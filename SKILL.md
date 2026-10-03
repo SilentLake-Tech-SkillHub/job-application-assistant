@@ -2,7 +2,7 @@
 name: job-application-assistant
 description: Run a user-confirmed campus recruiting batch from official job discovery through application preparation, review, authorized submission, receipt verification, and tracker readback. Use when the user asks to prepare or execute multiple campus applications; do not invoke for information-only company research.
 metadata:
-  version: "1.1.0"
+  version: "1.1.1"
 ---
 
 # 岗位代投助手 / Job Application Assistant
@@ -24,7 +24,7 @@ If the user asks only to research companies or collect jobs, use the workspace's
 - Judge candidates from **title plus complete visible JD** and the confirmed role functions. A matching title alone is insufficient; an unfamiliar title can still qualify when the JD shows product ownership. Record inclusion or exclusion evidence for borderline roles. Do not convert a user's batch interpretation into a universal role definition.
 - A company counts in one bucket only. Keep checked companies, eligible roles, prepared applications and verified submissions as separate numbers. A blocked or role-free company follows the confirmed replacement rule; it never counts as a prepared application. Use [daily-batch.md](references/daily-batch.md) for the batch ledger and optional deterministic validation.
 - Respect official plan relationships, cohort rules, application windows, account quotas and existing submissions. Check the logged-in account immediately before preparing and again before submitting. Do not withdraw, delete or resubmit without a new specific instruction.
-- Default application content comes from the user's designated application résumé. Follow explicit user instructions about content and material versions; otherwise, do not silently substitute an older résumé, historical application, auto-parsed text or project repository. Trace each field to its source and check auto-populated fields individually. Use the content-filling subskill for longer accepted versions, missing facts, field limits and readback.
+- Default application content comes from the user's designated application résumé. Follow explicit user instructions about content and material versions; otherwise, do not silently substitute an older résumé, historical application, auto-parsed text or project repository. Trace each field to its source and check auto-populated fields individually. Select all date/year/month fields through the actual picker controls; displayed input text alone is not a valid component selection. Use the content-filling subskill for longer accepted versions, missing facts, field limits and readback.
 - Ordinary form and privacy-consent controls may be operated within the user's confirmed batch authority after reading them. The Agent handles the permitted login, OTP entry, CAPTCHA interaction and page controls through the login subskill; ask for the minimum user action only when a real missing input or the site's/tool's confirmation requirement makes it necessary. Check legal declarations, identity assertions and signatures against supported facts and current authority. Never retain credentials, codes, cookies or identity documents in the ledger or screenshots.
 - Treat website drafts, final submission clicks, receipts and tracker updates as distinct stages. Persist the stage and evidence after each role so a new turn can resume without duplicate submission.
 
