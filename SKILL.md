@@ -2,12 +2,18 @@
 name: job-application-assistant
 description: Run a user-confirmed campus recruiting batch from official job discovery through application preparation, review, authorized submission, receipt verification, and tracker readback. Use when the user asks to prepare or execute multiple campus applications; do not invoke for information-only company research.
 metadata:
-  version: "1.2.0"
+  version: "1.3.0"
 ---
 
 # 岗位代投助手 / Job Application Assistant
 
 This Skill is independent of company-research Skills. Discover the workspace's private profile, current batch record and role tracker from its project router. Keep names, contact details, résumé paths, company lists, quotas, personal eligibility and referral information in private project records, never in this Skill or a public copy. A previous batch is evidence, not current authorization.
+
+## Application execution-mode Query
+
+Before a new application-preparation batch starts form actions, ask `本轮申请准备和投递由一个 AI 执行，还是由多个 AI 平行执行？` with the remaining Query choices. Record this application's choice and user evidence, separately from any search execution mode. Reuse a confirmed choice for the same batch; if the user already requests multiple AI, resolve only missing coordination facts. An unanswered question does not enable parallel work or dependent form actions; independent offline work may continue.
+
+Single AI follows this parent's normal workflow. Confirmed multiple AI loads [application-parallel-execution](skills/application-parallel-execution/SKILL.md) before allocation or dispatch. This allows agreed preparation delegation across independent companies, with exclusive shared-account ownership and a serial tracker writer. It never replaces exact-role/current-review submission approval or changes the login, form-control and receipt gates below.
 
 ## Modes and authority
 

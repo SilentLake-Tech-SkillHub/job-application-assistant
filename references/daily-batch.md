@@ -11,6 +11,12 @@ Use this reference for Query, daily counts and a resumed run. The workspace owns
 
 Do not guess missing classification, quota, materials or counting semantics. Ask only the decisions that affect the next action; continue work on independent confirmed buckets. A stated quota is a target, not proof it was met.
 
+## Execution choices
+
+Before new form actions, ask `本轮申请准备和投递由一个 AI 执行，还是由多个 AI 平行执行？` unless this application's batch already has an explicit choice. Record `application_execution_mode` (`single` or `parallel`) and `mode_approval_ref`; a search mode is not application permission. Missing mode keeps dependent actions pending. Reuse valid same-batch choices and approval references rather than repeatedly requesting them.
+
+For parallel work, record participant IDs/count, coordinator, resource limit, `execution_channel` (`platform` or `manual_handoff`), allocation version and a reference to the private coordination manifest. Load [the parallel subskill](../skills/application-parallel-execution/SKILL.md). Each delta identifies its batch/Query/allocation version and owner; one company/recruiting entity/shared-account scope has one owner. The coordinator writes the tracker serially from its latest version. A subskill allocation check supplements `validate_batch.py`; neither proves a real site saved or submitted anything.
+
 ## Ledger fields
 
 Keep a private, durable record with `batch_id`, Query version/time, company key, bucket, site/plan URLs, coverage state and evidence; each role has a stable role key, direct URL, title, JD evidence, application stage, draft URL, material identity, review version/hash, submission approval, receipt reference/time, tracker readback and next action. Never store the filled form's full personal answers, credentials, OTP, cookie or identity document. Link to a protected form or sanitized review package instead.

@@ -1,0 +1,5 @@
+interface:
+  display_name: "多 Agent 平行准备与投递"
+  short_description: "Coordinate approved applications with exclusive account owners"
+policy:
+  allow_implicit_invocation: true
