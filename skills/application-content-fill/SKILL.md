@@ -1,6 +1,8 @@
 ---
 name: application-content-fill
 description: Fill recruiting forms from the user's designated application résumé, following explicit content and material instructions. Use for education, work, project, award, AI-experience and portfolio fields, résumé uploads, auto-parser correction and form review; return a source-traceable preparation package without final submission.
+metadata:
+  version: "1.2.1"
 ---
 
 # 投递内容填写
@@ -20,7 +22,7 @@ description: Fill recruiting forms from the user's designated application résum
 
 - 为每个字段建立私有操作表：所属条目、稳定定位、控件性质与识别依据、必填/禁用/只读/长度或文件限制、来源值、实际交互方法、依赖顺序及核验结果。先打开下拉确认实际选项和“其他/自定义”入口，再制定填写方式。不能仅凭input标签或当前显示文本判断是文本框。
 - **文本框**才采用输入与失焦。**下拉/搜索下拉/级联**须打开并点击实际选项，级联逐层选择；可搜索的input只用于过滤选项，搜索文本不代表选中。**单选/多选**使用真实选项，**时间**使用真实日期面板，**上传**使用对应文件控件。
-- 不得直接赋值、移除readonly或修改组件内部状态来伪造枚举、日期、单多选的选择。读回选中项/标签、组件有效状态与校验提示；有文字仍报未填写时检查控件绑定并重选，不继续保存或提交。
+- 不得直接赋值、移除readonly或修改组件内部状态来伪造枚举、日期、单多选的选择。读回选中项/标签、组件有效状态与校验提示；有文字仍报未填写、字段错位或重渲染丢值时，必须加载[字段绑定恢复策略](../../references/field-binding-recovery.md)，核对字段身份、控件类型和该字段校验，再按内置浏览器、computer use或Playwright的实际能力恢复；不得以提交试错。
 - 官网没有对应选项时，只有实际“其他/自定义”入口才可填写真实名称；不得选不相关奖项凑数。没有可表达入口的条目按用户明确指示删除或保留待处理，不能自行改变事实或宣称填完。用户已授权删除无效条目时，通过该条目真实删除按钮操作，并核对剩余数量与内容。
 - 上传解析、增加/删除条目、更改类型/上级选项或“至今”都会触发重渲染；重新盘点受影响区域、重新定位，检查下级字段是否清空。对原有疑似伪填控件逐项复核，不能只修当前报红的一处。保存持久化与页面显示分别核验，最终投递仍走父Skill审核。
 
@@ -46,7 +48,7 @@ description: Fill recruiting forms from the user's designated application résum
 ## 填写、保存与读回
 
 1. 检查实际页面控件及当前值；保留本次范围外的用户修改，避免整表覆盖。
-2. 用页面支持的交互填入字段，正确触发输入、选择、失焦或保存；采用程序化填写时同样触发组件所需事件。不能把DOM临时值视为组件或服务端已保存。
+2. 用工具支持的真实输入、选择及安全失焦动作填写；文本默认输入动作，只有页面键盘处理证据才切换逐字输入。不得把直接赋值、合成事件或execCommand当作通用绑定修复。不能把DOM临时值视为组件或服务端已保存。
 3. 条目填写后读回显示文本、选择值、日期、计数、空项和错误提示；字段联动或重渲染后再次检查。需要确认保存持久化时，先确认草稿保存成功再安全切换/重开，并核对内容，避免丢失用户未保存修改。
 4. 检查全表必填字段、条目数量、附件、链接和同意状态。只使用明确的保存/草稿或安全预览控件，不用最终提交按钮试探缺项。
 5. 截图前激活实际目标页并等待绘制，核对截图与当前读回一致。保存可供用户审阅的完整字段内容、来源、附件文件名与Hash、缺项和脱敏截图；审核包中的必要申请内容保持私有，认证秘密不进入审核包。

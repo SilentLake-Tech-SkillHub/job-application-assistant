@@ -21,5 +21,9 @@ assert.equal(r.fields.find(x=>x.label==='说明*').required,true);assert.equal(r
 assert.equal(r.fields.find(x=>x.kind==='file').accept,'.pdf');assert.equal(r.fields.find(x=>x.disabled).action,'skip_until_dependency_resolved');assert(r.fields.some(x=>x.kind==='cascader'));assert(r.fields.some(x=>x.kind==='checkbox'));assert(r.fields.some(x=>x.kind==='radio'));
 assert(!JSON.stringify(r).includes('SECRET'));assert(!JSON.stringify(r).includes('PRIVATE_MARKER'));assert(!JSON.stringify(r).includes('FAKE_PRIVATE_VALUE'));assert.equal(await page.locator('#plain').inputValue(),before);
 assert.equal(await page.locator('.el-select input').inputValue(),'FAKE_PRIVATE_VALUE');assert(!r.fields.some(x=>x.locator==='#hidden-section'));
-console.log(JSON.stringify({passed:true,controls:r.count,checks:18,readOnlyVerified:true,valuesExcluded:true}));
+await page.setContent(`<div class="info_box"><div class="subtitle">姓名*</div><input id="given" aria-label="名" data-automation-id="name" aria-invalid="false"><label for="family">姓</label><input id="family" data-automation-id="name" aria-invalid="true" aria-errormessage="family-error"><div id="family-error" role="alert">必填</div></div><div class="info_box"><div class="subtitle">两字段</div><input id="unknown-a"><input id="unknown-b"></div>`);
+const shared=await page.evaluate(()=>inspectApplicationForm(document));
+const given=shared.fields.find(x=>x.controlLocator==='#given'),family=shared.fields.find(x=>x.controlLocator==='#family');
+assert.equal(given.label,'名');assert.equal(family.label,'姓');assert.equal(given.validationErrorVisible,false);assert.equal(family.validationErrorVisible,true);assert.equal(given.sharedContainer,true);assert.equal(given.automationMatchCount,2);assert.equal(given.required,false);assert.equal(shared.fields.find(x=>x.controlLocator==='#unknown-a').fieldIdentityNeedsReview,true);
+console.log(JSON.stringify({passed:true,controls:r.count,checks:26,readOnlyVerified:true,valuesExcluded:true,sharedContainerIdentityAndErrors:true}));
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

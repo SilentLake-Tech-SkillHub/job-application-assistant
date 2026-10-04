@@ -24,8 +24,12 @@
       const box=outer.closest('.info_box,.ant-form-item,.el-form-item,[data-field]');
       const labelNode=box?.querySelector('.subtitle,.ant-form-item-label,.el-form-item__label,[data-label]');
       const labels=control?.labels?.length?[...control.labels].map(text).join(' '):'';
-      const labelled=outer.getAttribute('aria-labelledby')?.split(/\s+/).map(id=>text(doc.getElementById(id))).join(' ');
-      const label=labels||text(labelNode)||labelled||outer.getAttribute('aria-label')||control?.getAttribute('aria-label')||'';
+      const labelled=(control?.getAttribute('aria-labelledby')||outer.getAttribute('aria-labelledby'))?.split(/\s+/).map(id=>text(doc.getElementById(id))).join(' ');
+      const ariaLabel=control?.getAttribute('aria-label')||outer.getAttribute('aria-label');
+      const boxControls=box?[...box.querySelectorAll('input:not([type="hidden"]),select,textarea,[role="textbox"]')].filter(x=>shown(x)&&x.type!=='password'):[];
+      const sharedContainer=boxControls.length>1;
+      const label=labels||labelled||ariaLabel||(!sharedContainer?text(labelNode):'')||'';
+      const labelSource=labels?'label':labelled?'aria-labelledby':ariaLabel?'aria-label':label?'single-control-container':'unresolved';
       const classHint=String(outer.className||'');
       let kind='unknown', action='inspect_in_ui', confidence='low';
       if(control?.type==='file'){kind='file';action='upload_file';}
@@ -44,10 +48,18 @@
       const list=listId?doc.getElementById(listId):null;
       const options=outer.tagName==='SELECT'?outer.options:list?.querySelectorAll('[role="option"]');
       const evidence=[outer.tagName.toLowerCase(),role?`role=${role}`:'',wrapper?`wrapper=${classHint.split(/\s+/).filter(x=>/^el-|^ant-/.test(x)).join(' ')}`:'',control?.readOnly?'readonly':'',control?.type?`input_type=${control.type}`:''].filter(Boolean);
-      const ownError=box?.querySelector('.verify-tip-no-data,.ant-form-item-explain-error,.el-form-item__error');
-      fields.push({index:fields.length,label,locator:path(outer),controlLocator:control?path(control):null,kind,action,confidence,evidence,required:!!(control?.required||outer.getAttribute('aria-required')==='true'||control?.getAttribute('aria-required')==='true'||box?.querySelector('.is-required,.ant-form-item-required')||/[＊*]/.test(text(labelNode))),disabled,readonly:!!control?.readOnly,multiple:!!control?.multiple||kind==='multi_select',maxLength:control?.getAttribute('maxlength')||null,accept:control?.getAttribute('accept')||null,placeholder:control?.getAttribute('placeholder')||null,optionCount:options?.length??null,optionsNeedOpening:['select','multi_select','cascader'].includes(kind)&&options==null,validationErrorVisible:!!ownError&&shown(ownError),dependencyReview:['date_picker','select','multi_select','cascader','checkbox','radio'].includes(kind),displayedValueIsProof:false});
+      const errorIds=(control?.getAttribute('aria-errormessage')||outer.getAttribute('aria-errormessage')||'').split(/\s+/).filter(Boolean);
+      const descriptionIds=(control?.getAttribute('aria-describedby')||outer.getAttribute('aria-describedby')||'').split(/\s+/).filter(Boolean);
+      const errorNodes=errorIds.map(id=>doc.getElementById(id)).filter(Boolean);
+      for(const id of descriptionIds){const e=doc.getElementById(id);if(e?.matches('[role="alert"],.verify-tip-no-data,.ant-form-item-explain-error,.el-form-item__error'))errorNodes.push(e);}
+      const ownError=!sharedContainer?box?.querySelector('.verify-tip-no-data,.ant-form-item-explain-error,.el-form-item__error'):null;
+      const ariaInvalid=control?.getAttribute('aria-invalid')??outer.getAttribute('aria-invalid');
+      const automationId=(control||outer).getAttribute('data-automation-id');
+      const automationMatchCount=automationId?doc.querySelectorAll('[data-automation-id="'+esc(automationId)+'"]').length:null;
+      fields.push({index:fields.length,label,locator:path(outer),controlLocator:control?path(control):null,kind,action,confidence,evidence,required:!!(control?.required||outer.getAttribute('aria-required')==='true'||control?.getAttribute('aria-required')==='true'||(!sharedContainer&&(box?.querySelector('.is-required,.ant-form-item-required')||/[＊*]/.test(text(labelNode))))),disabled,readonly:!!control?.readOnly,multiple:!!control?.multiple||kind==='multi_select',maxLength:control?.getAttribute('maxlength')||null,accept:control?.getAttribute('accept')||null,placeholder:control?.getAttribute('placeholder')||null,optionCount:options?.length??null,optionsNeedOpening:['select','multi_select','cascader'].includes(kind)&&options==null,validationErrorVisible:!!ownError&&shown(ownError),dependencyReview:['date_picker','select','multi_select','cascader','checkbox','radio'].includes(kind),displayedValueIsProof:false});
+      Object.assign(fields[fields.length-1],{labelSource,sharedContainer,fieldIdentityNeedsReview:!label||labelSource==='single-control-container',ariaInvalid,automationMatchCount,validationErrorVisible:errorNodes.some(shown)||!!ownError&&shown(ownError)||ariaInvalid!=null&&!['false',''].includes(ariaInvalid),validationAssociationNeedsReview:sharedContainer&&!errorIds.length&&!descriptionIds.length});
     }
-    return {schemaVersion:1,readOnly:true,valuesIncluded:false,scope:'rendered DOM including offscreen controls; excludes hidden sections and authentication inputs',coverageLimit:'Unrendered steps, collapsed sections, iframe contents, shadow roots and dynamic options require separate UI inspection and a new scan.',count:fields.length,fields};
+    return {schemaVersion:2,readOnly:true,valuesIncluded:false,scope:'rendered DOM including offscreen controls; excludes hidden sections and authentication inputs',coverageLimit:'Unrendered steps, collapsed sections, iframe contents, shadow roots and dynamic options require separate UI inspection and a new scan.',count:fields.length,fields};
   }
   if(typeof module!=='undefined'&&module.exports)module.exports={inspectApplicationForm};
   else root.inspectApplicationForm=inspectApplicationForm;

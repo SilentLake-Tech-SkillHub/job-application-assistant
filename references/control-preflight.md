@@ -27,3 +27,5 @@
 ## 定向维护检查
 
 执行`NODE_PATH=<含playwright的依赖目录> node scripts/test_inspect_form_controls.cjs`。测试使用隔离浏览器的合成表单，不访问真实申请账号；验证控件分类、隐藏文件上传、禁用依赖、必填与限制、个人取值排除及DOM只读。浏览器可执行路径由`CHROME_EXECUTABLE`指定；默认使用本机Chrome。随后在授权的实际表单运行脚本并验证一个受影响的真实控件，不能用合成测试冒充官网填写成功。
+
+显示已填但仍报错、共享容器字段错位或联动丢值时，必须按[字段绑定恢复策略](field-binding-recovery.md)逐项恢复并记录分层证据。

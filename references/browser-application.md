@@ -17,3 +17,5 @@ For each role show company, plan, title, direct URL, quota/cross-plan impact, r�
 ## Submit and verify
 
 Approval covers only the exact named roles and reviewed form versions. Immediately before each click, recheck the title, account remaining quota, form version and unresolved warnings. Submit one role and wait. A quota modal, CAPTCHA, redirect or loading state is not a receipt. Verify the site's success page and application history or confirmation ID where available. If uncertain, stop that role's retry and inspect the application center. Record the receipt and only then update the tracker. Continue an unrelated role only when it cannot duplicate or interfere with the uncertain one.
+
+显示已填但仍报错、共享容器字段错位或联动丢值时，必须按[字段绑定恢复策略](field-binding-recovery.md)逐项恢复并记录分层证据。

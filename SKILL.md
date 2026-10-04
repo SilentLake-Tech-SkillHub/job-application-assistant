@@ -2,7 +2,7 @@
 name: job-application-assistant
 description: Run a user-confirmed campus recruiting batch from official job discovery through application preparation, review, authorized submission, receipt verification, and tracker readback. Use when the user asks to prepare or execute multiple campus applications; do not invoke for information-only company research.
 metadata:
-  version: "1.3.1"
+  version: "1.3.2"
 ---
 
 # 岗位代投助手 / Job Application Assistant
@@ -43,3 +43,5 @@ Load only the subskill needed for the current step. Login returns an account sta
 Use the tracker and batch ledger specified by the workspace, without adding tracker columns or statuses on your own. Before each write, reread the live file and record a recoverable backup; change only the affected rows, then reopen the saved file and read back the company official entry, role URL, full JD and status. If another process changed the file, reconcile against the latest copy instead of overwriting it. Screenshots should show enough context to identify the site and step while masking personal details where possible.
 
 Report coverage and outcome separately: companies checked by batch-specific bucket, roles verified, forms prepared, submissions with receipts, uncertain results, blocked sites, remaining numeric targets where configured, and progress against nonnumeric stopping conditions. Report official account quotas separately. State exactly which evidence supports a completion claim. Read the relevant reference at the point of use; this entrypoint does not import other project Skills or private configuration into a public copy.
+
+当字段显示已填但仍报必填、值在联动后消失或邻近字段错位时，必须加载[字段绑定恢复策略](references/field-binding-recovery.md)，先核对字段身份，再按实际操作通道恢复；显示、页面校验、草稿保存与提交回执分别记录。
