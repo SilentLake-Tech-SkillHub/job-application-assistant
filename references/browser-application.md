@@ -2,6 +2,20 @@
 
 Read when opening company sites, filling, reviewing or submitting. Prefer the user's requested browser and preserve its login state. Where the workspace specifies a browser priority, try its first tier and record an actual failure before changing tiers. Use a separate company window when required; never repurpose or close user-owned or review/receipt tabs. Headless navigation is only for public, read-only pages.
 
+Browser tab/window indexes drift whenever the user (or a parallel session) opens, closes or reorders tabs mid-run. Re-locate the target tab by URL match before every operation batch; never address a tab by an index remembered from an earlier step.
+
+## Page-init, reload and injection discipline
+
+These rules come from a live SuccessFactors/Workday application session; follow them on any heavy-SPA recruiting page.
+
+- **Wait for framework init before touching the page.** Injecting synthetic events or scripts while the page's JS framework is still loading can poison component state: click handlers silently die, framework globals appear undefined, and the form stays fillable-looking but unsubmittable. Before the first write, probe readiness read-only (a known control responds to focus/click; the framework's own markers exist). If controls that worked before suddenly all stop responding, suspect your own earlier injections first: do a clean reload and re-verify before blaming extensions, the site, or the environment. A "blocked site" conclusion without a clean-reload counter-test is invalid.
+- **Predict the native resubmit dialog.** Pages entered via form POST (common after verification-code logins) raise the browser-native "confirm form resubmission" dialog on reload. That dialog is not in the page DOM; handle it at the OS accessibility layer, and prefer not to reload such pages at all unless the form is server-drafted.
+- **Generate and execute file-injection scripts in the same shell command.** A temp script that embeds shell variables (`$B64`) executes with those variables empty in a later shell invocation, uploading an empty file (the site then warns "file is empty") and wasting a cycle. Build and run in one command, or re-expand the variable every time.
+- **Inject in the page, don't click the screen, while the user is at the machine.** Screen-level clicks and keystrokes go to whatever window is frontmost: they have stolen focus, opened find-bars, and landed on pages the user was actively editing. Page-context JS against the URL-verified tab is the default; use OS-level clicks only when the page genuinely requires a trusted gesture, after verifying the target window is frontmost.
+- **Expect id renumbering after re-renders.** Resume upload (and its auto-parse), saves and section changes can rebuild the whole form with new element ids. After any such event, re-enumerate before filling; prefer upload-first then fill-fields. Once required fields are filled, save the server-side draft immediately and confirm its success message, so a later re-render cannot lose the work.
+- **Cross-check "data lost" reports through a second locator.** A readback script can have its own bug (e.g. concatenating a label name into an id) and produce a false "all fields GONE" panic. Before reporting data loss, re-read the same fields via an independent locator (by id vs. by label text) and compare.
+- **Check the sent folder before any application email.** A parallel executor or the user may already have sent the same application. Before sending, read the mail account's sent items for the same recipient/company and recent window; a hit means stop and reconcile instead of sending a duplicate.
+
 ## Discover and prepare
 
 1. Verify that the page belongs to the employer or its named recruiting platform. Recheck cohort, employment type, location, title, plan and application window. Enumerate all in-scope pages or record a precise coverage limit. Open each candidate's real detail page and judge its title **and complete visible JD**.
