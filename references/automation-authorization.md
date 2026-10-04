@@ -6,7 +6,7 @@
 |---|---|---|
 | [login-phone-otp](../skills/login-phone-otp/SKILL.md) | 填手机号、获取验证码、按授权读取短信并填写 | 只用本次请求的新码；平台禁止代填时由用户输入 |
 | [login-wechat](../skills/login-wechat/SKILL.md) | 选择微信登录，点击本机微信快捷确认 | 手机扫码、生物识别由用户本人完成 |
-| [captcha-handoff](../skills/captcha-handoff/SKILL.md) | 截图识别人机验证类型并交接 | 不自动破解或代为通过 CAPTCHA |
+| [captcha-solve](../skills/captcha-solve/SKILL.md) | 截图识别人机验证类型，并用 computer use 完成（滑块/点选/字符/旋转） | 同一挑战最多尝试 2 次；失败或不支持的形态交用户本人；不换 IP、不伪造指纹 |
 | [privacy-info-fill](../skills/privacy-info-fill/SKILL.md) | 电话、邮箱、地址等个人信息填写 | 证件号码由用户本人填写；缺失信息向用户索取 |
 | [terms-consent](../skills/terms-consent/SKILL.md) | 阅读并勾选登录/隐私/真实性/须知类条款 | 不点击最终投递或“确认投递” |
 
@@ -14,7 +14,7 @@
 
 在批次 Query 阶段、任何登录或填写动作之前，问一次：
 
-> 本轮是否开启自动化子Skill？可选：①不开启（全部由你本人操作）②半自动：只开启其中几项（请列出）③全自动：5项全部开启。各项含义与边界见上表。
+> 本轮是否开启自动化子Skill？可选：①不开启（全部由你本人操作）②半自动：只开启其中几项（请列出）③全自动：5项全部开启。各项含义与边界见上表。注意：`captcha-solve` 开启后 Agent 会用 computer use 自动完成人机验证，属于自动化操作，存在触发网站风控的可能。
 
 - 没有回答、回答含糊（如“你看着办”“继续”）或只批准了别的事项（如批准投递某岗位）时，按“不开启”处理。批准投递不等于开启自动化子Skill。
 - 用户只说“全自动”时，逐项列出将开启的5项和各自边界，请用户确认一次。

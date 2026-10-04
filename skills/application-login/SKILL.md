@@ -23,7 +23,7 @@ metadata:
 | 微信 | 调用 [login-wechat](../login-wechat/SKILL.md) | 请用户本人登录 |
 | 邮箱验证码 | 用户已授权读取该邮箱时，按下方“邮箱验证码”处理 | 请用户本人登录 |
 | 账号密码 | 不代填密码 | 请用户本人登录 |
-| 任意方式中出现人机验证 | 调用 [captcha-handoff](../captcha-handoff/SKILL.md) 识别并交给用户 | 直接请用户完成验证 |
+| 任意方式中出现人机验证 | 调用 [captcha-solve](../captcha-solve/SKILL.md) 识别并用 computer use 通过；连续失败交用户 | 直接请用户完成验证 |
 | 登录条款勾选 | 已开启 [terms-consent](../terms-consent/SKILL.md) 时由Agent勾选 | 请用户勾选 |
 
 用户指定了登录方式时优先使用；网站只支持某一种方式时按网站实际情况选择。
