@@ -2,7 +2,7 @@
 name: job-application-assistant
 description: Run a user-confirmed campus recruiting batch from official job discovery through application preparation, review, authorized submission, receipt verification, and tracker readback. Use when the user asks to prepare or execute multiple campus applications; do not invoke for information-only company research.
 metadata:
-  version: "1.3.2"
+  version: "1.4.0"
 ---
 
 # 岗位代投助手 / Job Application Assistant
@@ -16,6 +16,10 @@ Before a new application-preparation batch starts form actions, ask `本轮申�
 Single AI follows this parent's normal workflow. Confirmed multiple AI loads [application-parallel-execution](skills/application-parallel-execution/SKILL.md) before allocation or dispatch. This allows agreed preparation delegation across independent companies, with exclusive shared-account ownership and a serial tracker writer. It never replaces exact-role/current-review submission approval or changes the login, form-control and receipt gates below.
 
 Before allocation, proactively ask about explicit requirements for participants, grouping, priorities, time and task quantities; if absent, invite the user's ideas and offer a reasoned proposal. Confirm it before dispatch. A numeric business target is optional: a confirmed scope or time window with an explicit stopping rule can be used instead. Counts and buckets belong to this batch; actual tool capacity and official account limits are separate constraints. See the parallel subskill for the proposal method.
+
+## Automation authorization Query
+
+Five automation subskills are **off by default**: [login-phone-otp](skills/login-phone-otp/SKILL.md), [login-wechat](skills/login-wechat/SKILL.md), [captcha-handoff](skills/captcha-handoff/SKILL.md), [privacy-info-fill](skills/privacy-info-fill/SKILL.md) and [terms-consent](skills/terms-consent/SKILL.md). Before any login or form action in a batch, ask whether to enable none, some (semi-automatic) or all (fully automatic), record the user's explicit answer, and invoke only the approved ones. Silence, vague consent or approval of something else (including approval to submit a role) leaves them off. Read [automation-authorization.md](references/automation-authorization.md) for the Query wording, modes, per-subskill permanent limits and the private record format. Neither mode changes the per-role submission approval.
 
 ## Modes and authority
 
@@ -33,7 +37,7 @@ If the user asks only to research companies or collect jobs, use the workspace's
 - A company counts in one bucket only. Keep checked companies, eligible roles, prepared applications and verified submissions as separate numbers. A blocked or role-free company follows the confirmed replacement rule; it never counts as a prepared application. Use [daily-batch.md](references/daily-batch.md) for the batch ledger and optional deterministic validation.
 - Respect official plan relationships, cohort rules, application windows, account quotas and existing submissions. Check the logged-in account immediately before preparing and again before submitting. Do not withdraw, delete or resubmit without a new specific instruction.
 - Default application content comes from the user's designated application résumé. Follow explicit user instructions about content and material versions; otherwise, do not silently substitute an older résumé, historical application, auto-parsed text or project repository. Trace each field to its source and check auto-populated fields individually. Before writing, inventory the form controls and build a per-field action map. Text fields accept typing; selects, cascaders, radio/checkbox choices and date/year/month fields require their actual selection controls. Displayed input text alone is not a valid component selection. Use the content-filling subskill for longer accepted versions, missing facts, field limits and readback.
-- Ordinary form and privacy-consent controls may be operated within the user's confirmed batch authority after reading them. The Agent handles the permitted login, OTP entry, CAPTCHA interaction and page controls through the login subskill; ask for the minimum user action only when a real missing input or the site's/tool's confirmation requirement makes it necessary. Check legal declarations, identity assertions and signatures against supported facts and current authority. Never retain credentials, codes, cookies or identity documents in the ledger or screenshots.
+- Ordinary form controls may be operated within the user's confirmed batch authority. Login codes, WeChat confirmation, CAPTCHA handling, personal/contact fields and agreement checkboxes go through their automation subskills only when the user has enabled them for this batch; otherwise stop at that step and ask the user to do it. CAPTCHAs are never solved by the Agent, and government ID numbers are always entered by the user. Check legal declarations, identity assertions and signatures against supported facts. Never retain credentials, codes, cookies or identity documents in the ledger, replies or screenshots.
 - Treat website drafts, final submission clicks, receipts and tracker updates as distinct stages. Persist the stage and evidence after each role so a new turn can resume without duplicate submission.
 
 ## Evidence and closeout

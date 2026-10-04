@@ -2,7 +2,7 @@
 name: application-content-fill
 description: Fill recruiting forms from the user's designated application résumé, following explicit content and material instructions. Use for education, work, project, award, AI-experience and portfolio fields, résumé uploads, auto-parser correction and form review; return a source-traceable preparation package without final submission.
 metadata:
-  version: "1.2.1"
+  version: "1.3.0"
 ---
 
 # 投递内容填写
@@ -43,7 +43,9 @@ metadata:
 - **字数限制**：先读实际限制和计数方式。能容纳时使用获准材料的完整内容；超长时删重复或次要修饰、合并同义内容，以完整语句缩写。不得按字符直接截尾；核对关键内容与数字后再填。
 - **奖项/证书/语言与技能**：按简历拆成实际独立条目，核对名称、等级、年份与说明；不能把不同奖项并进一个说明框，也不能沿用解析生成的虚假资格。
 - **AI协作/作品与链接**：从相应已确认项目抽取任务、本人贡献、设计与结果；按用户要求保留或排除具体内容。网站链接使用真实域名或URL，开源链接与上线作品按字段用途填写，不以“项目网站”标签替代域名。
-- **声明与必填空项**：身份、资格、承诺和同意项依据材料、用户答复及当前授权处理。用户指定自己填写的字段保留给用户，同时继续其他字段；其余确实缺失且影响投递的事实只做最小确认，不让用户重新整理整份简历。
+- **个人信息栏**：电话、邮箱、地址、证件号等由 [privacy-info-fill](../privacy-info-fill/SKILL.md) 处理，仅在用户本批次开启该子Skill后调用；未开启时留给用户本人填写。证件号码在任何模式下都由用户本人输入。
+- **条款与声明勾选**：由 [terms-consent](../terms-consent/SKILL.md) 处理，仅在用户开启后调用；未开启时留给用户勾选。最终投递/确认投递按钮不属于填写阶段。
+- **资格类问题与必填空项**：资格、意向等问题依据材料和用户答复处理。用户指定自己填写的字段保留给用户，同时继续其他字段；其余确实缺失且影响投递的事实只做最小确认，不让用户重新整理整份简历。
 
 ## 填写、保存与读回
 
