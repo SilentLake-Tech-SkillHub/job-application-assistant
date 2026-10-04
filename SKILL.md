@@ -2,7 +2,7 @@
 name: job-application-assistant
 description: Run a user-confirmed campus recruiting batch from official job discovery through application preparation, review, authorized submission, receipt verification, and tracker readback. Use when the user asks to prepare or execute multiple campus applications; do not invoke for information-only company research.
 metadata:
-  version: "1.4.1"
+  version: "1.5.0"
 ---
 
 # 岗位代投助手 / Job Application Assistant
@@ -26,7 +26,19 @@ Five automation subskills are **off by default**: [login-phone-otp](skills/login
 1. **Query**: confirm the batch's region, cohort, employment type, role families and exclusions, locations, company classification, batch-specific counting buckets, optional numeric targets or another explicit stopping rule, counting and replacement rules, time window, current materials, and whether selecting roles and preparing forms is authorized. Record unresolved decisions. Do not start dependent browsing or forms while material scope is unresolved. Read [daily-batch.md](references/daily-batch.md).
 2. **Prepare**: the confirmed batch may authorize the Agent to select roles within scope, handle login, fill fields, upload approved materials and save drafts without asking for each role first. Record the official company entry, every relevant plan, title and full visible JD, direct role URL, duplicate check and logged-in account limits. Preserve the role tracker as the fact source. Read [workbook-contract.md](references/workbook-contract.md) before tracker work and [browser-application.md](references/browser-application.md) before interacting with a site. Route login to [application-login](skills/application-login/SKILL.md) and form content to [application-content-fill](skills/application-content-fill/SKILL.md). Preparation does not authorize final submission.
 3. **Review**: provide the exact role list and a versioned, readable package of each completed form, materials, consequential answers, current account limit, unresolved fields and screenshots. Keep the forms available. Request approval for the named roles and review versions only.
-4. **Submit**: after that approval, recheck the role, plan, quota, materials and form version; submit one application at a time. Confirm a success page and, where available, the application history or receipt. An ambiguous result triggers status investigation before any retry. Update the tracker only after a verified receipt.
+4. **Submit**: after that approval, apply the **pre-submission target confirmation gate** below, recheck the role, plan, quota, materials and form version; submit one application at a time. Confirm a success page and, where available, the application history or receipt. An ambiguous result triggers status investigation before any retry. Update the tracker only after a verified receipt.
+
+## Pre-submission target confirmation gate (hard gate, Issue #8)
+
+Before every final submission click — in single-AI, semi-automatic and fully automatic modes alike — present the **complete submission target** to the user and wait for an explicit confirmation of that exact target:
+
+- **公司**（招聘主体与平台账号）
+- **BU/业务集团/组织**（如适用：集团下实际接收简历的一级组织）
+- **办公地**（该投递的落地城市/地点）
+- **岗位**
+- **意向部门 / 志愿槽位**（多意向按投递顺序逐项列出；第一、第二意向分别写明）
+
+Rules: a general-purpose instruction such as 「帮我填写打勾提交」「后面的你帮我提交」 authorizes mechanics, **not** the target; it never satisfies this gate. Intention/preference slots (意向部门、志愿顺序、调剂选项) are **user-choice fields**: the Agent may propose options with reasoning but must not select them unilaterally. When a site exposes a target-confirmation panel (e.g. 意向投递弹窗), pause there, restate the filled slots, and require the user's confirmation before the final click. If the user cannot be reached, stop at pre-submit and record `待确认` — never click submit on an unconfirmed target. Termination is often irreversible (several sites permanently close a BU after withdrawal), which is why this gate cannot be waived by any automation mode.
 5. **Resume/status**: reload the latest private batch record, current tracker and website status. Reconcile uncertain or already submitted roles before acting. Continue independent companies when one role is blocked; never infer a successful submission from a button click, modal, redirect or draft.
 
 If the user asks only to research companies or collect jobs, use the workspace's research workflow instead of this Skill. If they request a specific existing role, skip only Query questions already answered by current evidence; the review and submission boundaries still apply.

@@ -2,7 +2,7 @@
 name: application-parallel-execution
 description: Coordinate user-approved parallel application preparation and role-version-approved submissions across independent recruiting account scopes. Use after an application batch chooses multiple AI; preserve exclusive ownership, approval evidence, receipts and serial tracker merging.
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
 ---
 
 # 多 Agent 平行准备与投递
@@ -33,7 +33,7 @@ Business targets are batch choices. Ask whether the user wants a numerical targe
 
 - One company, employing/recruiting entity and shared ATS/account/quota scope has one active owner. Different roles or preferences sharing that history or limit stay with that owner. When independence cannot be established, stop the conflicting scope and let the coordinator merge its allocation. Different confirmed independent companies may proceed in parallel.
 - Each owner works within its versioned assignment and output directory, using company-specific windows. Only the coordinator updates the master workbook and shared ledgers, serially from the latest copy with backup, identity deduplication and saved readback. A prepared-form count is distinct from a verified-submission count.
-- Produce a readable, versioned form review with material identity, control selections, consequential answers, quota impact and sanitized screenshot. The user can approve a batch of **named roles and review versions**. Preserve exact approval references; a user or coordinator forwarding a task cannot enlarge that scope. An unchanged valid approval survives handoff and does not require asking again.
+- Produce a readable, versioned form review with material identity, control selections, consequential answers, quota impact and sanitized screenshot. The user can approve a batch of **named roles and review versions**. Preserve exact approval references; a user or coordinator forwarding a task cannot enlarge that scope. An unchanged valid approval survives handoff and does not require asking again. Every final submission click additionally requires the parent's pre-submission target confirmation gate (Issue #8): 公司、BU/业务集团、办公地、岗位 and 意向部门/志愿槽位 restated and explicitly confirmed by the user — general instructions never satisfy it, no automation mode waives it, and intention slots are user-choice fields the Agent proposes but never selects.
 - Immediately before submission, reread role, current form/material version, account quota and shared-plan/preference rules. A material answer/upload/role change needs a new review. Apply the actual tool's action-time requirements where present. A selected multi-AI mode is never final-submit approval.
 - After the authorized click, verify an official success receipt and history where available. `submit_clicked` and `uncertain` remain unresolved; investigate status before retry. Do not interpret a loading page, modal or tracker cell as success.
 
