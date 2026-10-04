@@ -2,7 +2,7 @@
 name: job-application-assistant
 description: Run a user-confirmed campus recruiting batch from official job discovery through application preparation, review, authorized submission, receipt verification, and tracker readback. Use when the user asks to prepare or execute multiple campus applications; do not invoke for information-only company research.
 metadata:
-  version: "1.3.0"
+  version: "1.3.1"
 ---
 
 # 岗位代投助手 / Job Application Assistant
@@ -15,9 +15,11 @@ Before a new application-preparation batch starts form actions, ask `本轮申�
 
 Single AI follows this parent's normal workflow. Confirmed multiple AI loads [application-parallel-execution](skills/application-parallel-execution/SKILL.md) before allocation or dispatch. This allows agreed preparation delegation across independent companies, with exclusive shared-account ownership and a serial tracker writer. It never replaces exact-role/current-review submission approval or changes the login, form-control and receipt gates below.
 
+Before allocation, proactively ask about explicit requirements for participants, grouping, priorities, time and task quantities; if absent, invite the user's ideas and offer a reasoned proposal. Confirm it before dispatch. A numeric business target is optional: a confirmed scope or time window with an explicit stopping rule can be used instead. Counts and buckets belong to this batch; actual tool capacity and official account limits are separate constraints. See the parallel subskill for the proposal method.
+
 ## Modes and authority
 
-1. **Query**: confirm the batch's region, cohort, employment type, role families and exclusions, locations, company classification, mutually exclusive buckets, quota and counting rule, replacement rule, time window, current materials, and whether selecting roles and preparing forms is authorized. Record unresolved decisions. Do not start dependent browsing or forms while material scope is unresolved. Read [daily-batch.md](references/daily-batch.md).
+1. **Query**: confirm the batch's region, cohort, employment type, role families and exclusions, locations, company classification, batch-specific counting buckets, optional numeric targets or another explicit stopping rule, counting and replacement rules, time window, current materials, and whether selecting roles and preparing forms is authorized. Record unresolved decisions. Do not start dependent browsing or forms while material scope is unresolved. Read [daily-batch.md](references/daily-batch.md).
 2. **Prepare**: the confirmed batch may authorize the Agent to select roles within scope, handle login, fill fields, upload approved materials and save drafts without asking for each role first. Record the official company entry, every relevant plan, title and full visible JD, direct role URL, duplicate check and logged-in account limits. Preserve the role tracker as the fact source. Read [workbook-contract.md](references/workbook-contract.md) before tracker work and [browser-application.md](references/browser-application.md) before interacting with a site. Route login to [application-login](skills/application-login/SKILL.md) and form content to [application-content-fill](skills/application-content-fill/SKILL.md). Preparation does not authorize final submission.
 3. **Review**: provide the exact role list and a versioned, readable package of each completed form, materials, consequential answers, current account limit, unresolved fields and screenshots. Keep the forms available. Request approval for the named roles and review versions only.
 4. **Submit**: after that approval, recheck the role, plan, quota, materials and form version; submit one application at a time. Confirm a success page and, where available, the application history or receipt. An ambiguous result triggers status investigation before any retry. Update the tracker only after a verified receipt.
@@ -40,4 +42,4 @@ Load only the subskill needed for the current step. Login returns an account sta
 
 Use the tracker and batch ledger specified by the workspace, without adding tracker columns or statuses on your own. Before each write, reread the live file and record a recoverable backup; change only the affected rows, then reopen the saved file and read back the company official entry, role URL, full JD and status. If another process changed the file, reconcile against the latest copy instead of overwriting it. Screenshots should show enough context to identify the site and step while masking personal details where possible.
 
-Report coverage and outcome separately: companies checked by bucket, roles verified, forms prepared, submissions with receipts, uncertain results, blocked sites and remaining quota. State exactly which evidence supports a completion claim. Read the relevant reference at the point of use; this entrypoint does not import other project Skills or private configuration into a public copy.
+Report coverage and outcome separately: companies checked by batch-specific bucket, roles verified, forms prepared, submissions with receipts, uncertain results, blocked sites, remaining numeric targets where configured, and progress against nonnumeric stopping conditions. Report official account quotas separately. State exactly which evidence supports a completion claim. Read the relevant reference at the point of use; this entrypoint does not import other project Skills or private configuration into a public copy.

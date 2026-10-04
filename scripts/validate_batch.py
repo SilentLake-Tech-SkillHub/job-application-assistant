@@ -28,11 +28,16 @@ def validate(data):
         batch = {}
     quotas = batch.get("quotas", {})
     if not isinstance(quotas, dict) or not quotas:
-        errors.append("batch.quotas must be a nonempty bucket-to-integer map")
+        errors.append("batch.quotas must be a nonempty bucket-to-target map (integer or null)")
         quotas = {}
     for bucket, quota in quotas.items():
-        if not bucket or type(quota) is not int or quota < 0:
+        if not isinstance(bucket, str) or not bucket or (quota is not None and (type(quota) is not int or quota < 0)):
             errors.append(f"invalid quota for bucket {bucket!r}")
+    if any(quota is None for quota in quotas.values()):
+        for field in ("target_choice_ref", "stop_condition"):
+            value = batch.get(field)
+            if not isinstance(value, str) or not value.strip():
+                errors.append(f"batch.{field} is required for a null numeric target")
     if batch.get("counting_basis") not in {"checked", "eligible"}:
         errors.append("batch.counting_basis must be checked or eligible")
     if batch.get("replacement_rule") not in {"replace", "keep_gap"}:
@@ -124,7 +129,7 @@ def validate(data):
         "prepared_applications": sum(role.get("stage") in PREPARED_STAGES for role in valid_roles),
         "verified_submissions": sum(role.get("stage") == "submitted" and bool(role.get("receipt_ref")) for role in valid_roles),
         "uncertain_roles": sum(role.get("stage") in {"submit_clicked", "uncertain"} for role in valid_roles),
-        "remaining_quota": {b: max(q - achieved[b], 0) for b, q in quotas.items() if type(q) is int and q >= 0},
+        "remaining_quota": {b: (None if q is None else max(q - achieved[b], 0)) for b, q in quotas.items() if q is None or (type(q) is int and q >= 0)},
     }
     return errors, report
 

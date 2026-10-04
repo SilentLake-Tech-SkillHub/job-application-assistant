@@ -2,7 +2,7 @@
 name: application-parallel-execution
 description: Coordinate user-approved parallel application preparation and role-version-approved submissions across independent recruiting account scopes. Use after an application batch chooses multiple AI; preserve exclusive ownership, approval evidence, receipts and serial tracker merging.
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 ---
 
 # 多 Agent 平行准备与投递
@@ -16,6 +16,18 @@ Before a new preparation/application batch enters forms, ask: `本轮申请准�
 Single AI returns to the parent. Multiple AI requires participants or count, coordinator, actual platform/resource limits, and platform subagents or user-managed handoff packages. Do not fix the participant count or silently create chats. The confirmed choice authorizes agreed delegation for application preparation; final submission remains tied to the exact role and reviewed version. Task files do not prove agents started or work completed.
 
 Read [the private coordination contract](references/coordination-contract.md), reconcile official history, current batch and materials, then assign exclusive company/recruiting-entity/account scopes. Run `python3 scripts/validate_assignments.py <private-manifest.json>` relative to this subskill before dispatch and after ownership or review changes. This validates a snapshot; it neither locks live agents nor confirms official receipts.
+
+## User requirements and allocation proposal
+
+Before proposing a split, proactively ask `对 AI 人数、分工方式、优先级、时间或任务数量，你有明确要求吗？` Reuse explicit answers already recorded for this batch. When there is no definite requirement, invite the user's own ideas: `你希望怎样推进？可以说说最看重的方向、覆盖面、速度，或你愿意投入的时间；暂时没有具体想法也可以告诉我，我会给你建议。` Do not make the user supply a finished allocation or a numeric answer. A user explicitly asking for recommendations may receive a reasoned proposal without another redundant question; silence does not confirm it. Continue independent evidence reconciliation while awaiting missing answers.
+
+Derive the proposal from the latest confirmed Query, the user's ideas, existing progress, uncovered independent scopes, priority/deadline, estimated effort and uncertainty, browser/account dependencies, available participants and actual tool capacity. Choose grouping dimensions that fit this batch; employer size, industry and historical task packages are possible evidence, never universal buckets. Search groups canonical source/plan coverage; application groups recruiting entities and shared account/history/official-quota dependencies. Keep dependent work together, balance estimated effort rather than company counts alone, and disclose estimates that have not been measured.
+
+If the user supplies a participant count or grouping requirement, honor it within actual execution constraints and explain any conflict. Otherwise recommend a justified count and allocation; do not demand that the user choose a number first or reuse a previous batch's count. Distinguish total participants, active workers, coordinator work and simultaneous platform capacity. More participants than current capacity can work in successive waves or through user-managed handoff, if supported and confirmed. A tool's measured capacity is an execution constraint, not a universal Skill limit; never claim unavailable agents exist or bypass tool controls.
+
+Present a readable proposal with the Query/evidence references, proposed participants and coordinator, each owner's scope and outputs, grouping/count rationale, estimated workload, time/resource constraints, quantity/stop conditions and known gaps. Ask the user to confirm or adjust it before dispatch. An execution-mode choice alone does not approve an inferred allocation. Record the confirmed proposal and evidence in private batch records, then produce the versioned manifest. Reuse the unchanged confirmed allocation on continuation; material scope, ownership or count changes require a revised proposal and the handoff controls below.
+
+Business targets are batch choices. Ask whether the user wants a numerical target, coverage of a confirmed list, a time window, or another explicit stopping rule. Do not impose a fixed number of companies, roles or applications, force equal-size groups, or silently fill missing numbers from earlier batches. A numeric target is a goal unless the user explicitly makes it a ceiling or stopping condition. Changing a confirmed goal needs an effective-time record and user agreement; absence of a numeric target does not expand the confirmed scope. Official application/account limits and exact-role submission approval remain binding.
 
 ## Owner and approval boundaries
 
