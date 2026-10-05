@@ -2,7 +2,7 @@
 name: job-application-assistant
 description: Run a user-confirmed campus recruiting batch from official job discovery through application preparation, review, authorized submission, receipt verification, and tracker readback. Use when the user asks to prepare or execute multiple campus applications; do not invoke for information-only company research.
 metadata:
-  version: "1.7.0"
+  version: "1.8.0"
 ---
 
 # 岗位代投助手 / Job Application Assistant
@@ -34,10 +34,17 @@ Throughput (Issue #11): after the Query, open every company in the batch at once
 3. **Review**: provide the exact role list and a versioned, readable package of each completed form, materials, consequential answers, current account limit, unresolved fields and screenshots. Keep the forms available. Request approval for the named roles and review versions only.
 4. **Submit**: after that approval, apply the **pre-submission target confirmation gate** below, recheck the role, plan, quota, materials and form version; submit one application at a time. Confirm a success page and, where available, the application history or receipt. An ambiguous result triggers status investigation before any retry. Update the tracker only after a verified receipt.
 
+## Application-count rule gate (hard gate, Issue #12)
+
+Before selecting roles for a company or asking the user to confirm them, establish that company's **application-count rules** for the logged-in account: how many roles may be applied to in total, whether several applications may run at the same time, whether there is a preference order, and whether a role can later be changed or withdrawn. Sources, in order: official application notice/FAQ, the apply page or its modal, the account's application history, then previously verified private tracker rules. Record the rule with source and date in the private tracker.
+
+Put the rule as the **first line** of the confirmation list. When the rule allows fewer applications than the roles the user wants, ask in that same confirmation which roles to use — never present more roles than the site can accept as if all could be submitted. If the rule cannot be found, write `未核实`, say what that risks, and after the first submission immediately reread the account state before touching the company's next role. A selected role list is not evidence that the site accepts that many applications.
+
 ## Pre-submission target confirmation gate (hard gate, Issue #8)
 
 Before every final submission click — in single-AI, semi-automatic and fully automatic modes alike — present the **complete submission target** to the user and wait for an explicit confirmation of that exact target:
 
+- **投递数量规则**（可投岗位数、能否同时进行多个流程、志愿/变更规则及来源；见上节）
 - **公司**（招聘主体与平台账号）
 - **BU/业务集团/组织**（如适用：集团下实际接收简历的一级组织）
 - **办公地**（该投递的落地城市/地点）
