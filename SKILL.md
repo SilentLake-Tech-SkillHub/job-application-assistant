@@ -2,7 +2,7 @@
 name: job-application-assistant
 description: Run a user-confirmed campus recruiting batch from official job discovery through application preparation, review, authorized submission, receipt verification, and tracker readback. Use when the user asks to prepare or execute multiple campus applications; do not invoke for information-only company research.
 metadata:
-  version: "1.5.0"
+  version: "1.6.0"
 ---
 
 # 岗位代投助手 / Job Application Assistant
@@ -20,6 +20,10 @@ Before allocation, proactively ask about explicit requirements for participants,
 ## Automation authorization Query
 
 Five automation subskills are **off by default**: [login-phone-otp](skills/login-phone-otp/SKILL.md), [login-wechat](skills/login-wechat/SKILL.md), [captcha-solve](skills/captcha-solve/SKILL.md), [privacy-info-fill](skills/privacy-info-fill/SKILL.md) and [terms-consent](skills/terms-consent/SKILL.md). Before any login or form action in a batch, ask whether to enable none, some (semi-automatic) or all (fully automatic), record the user's explicit answer, and invoke only the approved ones. Silence, vague consent or approval of something else (including approval to submit a role) leaves them off. Read [automation-authorization.md](references/automation-authorization.md) for the Query wording, modes, per-subskill permanent limits and the private record format. Neither mode changes the per-role submission approval.
+
+## Automation continuity (Issue #10)
+
+The goal is **full automation**: the user appears only at steps that truly require them. In the Query, run the capability preflight in [automation-continuity.md](references/automation-continuity.md) — browser tool, computer use, system scripting, Playwright — and state up front any step this executing Agent will not perform under its own platform rules, with the alternative arrangement. During work, when one channel cannot reach a control (for example a desktop WeChat authorization window outside the browser), switch channels before handing anything back. Advance to the last step before a handoff point, then hand off with a screenshot, the single action needed and what happens next; keep working on other companies meanwhile and batch handoffs and target confirmations per company.
 
 ## Modes and authority
 

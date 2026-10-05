@@ -2,7 +2,7 @@
 name: application-login
 description: Check and reconcile recruiting-site login state, then route to the user-approved login subskill (phone code, WeChat) or hand login to the user. Use when a recruiting form requires authentication, a session expires, or the logged-in account must be verified before preparing or submitting.
 metadata:
-  version: "2.0.0"
+  version: "2.1.0"
 ---
 
 # 投递登录处理
@@ -14,6 +14,10 @@ metadata:
 1. 从父Skill读取当前公司、岗位、准备授权、用户指定的登录方式和自动化授权记录。保留用户已登录的 Chrome 或指定浏览器会话。
 2. 核对招聘官网及其实际跳转的认证平台。先检查页面账号标识、个人中心和目标表单；已登录就继续准备，不重新发验证码，也不切换账号。
 3. 页面仍在加载时等待账号与表单状态稳定。“网页加载完成”不等于登录完成，空白加载态也不代表用户没有资料。
+
+## 连续推进
+
+登录以完全自动化为目标：优先选择不需要人机验证、不需要手机端操作的方式（如本机已登录微信的快捷登录）；网页工具够不着的桌面窗口切换到 computer use 或系统脚本；推进到交接点前的最后一步再交接，并附截图和唯一动作。详见[连续推进](../../references/automation-continuity.md)。
 
 ## 选择登录方式
 
