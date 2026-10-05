@@ -2,7 +2,7 @@
 name: job-application-assistant
 description: Run a user-confirmed campus recruiting batch from official job discovery through application preparation, review, authorized submission, receipt verification, and tracker readback. Use when the user asks to prepare or execute multiple campus applications; do not invoke for information-only company research.
 metadata:
-  version: "1.6.0"
+  version: "1.7.0"
 ---
 
 # 岗位代投助手 / Job Application Assistant
@@ -24,6 +24,8 @@ Five automation subskills are **off by default**: [login-phone-otp](skills/login
 ## Automation continuity (Issue #10)
 
 The goal is **full automation**: the user appears only at steps that truly require them. In the Query, run the capability preflight in [automation-continuity.md](references/automation-continuity.md) — browser tool, computer use, system scripting, Playwright — and state up front any step this executing Agent will not perform under its own platform rules, with the alternative arrangement. During work, when one channel cannot reach a control (for example a desktop WeChat authorization window outside the browser), switch channels before handing anything back. Advance to the last step before a handoff point, then hand off with a screenshot, the single action needed and what happens next; keep working on other companies meanwhile and batch handoffs and target confirmations per company.
+
+Throughput (Issue #11): after the Query, open every company in the batch at once (one tab per company), advance each to its login handoff, and send one consolidated login request; while the user logs in, progress logged-in companies, then fill and submit company by company. See section 5 of [automation-continuity.md](references/automation-continuity.md).
 
 ## Modes and authority
 
