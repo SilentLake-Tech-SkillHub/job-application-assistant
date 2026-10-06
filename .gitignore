@@ -1,0 +1,9 @@
+# 用户私有档案永不提交（personal-info-vault）
+personal-info*.md
+!skills/personal-info-vault/SKILL.md
+*.private.md
+**/private/
+*个人信息档案*.md
+.DS_Store
+__pycache__/
+*.pyc

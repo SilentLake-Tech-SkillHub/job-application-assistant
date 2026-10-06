@@ -1,0 +1,5 @@
+interface:
+  display_name: "个人信息档案"
+  short_description: "Keep non-résumé application facts in a private, per-user file that is never published"
+policy:
+  allow_implicit_invocation: true
