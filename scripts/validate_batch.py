@@ -10,6 +10,7 @@ import json
 import sys
 from collections import Counter
 from pathlib import Path
+from preference_contract import validate_snapshot
 
 COMPANY_STATES = {"unvisited", "checking", "checked", "blocked"}
 ROLE_STAGES = {
@@ -116,16 +117,19 @@ def validate(data):
         if stage != "submitted" and role.get("tracker_status") == "submitted":
             errors.append(f"role {key!r} has submitted tracker status without a verified stage")
 
+    errors.extend(validate_snapshot(batch.get("preferences"), roles, raw_companies, data.get("prior_roles")))
+
     checked = Counter(c["bucket"] for c in companies.values() if c.get("state") == "checked" and c.get("bucket") in quotas)
     valid_roles = [role for role in roles if isinstance(role, dict)]
-    eligible_companies = {role.get("company_key") for role in valid_roles if role.get("stage") in ELIGIBLE_STAGES}
+    eligible_roles = [role for role in valid_roles if role.get("stage") in ELIGIBLE_STAGES and role.get("disposition") in {"primary", "fallback"} and role.get("hard_scope_pass") is True]
+    eligible_companies = {role.get("company_key") for role in eligible_roles}
     eligible_company_counts = Counter(companies[k]["bucket"] for k in eligible_companies if k in companies and companies[k].get("bucket") in quotas)
     achieved = checked if batch.get("counting_basis") == "checked" else eligible_company_counts
     report = {
         "batch_id": batch.get("batch_id"),
         "checked_companies": dict(checked),
         "eligible_companies": dict(eligible_company_counts),
-        "eligible_roles": sum(role.get("stage") in ELIGIBLE_STAGES for role in valid_roles),
+        "eligible_roles": len(eligible_roles),
         "prepared_applications": sum(role.get("stage") in PREPARED_STAGES for role in valid_roles),
         "verified_submissions": sum(role.get("stage") == "submitted" and bool(role.get("receipt_ref")) for role in valid_roles),
         "uncertain_roles": sum(role.get("stage") in {"submit_clicked", "uncertain"} for role in valid_roles),

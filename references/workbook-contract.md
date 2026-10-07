@@ -9,3 +9,7 @@ Read for workbook discovery, writes and status reconciliation. Locate the curren
 - Reread the live workbook immediately before writing; record its SHA-256 and make a recoverable backup for a structural edit. Apply the smallest update, preserve other sheets, formulas, validation and user edits, save, reopen and verify the company entry, role URL, JD, status and formula errors. If the file changed during editing, reconcile or stop before overwriting it. Never treat remembered row numbers as stable.
 
 When site evidence conflicts with the tracker, leave the application stage unresolved until the site account/history is checked. Report the discrepancy and its exact affected roles; do not mass-change statuses or resubmit.
+
+## 独立偏好与执行证据
+
+执行 [偏好证据契约](preference-contract.md)：硬范围之外的城市排序只分组；不更改现有 Excel 列/验证/枚举。用招聘主体内官方 ID 或规范直链识别岗位，同名不同 BU/城市/ID 不合并，多城市同一岗位不重复计数。BU 未披露写 未披露。就业/方向/筛选理由/偏好版本/逐岗证据保存在已有备注或私有流水；保留已投回执和明确选择，更新偏好不撤回申请。能力分不包含城市偏好，Top5 只展示。

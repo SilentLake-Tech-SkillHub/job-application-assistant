@@ -2,7 +2,7 @@
 name: application-parallel-execution
 description: Coordinate user-approved parallel application preparation and role-version-approved submissions across independent recruiting account scopes. Use after an application batch chooses multiple AI; preserve exclusive ownership, approval evidence, receipts and serial tracker merging.
 metadata:
-  version: "1.0.2"
+  version: "1.1.0"
 ---
 
 # 多 Agent 平行准备与投递
@@ -28,6 +28,10 @@ If the user supplies a participant count or grouping requirement, honor it withi
 Present a readable proposal with the Query/evidence references, proposed participants and coordinator, each owner's scope and outputs, grouping/count rationale, estimated workload, time/resource constraints, quantity/stop conditions and known gaps. Ask the user to confirm or adjust it before dispatch. An execution-mode choice alone does not approve an inferred allocation. Record the confirmed proposal and evidence in private batch records, then produce the versioned manifest. Reuse the unchanged confirmed allocation on continuation; material scope, ownership or count changes require a revised proposal and the handoff controls below.
 
 Business targets are batch choices. Ask whether the user wants a numerical target, coverage of a confirmed list, a time window, or another explicit stopping rule. Do not impose a fixed number of companies, roles or applications, force equal-size groups, or silently fill missing numbers from earlier batches. A numeric target is a goal unless the user explicitly makes it a ceiling or stopping condition. Changing a confirmed goal needs an effective-time record and user agreement; absence of a numeric target does not expand the confirmed scope. Official application/account limits and exact-role submission approval remain binding.
+
+## Preference-version and per-role handoff
+
+Load [the preference contract](../../references/preference-contract.md) before allocation and merge. Assignments, roles and deltas carry the current preference_version; reject stale versions without rewriting them. Reuse recorded JDs and only user-selected recheck gaps. Every role returns company/title/direct URL/BU or 未披露/cities/employment/direction/JD decision evidence and separate actual fill/save/submit states plus its pre-form report reference. No worker resolves cross-axis conflicts, replaces an explicit selection or loses a submitted receipt. Conditional internships need sufficient formal coverage and no suitable formal role. Existing account exclusivity, serial tracker writing and final target/form-version review remain mandatory.
 
 ## Owner and approval boundaries
 

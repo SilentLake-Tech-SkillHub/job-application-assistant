@@ -5,6 +5,7 @@ import copy
 import unittest
 
 from validate_batch import validate
+from test_preference_contract import preferences, role
 
 
 def fixture():
@@ -12,6 +13,7 @@ def fixture():
         "batch": {
             "batch_id": "sample-day",
             "query_version": "v1",
+            "preferences": preferences(),
             "quotas": {"large": 1, "bank": 1},
             "counting_basis": "eligible",
             "replacement_rule": "replace",
@@ -20,12 +22,13 @@ def fixture():
             "materials_confirmed": True,
             "preparation_authorized": True,
         },
+        "prior_roles": [],
         "companies": [
             {"company_key": "alpha", "bucket": "large", "state": "checked"},
             {"company_key": "beta", "bucket": "bank", "state": "blocked"},
         ],
         "roles": [
-            {"role_key": "a-1", "company_key": "alpha", "direct_url": "https://example.test/a/1", "stage": "verified"},
+            dict(role(), role_key="alpha:id:1", company_key="alpha", direct_url="https://example.test/a/1"),
         ],
     }
 
@@ -66,6 +69,8 @@ class BatchValidationTests(unittest.TestCase):
         errors, _ = validate(data)
         self.assertTrue(any("lacks approval" in error for error in errors))
         self.assertTrue(any("official receipt" in error for error in errors))
+        role["execution"]["fill"] = {"status": "complete", "evidence_ref": "synthetic-fill"}
+        role["execution"]["submit"] = {"status": "complete", "evidence_ref": "receipt-1"}
         role.update(approved_review_hash="v2", approval_ref="user-message-1", receipt_ref="receipt-1")
         errors, report = validate(data)
         self.assertEqual(errors, [])
@@ -84,6 +89,22 @@ class BatchValidationTests(unittest.TestCase):
         data["batch"]["bucket_rules_confirmed"] = False
         errors, _ = validate(data)
         self.assertTrue(any("bucket_rules_confirmed" in error for error in errors))
+
+    def test_pending_and_excluded_evidence_do_not_count_as_eligible_roles(self):
+        for disposition in ['pending', 'excluded']:
+            data = fixture(); data['roles'][0]['disposition'] = disposition
+            errors, report = validate(data)
+            self.assertEqual(errors, [])
+            self.assertEqual(report['eligible_roles'], 0)
+            self.assertEqual(report['eligible_companies'], {})
+
+    def test_batch_rejects_missing_pre_form_report_and_stale_preferences(self):
+        data = fixture(); data['roles'][0].pop('pre_form_report_ref')
+        errors, _ = validate(data)
+        self.assertTrue(any('pre_form_report_ref' in e for e in errors))
+        data = fixture(); data['roles'][0]['preference_version'] = 'old'
+        errors, _ = validate(data)
+        self.assertTrue(any('stale role' in e for e in errors))
 
     def test_malformed_record_returns_errors_instead_of_crashing(self):
         data = {"batch": None, "companies": None, "roles": [None]}

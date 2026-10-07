@@ -22,3 +22,7 @@ Use sanitized reference IDs instead of contact details, form personal answers, c
 ## Allocation decision evidence
 
 Keep a private readable proposal alongside the manifest: the user's explicit requirements or ideas, Query/progress references, chosen grouping and count rationale, estimated workload and uncertainty, participant/worker/coordinator counts, actual concurrent capacity, wave/handoff arrangement where needed, configurable numeric or nonnumeric targets and stopping conditions, and user confirmation reference. These decision records precede dispatch. The snapshot validator does not judge allocation quality, confirm a proposal, optimize participant counts or enforce platform capacity. Reuse an unchanged confirmed proposal; version material changes and preserve their effective time and approval.
+
+## 独立偏好与执行证据
+
+manifest 顶层 preferences、prior_roles；assignment/role/delta 必填 preference_version，与当前确认版本相同。assignment 携带公司正式覆盖字段；roles 携带 [完整逐岗字段](../../../references/preference-contract.md)、前置报告和实际 execution。偏好更新拒收旧增量，复用 JD/指定复查范围；不合成偏好分或替换明确选岗，保留已投和回执；账号独占、协调者串行写、精确目标与表单版本审核照常。
