@@ -90,6 +90,32 @@ class BatchValidationTests(unittest.TestCase):
         errors, _ = validate(data)
         self.assertTrue(any("bucket_rules_confirmed" in error for error in errors))
 
+    def test_uncertain_pending_unstarted_is_rejected_and_not_prepared(self):
+        data = fixture()
+        data['roles'][0].update(stage='uncertain', disposition='pending', material_id='synthetic-resume')
+        errors, report = validate(data)
+        self.assertTrue(any('attempted-action evidence' in e for e in errors))
+        self.assertEqual(report['prepared_applications'], 0)
+
+    def test_uncertain_partially_filled_is_valid_but_not_prepared(self):
+        data = fixture(); r = data['roles'][0]
+        r.update(stage='uncertain', material_id='synthetic-resume')
+        r['execution']['fill'] = {'status': 'in_progress', 'evidence_ref': 'synthetic-fill'}
+        errors, report = validate(data)
+        self.assertEqual(errors, [])
+        self.assertEqual(report['prepared_applications'], 0)
+
+    def test_uncertain_with_completed_fill_evidence_counts_as_prepared(self):
+        data = fixture(); r = data['roles'][0]
+        r.update(stage='uncertain', material_id='synthetic-resume')
+        r['execution']['fill'] = {'status': 'complete', 'evidence_ref': 'synthetic-fill'}
+        r['execution']['save'] = {'status': 'complete', 'evidence_ref': 'synthetic-draft'}
+        r['execution']['submit'] = {'status': 'uncertain', 'evidence_ref': 'synthetic-attempt'}
+        errors, report = validate(data)
+        self.assertEqual(errors, [])
+        self.assertEqual(report['prepared_applications'], 1)
+        self.assertEqual(report['verified_submissions'], 0)
+
     def test_pending_and_excluded_evidence_do_not_count_as_eligible_roles(self):
         for disposition in ['pending', 'excluded']:
             data = fixture(); data['roles'][0]['disposition'] = disposition

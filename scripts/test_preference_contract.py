@@ -69,6 +69,19 @@ class PreferenceTests(unittest.TestCase):
         r['selection_ref'] = 'synthetic-user-choice'
         self.assertEqual(self.check(roles=[r]), [])
 
+    def test_cross_axis_reference_without_selection_cannot_start_forms(self):
+        r = role(); r.update(cross_axis_conflict=True, selected=False, selection_ref='synthetic-ref')
+        r['execution']['fill'] = {'status': 'in_progress', 'evidence_ref': 'synthetic-fill'}
+        self.assertTrue(any('explicit user selection' in e for e in self.check(roles=[r])))
+        r['selected'] = True
+        self.assertEqual(self.check(roles=[r]), [])
+        r['selection_ref'] = ''
+        self.assertTrue(any('explicit user selection' in e for e in self.check(roles=[r])))
+
+    def test_uncertain_without_any_attempt_is_rejected(self):
+        r = role(); r.update(stage='uncertain', disposition='pending', material_id='synthetic-resume')
+        self.assertTrue(any('attempted-action evidence' in e for e in self.check(roles=[r])))
+
     def test_weighted_conflict_choice_rejected(self):
         p = preferences(); p['combined_weights'] = {'city': 3, 'direction': 2}
         self.assertTrue(any('weighted' in e for e in self.check(p)))

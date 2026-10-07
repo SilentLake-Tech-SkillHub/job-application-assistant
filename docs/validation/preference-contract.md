@@ -13,7 +13,7 @@ python3 docs/validation/check_package.py .
 
 Playwright 仅安装到临时目录，不进入技能包。既有两项浏览器测试运行于无账号的隔离合成页面：控件盘点 12 个控件/26 项检查通过；直接赋值失败复现、fill/顺序输入恢复、草稿保存重开读回通过。测试启动临时 headless Chrome，需要运行环境允许该进程；不访问真实 ATS。
 
-Python 合成测试：36 项通过，无跳过。包括不限城市不排除、硬城市范围、弱优先/并列/未知原样保留、跨轴不代选/不加权、AI 数据产品与纯数仓的人工 JD 依据、正式岗与实习分列、候补覆盖充分/不足、有正式岗矛盾、旧已投/回执与明确选择保护、旧偏好版本拒收、BU 未披露、缺前置逐岗报告拒收、实际执行/回执证据、待核/排除不计为候选、同名不同 ID 与多城市同 ID、URL 业务参数保留。测试只验证声明与字段契约，不判断 JD 真伪或自然语言分类正确性。
+Python 合成测试：41 项通过，无跳过。包括不限城市不排除、硬城市范围、弱优先/并列/未知原样保留、跨轴不代选/不加权、AI 数据产品与纯数仓的人工 JD 依据、正式岗与实习分列、候补覆盖充分/不足、有正式岗矛盾、旧已投/回执与明确选择保护、旧偏好版本拒收、BU 未披露、缺前置逐岗报告拒收、实际执行/回执证据、待核/排除不计为候选、同名不同 ID 与多城市同 ID、URL 业务参数保留。测试只验证声明与字段契约，不判断 JD 真伪或自然语言分类正确性。
 
 ## 完整包与流程图
 
@@ -59,3 +59,7 @@ FLOW_FONT=<Chinese-font-file> python3 docs/flow/render_flow.py docs/flow/module-
 - `skills/application-parallel-execution/SKILL.md`
 - `skills/application-parallel-execution/references/coordination-contract.md`
 - `skills/application-parallel-execution/scripts/validate_assignments.py`
+
+## 独立复审反例回归
+
+跨轴冲突执行必须同时有 selected:true 与 selection_ref；仅有引用而 selected:false 会拒收。uncertain 无任何动作证据会拒收；准备数量只计算候选中具备完成填写证据与材料身份的记录，部分填写不计已准备。搜索 manifest 及其 delta 岗位仅允许只读阶段，fill/save/submit 全部 not_started；通用申请入口仍可在授权内填写。合成回归覆盖原样反例与有效正例。
