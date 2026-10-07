@@ -13,7 +13,7 @@ def fixture():
         "batch": {
             "batch_id": "sample-day",
             "query_version": "v1",
-            "preferences": preferences(),
+            "preferences": preferences("sample-day"),
             "quotas": {"large": 1, "bank": 1},
             "counting_basis": "eligible",
             "replacement_rule": "replace",
@@ -115,6 +115,18 @@ class BatchValidationTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(report['prepared_applications'], 1)
         self.assertEqual(report['verified_submissions'], 0)
+
+    def test_batch_default_order_cannot_be_reused_from_other_batch(self):
+        data = fixture(); data['batch']['preferences']['default_order_batch_id'] = 'another-batch'
+        errors, _ = validate(data)
+        self.assertTrue(any('different batch' in e for e in errors))
+
+    def test_company_actions_wait_for_company_order_confirmation(self):
+        data = fixture(); r = data['roles'][0]
+        r['execution']['fill'] = {'status': 'in_progress', 'evidence_ref': 'synthetic-fill'}
+        r.pop('company_order_confirmation_ref')
+        errors, _ = validate(data)
+        self.assertTrue(any('same pre-form report' in e for e in errors))
 
     def test_pending_and_excluded_evidence_do_not_count_as_eligible_roles(self):
         for disposition in ['pending', 'excluded']:

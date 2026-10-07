@@ -31,7 +31,7 @@ Business targets are batch choices. Ask whether the user wants a numerical targe
 
 ## Preference-version and per-role handoff
 
-Load [the preference contract](../../references/preference-contract.md) before allocation and merge. Assignments, roles and deltas carry the current preference_version; reject stale versions without rewriting them. Reuse recorded JDs and only user-selected recheck gaps. Every role returns company/title/direct URL/BU or 未披露/cities/employment/direction/JD decision evidence and separate actual fill/save/submit states plus its pre-form report reference. No worker resolves cross-axis conflicts, replaces an explicit selection or loses a submitted receipt. Conditional internships need sufficient formal coverage and no suitable formal role. Existing account exclusivity, serial tracker writing and final target/form-version review remain mandatory.
+Load [the preference contract](../../references/preference-contract.md) before allocation and merge. Assignments, roles and deltas carry the current preference_version; reject stale versions without rewriting them. Reuse recorded JDs and only user-selected recheck gaps. Every role returns company/title/direct URL/BU or 未披露/cities/employment/direction/JD decision evidence and separate actual fill/save/submit states plus its pre-form report reference. No worker resolves cross-axis conflicts, replaces an explicit selection or loses a submitted receipt. Under conversion_last, officially evidenced conversion internships remain last in the same report, including when formal roles exist or coverage is incomplete. Existing account exclusivity, serial tracker writing and final target/form-version review remain mandatory.
 
 ## Owner and approval boundaries
 

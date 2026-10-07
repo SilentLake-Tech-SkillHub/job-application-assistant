@@ -36,4 +36,6 @@ Approval covers only the exact named roles and reviewed form versions. Immediate
 
 ## 独立偏好与执行证据
 
-准备前读取 [偏好证据契约](preference-contract.md)，展示每岗公司、岗位、直链、BU 或未披露、城市、用工、方向、完整 JD 依据/理由及填/存/提交状态；先有 pre_form_report_ref 后操作表单。标题不能黑名单，AI 数据产品按实际 AI/Agent 产品职责判断。条件候补须覆盖充分且公司无合适正式岗；不足标待核。跨轴取舍由用户决定，已有明确选择不替换。Review 和 closeout 按每岗更新实际执行证据，与材料版本、名额、目标门禁一并读回；登录成功不能称表单准备完成。
+准备前读取 [偏好证据契约](preference-contract.md)，展示每岗公司、岗位、直链、BU 或未披露、城市、用工、方向、完整 JD 依据/理由及填/存/提交状态；先有 pre_form_report_ref 后操作表单。标题不能黑名单，AI 数据产品按实际 AI/Agent 产品职责判断。conversion_last 的已核转正实习在同一份报告最后；无论正式岗是否存在或覆盖充分，不移出报告。跨轴取舍由用户决定，已有明确选择不替换。Review 和 closeout 按每岗更新实际执行证据，与材料版本、名额、目标门禁一并读回；登录成功不能称表单准备完成。
+
+每批先向用户要默认岗位次序，保存同批确认，不沿用上一批。每家公司开始申请操作前，先用同一逐岗包展示公司/岗位/BU或未披露/办公地，确认相对默认次序有无变化；company_order_confirmation_ref 和 pre_form_report_ref 对应同一包。交接复用这份记录，最终具体目标和当前表单版本继续审核，不另建三套脱节清单。

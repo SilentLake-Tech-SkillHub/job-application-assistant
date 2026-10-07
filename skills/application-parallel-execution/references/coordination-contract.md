@@ -26,3 +26,5 @@ Keep a private readable proposal alongside the manifest: the user's explicit req
 ## 独立偏好与执行证据
 
 manifest 顶层 preferences、prior_roles；assignment/role/delta 必填 preference_version，与当前确认版本相同。assignment 携带公司正式覆盖字段；roles 携带 [完整逐岗字段](../../../references/preference-contract.md)、前置报告和实际 execution。偏好更新拒收旧增量，复用 JD/指定复查范围；不合成偏好分或替换明确选岗，保留已投和回执；账号独占、协调者串行写、精确目标与表单版本审核照常。
+
+每批先向用户要默认岗位次序，保存同批确认，不沿用上一批。每家公司开始申请操作前，先用同一逐岗包展示公司/岗位/BU或未披露/办公地，确认相对默认次序有无变化；company_order_confirmation_ref 和 pre_form_report_ref 对应同一包。交接复用这份记录，最终具体目标和当前表单版本继续审核，不另建三套脱节清单。
