@@ -28,3 +28,9 @@ Keep a private, durable record with `batch_id`, Query version/time, company key,
 Suggested company states: `unvisited`, `checking`, `checked`, `blocked`; suggested role stages: `discovered`, `verified`, `preparing`, `prepared`, `reviewed`, `submit_clicked`, `submitted`, `uncertain`. These are ledger states, not new workbook statuses. A `submit_clicked` or `uncertain` role must be investigated through the application center before retrying.
 
 Count distinct company keys per bucket for checked companies, distinct verified official role links for eligible roles, completed forms for prepared applications, and official receipts for submissions. Report the configured denominator and remaining target for numeric buckets; for nonnumeric buckets report scope/time progress and unresolved work against the confirmed stopping rule. A group/subsidiary counts separately only when the confirmed Query and actual employing/recruiting identity support it. Run `scripts/validate_batch.py <batch.json>` when using the JSON ledger format; set `scope_confirmed`, `bucket_rules_confirmed`, `materials_confirmed` and `preparation_authorized` only after the corresponding Query decisions. The validator checks duplicates, bucket membership, required approval references and receipt invariants.
+
+## 独立偏好与执行证据
+
+Query 将 hard_scope 和三条独立轴写入 batch.preferences（见 [契约](preference-contract.md) 与 [空模板](preference-template.md)），roles/增量携带 preference_version。公司覆盖字段放 companies，prior_roles 保留已投/回执与明确选择。每岗包含前置报告、BU 未披露标记、完整 JD 判断和独立 fill/save/submit 证据。更新偏好只复用原 JD 和用户指定复查范围，不重开首轮；弱优先/平级不强排、跨轴不加权。缺字段的旧快照需适配人工复核后才能新交付。
+
+每批先向用户要默认岗位次序，保存同批确认，不沿用上一批。每家公司开始申请操作前，先用同一逐岗包展示公司/岗位/BU或未披露/办公地，确认相对默认次序有无变化；company_order_confirmation_ref 和 pre_form_report_ref 对应同一包。交接复用这份记录，最终具体目标和当前表单版本继续审核，不另建三套脱节清单。
