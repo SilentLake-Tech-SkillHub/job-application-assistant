@@ -1,36 +1,38 @@
 ---
 name: terms-consent
-description: Read and tick ordinary agreement checkboxes during recruiting login and application filling — user agreements, privacy authorizations, résumé-truthfulness declarations and application notices — used only after the user has explicitly enabled this subskill in the batch's automation Query. Never clicks final submission or "confirm submission" controls.
+description: Ask whether the user wants item-by-item review or ordinary agreement checkboxes handled throughout the current job-application workflow. Batch ticking requires three explicit user confirmations; preserve concrete legal-agreement disclosure, per-action persistent-access approval and user-only steps, and never submit applications.
 metadata:
   version: "1.0.0"
 ---
 
 # 条款确认与勾选
 
-## 调用前检查
+## 先选择本次流程的处理方式
 
-读取私有批次记录中的自动化授权（见[自动化授权](../../references/automation-authorization.md)）。`approved_subskills` 不含 `terms-consent` 时，所有勾选框留给用户本人勾选。
+在首次遇到条款前，先问：“这次求职流程的条款，你想逐项查看后确认，还是由我在本次已确认范围内全部代勾？”读取[自动化授权](../../references/automation-authorization.md)并记录选择；已回答且范围未变时不重复问。
 
-## 可以勾选的条款
+- **逐项查看**：展示当前条款名称、链接和关键内容，按用户对该项的答复操作；用户选择自行勾选时保留给用户。
+- **本次全部代勾**：按[三次明确确认](../../references/automation-authorization.md#三次明确确认用户自定的额外流程)确认本次公司范围、条款类别、可能后果及最终授权后，开启 `terms-consent`。明确代勾会表达同意、作出声明或授权处理申请资料，请用户确认理解并愿意自行承担所述风险。三次是用户自定额外流程，不是平台标准，也不能替代平台的具体条款披露、逐次确认或本人操作要求。
+- 未选择或未完成所需确认时，不代勾。授权限本次求职流程，不沿用到其他用途或未来批次。
 
-- 登录/注册时的用户协议、隐私政策。
-- 网申页的个人信息处理授权、简历真实性承诺（“本人承诺所提供的简历真实、准确……”）。
-- 招聘须知、申请工作须知、信息声明等阅读确认。
+## 可以代勾的范围
 
-勾选前打开或阅读条款正文，确认没有异常内容，例如：同意转授信息给无关第三方、自动订阅付费服务、放弃法定权利、竞业或保证金。出现这类内容时先向用户说明，由用户决定。
+在用户确认的本次范围内，阅读并处理登录/注册条款、隐私及申请资料处理条款、简历真实性声明、招聘须知和申请阅读确认。对已获充分授权的普通项直接勾选，不再逐项重复询问，也不以主观“异常”判断引入无限追问。
 
-真实性承诺只有在表单内容来自用户确认过的材料时才勾选；还有待核实的事实时，先解决再勾选。
+真实性承诺只有在表单内容来自用户确认过的材料时才勾选；尚待核实的事实先解决。普通代勾不包含账号权限授予、付款、申请目标变更或最终提交。
 
-## 不属于本Skill的操作
+## 必须保留的具体边界
 
-- “投递简历”“确认投递”“我已知晓（投递后不可修改）”这类会触发**最终提交**的按钮和弹窗勾选，属于父Skill的 Submit 阶段，需要用户对具体岗位和审核版本的投递批准。
-- 撤回申请、终止应聘、替换志愿、删除记录。
-- 授权绑定其他账号、开通付费服务。
+- **具体新法律协议**：遇到执行平台要求明确接受的新协议，先提供该协议的名称、链接和必要后果说明，取得用户对该协议的接受或在披露后的明确继续指令，再勾选。已有有效接受可复用；本次全部代勾或三次确认本身不能提前覆盖尚未披露的新协议。接受后按平台要求告知并附链接；平台要求本人接受的协议交用户本人完成。
+- **持续权限**：创建或实质扩大 OAuth、账号、数据或系统持续访问权限时，仍须取得平台要求的逐次确认；不把三次确认当成永久授权。微信 OAuth“允许”按 `login-wechat` 始终由用户本人操作。
+- **范围外行动**：新增收件方或个人数据分享、付款/付费订阅、账号绑定、放弃权利或其他不在已确认范围内的实质承诺，按其具体操作及执行平台要求另行披露和确认。只询问确实新增或变更的事项，不重复询问同一已覆盖普通项。
+- **本人操作**：平台规定的签名、身份核验、受监管协议接受或其他必须本人完成的步骤，不由代勾授权替代。
+- **最终投递**：“投递简历”“确认投递”“我已知晓（投递后不可修改）”等触发最终提交的按钮或弹窗属于父Skill的 Submit 阶段，仍需具体完整目标及当前审核版本批准。撤回、终止、替换志愿或删除记录也不在代勾范围内。
 
 ## 记录
 
-在私有审核包记录：页面、条款名称、勾选时间、依据（用户批准的自动化授权）。勾选后读回勾选状态，页面重渲染后再检查一次。
+在私有审核包记录：本次处理方式、范围及三次确认依据（如适用）、页面、条款名称/链接、具体新协议的披露与接受依据、勾选时间。勾选后读回状态，页面重渲染后再检查；不记录认证秘密。
 
 ## 返回
 
-已勾选条款列表、未勾选及原因、需要用户决定的条款。
+已勾选条款列表、未勾选及具体原因、确需用户接受或本人完成的事项。

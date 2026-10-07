@@ -1,4 +1,9 @@
-/* Read-only DOM inventory. It deliberately never reads input values or auth state. */
+/* Read-only DOM inventory. It deliberately never reads control.value or auth state.
+ * Not reading control.value does not mean the output is free of personal data:
+ * labels, placeholders, locator metadata and nearby DOM text may contain personal content.
+ * Use the output only for the currently authorized job-application workflow;
+ * keep it private and do not share or publish it without the user's authorization.
+ */
 (function (root) {
   'use strict';
   function inspectApplicationForm(doc) {
@@ -59,6 +64,8 @@
       fields.push({index:fields.length,label,locator:path(outer),controlLocator:control?path(control):null,kind,action,confidence,evidence,required:!!(control?.required||outer.getAttribute('aria-required')==='true'||control?.getAttribute('aria-required')==='true'||(!sharedContainer&&(box?.querySelector('.is-required,.ant-form-item-required')||/[＊*]/.test(text(labelNode))))),disabled,readonly:!!control?.readOnly,multiple:!!control?.multiple||kind==='multi_select',maxLength:control?.getAttribute('maxlength')||null,accept:control?.getAttribute('accept')||null,placeholder:control?.getAttribute('placeholder')||null,optionCount:options?.length??null,optionsNeedOpening:['select','multi_select','cascader'].includes(kind)&&options==null,validationErrorVisible:!!ownError&&shown(ownError),dependencyReview:['date_picker','select','multi_select','cascader','checkbox','radio'].includes(kind),displayedValueIsProof:false});
       Object.assign(fields[fields.length-1],{labelSource,sharedContainer,fieldIdentityNeedsReview:!label||labelSource==='single-control-container',ariaInvalid,automationMatchCount,validationErrorVisible:errorNodes.some(shown)||!!ownError&&shown(ownError)||ariaInvalid!=null&&!['false',''].includes(ariaInvalid),validationAssociationNeedsReview:sharedContainer&&!errorIds.length&&!descriptionIds.length});
     }
+    // valuesIncluded:false means control.value is not read; it is not a guarantee
+    // that labels, placeholders or other returned metadata contain no personal data.
     return {schemaVersion:2,readOnly:true,valuesIncluded:false,scope:'rendered DOM including offscreen controls; excludes hidden sections and authentication inputs',coverageLimit:'Unrendered steps, collapsed sections, iframe contents, shadow roots and dynamic options require separate UI inspection and a new scan.',count:fields.length,fields};
   }
   if(typeof module!=='undefined'&&module.exports)module.exports={inspectApplicationForm};

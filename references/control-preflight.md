@@ -1,6 +1,6 @@
 # 填写前控件盘点
 
-在用户指定的真实浏览器页面，通过已授权浏览器DOM执行接口载入`scripts/inspect_form_controls.js`，再执行`JSON.stringify(inspectApplicationForm(document))`。脚本不点击、不填值、不调用网络，也不读取input.value、密码、验证码、Cookie或认证状态。输出不包含URL、个人取值和选项文本；结果默认保存在私有项目，不上传公开仓库。
+在用户指定的真实浏览器页面，通过已授权浏览器DOM执行接口载入`scripts/inspect_form_controls.js`，再执行`JSON.stringify(inspectApplicationForm(document))`。脚本不点击、不填值、不调用网络，不直接读取control.value、Cookie或认证状态，并过滤所识别的认证输入。未读取control.value不代表输出没有个人数据：label、placeholder、定位元数据或附近DOM文本可能含个人内容，也可能含URL等文本。`valuesIncluded:false`仅表示未读取control.value，不是无个人数据保证。结果仅用于本次已授权的求职流程，保持私有，不擅自分享或公开。
 
 ## 输出与人工核对
 
@@ -26,6 +26,6 @@
 
 ## 定向维护检查
 
-执行`NODE_PATH=<含playwright的依赖目录> node scripts/test_inspect_form_controls.cjs`。测试使用隔离浏览器的合成表单，不访问真实申请账号；验证控件分类、隐藏文件上传、禁用依赖、必填与限制、个人取值排除及DOM只读。浏览器可执行路径由`CHROME_EXECUTABLE`指定；默认使用本机Chrome。随后在授权的实际表单运行脚本并验证一个受影响的真实控件，不能用合成测试冒充官网填写成功。
+执行`NODE_PATH=<含playwright的依赖目录> node scripts/test_inspect_form_controls.cjs`。测试使用隔离浏览器的合成表单，不访问真实申请账号；验证控件分类、隐藏文件上传、禁用依赖、必填与限制、未读取control.value及DOM只读；这些检查不保证元数据不含个人内容。浏览器可执行路径由`CHROME_EXECUTABLE`指定；默认使用本机Chrome。随后在授权的实际表单运行脚本并验证一个受影响的真实控件，不能用合成测试冒充官网填写成功。
 
 显示已填但仍报错、共享容器字段错位或联动丢值时，必须按[字段绑定恢复策略](field-binding-recovery.md)逐项恢复并记录分层证据。
