@@ -2,7 +2,7 @@
 name: application-login
 description: Check and reconcile recruiting-site login state, then route to the user-approved login subskill (phone code, WeChat) or hand login to the user. Use when a recruiting form requires authentication, a session expires, or the logged-in account must be verified before preparing or submitting.
 metadata:
-  version: "2.1.0"
+  version: "2.1.1"
 ---
 
 # 投递登录处理
@@ -26,11 +26,17 @@ metadata:
 | 手机号验证码 | 调用 [login-phone-otp](../login-phone-otp/SKILL.md) | 请用户本人登录 |
 | 微信 | 调用 [login-wechat](../login-wechat/SKILL.md) | 请用户本人登录 |
 | 邮箱验证码 | 用户已授权读取该邮箱时，按下方“邮箱验证码”处理 | 请用户本人登录 |
-| 账号密码 | 不代填密码 | 请用户本人登录 |
+| 账号密码 | 已授权目标的既有账号若由浏览器/用户完成预填，按下节点击普通登录；不读取或代填密码 | 已有正常登录授权仍可复用既有账号；缺凭据时交用户，不以五项开启代替目标授权 |
 | 任意方式中出现人机验证 | 调用 [captcha-solve](../captcha-solve/SKILL.md)：普通点击由 Agent 做，图形默认用户完成；三次确认且平台允许才完整接手 | 直接请用户完成验证 |
 | 登录条款勾选 | 调用 [terms-consent](../terms-consent/SKILL.md)，按逐项查看或三次确认后的本次全部代勾处理，并保留平台边界 | 请用户勾选 |
 
 用户指定了登录方式时优先使用；网站只支持某一种方式时按网站实际情况选择。
+
+## 浏览器已预填的已有账号
+
+核对官网实际认证平台、用户指定账号的可见标识、当前登录表单和普通登录按钮。浏览器或用户已经填好既有账号、密码以掩码显示且目标登录已授权时，可点击普通“登录 / Sign In”；无需为了密码再交接。只用页面可见状态判断，不读取密码值、显示密码、导出密码库或把凭据写进日志/截图。登录后以账号标识及可访问的申请中心读回成功，再检查历史申请和名额；按钮点击不是成功证据。
+
+密码缺失、错误、过期或账号不符时，请用户补全或纠正；不创建、重设、更换或保存凭据，不选择未经授权的账号，不盲目重试。新绑定、合并账号、OAuth权限、验证码和新协议继续走各自门禁，登录不授权投递。
 
 ## 邮箱验证码
 
