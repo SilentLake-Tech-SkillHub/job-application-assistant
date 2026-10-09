@@ -2,7 +2,7 @@
 name: job-application-assistant
 description: Run a user-confirmed campus recruiting batch from official job discovery through application preparation, review, authorized submission, receipt verification, and tracker readback. Use when the user asks to prepare or execute multiple campus applications; do not invoke for information-only company research.
 metadata:
-  version: "1.11.2"
+  version: "1.11.3"
 ---
 
 # 岗位代投助手 / Job Application Assistant
@@ -30,6 +30,10 @@ Throughput (Issue #11): after the Query, open the current confirmed company set 
 ## Independent preference and evidence contract
 
 Query reads [preference-contract](references/preference-contract.md) and the [blank private template](references/preference-template.md): confirm hard scope separately from employment-path, city and direction relations, retaining weak/tied/unknown meanings. Prepare reuses full JDs and includes officially evidenced conversion internships last in the same report when the private policy is conversion_last; this does not require absence of formal roles or sufficient formal coverage; no weighted cross-axis choice. Before form actions present every role’s full evidence and actual fill/save/submit states. Review and closeout repeat this per-role package alongside existing target and form-version approval. A preference update preserves submissions and explicit selections and revisits only user-selected gaps, without restarting first-pass research.
+
+## 任职资格门禁
+
+搜索筛选、取岗、准备、审核和续跑必须读取[岗位任职资格核对](references/eligibility-check.md)。按完整JD分别判断职责范围与个人资格，必需条件、优先条件及待解释条件分别记录；搜索交付资格结论与个人证据缺口，投递在进入表单前结合当前材料复核。缺证据标待核，不把“待投递”、标题或匹配分当作可投；明确冲突不默认推进，用户针对具体缺口以真实材料尝试的指令单独保留。用户已剔除、既有已投与明确选岗不重置，最终目标及表单版本仍审核。
 
 ## Modes and authority
 

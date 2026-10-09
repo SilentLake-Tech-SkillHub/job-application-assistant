@@ -16,6 +16,10 @@ These rules come from a live SuccessFactors/Workday application session; follow 
 - **Cross-check "data lost" reports through a second locator.** A readback script can have its own bug (e.g. concatenating a label name into an id) and produce a false "all fields GONE" panic. Before reporting data loss, re-read the same fields via an independent locator (by id vs. by label text) and compare.
 - **Check the sent folder before any application email.** A parallel executor or the user may already have sent the same application. Before sending, read the mail account's sent items for the same recipient/company and recent window; a hit means stop and reconcile instead of sending a duplicate.
 
+## 表单准备前的资格复核
+
+读取[任职资格核对](eligibility-check.md)，先把搜索记录中的硬性条件、个人依据和缺口落实为独立结论。JD或历史库已列出的必需条件不得忽略；待核和明确不符合不默认进入表单。只为读取JD/查历史的登录与投递准备分开，不把已登录当作已选岗通过。有效选择、用户剔除与已投保护继续保留。
+
 ## Discover and prepare
 
 1. Verify that the page belongs to the employer or its named recruiting platform. Recheck cohort, employment type, location, title, plan and application window. Enumerate all in-scope pages or record a precise coverage limit. Open each candidate's real detail page and judge its title **and complete visible JD**.
