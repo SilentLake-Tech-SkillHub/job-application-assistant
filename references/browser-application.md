@@ -1,6 +1,6 @@
 # Browser preparation and submission
 
-Read when opening company sites, filling, reviewing or submitting. Prefer the user's requested browser and preserve its login state. Where the workspace specifies a browser priority, try its first tier and record an actual failure before changing tiers. Use a separate company window when required; never repurpose or close user-owned or review/receipt tabs. Headless navigation is only for public, read-only pages.
+Read when opening company sites, filling, reviewing or submitting. Prefer the user's requested browser and preserve its login state. Where the workspace specifies a browser priority, try its first tier and record an actual failure before changing tiers. Use [Chrome window grouping](chrome-window-grouping.md): open up to 10 webpage tabs in one Agent-owned Chrome window, then create a new window before page 11. Track company identity per tab, preserve other companies in shared windows, and never repurpose or close user-owned or review/receipt tabs. Headless navigation is only for public, read-only pages.
 
 Browser tab/window indexes drift whenever the user (or a parallel session) opens, closes or reorders tabs mid-run. Re-locate the target tab by URL match before every operation batch; never address a tab by an index remembered from an earlier step.
 
