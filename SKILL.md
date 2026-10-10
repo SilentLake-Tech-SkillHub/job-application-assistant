@@ -2,12 +2,16 @@
 name: job-application-assistant
 description: Run a user-confirmed campus recruiting batch from official job discovery through application preparation, review, authorized submission, receipt verification, and tracker readback. Use when the user asks to prepare or execute multiple campus applications; do not invoke for information-only company research.
 metadata:
-  version: "1.11.3"
+  version: "1.11.4"
 ---
 
 # 岗位代投助手 / Job Application Assistant
 
 This Skill is independent of company-research Skills. Discover the workspace's private profile, current batch record and role tracker from its project router. Keep names, contact details, résumé paths, company lists, quotas, personal eligibility and referral information in private project records, never in this Skill or a public copy. A previous batch is evidence, not current authorization.
+
+## Browser default and retained company tabs
+
+Use the in-app browser by default, unless the user explicitly chooses another browser. Reuse its login state and selected binding across turns; an unavailable in-app browser never authorizes automatic switching to Chrome or headless browsing. Protect unsaved work and follow [browser preparation and submission](references/browser-application.md) for recovery and visible retention. Keep the entire confirmed company group open during preparation/submission, including unfinished companies, accounts, forms and receipts. Finishing a role, a CAPTCHA handoff or ending a turn does not authorize closing them. Only a separate explicit company/page closure instruction permits cleanup.
 
 ## Application execution-mode Query
 
@@ -25,7 +29,7 @@ Five automation subskills are **off by default**: [login-phone-otp](skills/login
 
 The goal is **full automation**: the user appears only at steps that truly require them. In the Query, run the capability preflight in [automation-continuity.md](references/automation-continuity.md) — browser tool, computer use, system scripting, Playwright — and state up front any step this executing Agent will not perform under its own platform rules, with the alternative arrangement. During work, when an authorized control is unreachable through one channel, try another supported channel before handing it back. This never permits switching channels to perform a user-only action, click WeChat OAuth approval or bypass a denied action. Advance to the last step before a handoff point, then hand off with a screenshot, the single action needed and what happens next; keep working on other companies meanwhile and batch handoffs and target confirmations per company.
 
-Throughput (Issue #11): after the Query, open the current confirmed company set in bounded groups using [Chrome window grouping](references/chrome-window-grouping.md): at most 10 webpage tabs per Agent-owned window, a new window before page 11, and protected pages retained. The grouping count does not expand the approved company scope. Present and confirm each company’s role/order package before application actions, then advance confirmed companies to their login handoff, and send one consolidated login request; while the user logs in, progress logged-in companies, then fill and submit company by company. See section 5 of [automation-continuity.md](references/automation-continuity.md).
+Throughput (Issue #11): after the Query, open the current confirmed company set in bounded groups using [browser tab grouping](references/chrome-window-grouping.md) and the selected browser's actual capabilities. Only an explicitly chosen Chrome branch uses at most 10 webpage tabs per Agent-owned window and a new window before page 11. Protected pages stay retained. The grouping count does not expand the approved company scope. Present and confirm each company’s role/order package before application actions, then advance confirmed companies to their login handoff, and send one consolidated login request; while the user logs in, progress logged-in companies, then fill and submit company by company. See section 5 of [automation-continuity.md](references/automation-continuity.md).
 
 ## Independent preference and evidence contract
 
