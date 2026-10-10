@@ -2,7 +2,7 @@
 name: job-application-assistant
 description: Run a user-confirmed campus recruiting batch from official job discovery through application preparation, review, authorized submission, receipt verification, and tracker readback. Use when the user asks to prepare or execute multiple campus applications; do not invoke for information-only company research.
 metadata:
-  version: "1.11.4"
+  version: "1.11.5"
 ---
 
 # 岗位代投助手 / Job Application Assistant
@@ -11,7 +11,7 @@ This Skill is independent of company-research Skills. Discover the workspace's p
 
 ## Browser default and retained company tabs
 
-Use the in-app browser by default, unless the user explicitly chooses another browser. Reuse its login state and selected binding across turns; an unavailable in-app browser never authorizes automatic switching to Chrome or headless browsing. Protect unsaved work and follow [browser preparation and submission](references/browser-application.md) for recovery and visible retention. Keep the entire confirmed company group open during preparation/submission, including unfinished companies, accounts, forms and receipts. Finishing a role, a CAPTCHA handoff or ending a turn does not authorize closing them. Only a separate explicit company/page closure instruction permits cleanup.
+Browser priority is **in-app browser → Chrome + computer use → Playwright framework**. Start in the in-app browser. Before each downgrade, show the actual failure, proposed next tier and effect on login/unsaved work, then obtain the user's explicit confirmation for that transition. Confirmation of one transition does not authorize the next. Preserve company tabs and state while waiting; do not automatically switch or bypass a site safety refusal. The in-app browser tool's own Playwright-named control API remains the first tier; it is not use of the separate Playwright framework. Follow [browser preparation and submission](references/browser-application.md). Keep the entire confirmed company group open during preparation/submission, including unfinished companies, accounts, forms and receipts. Finishing a role, a CAPTCHA handoff or ending a turn does not authorize closing them. Only a separate explicit company/page closure instruction permits cleanup.
 
 ## Application execution-mode Query
 
@@ -27,7 +27,7 @@ Five automation subskills are **off by default**: [login-phone-otp](skills/login
 
 ## Automation continuity (Issue #10)
 
-The goal is **full automation**: the user appears only at steps that truly require them. In the Query, run the capability preflight in [automation-continuity.md](references/automation-continuity.md) — browser tool, computer use, system scripting, Playwright — and state up front any step this executing Agent will not perform under its own platform rules, with the alternative arrangement. During work, when an authorized control is unreachable through one channel, try another supported channel before handing it back. This never permits switching channels to perform a user-only action, click WeChat OAuth approval or bypass a denied action. Advance to the last step before a handoff point, then hand off with a screenshot, the single action needed and what happens next; keep working on other companies meanwhile and batch handoffs and target confirmations per company.
+The goal is **full automation**: the user appears only at steps that truly require them. In the Query, run the capability preflight in [automation-continuity.md](references/automation-continuity.md) — browser tool, computer use, system scripting, Playwright — and state up front any step this executing Agent will not perform under its own platform rules, with the alternative arrangement. During work, when an authorized control is unreachable through one channel, try another supported channel within the current tier; moving to the next browser tier requires separate user confirmation before proceeding. This never permits switching channels to perform a user-only action, click WeChat OAuth approval or bypass a denied action. Advance to the last step before a handoff point, then hand off with a screenshot, the single action needed and what happens next; keep working on other companies meanwhile and batch handoffs and target confirmations per company.
 
 Throughput (Issue #11): after the Query, open the current confirmed company set in bounded groups using [browser tab grouping](references/chrome-window-grouping.md) and the selected browser's actual capabilities. Only an explicitly chosen Chrome branch uses at most 10 webpage tabs per Agent-owned window and a new window before page 11. Protected pages stay retained. The grouping count does not expand the approved company scope. Present and confirm each company’s role/order package before application actions, then advance confirmed companies to their login handoff, and send one consolidated login request; while the user logs in, progress logged-in companies, then fill and submit company by company. See section 5 of [automation-continuity.md](references/automation-continuity.md).
 
