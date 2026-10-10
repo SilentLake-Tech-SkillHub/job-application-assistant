@@ -1,5 +1,50 @@
 # job-application-assistant 岗位代投助手
 
+## 快速使用：安装、调用与检查
+
+先准备一份已确认的简历和岗位清单,并确保你的 AI 工具能操作浏览器。以 Codex 项目安装为例,在自己的求职工作目录打开终端,执行:
+
+```bash
+mkdir -p .agents/skills
+git clone \
+  https://github.com/SilentLake-Tech-SkillHub/job-application-assistant.git \
+  .agents/skills/job-application-assistant
+```
+
+已有这个目录时不要重复克隆或覆盖,让 AI 先核对本地修改再更新。安装后重新打开项目或新建对话,下面提示词里的材料和范围替换成自己的实际内容。
+
+**调用整个 Skill**——建议显式写出名称与入口路径,让 AI 按当前任务加载引用和子 Skill,减少只靠自动匹配时漏读内容的情况:
+
+```text
+请显式调用 $job-application-assistant,先读取并执行
+.agents/skills/job-application-assistant/SKILL.md,按任务加载其中引用和子 Skill。
+本批范围是【公司/岗位清单】,使用【简历路径】和【追踪表路径】。
+先完成本批 Query,再按确认范围准备表单、保存草稿并交付评审包。
+最终提交等我批准具体岗位和评审版本。结尾列出已做、未做、阻塞及证据。
+```
+
+**只用其中一项功能**——复制所需的一行给 AI。子 Skill 在库内的 `skills/` 目录中;直接指定文件路径,也适用于工具未单独发现这些子 Skill 的情况。
+
+| 想做什么 | 单独提示词 |
+|---|---|
+| 处理登录 | 先读取父入口 `.agents/skills/job-application-assistant/SKILL.md`,再调用其中 `skills/application-login/SKILL.md`。仅检查并处理【公司页面】的登录,复用本批有效授权,缺失项先确认;汇报账号核对结果和需要我完成的动作,暂不填写或提交。 |
+| 填表与存草稿 | 先读取父入口 `.agents/skills/job-application-assistant/SKILL.md`,再调用其中 `skills/application-content-fill/SKILL.md`。仅用【简历路径】为【岗位页面】准备表单;先核对本批范围、选岗与资格,逐字段填写、读回并保存草稿,给我关键答案、缺失项和保存证据,暂不提交。 |
+| 整理个人信息档案 | 读取并执行 `.agents/skills/job-application-assistant/skills/personal-info-vault/SKILL.md`,将我明确提供的【新增或更正信息】记入工作区的私有档案,核对本次改动;档案放在 Skill 目录之外,不公开,暂不操作招聘网站。 |
+
+单独调用只缩小本次任务范围,父流程中适用的范围、资格、授权和审核要求仍然保留。
+
+**检查结果**——每次执行后,可以再发这句:
+
+```text
+请对照本次调用的 Skill 和批次记录检查遗漏,按岗位列出:
+资格结论及材料缺口;填写是否读回;草稿是否保存并重新读回;
+提交是否有官网成功页或申请记录;追踪表是否与官网一致。
+每项给出证据,未执行、待我确认和阻塞分别写明。
+缺证据的步骤保留未验证,不要将登录、页面已填、按钮点击或脚本通过算成投递成功。
+```
+
+接下来是项目的完整介绍与流程说明。
+
 2022 年,我刚刚进入社会,那一年我投了 70 个简历,最后拿了 10 个 offer。人们都在说"工作不好找"。2026 年,我再次回到校招,发现没有 200-300 次简历投递,很难找到同样的机会;而找工作、投简历本身,就是非常麻烦且复杂的事情。因此,我做了这个。
 
 [`campus-job-skills`](https://github.com/SilentLake-Tech-SkillHub/campus-job-skills) 解决"找"的麻烦:逐家公司收集岗位,整理进 Excel 账本。这个仓库解决"投"的麻烦:你选好一批岗位之后,AI 帮你开页面、登录、填表、存草稿,整理成评审包给你过目;你批准了,才逐个提交,并且只有读到官方回执,才把状态改成"已提交"。面向**中国大陆的校招和实习**。
