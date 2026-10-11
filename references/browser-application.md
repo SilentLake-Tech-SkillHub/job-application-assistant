@@ -33,7 +33,15 @@
 
 ## Page retention
 
-Read when opening company sites, filling, reviewing or submitting. Reuse each company's current login state and assigned browser lane; do not bypass a site safety refusal by switching lanes. Keep the entire confirmed company group visible during preparation/submission, including unfinished companies, accounts, forms, reviews and receipts. A completed submission or turn does not authorize closure; require a separate explicit instruction naming the pages/company to close.
+本节是页面保留与关闭的**唯一规则**，[窗口分组](chrome-window-grouping.md)和其他文件只引用这里。
+
+Read when opening company sites, filling, reviewing or submitting. Reuse each company's current login state and assigned browser lane; do not bypass a site safety refusal by switching lanes.
+
+- **默认全部保留**：准备/投递期间，本批已确认公司的整组页面保持可见，包括未完成公司、账号页、表单、审核页和回执。完成一个岗位、一次验证码交接、提交成功或回合结束，都不授权关闭。
+- **受保护页面**（任何情况下都不由 Agent 关闭、移动或重载腾位）：登录态页面、有未保存内容的表单、草稿、待审核页面、提交回执/成功页、`save: not_supported` 的已填表单、用户本人打开或归属不清的页面、用户指定保留的页面。
+- **非保护页面**：Agent 自己打开的岗位列表、详情、研究页，且所属公司的业务读回门禁已通过。
+- **何时可以关闭**：只有用户另行发出**点名公司或页面**的关闭指令时，才关闭其中的非保护页面；指令覆盖到受保护页面时，先列出这些页面并再确认一次。没有这样的指令，不清理任何批次标签——包括公司处理结束时。
+- 窗口满了只新建窗口，不关闭页面腾位。
 
 Before ending the turn, use the browser tool's documented visible-retention mechanism and read back company, URL and stage from the tab list. Where a visible deliverable and an internal handoff are distinct, retained company pages must be visible deliverables; a handoff flag alone is not proof of visible retention. On the next turn, re-list tabs before acting. If protected pages are missing, report the actual loss, recover their original URLs and check server-saved content; reopening does not restore unsaved edits.
 
@@ -47,9 +55,9 @@ These rules come from a live SuccessFactors/Workday application session; follow 
 - **Predict the native resubmit dialog.** Pages entered via form POST (common after verification-code logins) raise the browser-native "confirm form resubmission" dialog on reload. That dialog is not in the page DOM; handle it at the OS accessibility layer, and prefer not to reload such pages at all unless the form is server-drafted.
 - **Upload through supported file controls.** Use the tool’s documented file chooser/upload API or the authorized native chooser. Do not synthesize files or mutate page inputs with scripts. Read back the uploaded filename and site result; inspect any open chooser before retrying.
 - **Use the verified tab’s documented controls.** Prefer URL-verified DOM locators/accessibility actions. Native clicks require a fresh observation of the actual company window; avoid stealing the user’s frontmost work. An unavailable tool does not authorize a different UI technology forbidden by the executing platform.
-- **Expect id renumbering after re-renders.** Resume upload (and its auto-parse), saves and section changes can rebuild the whole form with new element ids. After any such event, re-enumerate before filling; prefer upload-first then fill-fields. Once required fields are filled, save the server-side draft immediately and confirm its success message, so a later re-render cannot lose the work.
+- **Expect id renumbering after re-renders.** Resume upload (and its auto-parse), saves and section changes can rebuild the whole form with new element ids. After any such event, re-enumerate before filling; prefer upload-first then fill-fields. **Draft-saving timing (single rule):** on a site with a draft/save control, save after each completed section; once all required fields are filled, save again, confirm the success message, reopen safely and read back field by field (`save.readback_ref`). On a site without drafts, collect all decisions first and fill in one pass (`save: not_supported`).
 - **Cross-check "data lost" reports through a second locator.** A readback script can have its own bug (e.g. concatenating a label name into an id) and produce a false "all fields GONE" panic. Before reporting data loss, re-read the same fields via an independent locator (by id vs. by label text) and compare.
-- **Check the sent folder before any application email.** A parallel executor or the user may already have sent the same application. Before sending, read the mail account's sent items for the same recipient/company and recent window; a hit means stop and reconcile instead of sending a duplicate.
+- **Email applications are out of scope.** This Skill never sends application emails ([stage contract §12](stage-contract.md#12-邮件投递)). For an email-only role, record it as blocked for the user; where reading the mailbox is authorized, check the sent items read-only so the user does not send a duplicate.
 
 ## 表单准备前的资格复核
 
@@ -75,6 +83,4 @@ Approval covers only the exact named roles and reviewed form versions. Immediate
 
 ## 独立偏好与执行证据
 
-准备前读取 [偏好证据契约](preference-contract.md)，展示每岗公司、岗位、直链、BU 或未披露、城市、用工、方向、完整 JD 依据/理由及填/存/提交状态；先有 pre_form_report_ref 后操作表单。标题不能黑名单，AI 数据产品按实际 AI/Agent 产品职责判断。conversion_last 的已核转正实习在同一份报告最后；无论正式岗是否存在或覆盖充分，不移出报告。跨轴取舍由用户决定，已有明确选择不替换。Review 和 closeout 按每岗更新实际执行证据，与材料版本、名额、目标门禁一并读回；登录成功不能称表单准备完成。
-
-每批先向用户要默认岗位次序，保存同批确认，不沿用上一批。每家公司开始申请操作前，先用同一逐岗包展示公司/岗位/BU或未披露/办公地，确认相对默认次序有无变化；company_order_confirmation_ref 和 pre_form_report_ref 对应同一包。交接复用这份记录，最终具体目标和当前表单版本继续审核，不另建三套脱节清单。
+准备前读取 [偏好证据契约](preference-contract.md)：先有 pre_form_report_ref 后操作表单，逐岗字段、转正实习排序和跨轴规则以该契约为准。Review 和 closeout 按每岗更新实际执行证据；登录成功不能称表单准备完成。默认岗位次序与公司动作前确认的唯一规则见[偏好契约](preference-contract.md#默认次序与公司动作前确认)。
