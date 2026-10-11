@@ -6,6 +6,48 @@ import unittest
 
 from validate_batch import validate
 from test_preference_contract import preferences, role
+from ledger_checks import review_hash_of
+
+H = "0" * 64
+
+
+def query_fields():
+    """Synthetic Query record (stage contract §1–§4); no personal data."""
+    return {
+        "entry": {"intent": "application", "basis": "synthetic: prepare confirmed list", "ref": "synthetic-entry"},
+        "sources": [{"name": n, "ref": "synthetic-" + n, "sha256": H, "read_at": "synthetic-time"}
+                    for n in ["router", "profile", "tracker", "batch_record", "resume"]],
+        "materials": [{"material_id": "sample-resume", "ref": "synthetic-resume.pdf", "sha256": H},
+                      {"material_id": "synthetic-resume", "ref": "synthetic-resume-2.pdf", "sha256": "1" * 64}],
+        "role_selection_authorized": True, "authorization_ref": "synthetic-authority",
+        "application_execution_mode": "single", "mode_approval_ref": "synthetic-mode",
+        "automation": {"automation_mode": "off", "approved_subskills": [], "approval_ref": "synthetic-off",
+                       "terms_mode": "per_item", "verification_mode": "user_result", "sms_read_allowed": False,
+                       "confirmation_refs": {"verification_takeover": [], "wechat_handoff": [], "terms_batch": []}},
+        "channels": {"in_app": "available", "chrome": "available", "computer_use": "not_checked",
+                     "system_script": "not_applicable", "playwright": "not_checked"},
+        "browser": {"playwright_substitute": None},
+    }
+
+
+def review_package(answer="synthetic answer"):
+    return {"materials": ["sample-resume"], "consequential_answers": {"synthetic question": answer},
+            "account_limit": "synthetic 2 of 2 left", "unresolved_fields": [], "screenshots": ["synthetic-shot"]}
+
+
+def make_reviewed(r, answer="synthetic answer"):
+    package = review_package(answer)
+    r.update(review_package=package, review_hash=review_hash_of(package))
+    return r["review_hash"]
+
+
+def make_submit_ready(r):
+    h = make_reviewed(r)
+    r.update(approved_review_hash=h, approval_ref="user-message-1", presubmit_check_ref="synthetic-recheck",
+             target_confirmation={"company": r["company"], "bu": r["bu"], "location": r["cities"][0],
+                                  "title": r["title"], "intent_slots": [], "count_rule_line": "synthetic: 2 roles max",
+                                  "review_hash": h, "confirmation_ref": "synthetic-target-ok"})
+    return h
 
 
 def fixture():
@@ -21,10 +63,14 @@ def fixture():
             "scope_confirmed": True,
             "materials_confirmed": True,
             "preparation_authorized": True,
+            **query_fields(),
         },
         "prior_roles": [],
         "companies": [
-            {"company_key": "alpha", "bucket": "large", "state": "checked"},
+            {"company_key": "alpha", "bucket": "large", "state": "checked", "browser_lane": "in_app",
+             "count_rule": {"status": "verified", "max_applications": 2, "concurrent": True,
+                            "order_rule": "synthetic none", "change_rule": "synthetic none",
+                            "source": "synthetic-faq", "checked_at": "synthetic-time"}},
             {"company_key": "beta", "bucket": "bank", "state": "blocked", "blocked": {
                 "reason": "synthetic site maintenance page", "scope": "company", "unblock_owner": "site",
                 "next_action": "recheck after the announced window; continue other companies meanwhile",
@@ -74,7 +120,8 @@ class BatchValidationTests(unittest.TestCase):
         self.assertTrue(any("official receipt" in error for error in errors))
         role["execution"]["fill"] = {"status": "complete", "evidence_ref": "synthetic-fill"}
         role["execution"]["submit"] = {"status": "complete", "evidence_ref": "receipt-1"}
-        role.update(approved_review_hash="v2", approval_ref="user-message-1", receipt_ref="receipt-1")
+        make_submit_ready(role)
+        role.update(receipt_ref="receipt-1", tracker_readback_ref="synthetic-tracker-readback")
         errors, report = validate(data)
         self.assertEqual(errors, [])
         self.assertEqual(report["verified_submissions"], 1)

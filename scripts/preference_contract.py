@@ -6,6 +6,14 @@ def text(value):
     return isinstance(value, str) and bool(value.strip())
 
 
+def isin(value, allowed):
+    """Membership that tolerates unhashable values (lists/dicts from malformed ledgers)."""
+    try:
+        return value in allowed
+    except TypeError:
+        return False
+
+
 def strings(value):
     return isinstance(value, list) and all(text(item) for item in value)
 
@@ -65,11 +73,11 @@ def blocked_errors(item, label, require_scope=False):
     for field in ['reason', 'next_action']:
         if not text(item.get(field)):
             errors.append(label + ' blocked needs ' + field)
-    if item.get('unblock_owner') not in UNBLOCK_OWNERS:
+    if not isin(item.get('unblock_owner'), UNBLOCK_OWNERS):
         errors.append(label + ' blocked needs unblock_owner in ' + '/'.join(sorted(UNBLOCK_OWNERS))
                       + ' (Agent-doable work is pending, not blocked)')
     if require_scope:
-        if item.get('scope') not in BLOCK_SCOPES:
+        if not isin(item.get('scope'), BLOCK_SCOPES):
             errors.append(label + ' blocked needs scope in ' + '/'.join(sorted(BLOCK_SCOPES)))
         if not text(item.get('evidence_ref')):
             errors.append(label + ' blocked needs evidence_ref')
@@ -101,7 +109,7 @@ def validate_preferences(preferences):
     scope = preferences.get('hard_scope')
     if not isinstance(scope, dict) or not strings(scope.get('cities')):
         errors.append('hard_scope.cities must be a string list; [] means unrestricted')
-    if preferences.get('internship_policy') not in {'excluded', 'conversion_last', 'separate'}:
+    if not isin(preferences.get('internship_policy'), {'excluded', 'conversion_last', 'separate'}):
         errors.append('invalid internship_policy')
     if preferences.get('conflict_policy') != 'user_decides':
         errors.append('cross-axis conflicts require user_decides')
@@ -118,7 +126,7 @@ def validate_preferences(preferences):
             continue
         for relation in item['relations']:
             if (not isinstance(relation, dict) or not text(relation.get('higher'))
-                    or not text(relation.get('lower')) or relation.get('relation') not in {'strict', 'weak', 'tied', 'unknown'}):
+                    or not text(relation.get('lower')) or not isin(relation.get('relation'), {'strict', 'weak', 'tied', 'unknown'})):
                 errors.append('invalid relation in axis ' + axis)
     if preferences.get('combined_weights') is not None or preferences.get('auto_resolve_conflicts') is True:
         errors.append('no automatic weighted cross-axis choice')
@@ -195,19 +203,19 @@ def validate_snapshot(preferences, roles, companies, prior_roles=None, batch_id=
             errors.append('role needs an actual direct URL')
         if not strings(role.get('cities')) or not role.get('cities'):
             errors.append('role cities must be explicit or 未披露')
-        if role.get('decision_basis') not in {'jd', 'scope'}:
+        if not isin(role.get('decision_basis'), {'jd', 'scope'}):
             errors.append('decision must use JD or confirmed scope, never title blacklist')
         if type(role.get('hard_scope_pass')) is not bool:
             errors.append('hard_scope_pass must be boolean')
         disposition = role.get('disposition')
-        if disposition not in {'primary', 'pending', 'excluded'}:
+        if not isin(disposition, {'primary', 'pending', 'excluded'}):
             errors.append('invalid disposition')
-        if disposition in {'primary'} and role.get('hard_scope_pass') is not True:
+        if disposition == 'primary' and role.get('hard_scope_pass') is not True:
             errors.append('candidate must pass hard scope')
         scope = prefs.get('hard_scope', {})
         allowed = scope.get('cities', []) if isinstance(scope, dict) else []
         if (strings(allowed) and allowed and strings(role.get('cities'))
-                and not set(allowed).intersection(role['cities']) and disposition in {'primary'}):
+                and not set(allowed).intersection(role['cities']) and disposition == 'primary'):
             errors.append('candidate outside explicit hard city scope')
         if role.get('employment_type') == 'internship' and disposition == 'primary':
             if prefs.get('internship_policy') == 'conversion_last':
@@ -229,7 +237,7 @@ def validate_snapshot(preferences, roles, companies, prior_roles=None, batch_id=
         for action in ['fill', 'save', 'submit']:
             item = execution.get(action)
             allowed = ACTION_STATES | (SAVE_ONLY_STATES if action == 'save' else set())
-            if not isinstance(item, dict) or item.get('status') not in allowed:
+            if not isinstance(item, dict) or not isin(item.get('status'), allowed):
                 errors.append('missing actual execution state: ' + action)
                 continue
             if item['status'] != 'not_started':
@@ -242,21 +250,25 @@ def validate_snapshot(preferences, roles, companies, prior_roles=None, batch_id=
                 errors.append('submit complete needs submitted stage and receipt')
         fill_state = execution.get('fill') if isinstance(execution.get('fill'), dict) else {}
         submit_state = execution.get('submit') if isinstance(execution.get('submit'), dict) else {}
-        if role.get('stage') in READY_STAGES:
+        if isin(role.get('stage'), READY_STAGES):
             errors.extend(preparation_errors(execution))
         elif role.get('stage') == 'submitted' and fill_state.get('status') != 'complete':
             errors.append('prepared/later stage requires completed fill evidence')
         if role.get('stage') == 'submitted' and submit_state.get('status') != 'complete':
             errors.append('submitted stage requires complete submit evidence')
-        if form_started and disposition in {'pending', 'excluded'}:
+        if form_started and isin(disposition, {'pending', 'excluded'}):
             errors.append('pending/excluded role cannot start forms')
         readonly_history = role.get('historical_readonly') is True and valid_readonly_history(role, prior_roles)
         if role.get('historical_readonly') is True and not readonly_history:
             errors.append('historical marker requires an unchanged submitted snapshot and no current-batch actions')
-        if form_started and not readonly_history:
+        # Stage contract §7: a submission found in the site's application history during resume is
+        # recorded with its receipt even if this batch's company-order confirmation is still pending.
+        site_reconciled = (role.get('stage') == 'submitted' and text(role.get('receipt_ref'))
+                           and text(role.get('site_history_ref')))
+        if form_started and not readonly_history and not site_reconciled:
             if (not text(role.get('company_order_confirmation_ref'))
                     or role.get('company_order_report_ref') != role.get('pre_form_report_ref')
-                    or role.get('company_order_decision') not in {'unchanged', 'changed'}):
+                    or not isin(role.get('company_order_decision'), {'unchanged', 'changed'})):
                 errors.append('company order must be confirmed using the same pre-form report before actions')
             if role.get('company_order_decision') == 'changed' and not text(role.get('company_role_order_raw')):
                 errors.append('changed company order needs user-provided raw order')
@@ -278,6 +290,6 @@ def validate_snapshot(preferences, roles, companies, prior_roles=None, batch_id=
             continue
         if prior.get('stage') == 'submitted' and (after.get('stage') != 'submitted' or after.get('receipt_ref') != prior.get('receipt_ref')):
             errors.append('preference update must preserve submitted role and receipt')
-        if prior.get('selected') is True and (after.get('selected') is not True or after.get('disposition') in {'pending', 'excluded'}):
+        if prior.get('selected') is True and (after.get('selected') is not True or isin(after.get('disposition'), {'pending', 'excluded'})):
             errors.append('preference update must preserve explicit selection')
     return errors

@@ -26,6 +26,7 @@ def role(job_id='1'):
             'hard_scope_pass': True, 'disposition': 'primary', 'preference_version': 'p2',
             'stage': 'verified', 'pre_form_report_ref': 'synthetic-role-report', 'report_precedes_form': True,
             'company_order_report_ref': 'synthetic-role-report', 'company_order_confirmation_ref': 'synthetic-company-confirmation', 'company_order_decision': 'unchanged',
+            'eligibility': {'conclusion': 'meets', 'ref': 'synthetic-eligibility'},
             'execution': {action: {'status': 'not_started'} for action in ['fill', 'save', 'submit']}}
 
 
