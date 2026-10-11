@@ -1,6 +1,39 @@
 # Browser preparation and submission
 
-Read when opening company sites, filling, reviewing or submitting. Browser priority is **in-app browser → Chrome + computer use → Playwright framework**. Start in the in-app browser. Before each downgrade, show the actual failure, proposed next tier and effect on login/unsaved work, then obtain the user's explicit confirmation for that transition. Confirmation of one transition does not authorize the next. Preserve company tabs and state while waiting; do not automatically switch or bypass a site safety refusal. The in-app browser tool's own Playwright-named control API remains the first tier; it is not use of the separate Playwright framework. Reuse the current login state and selected browser binding. Make one evidenced recovery attempt in the current tier before requesting the next tier; preserve the handoff if no approved/supported next tier is available. Read [browser tab grouping](chrome-window-grouping.md); the Chrome window rule applies only when Chrome was explicitly chosen or approved as a downgrade. Keep the entire confirmed company group visible during preparation/submission, including unfinished companies, accounts, forms, reviews and receipts. A completed submission or turn does not authorize closure; require a separate explicit instruction naming the pages/company to close.
+## 浏览器分工：内置浏览器与 Chrome 默认并行
+
+本节是浏览器选择的唯一规则，其他文件只引用这里。
+
+**两个默认通道，同时使用：**
+
+1. **内置浏览器通道**：执行 Agent 自带的浏览器（例如 Claude 桌面端的浏览器窗格）。该工具内部名为 Playwright 的定位接口属于这一通道，不算使用 Playwright 框架。
+2. **Chrome 通道**：通过 Chrome 插件（例如 Claude in Chrome）操作用户本人的 Chrome，复用其中已有的登录状态。
+
+**分工规则：**
+
+- 以公司为单位分配通道（招聘主体及其共享账号、名额范围算一家）。同一家公司、同一个账号不在两个通道里同时操作，避免重复登录、互相覆盖草稿或重复提交。
+- 用户指定的分配优先。未指定时：用户已在自己 Chrome 里登录过的站点、或必须用用户本人浏览器环境的站点，放 Chrome 通道；其余放内置浏览器通道，两边工作量大致均衡。分配结果在 Query 时与公司清单一起给用户看。
+- 一家公司中途换通道视为交接：先保存草稿或记下当前页面、未保存内容和下一步，再在新通道读回账号与表单状态。
+- 每个通道保留自己的公司页面；Chrome 通道按[窗口分组](chrome-window-grouping.md)每窗口最多 10 个网页。
+- 私有台账为每家公司记录 `browser_lane`（`in_app` / `chrome` / `playwright`）。
+
+**通道缺失时（Query 能力预检时确定，运行中出现同样处理）：**
+
+| 情况 | 处理 |
+|---|---|
+| 两个通道都可用 | 按上面的分工并行推进 |
+| 没有 Chrome 插件（未安装、未连接或本会话不可用） | 告诉用户缺少 Chrome 通道，并询问：“没有检测到 Chrome 插件，可以用 Playwright 代替 Chrome 通道吗？”用户明确同意才启用 Playwright，并记录确认依据；不同意或未回答时只用内置浏览器继续，原计划给 Chrome 通道的公司依次排在后面 |
+| 内置浏览器不可用 | 告诉用户，所有公司改走 Chrome 通道；不自动启用 Playwright |
+| 两个通道都不可用 | 询问是否可以用 Playwright；不同意则停在断点，说明缺什么 |
+| 运行中 Chrome 插件断开 | 保留页面与已记录状态，做一次有证据的重连；仍失败就按“没有 Chrome 插件”处理，询问是否用 Playwright 接管 Chrome 通道里的公司 |
+
+**Playwright 代替的边界：** 询问时说明它会连接哪个浏览器或会话；新开的独立浏览器没有用户的登录状态，相关公司需要重新登录。同意只对当前批次有效，记录在私有批次记录 `browser.playwright_substitute`（是否同意、确认原话引用、时间）。代替不扩大公司、数据、登录、验证码或提交授权。
+
+**computer use 与系统脚本不属于浏览器通道：** 只用于浏览器工具够不到的系统层控件，例如原生的“确认重新提交表单”对话框。本批首次使用前说明用途并取得用户确认，记录后同批同类用途可复用；验证码完整接手按 [captcha-solve](../skills/captcha-solve/SKILL.md) 的三次确认执行。不能用它们绕过站点安全拒绝或本人操作要求，也不能代点微信 OAuth“允许”。
+
+## Page retention
+
+Read when opening company sites, filling, reviewing or submitting. Reuse each company's current login state and assigned browser lane; do not bypass a site safety refusal by switching lanes. Keep the entire confirmed company group visible during preparation/submission, including unfinished companies, accounts, forms, reviews and receipts. A completed submission or turn does not authorize closure; require a separate explicit instruction naming the pages/company to close.
 
 Before ending the turn, use the browser tool's documented visible-retention mechanism and read back company, URL and stage from the tab list. Where a visible deliverable and an internal handoff are distinct, retained company pages must be visible deliverables; a handoff flag alone is not proof of visible retention. On the next turn, re-list tabs before acting. If protected pages are missing, report the actual loss, recover their original URLs and check server-saved content; reopening does not restore unsaved edits.
 

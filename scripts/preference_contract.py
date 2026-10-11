@@ -24,6 +24,58 @@ def canonical_url(value):
         return ''
 
 
+ACTION_STATES = {'not_started', 'in_progress', 'complete', 'blocked', 'uncertain'}
+# Only `save` may be not_supported: the site offers no draft, so the filled page itself is the reviewable state.
+SAVE_ONLY_STATES = {'not_supported'}
+# Stages whose meaning is "the form is ready"; submitted is excluded because its official receipt supersedes draft evidence.
+READY_STAGES = {'prepared', 'reviewed', 'submit_clicked'}
+
+
+def preparation_errors(execution):
+    """Return why a form may not count as prepared; empty means the evidence branches are complete."""
+    errors = []
+    fill = execution.get('fill') if isinstance(execution.get('fill'), dict) else {}
+    save = execution.get('save') if isinstance(execution.get('save'), dict) else {}
+    if fill.get('status') != 'complete' or not text(fill.get('evidence_ref')):
+        errors.append('prepared/later stage requires completed fill evidence')
+    elif not text(fill.get('readback_ref')):
+        errors.append('prepared needs fill.readback_ref (field-by-field readback after filling)')
+    if save.get('status') == 'complete':
+        if not text(save.get('evidence_ref')) or not text(save.get('readback_ref')):
+            errors.append('prepared via draft needs save.evidence_ref and save.readback_ref (reopened draft readback)')
+    elif save.get('status') == 'not_supported':
+        if not text(save.get('evidence_ref')):
+            errors.append('save not_supported needs evidence that the site offers no draft')
+    else:
+        errors.append('prepared needs save complete, or save not_supported on a site without drafts')
+    return errors
+
+
+# Who can lift a block. The Agent itself is deliberately absent: work the Agent is authorized
+# and able to do is pending work, not a block, and must not end the batch.
+UNBLOCK_OWNERS = {'user', 'site', 'platform', 'official_rule'}
+BLOCK_SCOPES = {'role', 'company', 'shared_account', 'batch'}
+
+
+def blocked_errors(item, label, require_scope=False):
+    """A blocked state must say why, who can unblock it and what happens next (and, for companies, what it affects)."""
+    errors = []
+    if not isinstance(item, dict):
+        return [label + ' blocked needs a details object']
+    for field in ['reason', 'next_action']:
+        if not text(item.get(field)):
+            errors.append(label + ' blocked needs ' + field)
+    if item.get('unblock_owner') not in UNBLOCK_OWNERS:
+        errors.append(label + ' blocked needs unblock_owner in ' + '/'.join(sorted(UNBLOCK_OWNERS))
+                      + ' (Agent-doable work is pending, not blocked)')
+    if require_scope:
+        if item.get('scope') not in BLOCK_SCOPES:
+            errors.append(label + ' blocked needs scope in ' + '/'.join(sorted(BLOCK_SCOPES)))
+        if not text(item.get('evidence_ref')):
+            errors.append(label + ' blocked needs evidence_ref')
+    return errors
+
+
 def identity(role):
     company = role.get('company_key')
     if not text(company):
@@ -176,18 +228,23 @@ def validate_snapshot(preferences, roles, companies, prior_roles=None, batch_id=
         form_started = False
         for action in ['fill', 'save', 'submit']:
             item = execution.get(action)
-            if not isinstance(item, dict) or item.get('status') not in {'not_started', 'in_progress', 'complete', 'blocked', 'uncertain'}:
+            allowed = ACTION_STATES | (SAVE_ONLY_STATES if action == 'save' else set())
+            if not isinstance(item, dict) or item.get('status') not in allowed:
                 errors.append('missing actual execution state: ' + action)
                 continue
             if item['status'] != 'not_started':
                 form_started = True
                 if not text(item.get('evidence_ref')):
                     errors.append('executed action needs evidence: ' + action)
+            if item['status'] == 'blocked':
+                errors.extend(blocked_errors(item, 'execution.' + action))
             if action == 'submit' and item['status'] == 'complete' and (role.get('stage') != 'submitted' or not text(role.get('receipt_ref'))):
                 errors.append('submit complete needs submitted stage and receipt')
         fill_state = execution.get('fill') if isinstance(execution.get('fill'), dict) else {}
         submit_state = execution.get('submit') if isinstance(execution.get('submit'), dict) else {}
-        if role.get('stage') in {'prepared', 'reviewed', 'submit_clicked', 'submitted'} and fill_state.get('status') != 'complete':
+        if role.get('stage') in READY_STAGES:
+            errors.extend(preparation_errors(execution))
+        elif role.get('stage') == 'submitted' and fill_state.get('status') != 'complete':
             errors.append('prepared/later stage requires completed fill evidence')
         if role.get('stage') == 'submitted' and submit_state.get('status') != 'complete':
             errors.append('submitted stage requires complete submit evidence')

@@ -10,7 +10,7 @@ import json
 import sys
 from collections import Counter
 from pathlib import Path
-from preference_contract import validate_snapshot
+from preference_contract import validate_snapshot, preparation_errors, blocked_errors
 
 COMPANY_STATES = {"unvisited", "checking", "checked", "blocked"}
 ROLE_STAGES = {
@@ -19,6 +19,16 @@ ROLE_STAGES = {
 }
 ELIGIBLE_STAGES = ROLE_STAGES - {"discovered"}
 PREPARED_STAGES = {"prepared", "reviewed", "submit_clicked", "submitted", "uncertain"}
+
+
+def is_prepared(role):
+    """Counting rule: a submitted role needs its receipt; any other stage needs the full fill/save evidence branch."""
+    execution = role.get("execution")
+    if not isinstance(execution, dict):
+        return False
+    if role.get("stage") == "submitted":
+        return bool(role.get("receipt_ref"))
+    return not preparation_errors(execution)
 
 
 def validate(data):
@@ -72,6 +82,8 @@ def validate(data):
             errors.append(f"company {key!r} has an unconfigured bucket: {bucket!r}")
         if state not in COMPANY_STATES:
             errors.append(f"company {key!r} has invalid state: {state!r}")
+        if state == "blocked":
+            errors.extend(blocked_errors(company.get("blocked"), f"company {key!r}", require_scope=True))
         if key:
             companies[key] = company
 
@@ -127,17 +139,19 @@ def validate(data):
     achieved = checked if batch.get("counting_basis") == "checked" else eligible_company_counts
     prepared_roles = [role for role in eligible_roles
                       if role.get("stage") in PREPARED_STAGES and role.get("material_id")
-                      and isinstance(role.get("execution"), dict)
-                      and isinstance(role["execution"].get("fill"), dict)
-                      and role["execution"]["fill"].get("status") == "complete"
-                      and isinstance(role["execution"]["fill"].get("evidence_ref"), str)
-                      and role["execution"]["fill"]["evidence_ref"].strip()]
+                      and is_prepared(role)]
+    unsaved = [role for role in prepared_roles if role.get("stage") != "submitted"
+               and role["execution"]["save"].get("status") == "not_supported"]
+    blocked_companies = [{"company_key": k, "next_action": (c.get("blocked") or {}).get("next_action")}
+                         for k, c in companies.items() if c.get("state") == "blocked"]
     report = {
         "batch_id": batch.get("batch_id"),
         "checked_companies": dict(checked),
         "eligible_companies": dict(eligible_company_counts),
         "eligible_roles": len(eligible_roles),
         "prepared_applications": len(prepared_roles),
+        "prepared_without_draft_page_must_stay_open": len(unsaved),
+        "blocked_companies": blocked_companies,
         "verified_submissions": sum(role.get("stage") == "submitted" and bool(role.get("receipt_ref")) for role in valid_roles),
         "uncertain_roles": sum(role.get("stage") in {"submit_clicked", "uncertain"} for role in valid_roles),
         "remaining_quota": {b: (None if q is None else max(q - achieved[b], 0)) for b, q in quotas.items() if q is None or (type(q) is int and q >= 0)},

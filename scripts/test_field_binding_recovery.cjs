@@ -3,8 +3,9 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const {chromium}=require('playwright');
+const {chromeExecutable}=require('./chrome_path.cjs');
 (async()=>{
-  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_EXECUTABLE||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
+  const browser=await chromium.launch({headless:true,executablePath:chromeExecutable()});
   try {
     const page=await browser.newPage({viewport:{width:1000,height:600}});
     await page.setContent(`<style>body{font:20px sans-serif;padding:40px}input{display:block;padding:10px;margin:10px}p{color:#a22}button{padding:10px}</style><h1>Isolated form binding test</h1><div><label for="first">Given name</label><input id="first"><label for="last">Family name</label><input id="last" aria-invalid="true"><p id="error">Family name required</p></div><button type="button" id="draft">Save draft</button><button type="button" id="reload">Reopen draft</button><p id="saved"></p><script>

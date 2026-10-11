@@ -1,8 +1,9 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const {chromium}=require('playwright');
+const {chromeExecutable}=require('./chrome_path.cjs');
 (async()=>{
-const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_EXECUTABLE||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',args:['--no-sandbox']});
+const browser=await chromium.launch({headless:true,executablePath:chromeExecutable(),args:['--no-sandbox']});
 try{const page=await browser.newPage();await page.setContent(`<form>
 <label for="plain">说明*</label><input id="plain" required value="PRIVATE_MARKER_765" maxlength="40">
 <div class="info_box"><div class="subtitle">奖项名称*</div><div class="el-select"><input readonly placeholder="请选择" value="FAKE_PRIVATE_VALUE"></div></div>

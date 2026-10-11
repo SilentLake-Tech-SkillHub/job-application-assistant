@@ -36,7 +36,7 @@ Query、计划盘点、收集、Prepare、Review、续跑与 closeout 均读取�
 
 每个已核岗位在表单前的报告和最终报告必须包括：公司、岗位、直链、BU（缺失写 `未披露`）、官方城市、用工性质、方向、完整 JD 与捕获引用、决定性 JD 依据、纳入/排除/待核理由、偏好版本、覆盖缺口与转正依据、实际填写/保存/提交状态及证据。未执行明确写 `not_started`，不能只报已登录。被排除或待核条目也保留依据和缺口，不误计为已核/已准备。
 
-`pre_form_report_ref` 指表单动作前已经展示的逐岗包，`report_precedes_form: true` 是执行者声明，必须现场核验；发现、信息收集或排除记录也要有逐岗报告，未开表单时该布尔字段为 true 表示仍在动作前。Review 还包含材料、字段读回、表单版本、账户名额与未决项，目标和表单版本的既有审核仍生效。`execution` 三个独立项 `fill/save/submit` 各为 `{status, evidence_ref}`；允许 `not_started/in_progress/complete/blocked/uncertain`，除未开始外必须有证据引用。登录不等于填写，显示已填不等于保存，点击不等于回执。`submitted` 仍须父校验器的回执要求；`submit.complete` 也必须为 submitted 且有回执。
+`pre_form_report_ref` 指表单动作前已经展示的逐岗包，`report_precedes_form: true` 是执行者声明，必须现场核验；发现、信息收集或排除记录也要有逐岗报告，未开表单时该布尔字段为 true 表示仍在动作前。Review 还包含材料、字段读回、表单版本、账户名额与未决项，目标和表单版本的既有审核仍生效。`execution` 三个独立项 `fill/save/submit` 各为 `{status, evidence_ref}`；允许 `not_started/in_progress/complete/blocked/uncertain`，`save` 另允许 `not_supported`（站点无草稿入口），除未开始外必须有证据引用。prepared/reviewed/submit_clicked 要求 fill 完成且有逐字段读回 `readback_ref`，save 为 complete（含重开草稿读回 `readback_ref`）或 not_supported（页面保持打开、单独报告）。动作为 blocked 时须写 `reason`、`unblock_owner`、`next_action`；公司 blocked 规则见 [daily-batch](daily-batch.md)。登录不等于填写，显示已填不等于保存，点击不等于回执。`submitted` 仍须父校验器的回执要求；`submit.complete` 也必须为 submitted 且有回执。
 
 ## 私有 JSON 字段（不新增 Excel 列或枚举）
 

@@ -25,7 +25,10 @@ def fixture():
         "prior_roles": [],
         "companies": [
             {"company_key": "alpha", "bucket": "large", "state": "checked"},
-            {"company_key": "beta", "bucket": "bank", "state": "blocked"},
+            {"company_key": "beta", "bucket": "bank", "state": "blocked", "blocked": {
+                "reason": "synthetic site maintenance page", "scope": "company", "unblock_owner": "site",
+                "next_action": "recheck after the announced window; continue other companies meanwhile",
+                "evidence_ref": "synthetic-maintenance-capture"}},
         ],
         "roles": [
             dict(role(), role_key="alpha:id:1", company_key="alpha", direct_url="https://example.test/a/1"),
@@ -108,8 +111,8 @@ class BatchValidationTests(unittest.TestCase):
     def test_uncertain_with_completed_fill_evidence_counts_as_prepared(self):
         data = fixture(); r = data['roles'][0]
         r.update(stage='uncertain', material_id='synthetic-resume')
-        r['execution']['fill'] = {'status': 'complete', 'evidence_ref': 'synthetic-fill'}
-        r['execution']['save'] = {'status': 'complete', 'evidence_ref': 'synthetic-draft'}
+        r['execution']['fill'] = {'status': 'complete', 'evidence_ref': 'synthetic-fill', 'readback_ref': 'synthetic-fill-readback'}
+        r['execution']['save'] = {'status': 'complete', 'evidence_ref': 'synthetic-draft', 'readback_ref': 'synthetic-reopened-draft'}
         r['execution']['submit'] = {'status': 'uncertain', 'evidence_ref': 'synthetic-attempt'}
         errors, report = validate(data)
         self.assertEqual(errors, [])
@@ -143,6 +146,90 @@ class BatchValidationTests(unittest.TestCase):
         data = fixture(); data['roles'][0]['preference_version'] = 'old'
         errors, _ = validate(data)
         self.assertTrue(any('stale role' in e for e in errors))
+
+    # --- Issue #23 P0: prepared needs a real save branch; blocked needs an actionable explanation ---
+
+    def prepared(self, fill=None, save=None):
+        data = fixture(); r = data['roles'][0]
+        r.update(stage='prepared', material_id='synthetic-resume')
+        r['execution']['fill'] = fill if fill is not None else {
+            'status': 'complete', 'evidence_ref': 'synthetic-fill', 'readback_ref': 'synthetic-fill-readback'}
+        if save is not None:
+            r['execution']['save'] = save
+        return data
+
+    def test_report_repro_prepared_without_save_is_rejected_and_not_counted(self):
+        # Published counterexample: fill complete, save not_started, no field check.
+        data = self.prepared(fill={'status': 'complete', 'evidence_ref': 'missing-file.png'})
+        errors, report = validate(data)
+        self.assertTrue(any('readback_ref' in e for e in errors))
+        self.assertTrue(any('save complete, or save not_supported' in e for e in errors))
+        self.assertEqual(report['prepared_applications'], 0)
+
+    def test_prepared_with_saved_draft_needs_reopen_readback(self):
+        data = self.prepared(save={'status': 'complete', 'evidence_ref': 'synthetic-draft'})
+        errors, report = validate(data)
+        self.assertTrue(any('save.readback_ref' in e for e in errors))
+        self.assertEqual(report['prepared_applications'], 0)
+        data['roles'][0]['execution']['save']['readback_ref'] = 'synthetic-reopened-draft'
+        errors, report = validate(data)
+        self.assertEqual(errors, [])
+        self.assertEqual(report['prepared_applications'], 1)
+        self.assertEqual(report['prepared_without_draft_page_must_stay_open'], 0)
+
+    def test_site_without_drafts_is_reviewable_and_reported_separately(self):
+        data = self.prepared(save={'status': 'not_supported'})
+        errors, _ = validate(data)
+        self.assertTrue(any('executed action needs evidence: save' in e for e in errors))
+        data['roles'][0]['execution']['save']['evidence_ref'] = 'synthetic-only-cancel-and-submit'
+        errors, report = validate(data)
+        self.assertEqual(errors, [])
+        self.assertEqual(report['prepared_applications'], 1)
+        self.assertEqual(report['prepared_without_draft_page_must_stay_open'], 1)
+
+    def test_not_supported_is_only_valid_for_save(self):
+        data = self.prepared(fill={'status': 'not_supported', 'evidence_ref': 'x', 'readback_ref': 'y'},
+                             save={'status': 'not_supported', 'evidence_ref': 'z'})
+        errors, report = validate(data)
+        self.assertTrue(any('missing actual execution state: fill' in e for e in errors))
+        self.assertEqual(report['prepared_applications'], 0)
+
+    def test_failed_or_uncertain_save_is_not_prepared(self):
+        for status in ['in_progress', 'uncertain']:
+            data = self.prepared(save={'status': status, 'evidence_ref': 'synthetic-save-attempt'})
+            errors, report = validate(data)
+            self.assertTrue(errors)
+            self.assertEqual(report['prepared_applications'], 0)
+
+    def test_report_repro_blocked_company_without_reason_is_rejected(self):
+        # Published counterexample: blocked company with no reason or next step.
+        data = fixture(); data['companies'][1].pop('blocked')
+        errors, _ = validate(data)
+        self.assertTrue(any("'beta' blocked needs a details object" in e for e in errors))
+        data['companies'][1]['blocked'] = {}
+        errors, _ = validate(data)
+        for field in ['reason', 'next_action', 'unblock_owner', 'scope', 'evidence_ref']:
+            self.assertTrue(any(field in e for e in errors), field)
+
+    def test_agent_doable_work_cannot_be_labelled_blocked(self):
+        data = fixture(); data['companies'][1]['blocked']['unblock_owner'] = 'agent'
+        errors, _ = validate(data)
+        self.assertTrue(any('Agent-doable work is pending' in e for e in errors))
+
+    def test_blocked_company_is_listed_with_next_action(self):
+        _, report = validate(fixture())
+        self.assertEqual([c['company_key'] for c in report['blocked_companies']], ['beta'])
+        self.assertTrue(report['blocked_companies'][0]['next_action'])
+
+    def test_blocked_role_action_needs_reason_owner_and_next_step(self):
+        data = fixture(); r = data['roles'][0]
+        r['execution']['fill'] = {'status': 'blocked', 'evidence_ref': 'synthetic-required-id-field'}
+        errors, _ = validate(data)
+        self.assertTrue(any('execution.fill blocked needs reason' in e for e in errors))
+        r['execution']['fill'].update(reason='government ID field is user-only', unblock_owner='user',
+                                      next_action='ask user to enter it; other companies continue')
+        errors, _ = validate(data)
+        self.assertEqual(errors, [])
 
     def test_malformed_record_returns_errors_instead_of_crashing(self):
         data = {"batch": None, "companies": None, "roles": [None]}
