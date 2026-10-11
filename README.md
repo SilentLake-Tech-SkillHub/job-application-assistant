@@ -258,3 +258,7 @@ job-application-assistant/
 ```
 
 本仓库由 [SilentLake-Tech-SkillHub](https://github.com/SilentLake-Tech-SkillHub) 维护。
+
+## 执行可靠性分析与待修复问题
+
+[2026-10-11 完整分析报告](reports/execution-reliability/20261011/analysis.md)记录投递准备、保存与读回、批次退出，以及 Job Search 和 Harness 的关联缺口；同目录保存公开复现证据。修复由 [Issue #23](https://github.com/SilentLake-Tech-SkillHub/job-application-assistant/issues/23) 跟踪，Harness 配套问题见 [Issue #18](https://github.com/SilentLake-Tech-SkillHub/SilentAgentHub/issues/18)。报告发布和历史版本交付不代表缺陷已修复。

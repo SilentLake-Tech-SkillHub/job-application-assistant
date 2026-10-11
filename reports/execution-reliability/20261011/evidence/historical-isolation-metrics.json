@@ -1,0 +1,26 @@
+{
+  "historical_audit_date": "2026-10-10",
+  "reexecuted_this_turn": false,
+  "memory_concurrency_rounds": 3,
+  "short_record_counts": [
+    2,
+    2,
+    3
+  ],
+  "index_record_counts": [
+    3,
+    5,
+    4
+  ],
+  "powershell_parallel_isolation": {
+    "rounds": 3,
+    "processes_per_round": 32,
+    "total": 96,
+    "passed": 96,
+    "failed": 0
+  },
+  "prepost_hook_samples": 10,
+  "prepost_all_exit_zero": true,
+  "prepost_median_seconds": 1.7785934585263021,
+  "measurement_boundary": "isolated script process costs, not whole application latency"
+}
