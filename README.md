@@ -223,7 +223,8 @@ AI 只打开本批已确认范围内需要的页面,优先复用已有公司页�
 ```text
 job-application-assistant/
 ├── README.md
-├── SKILL.md                              入口:Query、准备、评审、提交四个阶段与硬门禁
+├── SKILL.md                              入口:Query、准备、评审、提交、续跑五个阶段与硬门禁
+├── .github/workflows/ci.yml              Linux + Windows 自动跑全部测试
 ├── agents/openai.yaml
 ├── docs/
 │   ├── images/icons/                     README 里的工具图标
@@ -240,12 +241,19 @@ job-application-assistant/
 │   ├── preference-contract.md            硬范围、独立偏好与逐岗证据规则
 │   ├── preference-template.md            私有偏好配置空白模板
 │   ├── preparation-scenarios.md          维护用的场景检查
+│   ├── stage-contract.md                 入口判定、问题时机、完整交接点清单、状态优先级、收尾检查(唯一出处)
 │   └── workbook-contract.md              岗位追踪表的读写约定
 ├── scripts/
 │   ├── chrome_path.cjs                   浏览器测试按系统查找 Chrome/Edge（可用 CHROME_EXECUTABLE 覆盖）
 │   ├── inspect_form_controls.js          只读盘点页面控件
 │   ├── preference_contract.py            偏好版本、岗位身份与阶段证据的结构校验
-│   ├── validate_batch.py                 批次台账的确定性校验
+│   ├── validate_batch.py                 批次台账的确定性校验(--evidence-root 核对证据文件,--closeout 收尾检查)
+│   ├── ledger_checks.py                  Query 记录、通道、数量规则、资格、审核包、目标确认等字段校验
+│   ├── stage_gate.py                     阶段门禁:query / prepare / review / submit / closeout 前必须通过
+│   ├── tracker_readback.py               写入追踪表后重开 Excel,对照备份逐行读回
+│   ├── ci.py                             一键跑:静态 → 单元 → 冒烟 → 浏览器全流程 → 压力
+│   ├── smoke_test.py                     冒烟测试
+│   ├── fixtures/synthetic_ats.py         全流程测试用的合成招聘网站(无真实数据)
 │   └── test_*                            上述脚本的测试
 └── skills/
     ├── application-login/                判断登录状态,按你的授权选登录方式
@@ -260,6 +268,16 @@ job-application-assistant/
 ```
 
 本仓库由 [SilentLake-Tech-SkillHub](https://github.com/SilentLake-Tech-SkillHub) 维护。
+
+## 测试
+
+```bash
+pip install openpyxl playwright && python -m playwright install chromium
+npm install --global playwright   # 两个 .cjs 浏览器测试用
+python scripts/ci.py               # 无浏览器环境: python scripts/ci.py --skip-browser
+```
+
+全流程测试 `scripts/test_e2e_full_flow.py` 在本地合成招聘网站上走完一次完整批次:Query → 分配通道与登录 → 读数量规则与完整 JD → 资格复核 → 控件盘点 → 先上传再校正解析 → 真实控件填写 → 保存草稿并重开读回 → 审核包与版本哈希 → 批准 → 目标确认 → 提交并核验回执与申请历史 → 写追踪表并读回 → 续跑对账 → 收尾检查。每一步都过对应的阶段门禁,并验证门禁在该停的地方确实拦住。测试只证明流程与工具配合正确,不代表任何真实招聘网站的行为。
 
 ## 执行可靠性分析与待修复问题
 

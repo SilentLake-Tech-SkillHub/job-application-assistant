@@ -20,12 +20,39 @@ for p in skills:
     header = source.split('\n---\n', 1)[0]
     assert re.search(r'^name: [a-z0-9-]+$', header, re.M), p
     assert re.search(r'^description: .+', header, re.M), p
-links = 0
+def slug(heading):
+    # GitHub heading anchors: lowercase, drop punctuation (keep word chars, CJK, spaces, hyphens), spaces -> hyphens.
+    text = re.sub(r'[`*_]', '', heading.strip().lower())
+    text = re.sub(r'[^\w\- ]', '', text)
+    return text.replace(' ', '-')
+
+
+def anchors(path):
+    found, seen = set(), {}
+    in_code = False
+    for line in path.read_text(encoding='utf-8').splitlines():
+        if line.startswith('```'):
+            in_code = not in_code
+        if in_code:
+            continue
+        m = re.match(r'^#{1,6} (.+)$', line)
+        if m:
+            base = slug(m.group(1)); n = seen.get(base, 0); seen[base] = n + 1
+            found.add(base if n == 0 else base + '-' + str(n))
+    return found
+
+
+links = anchored = 0
 for p in root.rglob('*.md'):
     for target in re.findall(r'\]\(([^)]+)\)', p.read_text(encoding='utf-8')):
-        if target.startswith(('https:', 'http:', '#', '<')):
+        if target.startswith(('https:', 'http:', '<')):
             continue
-        assert (p.parent/target.split('#')[0]).exists(), (p, target)
+        file_part, _, anchor = target.partition('#')
+        dest = (p.parent/file_part) if file_part else p
+        assert dest.exists(), (p, target)
+        if anchor and dest.suffix == '.md':
+            assert anchor in anchors(dest), ('broken anchor', p, target)
+            anchored += 1
         links += 1
 scripts = list(root.rglob('*.py'))
 for p in scripts:
@@ -38,6 +65,6 @@ with tempfile.TemporaryDirectory() as temp:
                                 encoding='utf-8', env=dict(os.environ, PYTHONIOENCODING='utf-8'))
         assert result.returncode == 1 and not result.stderr, (p, result.stdout, result.stderr)
         json.loads(result.stdout)  # Independent CLI import/loading and controlled invalid-data failure.
-print(json.dumps({'passed': True, 'skill_entrypoints': len(skills), 'local_links': links,
+print(json.dumps({'passed': True, 'skill_entrypoints': len(skills), 'local_links': links, 'anchors_checked': anchored,
                   'python_sources': len(scripts), 'validators_loaded': len(validators),
                   'scope': 'complete copied package; static metadata/references and CLI loading, no platform registration or live ATS'}, ensure_ascii=False))
