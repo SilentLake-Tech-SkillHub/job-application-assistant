@@ -10,6 +10,11 @@ cannot prove a website saved or received anything.
   stage_gate.py batch.json --stage review  --role <role_key>
   stage_gate.py batch.json --stage submit  --role <role_key>
   stage_gate.py batch.json --stage closeout
+
+Evidence is strict by default: every reference must be a file under the application root's
+投递证据/ folder (root = nearest ancestor of the ledger containing 投递证据/, or --root).
+A passing submit gate writes 投递证据/门禁通行证.json, which the PreToolUse hook requires
+before a final-submit click (hooks/application_guard.py).
 """
 import argparse
 import copy
@@ -19,7 +24,8 @@ import sys
 from pathlib import Path
 
 from validate_batch import validate
-from ledger_checks import evidence_errors, closeout_status
+from ledger_checks import evidence_errors, closeout_status, find_root, EVIDENCE_DIR
+from submit_pass import issue_submit_pass
 
 ORDER = ['discovered', 'verified', 'preparing', 'prepared', 'reviewed', 'submit_clicked', 'submitted', 'uncertain']
 SIMULATED = 'stage-gate-simulation'
@@ -59,13 +65,16 @@ def simulate(data, stage, role_key):
     return after, None
 
 
-def run(data, stage, role_key=None, evidence_root=None):
+def run(data, stage, role_key=None, root=None, strict=None):
+    """strict=None: no evidence check (library use); the CLI always passes strict=True unless --lenient."""
     after, problem = simulate(data, stage, role_key)
     if problem:
         return {'stage': stage, 'role': role_key, 'allowed': False, 'errors': [problem]}
     errors, report = validate(after)
-    if evidence_root:
-        errors.extend(evidence_errors(data, evidence_root))
+    if root is not None and strict is not None:
+        errors.extend(evidence_errors(data, root, strict=strict))
+    elif strict:
+        errors.append('strict evidence: application root with ' + EVIDENCE_DIR + '/ not found; pass --root or --lenient')
     result = {'stage': stage, 'role': role_key, 'allowed': not errors, 'errors': errors,
               'checked_at': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')}
     if stage == 'closeout':
@@ -79,7 +88,8 @@ def main():
     parser.add_argument('batch_json', type=Path)
     parser.add_argument('--stage', required=True, choices=['query', 'prepare', 'review', 'submit', 'closeout'])
     parser.add_argument('--role', help='role_key for prepare/review/submit')
-    parser.add_argument('--evidence-root', type=Path)
+    parser.add_argument('--root', type=Path, help='application root containing 投递证据/ (default: nearest ancestor of the ledger)')
+    parser.add_argument('--lenient', action='store_true', help='legacy ledgers only: skip the strict file-evidence check')
     args = parser.parse_args()
     if args.stage in {'prepare', 'review', 'submit'} and not args.role:
         parser.error('--role is required for ' + args.stage)
@@ -90,7 +100,10 @@ def main():
     except (OSError, ValueError) as exc:
         print(json.dumps({'allowed': False, 'errors': [str(exc)]}, ensure_ascii=False))
         return 2
-    result = run(data, args.stage, args.role, args.evidence_root)
+    root = args.root or find_root(args.batch_json)
+    result = run(data, args.stage, args.role, root, strict=not args.lenient)
+    if args.stage == 'submit' and result['allowed'] and root is not None and not args.lenient:
+        result['submit_pass'] = issue_submit_pass(root, data, args.role, ledger=args.batch_json)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result['allowed'] else 1
 

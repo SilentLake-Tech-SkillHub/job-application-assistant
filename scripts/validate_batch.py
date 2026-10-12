@@ -12,7 +12,7 @@ from collections import Counter
 from pathlib import Path
 from preference_contract import validate_snapshot, preparation_errors, blocked_errors, isin
 from ledger_checks import (query_errors, company_errors, role_errors, material_ids,
-                           evidence_errors, closeout_status)
+                           evidence_errors, closeout_status, find_root)
 
 COMPANY_STATES = {"unvisited", "checking", "checked", "blocked"}
 ROLE_STAGES = {
@@ -187,7 +187,8 @@ def validate(data):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("batch_json", type=Path)
-    parser.add_argument("--evidence-root", type=Path, help="check that every file:<path> reference exists here")
+    parser.add_argument("--root", type=Path, help="application root containing 投递证据/ (default: nearest ancestor of the ledger)")
+    parser.add_argument("--lenient", action="store_true", help="legacy ledgers only: skip the strict file-evidence check")
     parser.add_argument("--closeout", action="store_true", help="also report whether the batch may be closed")
     args = parser.parse_args()
     try:
@@ -198,8 +199,12 @@ def main():
         print(json.dumps({"valid": False, "errors": [str(exc)]}, ensure_ascii=False))
         return 2
     errors, report = validate(data)
-    if args.evidence_root:
-        errors.extend(evidence_errors(data, args.evidence_root))
+    if not args.lenient:
+        root = args.root or find_root(args.batch_json)
+        if root is None:
+            errors.append("strict evidence: no 投递证据/ folder found above the ledger; pass --root or --lenient")
+        else:
+            errors.extend(evidence_errors(data, root))
     result = {"valid": not errors, "errors": errors, "report": report}
     if args.closeout:
         result["closeout"] = closeout_status(data, report)

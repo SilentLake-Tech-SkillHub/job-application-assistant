@@ -38,11 +38,14 @@ def main():
         bad = tmp / 'bad.json'; bad.write_text('{"batch": {}}', encoding='utf-8')
         for script in ('validate_batch.py', 'stage_gate.py', 'tracker_readback.py'):
             expect(script + ' --help', run(HERE / script, '--help'), 0)
-        expect('validate good ledger', run(HERE / 'validate_batch.py', good), 0)
-        expect('validate bad ledger', run(HERE / 'validate_batch.py', bad), 1)
-        expect('gate query', run(HERE / 'stage_gate.py', good, '--stage', 'query'), 0)
-        expect('gate prepare', run(HERE / 'stage_gate.py', good, '--stage', 'prepare', '--role', 'alpha:id:1'), 0)
-        expect('gate submit blocked', run(HERE / 'stage_gate.py', good, '--stage', 'submit', '--role', 'alpha:id:1'), 1)
+        expect('validate good ledger', run(HERE / 'validate_batch.py', good, '--lenient'), 0)
+        expect('strict evidence rejects text refs', run(HERE / 'validate_batch.py', good), 1)
+        expect('validate bad ledger', run(HERE / 'validate_batch.py', bad, '--lenient'), 1)
+        expect('gate query', run(HERE / 'stage_gate.py', good, '--stage', 'query', '--lenient'), 0)
+        expect('gate prepare', run(HERE / 'stage_gate.py', good, '--stage', 'prepare', '--role', 'alpha:id:1', '--lenient'), 0)
+        expect('gate submit blocked', run(HERE / 'stage_gate.py', good, '--stage', 'submit', '--role', 'alpha:id:1', '--lenient'), 1)
+        for script in ('../hooks/application_guard.py', '../hooks/install_hooks.py'):
+            expect(script + ' --help' if 'install' in script else script + ' empty stdin', run(HERE / script, '--help') if 'install' in script else subprocess.run([sys.executable, str(HERE / script)], input='', capture_output=True, text=True), 0)
         book, backup = tmp / 't.xlsx', tmp / 't.bak.xlsx'
         wb = Workbook(); ws = wb.active; ws.title = 'S'; ws.append(['url', 'status']); ws.append(['u1', 'pending']); wb.save(backup)
         ws['B2'] = 'submitted'; wb.save(book)

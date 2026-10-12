@@ -116,6 +116,16 @@ class StructureTexts(unittest.TestCase):
         for stage in ['query', 'prepare', 'review', 'submit', 'closeout']:
             self.assertIn('--stage ' + stage, skill + read('references/stage-contract.md'), stage)
 
+    def test_strict_evidence_and_hook_documented(self):
+        contract = read('references/stage-contract.md')
+        self.assertIn('## 10a. 严格证据模式与 `投递证据/`', contract)
+        self.assertIn('门禁通行证.json', contract)
+        self.assertNotIn('--evidence-root', contract + read('references/daily-batch.md') + read('README.md'))
+        hooks = read('hooks/README.md')
+        for platform in ['Claude Code', 'Codex', 'Kimi Code', 'Z.ai', 'ZCode']:
+            self.assertIn(platform, hooks)
+        self.assertIn('投递证据/', read('SKILL.md'))
+
     def test_versions_bumped(self):
         self.assertIn('version: "1.13.0"', read('SKILL.md'))
 

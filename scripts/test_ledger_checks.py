@@ -261,12 +261,12 @@ class EvidenceTests(unittest.TestCase):
         r['execution']['fill']['readback_ref'] = 'file:readback/role1.json'
         r['execution']['save']['evidence_ref'] = 'file:../escape.png'
         with tempfile.TemporaryDirectory() as root:
-            errors = evidence_errors(data, root)
+            errors = evidence_errors(data, root, strict=False)
             self.assertTrue(has(errors, 'evidence file not found: readback/role1.json'))
-            self.assertTrue(has(errors, 'outside the evidence root'))
+            self.assertTrue(has(errors, 'outside the application root'))
             Path(root, 'readback').mkdir(); Path(root, 'readback', 'role1.json').write_text('{}', encoding='utf-8')
             r['execution']['save']['evidence_ref'] = 'file:draft.png'; Path(root, 'draft.png').write_bytes(b'x')
-            self.assertEqual(evidence_errors(data, root), [])
+            self.assertEqual(evidence_errors(data, root, strict=False), [])
 
 
 class CloseoutTests(unittest.TestCase):
@@ -332,10 +332,10 @@ class GateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp, 'batch.json'); path.write_text(json.dumps(fixture(), ensure_ascii=False), encoding='utf-8')
             env = dict(os.environ, PYTHONIOENCODING='utf-8')
-            ok = subprocess.run([sys.executable, str(HERE / 'stage_gate.py'), str(path), '--stage', 'prepare', '--role', 'alpha:id:1'],
+            ok = subprocess.run([sys.executable, str(HERE / 'stage_gate.py'), str(path), '--stage', 'prepare', '--role', 'alpha:id:1', '--lenient'],
                                 capture_output=True, text=True, encoding='utf-8', env=env)
             self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
-            blocked = subprocess.run([sys.executable, str(HERE / 'stage_gate.py'), str(path), '--stage', 'closeout'],
+            blocked = subprocess.run([sys.executable, str(HERE / 'stage_gate.py'), str(path), '--stage', 'closeout', '--lenient'],
                                      capture_output=True, text=True, encoding='utf-8', env=env)
             self.assertEqual(blocked.returncode, 1)
             self.assertFalse(json.loads(blocked.stdout)['allowed'])

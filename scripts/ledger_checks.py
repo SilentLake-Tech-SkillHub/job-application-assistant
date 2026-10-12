@@ -258,18 +258,31 @@ def role_errors(role, batch, materials):
 
 # ---------------------------------------------------------------- evidence files
 
-def iter_refs(node, path=''):
+EVIDENCE_DIR = '投递证据'
+# Gate simulation placeholders are never written to a ledger; skip them if a caller passes a simulated copy.
+SIMULATION_REFS = {'stage-gate-simulation'}
+
+
+def is_ref_key(key):
+    return isinstance(key, str) and (key == 'ref' or key.endswith('_ref') or key.endswith('_refs'))
+
+
+def iter_refs(node, path='', in_refs=False):
+    """Yield (location, value, key) for every reference field: `ref`, `*_ref`, `*_refs` (lists or dicts of lists)."""
     if isinstance(node, dict):
         for k, v in node.items():
             child = path + '.' + str(k) if path else str(k)
-            if isinstance(v, str) and (k.endswith('_ref') or k == 'ref'):
-                yield child, v
-            elif isinstance(v, list) and (k.endswith('_refs') or k.endswith('_ref')):
+            ref_key = is_ref_key(k) or in_refs
+            if ref_key and not isinstance(v, (dict, list)):
+                yield child, v, k
+            elif ref_key and isinstance(v, list):
                 for i, item in enumerate(v):
-                    if isinstance(item, str):
-                        yield child + '[' + str(i) + ']', item
-                    else:
+                    if isinstance(item, (dict, list)):
                         yield from iter_refs(item, child + '[' + str(i) + ']')
+                    else:
+                        yield child + '[' + str(i) + ']', item, k
+            elif isinstance(v, dict) and str(k).endswith('_refs'):
+                yield from iter_refs(v, child, in_refs=True)
             else:
                 yield from iter_refs(v, child)
     elif isinstance(node, list):
@@ -277,19 +290,49 @@ def iter_refs(node, path=''):
             yield from iter_refs(item, path + '[' + str(i) + ']')
 
 
-def evidence_errors(data, root):
-    """Check every `file:<relative path>` reference exists inside root (self-reported refs are not evidence)."""
+def evidence_errors(data, root, strict=True):
+    """Evidence must be real files (stage contract §10).
+
+    root is the user's application root (投递根目录). Every reference is written `file:<path relative
+    to root>`. In strict mode (the default) any other form is an error, and evidence fields
+    (`*_ref`, `*_refs`) must point inside `投递证据/`; a plain `ref` may name any workspace file such as
+    the résumé. Non-strict mode only checks the `file:` references that are present.
+    """
     base = Path(root).resolve()
+    evidence = (base / EVIDENCE_DIR).resolve()
     errors = []
-    for where, ref in iter_refs(data):
-        if not ref.startswith('file:'):
+    if strict and not evidence.is_dir():
+        errors.append('evidence folder missing: create ' + EVIDENCE_DIR + '/ in the application root')
+    for where, ref, key in iter_refs(data):
+        if ref in (None, '') or ref in SIMULATION_REFS:
             continue
-        target = (base / ref[5:]).resolve()
+        if not isinstance(ref, str) or not ref.startswith('file:'):
+            if strict:
+                errors.append(where + ' must be file:<path under the application root> (strict evidence), got ' + repr(ref)[:60])
+            continue
+        relative = ref[5:].replace('\\', '/')
+        if not relative or relative.startswith('/') or ':' in relative.split('/')[0]:
+            errors.append(where + ' must be a relative path, got ' + relative[:60])
+            continue
+        target = (base / relative).resolve()
         if base != target and base not in target.parents:
-            errors.append(where + ' points outside the evidence root')
+            errors.append(where + ' points outside the application root')
+        elif strict and key != 'ref' and evidence not in target.parents:
+            errors.append(where + ' evidence must be stored under ' + EVIDENCE_DIR + '/: ' + relative)
         elif not target.is_file():
-            errors.append(where + ' evidence file not found: ' + ref[5:])
+            errors.append(where + ' evidence file not found: ' + relative)
     return errors
+
+
+def find_root(start):
+    """Nearest directory (start or an ancestor) that contains 投递证据/, else None."""
+    here = Path(start).resolve()
+    if here.is_file():
+        here = here.parent
+    for candidate in [here, *here.parents]:
+        if (candidate / EVIDENCE_DIR).is_dir():
+            return candidate
+    return None
 
 
 # ---------------------------------------------------------------- closeout

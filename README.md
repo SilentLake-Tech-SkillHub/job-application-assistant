@@ -225,6 +225,7 @@ job-application-assistant/
 ├── README.md
 ├── SKILL.md                              入口:Query、准备、评审、提交、续跑五个阶段与硬门禁
 ├── .github/workflows/ci.yml              Linux + Windows 自动跑全部测试
+├── hooks/                                提交门禁钩子(Claude Code / Codex / Kimi Code)与安装脚本
 ├── agents/openai.yaml
 ├── docs/
 │   ├── images/icons/                     README 里的工具图标
@@ -247,13 +248,14 @@ job-application-assistant/
 │   ├── chrome_path.cjs                   浏览器测试按系统查找 Chrome/Edge（可用 CHROME_EXECUTABLE 覆盖）
 │   ├── inspect_form_controls.js          只读盘点页面控件
 │   ├── preference_contract.py            偏好版本、岗位身份与阶段证据的结构校验
-│   ├── validate_batch.py                 批次台账的确定性校验(--evidence-root 核对证据文件,--closeout 收尾检查)
+│   ├── validate_batch.py                 批次台账的确定性校验(默认严格核对 投递证据/ 里的文件,--closeout 收尾检查)
 │   ├── ledger_checks.py                  Query 记录、通道、数量规则、资格、审核包、目标确认等字段校验
 │   ├── stage_gate.py                     阶段门禁:query / prepare / review / submit / closeout 前必须通过
 │   ├── tracker_readback.py               写入追踪表后重开 Excel,对照备份逐行读回
 │   ├── ci.py                             一键跑:静态 → 单元 → 冒烟 → 浏览器全流程 → 压力
 │   ├── smoke_test.py                     冒烟测试
 │   ├── fixtures/synthetic_ats.py         全流程测试用的合成招聘网站(无真实数据)
+│   ├── submit_pass.py                    提交通行证:门禁通过后发放,钩子检查
 │   └── test_*                            上述脚本的测试
 └── skills/
     ├── application-login/                判断登录状态,按你的授权选登录方式
@@ -268,6 +270,16 @@ job-application-assistant/
 ```
 
 本仓库由 [SilentLake-Tech-SkillHub](https://github.com/SilentLake-Tech-SkillHub) 维护。
+
+## 证据与提交门禁
+
+在你的投递工作目录(投递根目录)下建一个 `投递证据/` 文件夹。台账里的每条证据,包括你的每次确认,都以相对路径存成文件放在这里,校验脚本会逐个核对文件是否存在,纯文字描述一律不认([规则](references/stage-contract.md#10a-严格证据模式与-投递证据))。
+
+最终提交由平台钩子强制把关:没有先通过提交门禁,浏览器里的"提交 / 投递"点击会被直接拦下。在投递根目录装一次即可([安装说明](hooks/README.md)):
+
+```bash
+python <Skill目录>/hooks/install_hooks.py --platform claude-code --project . --write   # 或 codex / kimi
+```
 
 ## 测试
 

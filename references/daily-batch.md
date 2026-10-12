@@ -46,7 +46,7 @@ Keep a private, durable record with `batch_id`, Query version/time, company key,
 | role | `presubmit_check_ref`, `target_confirmation` | required from `submit_clicked`; target `{company, bu, location, title, intent_slots[], count_rule_line, review_hash, confirmation_ref}` matching the role and current `review_hash` |
 | role | `tracker_readback_ref` | required when `tracker_status` is `submitted` |
 
-`keep_gap` and `replace` change the remaining target as defined in [§9](stage-contract.md#9-计数补位规则). A reference written as `file:<relative path>` is checked for existence when the validator runs with `--evidence-root`.
+`keep_gap` and `replace` change the remaining target as defined in [§9](stage-contract.md#9-计数补位规则). Every reference is a file path relative to the application root (`file:<path>`), with evidence under `投递证据/`; the validator and gates enforce this by default ([strict evidence](stage-contract.md#10a-严格证据模式与-投递证据)), and `--lenient` exists only for migrating old ledgers.
 
 Suggested company states: `unvisited`, `checking`, `checked`, `blocked`; suggested role stages: `discovered`, `verified`, `preparing`, `prepared`, `reviewed`, `submit_clicked`, `submitted`, `uncertain`. These are ledger states, not new workbook statuses. A `submit_clicked` or `uncertain` role must be investigated through the application center before retrying.
 
