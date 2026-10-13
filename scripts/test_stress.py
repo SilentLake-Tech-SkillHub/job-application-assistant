@@ -123,6 +123,47 @@ class FuzzTest(unittest.TestCase):
                 for p, data in originals.items():
                     p.write_bytes(data)
 
+    def test_broken_fill_caches_never_crash(self):
+        """Random JSON shapes in 填写方案.json: validator, actions, export and every gate stay crash-free."""
+        import fill_plan
+        rng = random.Random(27)
+        atoms = [None, 0, -1, 2.5, '', ' ', '提交申请', '已读回', '投递状态', [], {}, True, 'x' * 300, '档案:', '材料:简历', '用户']
+        def junk(depth=0):
+            r = rng.random()
+            if depth > 2 or r < 0.4:
+                return rng.choice(atoms)
+            if r < 0.7:
+                return [junk(depth + 1) for _ in range(rng.randint(0, 4))]
+            keys = list(fill_plan.TOP_KEYS | fill_plan.FIELD_KEYS | {'投递状态', '回执', 'label', 'css', 'role', '点击', '选项', '等待'})
+            return {rng.choice(keys): junk(depth + 1) for _ in range(rng.randint(0, 6))}
+        with tempfile.TemporaryDirectory() as tmp:
+            w = Workspace(tmp)
+            url = 'https://example.test/jobs/1'
+            w.tag('合成公司A', '已有相关岗位记录'); w.add_role('合成公司A', url)
+            w.company_ready('合成公司A'); w.role_prepared('合成公司A', url)
+            path = w.role_folder('合成公司A', url) / fill_plan.PLAN_NAME
+            good = json.loads(path.read_text(encoding='utf-8'))
+            for i in range(3000):
+                data = json.loads(json.dumps(good))
+                if rng.random() < 0.5:
+                    data = junk()
+                else:
+                    target = rng.choice([data] + [f for f in data['字段']])
+                    target[rng.choice(list(target) + ['投递状态', '定位'])] = junk()
+                try:
+                    errors = fill_plan.validate(data)
+                    fill_plan.validate(data, ready=True); fill_plan.validate_template(data)
+                    if not errors:
+                        fill_plan.actions(data); fill_plan.pending(data)
+                    if i % 30 == 0:
+                        path.write_text(json.dumps(data, ensure_ascii=False) if rng.random() < 0.9 else '{broken', encoding='utf-8')
+                        batch = Batch(w.book, 'b1')
+                        batch.consistency_errors(); batch.report()
+                        for stage in ('prepare', 'review', 'submit'):
+                            gate(w.book, 'b1', stage, url)
+                except Exception as exc:  # noqa: BLE001 - any crash is a failure
+                    self.fail('iteration %d crashed: %r on %s' % (i, exc, json.dumps(data, ensure_ascii=False)[:300]))
+
     def test_hook_payloads_never_crash(self):
         rng = random.Random(7)
         junk = [None, 0, 1.5, '', [], {}, '提交', 'Submit', {'action': 'left_click'}, ['x', {'a': '提交'}],

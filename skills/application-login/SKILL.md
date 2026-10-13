@@ -17,7 +17,7 @@ metadata:
 
 ## 连续推进
 
-登录在授权范围内连续推进：优先复用已登录会话，其他登录方式按用户选择；Agent 不执行微信快捷确认或 OAuth“允许”。普通控件不可达时在该公司已分配的浏览器通道内恢复；换通道是交接，启用 Playwright 或 computer use 按[浏览器分工](../../references/browser-application.md#浏览器分工内置浏览器与-chrome-默认并行)先取得确认，不得绕过权限限制或本人操作要求。推进到安全交接点，按对应子Skill提供允许的截图和唯一动作；微信截图交接需先完成三次确认。详见[连续推进](../../references/automation-continuity.md)。
+登录在授权范围内连续推进：优先复用已登录会话，其他登录方式按用户选择；Agent 不执行微信快捷确认或 OAuth“允许”。普通控件不可达时在该公司已分配的浏览器通道内恢复；换通道是交接；Playwright 作为 Chrome 通道的备用、computer use 的首次确认，都按[浏览器分工](../../references/browser-application.md#浏览器分工内置浏览器与-chrome-默认并行)执行（在 Playwright 配置里登录一次后保留登录态），不得绕过权限限制或本人操作要求。推进到安全交接点，按对应子Skill提供允许的截图和唯一动作；微信截图交接需先完成三次确认。详见[连续推进](../../references/automation-continuity.md)。
 
 ## 选择登录方式
 

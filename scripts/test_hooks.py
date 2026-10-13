@@ -89,12 +89,77 @@ class GuardProcessTests(unittest.TestCase):
         self.assertIn('stage_gate.py', result.stderr.decode('utf-8'))
         self.assertIn('已拦截', result.stderr.decode('utf-8'))
 
-    def test_pass_allows_three_clicks_then_blocks(self):
+    def test_one_initial_submit_then_only_confirmations(self):
         info = self.issue()
         self.assertEqual(info['点击次数'], 3)
-        for _ in range(3):
-            self.assertEqual(run_guard(self.click).returncode, 0)
-        self.assertEqual(run_guard(self.click).returncode, 2)
+        self.assertEqual(run_guard(self.click).returncode, 0)  # initial submit
+        self.assertTrue((self.folder / '提交已点击.md').is_file())
+        replay = run_guard(self.click)
+        self.assertEqual(replay.returncode, 2)  # an initial submit cannot be replayed on the same pass
+        self.assertIn('initial submit already released', replay.stderr.decode('utf-8'))
+        confirm = payload('mcp__Claude_Browser__computer', {'action': 'left_click', 'action_summary': '点击弹窗“确认投递”'}, self.cwd)
+        for _ in range(2):
+            self.assertEqual(run_guard(confirm).returncode, 0)
+        self.assertEqual(run_guard(confirm).returncode, 2)  # three clicks spent
+
+    def test_confirmation_needs_the_initial_submit_first(self):
+        self.issue()
+        confirm = payload('mcp__Claude_Browser__computer', {'action': 'left_click', 'action_summary': '点击弹窗“确认投递”'}, self.cwd)
+        self.assertEqual(run_guard(confirm).returncode, 2)
+
+    def test_batch_with_two_initial_submits_is_blocked(self):
+        self.issue()
+        action = {'name': 'computer', 'input': {'action': 'left_click', 'action_summary': '点击“提交申请”'}}
+        self.assertEqual(run_guard(payload('mcp__claude-in-chrome__browser_batch', {'actions': [action, action]}, self.cwd)).returncode, 2)
+        self.assertTrue((self.folder / '提交已点击.md').is_file())  # conservative: the first one may have gone out
+
+    def test_concurrent_clicks_release_only_one(self):
+        self.issue()
+        procs = [subprocess.Popen([sys.executable, str(GUARD)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ENV)
+                 for _ in range(6)]
+        for proc in procs:
+            proc.stdin.write(self.click.encode('utf-8')); proc.stdin.close()
+        codes = [proc.wait() for proc in procs]
+        for proc in procs:
+            proc.stdout.close(); proc.stderr.close()
+        self.assertEqual(codes.count(0), 1, codes)
+
+    def test_stale_lock_is_recovered_but_fresh_lock_blocks(self):
+        self.issue()
+        lock = pass_path(self.root).with_name('门禁通行证.md.lock')
+        lock.write_text('', encoding='utf-8')
+        self.assertFalse(consume_submit_click(self.root)[0])  # someone else is checking right now
+        old = datetime.datetime.now().timestamp() - 120
+        os.utime(lock, (old, old))
+        self.assertTrue(consume_submit_click(self.root)[0])  # left behind by an interrupted hook
+        self.assertFalse(lock.exists())
+
+    def test_reissue_refused_while_click_unreconciled_then_allowed_after_check(self):
+        self.issue()
+        self.assertEqual(run_guard(self.click).returncode, 0)
+        with self.assertRaises(ValueError):
+            self.issue()
+        marker = self.folder / '提交已点击.md'
+        import hashlib
+        evidence = self.root / '投递证据' / 'b1' / '岗位' / self.folder.name / '申请中心截图.png'
+        evidence.write_bytes(b'png')
+        check = self.folder / '提交核查.md'
+        def write_check(**over):
+            fields = {'标记哈希': hashlib.sha256(marker.read_bytes()).hexdigest(), '结论': '未提交',
+                      '核验时间': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
+                      '来源': 'https://example.test/center', '证据': evidence.relative_to(self.root).as_posix()}
+            fields.update(over)
+            check.write_text(''.join('%s: %s\n' % kv for kv in fields.items()), encoding='utf-8')
+        for bad in ({'结论': '已提交'}, {'标记哈希': '0' * 64}, {'来源': '我看过了'}, {'证据': '../x.png'},
+                    {'核验时间': '2020-01-01T00:00:00+00:00'}):
+            write_check(**bad)
+            with self.assertRaises(ValueError, msg=str(bad)):
+                self.issue()
+        write_check()
+        self.issue()  # reconciled: the click did not go through, a retry is allowed
+        self.assertEqual(run_guard(self.click).returncode, 0)
+        archived = list((self.folder / '提交尝试').iterdir())
+        self.assertEqual(len(archived), 2)  # old marker + its check, kept as history
 
     def test_expired_pass_is_blocked(self):
         self.issue()
@@ -128,7 +193,8 @@ class GuardProcessTests(unittest.TestCase):
             self.issue()
             self.assertEqual(run_guard(self.click).returncode, 0)
             (self.folder / marker).write_text('x', encoding='utf-8')
-            result = run_guard(self.click)
+            confirm = payload('mcp__Claude_Browser__computer', {'action': 'left_click', 'action_summary': '点击弹窗“确认投递”'}, self.cwd)
+            result = run_guard(confirm)
             self.assertEqual(result.returncode, 2, marker)
             self.assertIn('void', result.stderr.decode('utf-8'))
         self.folder.rename(self.folder.with_name('moved'))

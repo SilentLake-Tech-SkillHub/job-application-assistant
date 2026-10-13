@@ -21,7 +21,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 ENV = dict(os.environ, PYTHONIOENCODING='utf-8', PYTHONDONTWRITEBYTECODE='1')
 
-UNIT = ['test_batch_check.py', 'test_docs_consistency.py', 'test_tracker_readback.py', 'test_hooks.py']
+UNIT = ['test_batch_check.py', 'test_fill_plan.py', 'test_profile_vault.py', 'test_docs_consistency.py', 'test_tracker_readback.py', 'test_hooks.py']
 
 
 def node_env():
@@ -41,6 +41,7 @@ def stages(skip_browser):
         'smoke': [[py, str(HERE / 'smoke_test.py')]],
         'browser': [['node', str(HERE / 'test_inspect_form_controls.cjs')],
                     ['node', str(HERE / 'test_field_binding_recovery.cjs')],
+                    [py, str(HERE / 'test_playwright_fill.py')],
                     [py, str(HERE / 'test_e2e_full_flow.py')]],
         'stress': [[py, str(HERE / 'test_stress.py')]],
     }

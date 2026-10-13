@@ -3,15 +3,30 @@
 `Workspace` writes files exactly where the Skill says they go, so tests exercise the same layout
 an Agent produces. Company names used for roles are synthetic (合成公司…).
 """
+import datetime
 import hashlib
+import json
 import shutil
+import sys
 from pathlib import Path
 
 from openpyxl import load_workbook
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+import fill_plan  # noqa: E402
+from evidence_layout import role_dir  # noqa: E402
+
 SAMPLE = HERE / 'sample_tracker.xlsx'
 ROLE_SHEET = '中国大陆'
+
+
+def today():
+    return datetime.date.today().isoformat()
+
+
+def now():
+    return datetime.datetime.now().astimezone().isoformat(timespec='seconds')
 
 
 class Workspace:
@@ -58,7 +73,7 @@ class Workspace:
             '授权': '选岗授权: 是\n准备授权: 是',
             '执行方式': '执行方式: 一个AI',
             '自动化授权': '模式: 不开启\n已开启: 无\n条款方式: 逐项查看\n验证码: 用户提供',
-            '能力预检': '内置浏览器: 可用\nChrome: 可用\ncomputer use: 未检查\n系统脚本: 不适用\nPlaywright: 未检查\nPlaywright代替: 未问',
+            '能力预检': '内置浏览器: 可用\nChrome: 可用\ncomputer use: 未检查\n系统脚本: 不适用\nPlaywright: 未检查',
         }
         sections.update(override)
         body = '批次: ' + self.batch + '\n'
@@ -109,16 +124,41 @@ class Workspace:
     # ------------------------------------------------------------ evidence per stage
     def company_ready(self, company, limit=2, state='已核实', lane='内置浏览器'):
         base = '投递证据/%s/公司/%s/' % (self.batch, company)
-        rule = '状态: ' + state + ('\n上限: %d\n来源: https://example.test/faq\n核验日期: 2026-10-13' % limit if state == '已核实' else '\n上限: 无')
+        rule = '状态: ' + state + ('\n上限: %d\n来源: https://example.test/faq\n核验日期: %s' % (limit, today()) if state == '已核实' else '\n上限: 无')
         self.write(base + '数量规则.md', rule + '\n')
         self.write(base + '次序确认.md', '决定: 不变\n依据: ' + self.say('order-' + company) + '\n')
         self.write(base + '通道.md', '通道: ' + lane + '\n')
 
     def role_folder(self, company, url):
-        import sys
-        sys.path.insert(0, str(HERE.parent))
-        from evidence_layout import role_dir
         return role_dir(self.root, self.batch, company, url)
+
+    def lane_of(self, company):
+        from evidence_layout import parse, value
+        return value(parse(self.root / '投递证据' / self.batch / '公司' / company / '通道.md')[0], '通道') or '内置浏览器'
+
+    def plan(self, company, url, done=True):
+        """A small 填写方案.json for the role (fill cache), all fields read back when done=True."""
+        state = '已读回' if done else '待填'
+        fields = [
+            {'序号': 1, '标签': '姓名 *', '定位': {'label': '姓名 *'}, '控件': '文本', '填法': '批量', '值': '合成候选人', '必填': True, '状态': state},
+            {'序号': 2, '标签': '手机号 *', '定位': {'label': '手机号 *'}, '控件': '文本', '填法': '批量', '值来源': '档案:手机号', '必填': True, '状态': state},
+            {'序号': 3, '标签': '学历 *', '定位': {'role': 'combobox', 'name': '学历 *'}, '控件': '下拉', '填法': '点击', '值': '硕士',
+             '点击步骤': [{'点击': {'role': 'combobox', 'name': '学历 *'}}, {'选项': '硕士'}], '读回定位': {'css': '.combo input'}, '必填': True, '状态': state},
+        ]
+        if done:
+            fields[0]['读回'], fields[1]['读回'], fields[2]['读回'] = '合成候选人', '一致', '硕士'
+            for f in fields:
+                f['更新时间'] = now()
+        plan = {'方案版本': 1, '批次': self.batch, '公司': company, '岗位链接': url, '通道': self.lane_of(company),
+                '生成时间': now(), '字段': fields}
+        folder = self.role_folder(company, url)
+        folder.mkdir(parents=True, exist_ok=True)
+        if done:
+            (folder / '填写截图.png').write_bytes(b'png')
+            plan['页面校验'] = {'结果': '通过', '时间': now(), '观察': (folder / '填写截图.png').relative_to(self.root).as_posix()}
+        path = folder / fill_plan.PLAN_NAME
+        path.write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding='utf-8')
+        return path
 
     def role_ready(self, company, url, conclusion='符合'):
         folder = self.role_folder(company, url)
@@ -129,7 +169,7 @@ class Workspace:
 
     def role_prepared(self, company, url, answer='synthetic answer'):
         folder = self.role_ready(company, url)
-        (folder / '填写读回.md').write_text('姓名: 合成候选人\n', encoding='utf-8')
+        fill_plan.export_readback(self.plan(company, url))
         (folder / '草稿读回.md').write_text('重开后一致: 是\n', encoding='utf-8')
         (folder / '审核包.md').write_text('# 审核包\n关键回答: ' + answer + '\n', encoding='utf-8')
         return folder
@@ -144,7 +184,7 @@ class Workspace:
         (folder / '目标确认.md').write_text(
             '公司: %s\nBU: %s\n办公地: %s\n岗位: %s\n意向: 无\n数量规则: 上限内\n审核包哈希: %s\n依据: %s\n'
             % (company, bu, city, title, digest, self.say('target-' + folder.name)), encoding='utf-8')
-        (folder / '提交前复核.md').write_text('复核: 岗位、名额、材料、版本一致\n', encoding='utf-8')
+        (folder / '提交前复核.md').write_text('复核: 岗位、名额、材料、版本一致\n复核时间: ' + now() + '\n', encoding='utf-8')
         return folder
 
     def role_submitted(self, company, url, readback=True):

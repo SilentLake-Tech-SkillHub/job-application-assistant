@@ -7,13 +7,14 @@ Layout under the application root (投递根目录):
     批次/收尾.md             stop reason and retained pages (closeout)
     确认记录/*.md            the user's own words and time for every confirmation
     公司/<公司>/             数量规则.md 次序确认.md 通道.md [选岗确认.md 首次提交后读回.md 受阻.md]
-    岗位/<公司>-<链接码>/    岗位包.md 资格核对.md [尝试指令.md] 填写读回.* 草稿读回.*|无草稿说明.md
-                              审核包.md 批准.md 提交前复核.md 目标确认.md 回执.*|结果不确定.md
+    岗位/<公司>-<链接码>/    岗位包.md 资格核对.md [尝试指令.md] 填写方案.json 填写读回.md 草稿读回.*|无草稿说明.md
+                              审核包.md 批准.md 提交前复核.md 目标确认.md [提交已点击.md] 回执.*|结果不确定.md
                               追踪表读回.md [受阻.md]
 
 Records are Markdown with `键: 值` lines (full-width colon allowed) under `## 节` headings.
-State (盘点状态 / 投递状态 / 备注) lives only in the Excel tracker.
+State (盘点状态 / 投递状态 / 备注) lives only in the Excel tracker; 填写方案.json is a fill cache, not state.
 """
+import datetime
 import hashlib
 import re
 from pathlib import Path
@@ -106,6 +107,21 @@ def list_items(lines):
         if m and ('|' in m.group(1) or not KV.match(line)):
             items.append([part.strip() for part in m.group(1).split('|')])
     return items
+
+
+def parse_time(raw):
+    """ISO date or datetime → aware datetime (naive values are the machine's local time), or None."""
+    raw = str(raw or '').strip()
+    if not raw:
+        return None
+    try:
+        moment = datetime.datetime.fromisoformat(raw.replace('Z', '+00:00'))
+    except ValueError:
+        try:
+            moment = datetime.datetime.strptime(raw[:10], '%Y-%m-%d')
+        except ValueError:
+            return None
+    return moment if moment.tzinfo else moment.astimezone()
 
 
 def ref_exists(root, ref):

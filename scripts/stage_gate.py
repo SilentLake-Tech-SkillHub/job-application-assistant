@@ -10,7 +10,7 @@
 Reads only the Excel tracker and 投递证据/. Exit 0 allowed, 1 blocked, 2 unreadable input.
 Every stage also enforces tracker consistency: a scanned company must carry one of the five
 盘点状态 labels, and a receipt must be booked as 投递状态=已提交 (and vice versa).
-A passing submit gate issues 投递证据/门禁通行证.json for the PreToolUse hook.
+A passing submit gate issues 投递证据/门禁通行证.md for the PreToolUse hook.
 """
 import argparse
 import datetime
@@ -26,7 +26,7 @@ def run(workbook, batch_id, stage, url=None, root=None):
     batch = Batch(workbook, batch_id, root)
     errors = list(batch.errors)
     if stage == 'query':
-        errors += batch.query_errors() + batch.book.label_errors(batch.scope.keys())
+        errors += batch.query_errors() + batch.book.label_errors(batch.scope.keys()) + batch.attempt_errors()
     else:
         errors += batch.consistency_errors()
     if stage in ('prepare', 'review', 'submit'):
@@ -40,7 +40,10 @@ def run(workbook, batch_id, stage, url=None, root=None):
         result['允许'] = result['允许'] and result['收尾']['可以收尾']
     if stage == 'submit' and result['允许']:
         row = batch.book.role_by_url(url)[0]
-        result['提交通行证'] = issue_submit_pass(batch.root, batch_id, url, batch.role_dir(row['公司'], url))
+        try:
+            result['提交通行证'] = issue_submit_pass(batch.root, batch_id, url, batch.role_dir(row['公司'], url))
+        except ValueError as exc:  # defence in depth: the pass refuses on its own as well
+            result['允许'], result['错误'] = False, result['错误'] + ['不发提交通行证：' + str(exc)]
     return result
 
 

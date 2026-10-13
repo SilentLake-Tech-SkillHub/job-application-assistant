@@ -57,7 +57,8 @@ for p in root.rglob('*.md'):
 scripts = list(root.rglob('*.py'))
 for p in scripts:
     ast.parse(p.read_text(encoding='utf-8'), filename=str(p))
-validators = [p for p in scripts if p.name in {'batch_check.py', 'stage_gate.py', 'tracker_readback.py', 'validate_assignments.py'}]
+validators = [p for p in scripts if p.name in {'batch_check.py', 'stage_gate.py', 'tracker_readback.py', 'validate_assignments.py',
+                                                'fill_plan.py', 'playwright_fill.py', 'profile_vault.py'}]
 with tempfile.TemporaryDirectory() as temp:
     for p in validators:  # each CLI loads from another cwd and answers --help
         result = subprocess.run([sys.executable, str(p), '--help'], cwd=temp, capture_output=True, text=True,

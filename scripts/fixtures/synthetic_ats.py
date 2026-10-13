@@ -99,6 +99,25 @@ document.getElementById('confirm-ok').onclick=async()=>{{
 (async()=>{{const r=await fetch('/api/draft/'+JOB);if(r.ok){{Object.assign(model,await r.json())}};render()}})();
 </script>"""
 
+LAB = r"""<h1>合成表单实验页</h1>
+<label for="city">城市 *</label><input id="city">
+<label for="prov">省份 *</label><select id="prov"><option value="">请选择</option><option>合成省</option><option>另一省</option></select>
+<label for="nick">昵称 *</label><input id="nick" autocomplete="off">
+<label for="phone">手机号 *</label><input id="phone">
+<p class="err" id="lab-err"></p>
+<script>
+// 昵称 only accepts keystrokes: a value inserted without keydown is reverted (some widgets behave like this).
+const nick=document.getElementById('nick'); let typed='';
+nick.addEventListener('keydown',e=>{if(e.key.length===1)typed+=e.key; else if(e.key==='Backspace'||e.key==='Delete')typed='';});
+nick.addEventListener('input',()=>{if(nick.value!==typed){if(!typed||!nick.value.startsWith(typed))nick.value=typed;}else{}});
+nick.addEventListener('input',()=>{typed=nick.value;});
+// Choosing a province clears the city shortly afterwards (cascade reset).
+document.getElementById('prov').addEventListener('change',()=>setTimeout(()=>{document.getElementById('city').value='';},80));
+function check(){const empty=['city','prov','nick','phone'].filter(id=>!document.getElementById(id).value);
+  document.getElementById('lab-err').textContent=empty.length?'请完成必填项：'+empty.join(','):'';}
+document.querySelectorAll('input,select').forEach(n=>n.addEventListener('blur',check));
+</script>"""
+
 RECEIPT = """<h1>投递成功</h1><p id="receipt">申请编号：<b id="app-id">{app_id}</b>（{title}）</p><p><a href="/center">返回申请中心</a></p>"""
 
 
@@ -136,6 +155,8 @@ def make_handler(state):
                 return self.page('登录', LOGIN)
             if not self.logged_in():
                 return self.send(302, '', headers={'Location': '/login'})
+            if path == '/lab':
+                return self.page('实验页', LAB)
             if path == '/center':
                 items = ''.join('<li class="app">{0} · {1} · {2}</li>'.format(h['application_id'], JOBS[h['job']]['title'], h['slot1'])
                                 for h in state.history)
@@ -161,7 +182,8 @@ def make_handler(state):
             parts = path.strip('/').split('/')
             body = self.rfile.read(int(self.headers.get('Content-Length') or 0)).decode('utf-8')
             if path == '/login':
-                return self.send(302, '', headers={'Location': '/center', 'Set-Cookie': 'session=synthetic; Path=/'})
+                # A persistent login cookie, as most ATS sites set, so a persistent browser profile keeps it.
+                return self.send(302, '', headers={'Location': '/center', 'Set-Cookie': 'session=synthetic; Path=/; Max-Age=86400'})
             if not self.logged_in():
                 return self.send(401, '{}', 'application/json')
             if parts[:2] == ['api', 'draft'] and len(parts) == 3:
