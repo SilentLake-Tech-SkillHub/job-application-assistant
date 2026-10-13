@@ -1,6 +1,47 @@
 # Browser preparation and submission
 
-Read when opening company sites, filling, reviewing or submitting. Browser priority is **in-app browser → Chrome + computer use → Playwright framework**. Start in the in-app browser. Before each downgrade, show the actual failure, proposed next tier and effect on login/unsaved work, then obtain the user's explicit confirmation for that transition. Confirmation of one transition does not authorize the next. Preserve company tabs and state while waiting; do not automatically switch or bypass a site safety refusal. The in-app browser tool's own Playwright-named control API remains the first tier; it is not use of the separate Playwright framework. Reuse the current login state and selected browser binding. Make one evidenced recovery attempt in the current tier before requesting the next tier; preserve the handoff if no approved/supported next tier is available. Read [browser tab grouping](chrome-window-grouping.md); the Chrome window rule applies only when Chrome was explicitly chosen or approved as a downgrade. Keep the entire confirmed company group visible during preparation/submission, including unfinished companies, accounts, forms, reviews and receipts. A completed submission or turn does not authorize closure; require a separate explicit instruction naming the pages/company to close.
+## 浏览器分工：内置浏览器与 Chrome 默认并行
+
+本节是浏览器选择的唯一规则，其他文件只引用这里。
+
+**两个默认通道，同时使用：**
+
+1. **内置浏览器通道**：执行 Agent 自带的浏览器（例如 Claude 桌面端的浏览器窗格）。该工具内部名为 Playwright 的定位接口属于这一通道，不算使用 Playwright 框架。
+2. **Chrome 通道**：通过 Chrome 插件（例如 Claude in Chrome）操作用户本人的 Chrome，复用其中已有的登录状态。
+
+**分工规则：**
+
+- 以公司为单位分配通道（招聘主体及其共享账号、名额范围算一家）。同一家公司、同一个账号不在两个通道里同时操作，避免重复登录、互相覆盖草稿或重复提交。
+- 用户指定的分配优先。未指定时：用户已在自己 Chrome 里登录过的站点、或必须用用户本人浏览器环境的站点，放 Chrome 通道；其余放内置浏览器通道，两边工作量大致均衡。分配结果在 Query 时与公司清单一起给用户看。
+- 一家公司中途换通道视为交接：先保存草稿或记下当前页面、未保存内容和下一步，再在新通道读回账号与表单状态。
+- 每个通道保留自己的公司页面；Chrome 通道按[窗口分组](chrome-window-grouping.md)每窗口最多 10 个网页。
+- 每家公司的通道写在 `投递证据/<批次>/公司/<公司>/通道.md`（`通道: 内置浏览器 / Chrome / Playwright`）。
+
+**通道缺失时（Query 能力预检时确定，运行中出现同样处理）：**
+
+| 情况 | 处理 |
+|---|---|
+| 两个通道都可用 | 按上面的分工并行推进 |
+| 没有 Chrome 插件（未安装、未连接或本会话不可用） | 告诉用户缺少 Chrome 通道，并询问：“没有检测到 Chrome 插件，可以用 Playwright 代替 Chrome 通道吗？”用户明确同意才启用 Playwright，并记录确认依据；不同意或未回答时只用内置浏览器继续，原计划给 Chrome 通道的公司依次排在后面 |
+| 内置浏览器不可用 | 告诉用户，所有公司改走 Chrome 通道；不自动启用 Playwright |
+| 两个通道都不可用 | 询问是否可以用 Playwright；不同意则停在断点，说明缺什么 |
+| 运行中 Chrome 插件断开 | 保留页面与已记录状态，做一次有证据的重连；仍失败就按“没有 Chrome 插件”处理，询问是否用 Playwright 接管 Chrome 通道里的公司 |
+
+**Playwright 代替的边界：** 询问时说明它会连接哪个浏览器或会话；新开的独立浏览器没有用户的登录状态，相关公司需要重新登录。同意只对当前批次有效，写在 Query.md `## 能力预检` 节（`Playwright代替: 同意` 与确认记录）。代替不扩大公司、数据、登录、验证码或提交授权。
+
+**computer use 与系统脚本不属于浏览器通道：** 只用于浏览器工具够不到的系统层控件，例如原生的“确认重新提交表单”对话框。本批首次使用前说明用途并取得用户确认，记录后同批同类用途可复用；验证码完整接手按 [captcha-solve](../skills/captcha-solve/SKILL.md) 的三次确认执行。不能用它们绕过站点安全拒绝或本人操作要求，也不能代点微信 OAuth“允许”。
+
+## Page retention
+
+本节是页面保留与关闭的**唯一规则**，[窗口分组](chrome-window-grouping.md)和其他文件只引用这里。
+
+Read when opening company sites, filling, reviewing or submitting. Reuse each company's current login state and assigned browser lane; do not bypass a site safety refusal by switching lanes.
+
+- **默认全部保留**：准备/投递期间，本批已确认公司的整组页面保持可见，包括未完成公司、账号页、表单、审核页和回执。完成一个岗位、一次验证码交接、提交成功或回合结束，都不授权关闭。
+- **受保护页面**（任何情况下都不由 Agent 关闭、移动或重载腾位）：登录态页面、有未保存内容的表单、草稿、待审核页面、提交回执/成功页、`save: not_supported` 的已填表单、用户本人打开或归属不清的页面、用户指定保留的页面。
+- **非保护页面**：Agent 自己打开的岗位列表、详情、研究页，且所属公司的业务读回门禁已通过。
+- **何时可以关闭**：只有用户另行发出**点名公司或页面**的关闭指令时，才关闭其中的非保护页面；指令覆盖到受保护页面时，先列出这些页面并再确认一次。没有这样的指令，不清理任何批次标签——包括公司处理结束时。
+- 窗口满了只新建窗口，不关闭页面腾位。
 
 Before ending the turn, use the browser tool's documented visible-retention mechanism and read back company, URL and stage from the tab list. Where a visible deliverable and an internal handoff are distinct, retained company pages must be visible deliverables; a handoff flag alone is not proof of visible retention. On the next turn, re-list tabs before acting. If protected pages are missing, report the actual loss, recover their original URLs and check server-saved content; reopening does not restore unsaved edits.
 
@@ -14,9 +55,9 @@ These rules come from a live SuccessFactors/Workday application session; follow 
 - **Predict the native resubmit dialog.** Pages entered via form POST (common after verification-code logins) raise the browser-native "confirm form resubmission" dialog on reload. That dialog is not in the page DOM; handle it at the OS accessibility layer, and prefer not to reload such pages at all unless the form is server-drafted.
 - **Upload through supported file controls.** Use the tool’s documented file chooser/upload API or the authorized native chooser. Do not synthesize files or mutate page inputs with scripts. Read back the uploaded filename and site result; inspect any open chooser before retrying.
 - **Use the verified tab’s documented controls.** Prefer URL-verified DOM locators/accessibility actions. Native clicks require a fresh observation of the actual company window; avoid stealing the user’s frontmost work. An unavailable tool does not authorize a different UI technology forbidden by the executing platform.
-- **Expect id renumbering after re-renders.** Resume upload (and its auto-parse), saves and section changes can rebuild the whole form with new element ids. After any such event, re-enumerate before filling; prefer upload-first then fill-fields. Once required fields are filled, save the server-side draft immediately and confirm its success message, so a later re-render cannot lose the work.
+- **Expect id renumbering after re-renders.** Resume upload (and its auto-parse), saves and section changes can rebuild the whole form with new element ids. After any such event, re-enumerate before filling; prefer upload-first then fill-fields. **Draft-saving timing (single rule):** on a site with a draft/save control, save after each completed section; once all required fields are filled, save again, confirm the success message, reopen safely and read back field by field (`save.readback_ref`). On a site without drafts, collect all decisions first and fill in one pass (`save: not_supported`).
 - **Cross-check "data lost" reports through a second locator.** A readback script can have its own bug (e.g. concatenating a label name into an id) and produce a false "all fields GONE" panic. Before reporting data loss, re-read the same fields via an independent locator (by id vs. by label text) and compare.
-- **Check the sent folder before any application email.** A parallel executor or the user may already have sent the same application. Before sending, read the mail account's sent items for the same recipient/company and recent window; a hit means stop and reconcile instead of sending a duplicate.
+- **Email applications are out of scope.** This Skill never sends application emails ([stage contract §12](stage-contract.md#12-邮件投递)). For an email-only role, record it as blocked for the user; where reading the mailbox is authorized, check the sent items read-only so the user does not send a duplicate.
 
 ## 表单准备前的资格复核
 
@@ -42,6 +83,4 @@ Approval covers only the exact named roles and reviewed form versions. Immediate
 
 ## 独立偏好与执行证据
 
-准备前读取 [偏好证据契约](preference-contract.md)，展示每岗公司、岗位、直链、BU 或未披露、城市、用工、方向、完整 JD 依据/理由及填/存/提交状态；先有 pre_form_report_ref 后操作表单。标题不能黑名单，AI 数据产品按实际 AI/Agent 产品职责判断。conversion_last 的已核转正实习在同一份报告最后；无论正式岗是否存在或覆盖充分，不移出报告。跨轴取舍由用户决定，已有明确选择不替换。Review 和 closeout 按每岗更新实际执行证据，与材料版本、名额、目标门禁一并读回；登录成功不能称表单准备完成。
-
-每批先向用户要默认岗位次序，保存同批确认，不沿用上一批。每家公司开始申请操作前，先用同一逐岗包展示公司/岗位/BU或未披露/办公地，确认相对默认次序有无变化；company_order_confirmation_ref 和 pre_form_report_ref 对应同一包。交接复用这份记录，最终具体目标和当前表单版本继续审核，不另建三套脱节清单。
+准备前读取 [偏好证据契约](preference-contract.md)：先有岗位目录的 `岗位包.md` 后操作表单，逐岗字段、转正实习排序和跨轴规则以该契约为准。Review 和 closeout 按每岗更新实际执行证据；登录成功不能称表单准备完成。默认岗位次序与公司动作前确认的唯一规则见[偏好契约](preference-contract.md#默认次序与公司动作前确认)。

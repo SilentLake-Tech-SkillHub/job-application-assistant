@@ -9,7 +9,7 @@ metadata:
 
 ## 调用前检查
 
-读取私有批次记录中的自动化授权（见[自动化授权](../../references/automation-authorization.md)）。`approved_subskills` 不含 `captcha-solve` 时，把人机验证交给用户；已授权登录流程中的普通入口点击和“获取短信验证码”由 `login-phone-otp` 继续处理。
+读取本批 `Query.md` 的 `## 自动化授权` 节（见[自动化授权](../../references/automation-authorization.md#记录)）。`已开启` 不含 `captcha-solve` 时，把人机验证交给用户；已授权登录流程中的普通入口点击和“获取短信验证码”由 `login-phone-otp` 继续处理。
 
 短信验证码与图形人机验证分开处理：短信走 `login-phone-otp`，验证码默认由用户提供或本人输入；本子Skill处理网页的人机验证。开启本子Skill后，Agent 可完成普通验证按钮/复选框点击；需要识别、拖动、点选图案、输入图形字符或旋转图片的挑战，默认由用户完成。
 

@@ -7,20 +7,23 @@ Query、计划盘点、收集、Prepare、Review、续跑与 closeout 均读取�
 - `hard_scope` 只记录明确排除的公司/届别/用工/城市/岗位职责等边界。`cities: []` 表示不限城市；不限城市不等于城市没有排序。低偏好项仍在范围内，不能当作硬排除，也不能把站点偏好过滤后的零结果当作公司没有岗位。
 - `axes.employment`、`axes.city`、`axes.direction` 各自保存用户原话和独立关系，不计算合成权重。每条关系为 `{higher, lower, relation}`，`relation` 可为 `strict`（>）、`weak`（>=，只知不低于）、`tied`（=）、`unknown`（未决）。弱优先不擅改严格优先，不把不同轴的关系拼成一个总顺序。
 - 按就业路径 → 城市 → 方向分组展示属于信息组织。平级保持平级，未知标待确认，多城市岗位只展示一个身份，可附多个地点。跨轴冲突列两边 JD/城市/用工事实，请用户取舍；不得自动加权、用能力分破局、以默认第一项代选志愿或替换已明确选岗。
-- `匹配度` 只评价完整 JD 与已确认能力材料的适配，不掺城市/路径偏好；城市只在确实改变 JD 能力要求且有依据时影响能力适配。Top5 是既有高亮展示容量，分数相同用原行序仅安排展示；不意味着自动保留/排除、优先投递或关闭其他岗位。
 - 用户已给本批取值则复用，仅问剩余歧义。更新记录 `version`、生效时间、确认引用、替代版本及复查范围。保留已投状态、回执和明确选岗；不撤回、不重投、不自动重启首轮扫站。先复用已保存完整 JD，仅在用户指定公司/缺口内复查；旧版本增量拒收并等待人工协调，不能改版本号冒充新结果。
+
+## 与搜索流程的交接字段
+
+`匹配度`、`Top5` 是搜索流程（如 campus-job-skills）岗位表里的既有概念，本 Skill 不新增这些列，只在接收交接数据时按以下含义理解：`匹配度` 只评价完整 JD 与已确认能力材料的适配，不掺城市/路径偏好；`Top5` 只是高亮展示容量，不意味着自动保留/排除、优先投递或关闭其他岗位。两者都不能决定偏好或选岗（校验字段 `score_includes_preferences`、`selected_by_top5` 必须不为 true）。
 
 ## 默认次序与公司动作前确认
 
-每批开始时先向用户要本批默认岗位类别次序；同批已有明确回答可引用，新批不得沿用上一批。续跑的首回合若缺本批确认，也必须先问，确认后才能写行、重排或生成汇总。`default_role_order` 保存用户原话，`default_order_confirmation_ref` 保存确认依据，`default_order_batch_id` 绑定本批。
+每批开始时先向用户要本批默认岗位类别次序；同批已有明确回答可引用，新批不得沿用上一批。续跑的首回合若缺本批确认，也必须先问，确认后才能新增岗位行、重排或生成汇总；**已有官方回执的提交入账不受此限**，按[阶段契约第 7 节](stage-contract.md#7-状态冲突时以谁为准)先对账入账。用户原话写在 Query.md 的 `## 默认岗位次序` 节，`依据:` 指向本批的确认记录；Query.md 位于本批目录，天然绑定本批。
 
-每家公司开始申请操作前，用同一份逐岗报告先展示公司、BU 或未披露、办公地、岗位及直链，再问“相对本批默认次序有没有变动？”确认后继续。该报告就是 `pre_form_report_ref`，公司次序确认保存为 `company_order_confirmation_ref`，`company_order_report_ref` 必须引用同一报告；`company_order_decision` 为 unchanged/changed，改变时保存 `company_role_order_raw`。不能拿仅登录或旧批确认代替。校园收集流程在交给投递助手时传递同一报告和确认，不重复建立独立确认清单。最终提交仍审核当前具体目标与表单版本；前面的次序确认不能授权提交，目标变化须重新确认。
+每家公司开始申请操作前，用同一份逐岗报告先展示公司、BU 或未披露、办公地、岗位及直链，再问“相对本批默认次序有没有变动？”确认后继续。多家公司可合并在一条消息中逐家列出、一次确认；未确认的公司只读开站。逐岗报告就是各岗位目录的 `岗位包.md`；公司次序确认写在 `公司/<公司>/次序确认.md`（`决定: 不变 / 变更`，变更时写用户给出的次序原话，`依据:` 指向确认记录）。不能拿仅登录或旧批确认代替。校园收集流程在交给投递助手时传递同一报告和确认，不重复建立独立确认清单。最终提交仍审核当前具体目标与表单版本；前面的次序确认不能授权提交，目标变化须重新确认。
 
 ## 就业路径：可配置的转正实习次序
 
 `internship_policy` 由用户在私有项目选择，没有公共默认值：`excluded` 不收实习；`separate` 表示用户明确选择独立实习批次；`conversion_last` 只纳入官方明确转正机会、资格和条件且方向符合的实习，与其他岗位在同一份汇报里排最后。该配置改变展示优先级，不把岗位排除出主清单；有合适正式岗也保留转正实习，不以正式覆盖充分或“无合适正式岗”为展示前提。普通实习在 conversion_last 下不纳入，转正含糊/详情不可达标待核，不保证转正。
 
-正式覆盖记录仍说明实际已查范围与缺口；覆盖不足不能宣称公司无正式岗，但不妨碍已核转正实习进入同一汇报。roles 的候选均为 primary；按同一报告顺序存放，conversion_last 的实习候选排在其他候选之后且 `display_position: last`。公开空模板不预填实际个人次序或政策。旧 conditional/fallback 快照先保留原件、按新确认版本适配，不静默改版本或重置历史。
+正式覆盖记录仍说明实际已查范围与缺口；覆盖不足不能宣称公司无正式岗，但不妨碍已核转正实习进入同一汇报。按同一报告顺序展示，conversion_last 的实习候选排在其他候选之后，并在 `岗位包.md` 写明转正依据。公开空模板不预填实际个人次序或政策。旧 conditional/fallback 快照先保留原件、按新确认版本适配，不静默改版本或重置历史。
 
 ## 标题＋完整 JD：职责决定方向
 
@@ -36,14 +39,17 @@ Query、计划盘点、收集、Prepare、Review、续跑与 closeout 均读取�
 
 每个已核岗位在表单前的报告和最终报告必须包括：公司、岗位、直链、BU（缺失写 `未披露`）、官方城市、用工性质、方向、完整 JD 与捕获引用、决定性 JD 依据、纳入/排除/待核理由、偏好版本、覆盖缺口与转正依据、实际填写/保存/提交状态及证据。未执行明确写 `not_started`，不能只报已登录。被排除或待核条目也保留依据和缺口，不误计为已核/已准备。
 
-`pre_form_report_ref` 指表单动作前已经展示的逐岗包，`report_precedes_form: true` 是执行者声明，必须现场核验；发现、信息收集或排除记录也要有逐岗报告，未开表单时该布尔字段为 true 表示仍在动作前。Review 还包含材料、字段读回、表单版本、账户名额与未决项，目标和表单版本的既有审核仍生效。`execution` 三个独立项 `fill/save/submit` 各为 `{status, evidence_ref}`；允许 `not_started/in_progress/complete/blocked/uncertain`，除未开始外必须有证据引用。登录不等于填写，显示已填不等于保存，点击不等于回执。`submitted` 仍须父校验器的回执要求；`submit.complete` 也必须为 submitted 且有回执。
+表单动作前必须已有该岗位目录的 `岗位包.md`（发现、信息收集或排除也要有逐岗报告）。Review 还包含材料、字段读回、表单版本、账户名额与未决项。填写、保存、提交三项分别看证据文件：`填写读回.*`（逐字段读回）、`草稿读回.*`（保存后重开读回）或 `无草稿说明.md`（站点无草稿，页面保持打开、单独报告）、`回执.*` 或 `结果不确定.md`；受阻写 `受阻.md`（原因、解除方、下一步）。登录不等于填写，显示已填不等于保存，点击不等于回执；表格 `投递状态` 只在有回执时改为 `已提交`。
 
-## 私有 JSON 字段（不新增 Excel 列或枚举）
+## 记录位置（不新增 Excel 列或枚举，没有 JSON 台账）
 
-所有新快照包含 `preferences`；批次台账放在 `batch.preferences`，搜索进度/并行 manifest 放顶层。它含非空 `version/confirmation_ref/effective_at`、`supersedes_version`（null 或旧版本）、`recheck_scope`（用户指定缺口列表；空列表不授权复查）、对象 `hard_scope`（`cities` 为字符串列表）、三个轴各含 `raw/relations`、本批 `default_role_order/default_order_confirmation_ref/default_order_batch_id`、`internship_policy` 及 `conflict_policy: user_decides`。各岗位和增量携带同一 `preference_version`。
+| 内容 | 位置 |
+|---|---|
+| 硬范围、三条偏好轴原话与关系（严格 / 弱 / 平级 / 未知）、实习政策、`冲突策略: 用户决定`、默认岗位次序 | `投递证据/<批次>/批次/Query.md` 对应各节，各带 `依据:` |
+| 偏好更新：新版本、生效时间、替代哪一版、用户指定的复查范围 | 在 Query.md 追加 `## 偏好更新 <日期>` 节并附确认记录；不改写原答复 |
+| 每个岗位的身份、直链、BU、城市、用工、方向、完整 JD 依据、纳入/排除/待核理由 | 追踪表岗位行（列按 campus 表结构）+ 岗位目录 `岗位包.md` |
+| 跨轴冲突的取舍、明确选岗 | `确认记录/` 文件，岗位目录 `用户选岗.md` |
+| 已投岗位与回执 | 表格 `投递状态: 已提交` + 岗位目录 `回执.*`；偏好更新不得改动 |
 
-`roles` 保存 `role_key/company_key/official_job_id`（无 ID 用 canonical 直链）、`company/title/direct_url/bu/cities/employment_type/direction/jd_full_text/jd_capture_ref/jd_basis/decision_reason/decision_basis`（`jd` 或 `scope`）、`hard_scope_pass`（布尔）、`disposition`（primary/pending/excluded）、`preference_version/pre_form_report_ref/report_precedes_form/execution`。conversion_last 的实习候选另有 `conversion_ref` 与 `display_position: last`；公司有无合适正式岗结论通过 `no_suitable_formal_found: true` 明确声明。只有这类无正式岗结论才需要 `formal_coverage: sufficient`、非空 `formal_coverage_refs`、`suitable_formal_found:false` 和 `no_suitable_formal_ref`；它们不是转正实习展示门槛。
+偏好更新只复用已存的完整 JD 和用户指定的复查范围，不重开首轮；已投、回执和明确选岗保留，改动需要新的明确指令（存成确认记录）。脚本只做结构检查，不能验证来源、覆盖或前置报告时间的真实性。
 
-跨轴冲突在岗位上记录 `cross_axis_conflict: true`；选择/替代它需要 `selected: true` 与 `selection_ref`，否则仅展示且不执行表单。`prior_roles` 是私有上一快照的身份/`stage/receipt_ref/selected`；当前快照必须保留已投及明确选择，任何获明确新指令的更改留 `change_authorization_ref`。偏好更新本身不是这项授权。缺少旧版本字段或逐岗报告的历史增量先适配和人工复核，不能作为新完整交付接收。
-
-运行父流程列出的校验脚本检查新快照。它们是技能内结构校验工具，不是平台强制 hook、锁或真实网站验收；人工仍核验来源、覆盖、前置报告时间和旧记录完整性。

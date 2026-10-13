@@ -1,194 +1,136 @@
 #!/usr/bin/env python3
-"""Validate a private coordination snapshot. No locks, browser actions or truth checks."""
+"""Validate 投递证据/<批次>/并行分工.md (no JSON manifest). Snapshot check only: no locks, no truth checks.
+
+File format (Markdown):
+
+    批次: <批次>
+    执行方式: 多个AI            # or 一个AI
+    执行渠道: 平台子代理        # or 用户转交
+    协调者: <参与者>
+    分工版本: 1
+    依据: 投递证据/<批次>/确认记录/分工确认.md
+
+    ## 分工
+    | 公司 | 招聘主体 | 账号范围 | 负责人 | 输出目录 |
+    |---|---|---|---|---|
+    | 公司A | 主体A | ATS-A | agent-1 | 投递证据/<批次>/输出/agent-1/公司A |
+
+    ## 交接
+    | 公司 | 原负责人 | 新负责人 | 停止证据 | 接收证据 |
+
+Rules: one company / recruiting entity / account scope has exactly one owner; each output folder
+sits inside 投递证据/<批次>/输出/<负责人>/; handoffs name both owners and point to existing stop and
+acknowledgement records. Role state lives in the Excel tracker and role evidence folders.
+"""
 import argparse
 import json
-import re
-from pathlib import Path, PurePosixPath
+import sys
+from pathlib import Path
 
-# Resolve inside the complete installed parent package, independent of cwd.
-import importlib.util
-_spec = importlib.util.spec_from_file_location("preference_contract", Path(__file__).resolve().parents[3] / "scripts/preference_contract.py")
-_contract = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_contract)
+SCRIPTS = Path(__file__).resolve().parents[3] / 'scripts'
+sys.path.insert(0, str(SCRIPTS))
+from evidence_layout import parse, value, ref_exists  # noqa: E402
+from batch_check import find_root  # noqa: E402
 
-WORKFLOW = 'application'
-STAGES = {"discovered", "verified", "preparing", "prepared", "reviewed", "submit_clicked", "submitted", "uncertain"}
-PREPARED = {"prepared", "reviewed", "submit_clicked", "submitted", "uncertain"}
+MODES = {'一个AI': 'single', '一个 AI': 'single', '多个AI': 'parallel', '多个 AI': 'parallel'}
+CHANNELS = {'平台子代理', '用户转交'}
 
 
-def text(value):
-    return isinstance(value, str) and bool(value.strip())
-
-
-def relative(value):
-    return text(value) and "\\" not in value and ":" not in value and not value.startswith("/") and all(p not in {"", ".", ".."} for p in value.split("/"))
-
-
-def within(path, root):
-    return path == root or root in PurePosixPath(path).parents
-
-
-def validate(data):
-    errors = []
-    if not isinstance(data, dict):
-        return ["manifest must be an object"]
-    if data.get("workflow") != WORKFLOW:
-        errors.append("wrong workflow")
-    for field in ("batch_id", "query_version", "mode_approval_ref"):
-        if not text(data.get(field)):
-            errors.append("missing " + field)
-    if not text(data.get("mode")) or data.get("mode") not in {"single", "parallel"}:
-        errors.append("execution mode must be explicitly selected")
-    if not text(data.get("execution_channel")) or data.get("execution_channel") not in {"platform", "manual_handoff"}:
-        errors.append("missing execution channel")
-    participants = data.get("participants")
-    if not isinstance(participants, list) or not participants or any(not text(p) for p in participants):
-        errors.append("participants must be nonempty distinct IDs")
-        participants = []
-    elif len(set(participants)) != len(participants):
-        errors.append("duplicate participant")
-    if data.get("mode") == "single" and len(participants) != 1:
-        errors.append("single mode needs one participant")
-    if data.get("mode") == "parallel" and len(participants) < 2:
-        errors.append("parallel mode needs multiple participants")
-    if data.get("coordinator") not in participants:
-        errors.append("coordinator must be a participant")
-    if not isinstance(data.get("source_hash"), str) or not re.fullmatch(r"[a-fA-F0-9]{64}", data["source_hash"]):
-        errors.append("invalid source hash")
-    if type(data.get("assignment_version")) is not int or data["assignment_version"] < 1:
-        errors.append("invalid assignment version")
-    roots = data.get("output_roots")
-    if not isinstance(roots, dict):
-        roots = {}
-    if set(roots) != set(participants) or any(not relative(v) for v in roots.values()):
-        errors.append("output roots must match participants and be relative")
-    valid_roots = [PurePosixPath(v) for v in roots.values() if relative(v)]
-    for i, a in enumerate(valid_roots):
-        for b in valid_roots[i + 1:]:
-            if within(a, b) or within(b, a):
-                errors.append("participant output roots overlap")
-    assignments = data.get("assignments")
-    if not isinstance(assignments, list):
-        errors.append("assignments must be a list")
-        assignments = []
-    ids, companies, scopes, entities = {}, set(), set(), set()
-    scope_field = "source_scope" if WORKFLOW == "search" else "operation_scope"
-    for item in assignments:
-        if not isinstance(item, dict):
-            errors.append("assignment must be an object")
+def table(lines):
+    rows, header = [], None
+    for line in lines:
+        if not line.strip().startswith('|'):
             continue
-        key = item.get("assignment_id")
-        owner = item.get("owner")
-        for field, seen in (("assignment_id", ids), ("company_key", companies), (scope_field, scopes)):
-            value = item.get(field)
-            if not text(value):
-                errors.append("missing assignment " + field)
-            elif value in seen:
-                errors.append("duplicate allocation " + field)
-            elif isinstance(seen, dict):
-                seen[value] = item
-            else:
-                seen.add(value)
-        if WORKFLOW == "application":
-            entity = item.get("recruiting_entity")
-            if not text(entity) or entity in entities:
-                errors.append("missing or duplicate recruiting entity")
-            else:
-                entities.add(entity)
-        if not text(owner) or owner not in participants:
-            errors.append("unknown assignment owner")
-        output = item.get("output_dir")
-        root = roots.get(owner) if text(owner) else None
-        if not relative(output) or not relative(root) or not within(PurePosixPath(output), PurePosixPath(root)):
-            errors.append("assignment output outside owner root")
-        handoff = item.get("handoff")
-        if handoff is not None:
-            if not isinstance(handoff, dict):
-                errors.append("handoff must be an object")
-            elif (handoff.get("from_owner") not in participants or handoff.get("to_owner") != owner or handoff.get("from_owner") == owner or not text(handoff.get("stopped_ref")) or not text(handoff.get("accepted_ref"))):
-                errors.append("handoff needs old-owner stop and new-owner acknowledgement")
-    roles = data.get("roles", [])
-    if not isinstance(roles, list):
-        errors.append("roles must be a list")
-        roles = []
-    seen_keys, seen_urls = set(), set()
-    for role in roles:
-        if not isinstance(role, dict):
-            errors.append("role must be an object")
+        cells = [c.strip() for c in line.strip().strip('|').split('|')]
+        if all(set(c) <= set('-: ') for c in cells):
             continue
-        for field, seen in (("role_key", seen_keys), ("direct_url", seen_urls)):
-            value = role.get(field)
-            if not text(value) or value in seen:
-                errors.append("missing or duplicate role " + field)
-            else:
-                seen.add(value)
-        assignment = ids.get(role.get("assignment_id")) if text(role.get("assignment_id")) else None
-        if assignment is None or role.get("owner") != assignment.get("owner"):
-            errors.append("role has unknown assignment or wrong owner")
-        if WORKFLOW == "search":
-            if not text(role.get("jd_full_text")) or not text(role.get("jd_capture_ref")):
-                errors.append("search role needs full JD and capture reference")
+        if header is None:
+            header = cells
         else:
-            stage = role.get("stage")
-            if not text(stage):
-                errors.append("role stage must be a string")
-                continue
-            if stage not in STAGES:
-                errors.append("invalid role stage")
-            if stage in PREPARED and not text(role.get("material_id")):
-                errors.append("prepared role needs material identity")
-            if stage in {"reviewed", "submit_clicked", "submitted"} and not text(role.get("review_hash")):
-                errors.append("reviewed role needs current review hash")
-            if stage in {"submit_clicked", "submitted"} and (not text(role.get("approval_ref")) or not text(role.get("review_hash")) or role.get("approved_review_hash") != role.get("review_hash")):
-                errors.append("submission lacks approval for current review")
-            if stage == "submitted" and not text(role.get("receipt_ref")):
-                errors.append("submitted role needs official receipt")
-            if stage != "submitted" and text(role.get("tracker_status")) and role.get("tracker_status") in {"submitted", "已提交"}:
-                errors.append("tracker claims submitted without verified stage")
-    errors.extend(_contract.validate_snapshot(data.get("preferences"), roles, assignments, data.get("prior_roles"), batch_id=data.get("batch_id")))
-    prefs = data.get("preferences")
-    preference_version = prefs.get("version") if isinstance(prefs, dict) else None
-    for assignment in assignments:
-        if isinstance(assignment, dict) and (assignment.get("preference_version") != preference_version or not preference_version):
-            errors.append("stale assignment preference_version")
-    deltas = data.get("deltas", [])
-    if not isinstance(deltas, list):
-        errors.append("deltas must be a list")
-        deltas = []
-    for delta in deltas:
-        if not isinstance(delta, dict):
-            errors.append("delta must be an object")
+            rows.append(dict(zip(header, cells)))
+    return rows
+
+
+def validate(path, root=None):
+    path = Path(path)
+    root = Path(root) if root else find_root(path)
+    if root is None:
+        return ['找不到投递根目录（投递证据/）']
+    if not path.is_file():
+        return [str(path) + ' 不存在']
+    kv, lines = parse(path)
+    errors = []
+    batch = value(kv, '批次')
+    mode = MODES.get(value(kv, '执行方式'))
+    if not batch:
+        errors.append('需要「批次:」')
+    if not mode:
+        errors.append('需要「执行方式: 一个AI / 多个AI」')
+    if value(kv, '执行渠道') not in CHANNELS:
+        errors.append('需要「执行渠道: 平台子代理 / 用户转交」')
+    version = value(kv, '分工版本')
+    if not version.isdigit() or int(version) < 1:
+        errors.append('需要「分工版本: 正整数」')
+    if not ref_exists(root, value(kv, '依据')):
+        errors.append('「依据:」必须指向用户确认分工的记录文件')
+    rows = table(lines.get('分工', []))
+    if not rows:
+        errors.append('「## 分工」表为空')
+    owners = {r.get('负责人', '') for r in rows if r.get('负责人')}
+    coordinator = value(kv, '协调者')
+    participants = owners | ({coordinator} if coordinator else set())
+    if not coordinator:
+        errors.append('需要「协调者:」')
+    if mode == 'single' and len(participants) != 1:
+        errors.append('一个AI 模式只能有一个参与者')
+    if mode == 'parallel' and len(participants) < 2:
+        errors.append('多个AI 模式至少两个参与者')
+    seen = {'公司': set(), '招聘主体': set(), '账号范围': set()}
+    by_company = {}
+    for r in rows:
+        for key in ('公司', '招聘主体', '账号范围', '负责人', '输出目录'):
+            if not r.get(key):
+                errors.append('分工行缺少「' + key + '」：' + json.dumps(r, ensure_ascii=False))
+        for key in seen:
+            if r.get(key):
+                if r[key] in seen[key]:
+                    errors.append('「' + key + '」' + r[key] + ' 分给了不止一个负责人：同一公司/主体/账号范围只能有一个负责人')
+                seen[key].add(r[key])
+        expected = ('投递证据/' + batch + '/输出/' + r.get('负责人', '') + '/') if batch else None
+        out = r.get('输出目录', '').replace('\\', '/')
+        if expected and not (out + '/').startswith(expected):
+            errors.append(r.get('公司', '?') + ' 的输出目录必须在 ' + expected + ' 下')
+        by_company[r.get('公司')] = r
+    for h in table(lines.get('交接', [])):
+        company = h.get('公司')
+        target = by_company.get(company)
+        if target is None:
+            errors.append('交接的公司 ' + str(company) + ' 不在分工表里')
             continue
-        for field in ("batch_id", "query_version", "assignment_version", "source_hash"):
-            if delta.get(field) != data.get(field):
-                errors.append("stale or foreign delta " + field)
-        if delta.get("preference_version") != preference_version or not preference_version:
-            errors.append("stale delta preference_version")
-        assignment = ids.get(delta.get("assignment_id")) if text(delta.get("assignment_id")) else None
-        if assignment is None or delta.get("owner") != assignment.get("owner"):
-            errors.append("delta has unknown assignment or wrong owner")
-        if "roles" in delta:
-            delta_keys = {r.get("role_key") for r in delta["roles"] if isinstance(r, dict) and text(r.get("role_key"))} if isinstance(delta["roles"], list) else set()
-            prior_snapshot = data.get("prior_roles")
-            delta_prior = [r for r in prior_snapshot if isinstance(r, dict) and text(r.get("role_key")) and r["role_key"] in delta_keys] if isinstance(prior_snapshot, list) else []
-            errors.extend(_contract.validate_snapshot(data.get("preferences"), delta["roles"], assignments, delta_prior, batch_id=data.get("batch_id")))
-        if delta.get("merge_status") == "merged" and not text(delta.get("tracker_readback_ref")):
-            errors.append("merged delta needs tracker readback")
+        if h.get('新负责人') != target.get('负责人') or not h.get('原负责人') or h.get('原负责人') == h.get('新负责人'):
+            errors.append(company + ' 交接：新负责人必须是当前负责人，且与原负责人不同')
+        if h.get('原负责人') not in participants:
+            errors.append(company + ' 交接：原负责人不是参与者')
+        for key in ('停止证据', '接收证据'):
+            if not ref_exists(root, h.get(key, '')):
+                errors.append(company + ' 交接需要存在的「' + key + '」文件（旧负责人已停止、新负责人已接收）')
     return errors
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("manifest", type=Path)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('assignment_md', type=Path)
+    parser.add_argument('--root', type=Path)
     args = parser.parse_args()
-    try:
-        errors = validate(json.loads(args.manifest.read_text(encoding="utf-8")))
-    except (OSError, ValueError) as exc:
-        print(json.dumps({"valid": False, "errors": [str(exc)]}, ensure_ascii=False))
-        return 2
-    print(json.dumps({"valid": not errors, "errors": errors, "workflow": WORKFLOW}, ensure_ascii=False, indent=2))
-    return int(bool(errors))
+    errors = validate(args.assignment_md, args.root)
+    print(json.dumps({'通过': not errors, '错误': errors}, ensure_ascii=False, indent=2))
+    return 0 if not errors else 1
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+if __name__ == '__main__':
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding='utf-8')
+        except (AttributeError, ValueError):
+            pass
+    sys.exit(main())

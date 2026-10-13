@@ -1,36 +1,135 @@
-# Daily batch and recovery record
+# 批次记录：Query.md 与 投递证据/
 
-Use this reference for Query, daily counts and a resumed run. The workspace owns the private batch file; this document defines portable fields, not values. A batch should have a stable ID and a dated, user-confirmed Query snapshot. Record later changes with effective time and the earlier choice they replace.
+一个投递批次的全部记录 = **岗位追踪表（状态）** + **`投递证据/<批次>/`（Query 答复与过程证据）**。没有 JSON 台账；表格怎么写见[追踪表契约](workbook-contract.md)。所有文件都在用户的投递根目录里，不放进 Skill 目录，也不公开。
 
-## Query fields
+## 目录
 
-- Scope: region, cohort, formal job or internship, target functions, exclusions and cities.
-- Company pool: authoritative source, distinct company key, subsidiary/group relationship, bucket assignment rule and priority. Buckets must be mutually exclusive for counting, even if a firm has several attributes.
-- Optional numeric targets by batch-specific counting bucket, or an explicit nonnumeric stop condition (confirmed-list coverage, a time window, or another user choice). Define whether counts concern checked companies or companies with eligible roles, and whether role-free/blocked companies are replaced. Do not inherit target values or bucket names from another user or batch; a single `all` bucket may represent a confirmed unsegmented scope.
-- Time window, order, account-limit constraints, current résumé and portfolio evidence, and authority to choose roles and prepare forms. Final submission remains a separate approval of exact review versions.
+```
+<投递根目录>/
+  <岗位追踪表>.xlsx
+  投递证据/
+    门禁通行证.md                     提交门禁通过后发放，钩子检查（自动生成）
+    <批次>/
+      批次/Query.md                   开始前必问的答复（下节）
+      批次/续跑读回.md                续跑时站点、回执、表格三方核对
+      批次/收尾.md                    停止原因:  保留页面:  依据:
+      确认记录/*.md                   用户每次确认的原话与时间（批准、目标确认、次序、授权、三次确认…）
+      并行分工.md                     多个 AI 时的分工（见并行子 Skill）
+      公司/<公司>/
+        数量规则.md                   状态: 已核实|未核实  上限:  来源:  核验日期:
+        次序确认.md                   决定: 不变|变更  依据:
+        通道.md                       通道: 内置浏览器|Chrome|Playwright（换通道时追加 换通道: 原→新 与交接说明）
+        [选岗确认.md]                 名额少于想投的岗位时，用户选了哪几个
+        [首次提交后读回.md]           数量规则未核实时，第一个提交后读回账号状态
+        [受阻.md]                     原因:  解除方: 用户|站点|平台|官方规则  下一步:
+      岗位/<公司>-<链接码>/          链接码 = 规范化直链的 SHA-1 前 8 位；batch_check.py --where 会给出路径
+        岗位包.md                     表单动作前的逐岗包（公司/BU/办公地/岗位/直链/完整 JD 依据）
+        资格核对.md                   结论: 符合|待核|不符合；非“符合”另需 尝试指令.md
+        [用户选岗.md]                 Query 未授权选岗时，用户点名这个岗位
+        填写读回.*                    逐字段读回
+        草稿读回.* 或 无草稿说明.md   保存后重开读回；站点无草稿时说明并保持页面打开
+        审核包.md                     审核版本 = 这个文件的 SHA-256
+        批准.md                       审核包哈希: <当前哈希>  依据:
+        目标确认.md                   公司: BU: 办公地: 岗位: 意向: 数量规则: 审核包哈希: 依据:
+        提交前复核.md                 岗位、计划、名额、材料、表单版本复核
+        回执.* 或 结果不确定.md        官方成功页/申请编号；不确定时先查申请中心
+        追踪表读回.md                 写入“已提交”后的读回（tracker_readback.py --record）
+        [受阻.md]                     同公司级
+```
 
-Do not guess missing classification, quantity choices, materials or counting semantics. Ask only the decisions that affect the next action; continue work on independent confirmed buckets. A stated numeric target is a goal, not a universal cap or proof it was met. Respect a user-defined ceiling/stop condition and official account limits separately. With no fixed numeric target, record the user choice and a concrete stop condition instead of inventing a number.
+记录文件都是 Markdown，用 `键: 值` 行（全角冒号也可）和 `## 节` 标题，人能直接读，脚本也能解析。截图、读回可以是任何格式。
 
-## Execution choices
+## Query.md
 
-Before new form actions, ask `本轮申请准备和投递由一个 AI 执行，还是由多个 AI 平行执行？` unless this application's batch already has an explicit choice. Record `application_execution_mode` (`single` or `parallel`) and `mode_approval_ref`; a search mode is not application permission. Missing mode keeps dependent actions pending. Reuse valid same-batch choices and approval references rather than repeatedly requesting them.
+Query 的“开始前必问”各项（[阶段契约 §3](stage-contract.md#3-query开始前必问-vs-到步骤前再问)）一项一节，每节都要有 `依据:` 指向 `确认记录/` 里存在的用户答复文件。缺节、缺依据或取值不合规，`stage_gate.py --stage query` 不放行。
 
-For parallel work, record participant IDs/count, coordinator, resource limit, `execution_channel` (`platform` or `manual_handoff`), allocation version and a reference to the private coordination manifest. Load [the parallel subskill](../skills/application-parallel-execution/SKILL.md). Each delta identifies its batch/Query/allocation version and owner; one company/recruiting entity/shared-account scope has one owner. The coordinator writes the tracker serially from its latest version. A subskill allocation check supplements `validate_batch.py`; neither proves a real site saved or submitted anything.
+```markdown
+批次: 2026-10-13-ai产品
 
-Record the user's requirements/ideas and confirmed allocation proposal, including count/grouping rationale, workload estimates, coordinator duties and any capacity-based execution waves. The execution-mode answer alone does not confirm the proposal.
+## 入口
+类型: 投递
+依据: 投递证据/2026-10-13-ai产品/确认记录/入口.md
 
-For JSON validation, `batch.quotas` is the legacy field name for a nonempty map of private counting buckets to nonnegative integer targets or `null`. An integer retains its existing counting semantics; `null` means no numeric target for that bucket. A `null` bucket requires nonempty `batch.target_choice_ref` and `batch.stop_condition`, referring to the user's confirmed choice and actual stopping rule. Unknown or unanswered quantities must not be encoded as `null`; they remain pending Query. `remaining_quota` reports `null` for such buckets, never zero or a fabricated remaining count. The validator cannot verify the stop condition, confirmation or official account limits against reality.
+## 硬范围
+地区: 中国大陆
+届别: 2027届
+用工: 正式
+职责: AI 产品
+依据: …
 
-## Ledger fields
+## 偏好轴
+用工路径: …（用户原话）
+城市: …
+方向: …
+实习政策: 不收实习 | 单独批次 | 转正实习排最后
+冲突策略: 用户决定
+依据: …
 
-Keep a private, durable record with `batch_id`, Query version/time, company key, bucket, site/plan URLs, coverage state and evidence; each role has a stable role key, direct URL, title, JD evidence, application stage, draft URL, material identity, review version/hash, submission approval, receipt reference/time, tracker readback and next action. Never store the filled form's full personal answers, credentials, OTP, cookie or identity document. Link to a protected form or sanitized review package instead.
+## 默认岗位次序
+AI 产品 > 数据产品（用户原话；新批次不沿用上一批）
+依据: …
 
-Suggested company states: `unvisited`, `checking`, `checked`, `blocked`; suggested role stages: `discovered`, `verified`, `preparing`, `prepared`, `reviewed`, `submit_clicked`, `submitted`, `uncertain`. These are ledger states, not new workbook statuses. A `submit_clicked` or `uncertain` role must be investigated through the application center before retrying.
+## 公司清单
+- 公司A | 大厂
+- 公司B | 银行
+依据: …
 
-Count distinct company keys per bucket for checked companies, distinct verified official role links for eligible roles, completed forms for prepared applications, and official receipts for submissions. Report the configured denominator and remaining target for numeric buckets; for nonnumeric buckets report scope/time progress and unresolved work against the confirmed stopping rule. A group/subsidiary counts separately only when the confirmed Query and actual employing/recruiting identity support it. Run `scripts/validate_batch.py <batch.json>` when using the JSON ledger format; set `scope_confirmed`, `bucket_rules_confirmed`, `materials_confirmed` and `preparation_authorized` only after the corresponding Query decisions. The validator checks duplicates, bucket membership, required approval references and receipt invariants.
+## 目标与停止条件
+计数口径: 有合格岗位的公司 | 已查公司
+补位规则: 留空 | 补位
+目标: 大厂=3, 银行=无
+停止条件: 确认清单全部覆盖（有“无”时必填）
+依据: …
 
-## 独立偏好与执行证据
+## 材料
+- 简历 | 材料/简历.pdf | <sha256>
+依据: …
 
-Query 将 hard_scope 和三条独立轴写入 batch.preferences（见 [契约](preference-contract.md) 与 [空模板](preference-template.md)），roles/增量携带 preference_version。公司覆盖字段放 companies，prior_roles 保留已投/回执与明确选择。每岗包含前置报告、BU 未披露标记、完整 JD 判断和独立 fill/save/submit 证据。更新偏好只复用原 JD 和用户指定复查范围，不重开首轮；弱优先/平级不强排、跨轴不加权。缺字段的旧快照需适配人工复核后才能新交付。
+## 授权
+选岗授权: 是 | 否
+准备授权: 是 | 否
+依据: …
 
-每批先向用户要默认岗位次序，保存同批确认，不沿用上一批。每家公司开始申请操作前，先用同一逐岗包展示公司/岗位/BU或未披露/办公地，确认相对默认次序有无变化；company_order_confirmation_ref 和 pre_form_report_ref 对应同一包。交接复用这份记录，最终具体目标和当前表单版本继续审核，不另建三套脱节清单。
+## 执行方式
+执行方式: 一个AI | 多个AI
+依据: …
+
+## 自动化授权
+模式: 不开启 | 半自动 | 全自动
+已开启: 无 | login-phone-otp, terms-consent …
+条款方式: 逐项查看 | 全部代勾
+验证码: 用户提供 | 完整接手
+依据: …
+
+## 能力预检
+内置浏览器: 可用 | 不可用 | 不适用 | 未检查
+Chrome: …
+computer use: …
+系统脚本: …
+Playwright: …
+Playwright代替: 同意 | 不同意 | 未问
+依据: …
+```
+
+材料的 sha256 与文件不一致时（简历换过），门禁报错，需要重新确认材料。批次内的后续改动在 Query.md 里追加说明并新增确认记录，不删除原答复。
+
+## 计数
+
+- `公司清单` 的每家公司属于一个桶；`目标` 里的桶必须与之一致，`无` 表示不设数字目标，此时必须写 `停止条件`。
+- 计数直接读表格：`已查公司` = `盘点状态` 不是 `尚未推进`；`有合格岗位的公司` = `已有相关岗位记录`。
+- 补位规则（[阶段契约 §9](stage-contract.md#9-计数补位规则)）：`留空` 时，标为 `无当年校招计划` / `无用户要求岗位` / `无法访问校招页面` 的公司算进目标、名额留空；`补位` 时它们不计数，报告需补位的桶。
+- 已准备 = 有 `填写读回` 且有 `草稿读回` 或 `无草稿说明`；已提交 = 表格 `已提交` 且有回执。数字目标是目标，不是上限，也不是官方名额。
+
+`scripts/batch_check.py --workbook <表> --batch <批次>` 输出一致性错误和以上计数；加 `--closeout` 判断能否收尾。
+
+## 受阻与待办
+
+`受阻.md` 必须写原因、解除方（用户 / 站点 / 平台 / 官方规则）和下一步。Agent 自己能做的事是待办，不是受阻，不能用来结束批次。等待用户批准也写 `受阻.md`（解除方: 用户）。
+
+## 执行方式
+
+开始表单前问 `本轮申请准备和投递由一个 AI 执行，还是由多个 AI 平行执行？`（搜索阶段的选择不算）。多个 AI 时加载[并行子 Skill](../skills/application-parallel-execution/SKILL.md)，分工写在 `并行分工.md`：同一公司 / 招聘主体 / 账号范围只有一个负责人，协调者串行写追踪表。分工须先给用户看、经确认后才派发；执行方式的回答本身不等于确认了分工。
+
+## 偏好与逐岗证据
+
+硬范围、三条偏好轴、实习政策写在 Query.md 的对应节（[偏好契约](preference-contract.md)）；逐岗包、资格结论和实际填写 / 保存 / 提交证据在岗位目录里。偏好更新只复用已存的完整 JD 和用户指定的复查范围，不重开首轮；已投、回执和明确选岗保留。默认岗位次序与公司动作前确认见[偏好契约](preference-contract.md#默认次序与公司动作前确认)。

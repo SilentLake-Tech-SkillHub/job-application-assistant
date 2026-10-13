@@ -2,7 +2,7 @@
 name: personal-info-vault
 description: Keep every application fact that is not on the résumé (birth date, home city, hometown, emergency contact, student-leader roles, photo path, interview and transfer preferences, etc.) in one private, per-user profile file, read it before filling any form, and write new facts the moment the user states them. Use whenever a recruiting form asks for something the résumé lacks, or the user tells you a personal fact in conversation. The profile file is created per user in their own workspace and must never be published.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # 个人信息档案
@@ -22,7 +22,8 @@ metadata:
 ## 写入
 
 - 用户在对话中给出新的个人信息、经历或网申偏好时，**当场写入档案**，注明日期、用户原话摘要和适用范围（全部公司 / 指定公司或批次）。
-- 缺失项按公司汇总一次性询问；拿到答复后写入档案，再填表，以后同类字段直接复用，不再重复问。
+- 缺失项按公司汇总一次性询问；拿到答复后写入档案，再填表，以后同类**事实字段**直接复用，不再重复问。
+- **选择类偏好不直接复用**：志愿顺序、意向部门、是否接受调剂、意向城市等是用户对具体目标的选择。档案里记录的这类偏好只能作为下一次的**建议默认值**展示给用户，仍须在父Skill提交前目标确认中逐项确认，不得据此直接勾选。
 - 用户修改已有值时，更新取值并在「变更记录」留一行，不保留已被否定的旧值作为当前值。
 - 只记用户明确给出的事实；不记推测、不记网站自动解析出的内容。
 

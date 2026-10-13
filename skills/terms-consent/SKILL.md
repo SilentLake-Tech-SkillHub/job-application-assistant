@@ -2,14 +2,14 @@
 name: terms-consent
 description: Ask whether the user wants item-by-item review or ordinary agreement checkboxes handled throughout the current job-application workflow. Batch ticking requires three explicit user confirmations; preserve concrete legal-agreement disclosure, per-action persistent-access approval and user-only steps, and never submit applications.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # 条款确认与勾选
 
 ## 先选择本次流程的处理方式
 
-在首次遇到条款前，先问：“这次求职流程的条款，你想逐项查看后确认，还是由我在本次已确认范围内全部代勾？”读取[自动化授权](../../references/automation-authorization.md)并记录选择；已回答且范围未变时不重复问。
+处理方式在批次 **Query** 阶段与自动化授权一起问（[自动化授权](../../references/automation-authorization.md)），本子Skill先读取 `条款方式:`。记录里已有选择且范围未变时直接按选择执行，不再问；只有 `条款方式:` 缺失时，才在首次遇到条款前补问这一项：“这次求职流程的条款，你想逐项查看后确认，还是由我在本次已确认范围内全部代勾？”补问的答复写回同一授权记录，并与其他待处理项合并进集中交接消息，不单独打断。
 
 - **逐项查看**：展示当前条款名称、链接和关键内容，按用户对该项的答复操作；用户选择自行勾选时保留给用户。
 - **本次全部代勾**：按[三次明确确认](../../references/automation-authorization.md#三次明确确认用户自定的额外流程)确认本次公司范围、条款类别、可能后果及最终授权后，开启 `terms-consent`。明确代勾会表达同意、作出声明或授权处理申请资料，请用户确认理解并愿意自行承担所述风险。三次是用户自定额外流程，不是平台标准，也不能替代平台的具体条款披露、逐次确认或本人操作要求。
