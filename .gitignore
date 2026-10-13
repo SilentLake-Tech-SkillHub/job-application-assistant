@@ -7,3 +7,6 @@ personal-info*.md
 .DS_Store
 __pycache__/
 *.pyc
+
+# Playwright persistent profiles hold login cookies (issue #27)
+.浏览器配置/

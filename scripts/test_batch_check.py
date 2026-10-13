@@ -182,9 +182,19 @@ class PrepareGateTests(Base):
         (self.w.role_folder(A, U1) / '尝试指令.md').write_text('依据: x\n', encoding='utf-8')
         self.assertTrue(gate(self.w.book, 'b1', 'prepare', U1)['允许'])
 
-    def test_lane_and_playwright_substitute(self):
+    def test_playwright_is_the_standing_backup_lane(self):
+        """In-app + Chrome extension by default; Playwright backs up Chrome without a per-batch consent question."""
         self.ready(); self.w.company_ready(A, lane='Playwright')
-        self.assertTrue(has(gate(self.w.book, 'b1', 'prepare', U1)['错误'], 'Playwright代替: 同意'))
+        errors = gate(self.w.book, 'b1', 'prepare', U1)['错误']
+        self.assertTrue(has(errors, 'Playwright 不是「可用」'))
+        self.assertTrue(has(errors, 'Playwright 只作备用'))
+        self.w.write_query('大厂=1, 银行=1', '补位', '有合格岗位的公司',
+                           能力预检='内置浏览器: 可用\nChrome: 不可用\ncomputer use: 未检查\n系统脚本: 不适用\nPlaywright: 可用')
+        self.assertTrue(gate(self.w.book, 'b1', 'prepare', U1)['允许'])  # Chrome missing → Playwright, no consent file
+        self.w.write_query('大厂=1, 银行=1', '补位', '有合格岗位的公司',
+                           能力预检='内置浏览器: 可用\nChrome: 可用\ncomputer use: 未检查\n系统脚本: 不适用\nPlaywright: 可用')
+        self.w.write('投递证据/b1/公司/合成公司A/通道.md', '通道: Playwright\n原因: Chrome 插件运行中断开，重连失败\n')
+        self.assertTrue(gate(self.w.book, 'b1', 'prepare', U1)['允许'])
 
     def test_verified_count_rule_needs_limit_source_date(self):
         self.ready()
@@ -252,6 +262,118 @@ class ReviewSubmitTests(Base):
         self.assertTrue(has(gate(self.w.book, 'b1', 'submit', U2)['错误'], '首次提交后读回'))
         self.w.write('投递证据/b1/公司/合成公司A/首次提交后读回.md', '账号状态: 已投 1 个\n')
         self.assertTrue(gate(self.w.book, 'b1', 'submit', U2)['允许'])
+
+
+class FillCacheExcelTests(Base):
+    """#27: 填写方案.json is a fill cache; Excel stays the only state record and the two must agree."""
+
+    def plan(self, url=U1, **change):
+        path = self.w.role_folder(A, url) / '填写方案.json'
+        data = json.loads(path.read_text(encoding='utf-8'))
+        data.update(change)
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+        return path
+
+    def test_review_requires_complete_plan_and_matching_readback(self):
+        self.ready()
+        self.w.plan(A, U1, done=False)
+        errors = gate(self.w.book, 'b1', 'review', U1)['错误']
+        self.assertTrue(has(errors, '3 个字段未读回'))
+        self.w.role_prepared(A, U1)
+        self.assertTrue(gate(self.w.book, 'b1', 'review', U1)['允许'])
+        self.plan(备注='改过方案')  # plan changed after the readback was exported
+        self.assertTrue(has(gate(self.w.book, 'b1', 'review', U1)['错误'], '方案哈希不符'))
+
+    def test_review_without_plan_is_blocked(self):
+        self.ready(); folder = self.w.role_prepared(A, U1)
+        (folder / '填写方案.json').unlink()
+        self.assertTrue(has(gate(self.w.book, 'b1', 'review', U1)['错误'], '填写方案.json 不存在'))
+
+    def test_status_keys_cannot_enter_the_cache(self):
+        self.ready(); self.w.role_prepared(A, U1)
+        self.plan(投递状态='已提交')
+        self.assertTrue(has(self.errors(), '不属于填写缓存的键 投递状态'))
+        self.plan(投递状态=None)
+        path = self.w.role_folder(A, U1) / '填写方案.json'
+        data = json.loads(path.read_text(encoding='utf-8')); data.pop('投递状态')
+        data['字段'][0]['回执'] = 'APP-1'
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+        self.assertTrue(has(self.errors(), '不属于填写缓存的键 回执'))
+
+    def test_cache_must_match_the_excel_row_and_lane(self):
+        self.ready(); self.w.role_prepared(A, U1)
+        self.plan(岗位链接=U2)
+        self.assertTrue(has(self.errors(), '岗位链接与岗位表不一致'))
+        self.plan(岗位链接=U1, 公司='合成公司Z')
+        self.assertTrue(has(self.errors(), '公司与岗位表不一致'))
+        self.plan(公司=A, 通道='Chrome')
+        self.assertTrue(has(self.errors(), '通道与 公司/通道.md 不一致'))
+        self.plan(通道='内置浏览器', 批次='别的批次')
+        self.assertTrue(has(self.errors(), '批次不是本批'))
+
+    def test_plan_without_excel_row_is_orphan(self):
+        folder = self.w.role_folder(A, U3); folder.mkdir(parents=True)
+        (folder / '填写方案.json').write_text('{}', encoding='utf-8')
+        self.assertTrue(has(self.errors(), '找不到对应的岗位表行'))
+
+    def test_cache_never_changes_excel_state(self):
+        """Deleting the cache after submission leaves every Excel-derived result unchanged."""
+        self.submitted()
+        before = (self.errors(), self.batch().report()['已提交且有回执'])
+        (self.w.role_folder(A, U1) / '填写方案.json').unlink()
+        after = (self.errors(), self.batch().report()['已提交且有回执'])
+        self.assertEqual(before, after)
+        self.assertEqual(Workbook(self.w.book).role_by_url(U1)[0]['投递状态'], '已提交')
+
+    def test_progress_is_reported_for_resume(self):
+        self.ready(); self.w.plan(A, U1, done=False)
+        report = self.batch().report()
+        self.assertEqual(list(report['填写进度'].values()), ['0/3 已读回'])
+
+    def test_sensitive_literal_and_never_store_fields_rejected(self):
+        self.ready(); self.w.role_prepared(A, U1)
+        path = self.w.role_folder(A, U1) / '填写方案.json'
+        data = json.loads(path.read_text(encoding='utf-8'))
+        data['字段'][1]['值'] = '13800000000'
+        data['字段'].append({'序号': 4, '标签': '身份证号 *', '定位': {'label': '身份证号 *'}, '控件': '文本', '填法': '批量', '值': 'x', '状态': '待填'})
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+        errors = self.errors()
+        self.assertTrue(has(errors, '个人敏感信息'))
+        self.assertTrue(has(errors, '永不记录的信息'))
+
+
+class ClickMarkerAndFreshnessTests(Base):
+    """#27: a click that may have submitted blocks a second pass; stale rechecks block submission."""
+
+    def test_click_without_receipt_blocks_every_gate(self):
+        self.ready(); self.w.role_prepared(A, U1); self.w.role_approved(A, U1)
+        self.assertTrue(gate(self.w.book, 'b1', 'submit', U1)['允许'])
+        sys.path.insert(0, str(HERE))
+        from submit_pass import consume_submit_click
+        self.assertTrue(consume_submit_click(self.w.root)[0])  # the hook allowed the click; session dies here
+        folder = self.w.role_folder(A, U1)
+        self.assertTrue((folder / '提交已点击.md').is_file())
+        result = gate(self.w.book, 'b1', 'submit', U1)
+        self.assertFalse(result['允许'])
+        self.assertTrue(has(result['错误'], '已点击过提交'))
+        self.assertNotIn('提交通行证', result)
+        self.assertTrue(has(gate(self.w.book, 'b1', 'closeout')['错误'], '已点击提交但没有回执'))
+        (folder / '结果不确定.md').write_text('申请中心暂未显示\n', encoding='utf-8')
+        self.assertFalse(has(self.errors(), '已点击提交但没有回执'))
+        self.assertTrue(has(gate(self.w.book, 'b1', 'submit', U1)['错误'], '已提交或结果不确定'))
+
+    def test_recheck_older_than_a_day_blocks_submit(self):
+        self.ready(); self.w.role_prepared(A, U1); folder = self.w.role_approved(A, U1)
+        (folder / '提交前复核.md').write_text('复核时间: 2026-01-01T09:00:00+08:00\n', encoding='utf-8')
+        self.assertTrue(has(gate(self.w.book, 'b1', 'submit', U1)['错误'], '超过 24 小时'))
+        (folder / '提交前复核.md').write_text('复核: 一致\n', encoding='utf-8')
+        self.assertTrue(has(gate(self.w.book, 'b1', 'submit', U1)['错误'], '需要「复核时间:」'))
+
+    def test_count_rule_older_than_a_week_blocks_submit(self):
+        self.ready(); self.w.role_prepared(A, U1); self.w.role_approved(A, U1)
+        self.w.write('投递证据/b1/公司/合成公司A/数量规则.md', '状态: 已核实\n上限: 2\n来源: https://example.test/faq\n核验日期: 2026-01-01\n')
+        self.assertTrue(has(gate(self.w.book, 'b1', 'submit', U1)['错误'], '超过 7 天'))
+        self.assertTrue(gate(self.w.book, 'b1', 'prepare', U1)['允许'])  # preparing is still fine
 
 
 class CountingTests(Base):

@@ -28,8 +28,13 @@ EVIDENCE_DIR = '投递证据'
 BROWSER_TOOL = re.compile(r'(browser|chrome|playwright|computer|click|navigate|puppeteer|devtools|web_?page)', re.I)
 READ_ONLY_TOOL = re.compile(r'(read_page|get_page_text|page_text|snapshot|screenshot|tabs_context|tabs_list|find$|console|network|zoom)', re.I)
 CLICK_ACTIONS = {'left_click', 'double_click', 'triple_click', 'click', 'key', 'press', 'tap', 'submit'}
-SUBMIT_WORDS = re.compile(r'(提交|投递|我已知晓|确认申请|submit|send application|confirm (?:the )?application|finish application|complete application)', re.I)
-NOT_SUBMIT = re.compile(r'(投递记录|投递状态|投递规则|投递须知|投递进度|申请中心|保存草稿|save draft|draft)', re.I)
+try:
+    from submit_words import submit_like_text  # noqa: E402 - shared with the fill executor
+except Exception as _exc:  # noqa: BLE001 - keep failing closed on clicks if the Skill copy is broken
+    _IMPORT_ERROR = _exc
+
+    def submit_like_text(text):
+        raise RuntimeError('submit_words unavailable: ' + type(_IMPORT_ERROR).__name__)
 
 
 def strings(node):
@@ -75,8 +80,7 @@ def submit_like(tool_name, tool_input):
         if not is_click(name, data):
             continue
         for text in strings(data):
-            cleaned = NOT_SUBMIT.sub('', text)
-            if SUBMIT_WORDS.search(cleaned):
+            if submit_like_text(text):
                 return True
     return False
 

@@ -139,8 +139,37 @@ class StructureTexts(unittest.TestCase):
                 self.assertFalse(stale in text, (path, stale))
         self.assertFalse(list(ROOT.glob('scripts/*ledger*')) or list(ROOT.glob('scripts/validate_batch.py')))
 
+    def test_issue27_playwright_is_standing_backup(self):
+        lanes = read('references/browser-application.md').split('## 浏览器分工')[1].split('## 批量填写')[0]
+        self.assertIn('常备备用', lanes)
+        self.assertIn('不再每批询问是否同意', lanes)
+        self.assertIn('由用户自己调整环境', lanes)
+        for path, text in all_md().items():
+            for stale in ('Playwright代替', '代替 Chrome 通道吗', '同意才启用 Playwright', '不为凑齐通道而安装依赖', '明确同意才启用并记录'):
+                self.assertFalse(stale in text, (path, stale))
+        self.assertIn('Playwright is the standing backup', read('SKILL.md'))
+
+    def test_issue27_fill_cache_and_excel_division(self):
+        contract = read('references/workbook-contract.md')
+        section = contract.split('## 填写缓存与 Excel 的分工')[1].split('\n## ')[0]
+        for needle in ('唯一的状态记录', '两边互不代写', '提交已点击.md', '当场**改 `已提交`', '方案哈希', '删掉 JSON'):
+            self.assertIn(needle, section)
+        fill = read('references/browser-application.md').split('## 批量填写与填写缓存')[1].split('\n## ')[0]
+        for needle in ('form_input', 'playwright_fill.py', '仍然禁止', '派发合成事件', '值来源: 档案', '续跑时先看', '复核'):
+            self.assertIn(needle, fill)
+        self.assertIn('填写方案.json', read('references/control-preflight.md'))
+        self.assertNotIn('不要先把所有input一律赋值', read('references/control-preflight.md'))
+
+    def test_issue27_interruption_rules(self):
+        contract = read('references/stage-contract.md')
+        resume = contract.split('### 7a.')[1].split('\n## ')[0]
+        for needle in ('提交已点击.md', '不再发提交通行证', '24 小时', '7 天', '填写进度'):
+            self.assertIn(needle, resume)
+        self.assertIn('提交已点击.md', read('hooks/README.md'))
+        self.assertIn('提交已点击.md', read('references/daily-batch.md'))
+
     def test_versions_bumped(self):
-        self.assertTrue('version: "1.14.0"' in read('SKILL.md'))
+        self.assertTrue('version: "1.15.0"' in read('SKILL.md'))
 
 
 if __name__ == '__main__':

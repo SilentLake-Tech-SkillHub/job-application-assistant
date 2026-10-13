@@ -6,7 +6,9 @@ ledger. The run uses the synthetic recruiting site in fixtures/synthetic_ats.py 
 browser (in-app lane), the real stage gates, the PreToolUse submit guard and tracker readback.
 
 Batch: 合成公司 (two roles on the synthetic site, limit 2) and 合成公司B (campus page unreachable),
-补位规则 留空 (keep_gap). User decisions are simulated and stored as 确认记录 files. A pass proves the
+补位规则 留空 (keep_gap). The Chrome extension is "missing", so 合成公司 runs in the Playwright backup lane:
+its forms are filled by scripts/playwright_fill.py from a 填写方案.json built from the control
+inventory, with one run interrupted and resumed from the cache. User decisions are simulated and stored as 确认记录 files. A pass proves the
 Skill's procedure and tooling fit together end to end, not that any live ATS behaves the same way.
 
   python3 test_e2e_full_flow.py [output_dir]
@@ -27,10 +29,12 @@ from playwright.sync_api import sync_playwright
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / 'fixtures'))
 from synthetic_ats import serve  # noqa: E402
-from workspace import Workspace  # noqa: E402
+from workspace import Workspace, today, now  # noqa: E402
 from stage_gate import run as gate  # noqa: E402
 from batch_check import Batch  # noqa: E402
 from workbook_state import Workbook  # noqa: E402
+import fill_plan  # noqa: E402
+from test_playwright_fill import plan_for  # noqa: E402
 
 A, B = '合成公司', '合成公司B'
 ENV = dict(os.environ, PYTHONIOENCODING='utf-8')
@@ -47,6 +51,9 @@ class FullFlow(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.w = Workspace(cls.tmp.name, batch='e2e', companies=((A, '全部'), (B, '全部')),
                           targets='全部=无', rule='留空', basis='有合格岗位的公司')
+        cls.w.write_query('全部=无', '留空', '有合格岗位的公司',
+                          能力预检='内置浏览器: 可用\nChrome: 不可用\ncomputer use: 未检查\n系统脚本: 不适用\nPlaywright: 可用')
+        cls.profile = cls.w.root / '.浏览器配置' / 'playwright'
         cls.base, cls.site, cls.server = serve()
         cls.pw = sync_playwright().start()
         cls.browser = cls.pw.chromium.launch(headless=True, executable_path=os.environ.get('CHROME_EXECUTABLE') or None)
@@ -146,8 +153,8 @@ class FullFlow(unittest.TestCase):
         rule = page.locator('#rule').inner_text()
         self.assertIn('最多投递 2 个岗位', rule)
         self.shot(a_dir, '规则.png')
-        self.note(a_dir, '数量规则.md', ['状态: 已核实', '上限: 2', '来源: ' + self.base + '/center', '核验日期: 2026-10-13', '原文: ' + rule])
-        self.note(a_dir, '通道.md', ['通道: 内置浏览器'])
+        self.note(a_dir, '数量规则.md', ['状态: 已核实', '上限: 2', '来源: ' + self.base + '/center', '核验日期: ' + today(), '原文: ' + rule])
+        self.note(a_dir, '通道.md', ['通道: Playwright', '说明: Chrome 插件不可用，Playwright 作备用通道'])
         self.urls = {}
         for job in ('101', '102'):
             page.goto(self.base + '/jobs/' + job)
@@ -166,38 +173,69 @@ class FullFlow(unittest.TestCase):
         self.note(a_dir, '次序确认.md', ['决定: 不变', '依据: ' + w.say('order', '合成公司两个岗位次序不变')])
 
     def m2_prepare(self):
+        self.login_profile()
         for job, slot in (('101', '合成智能事业群'), ('102', '合成数据平台部')):
             url = self.urls[job]['url']
             self.gate('prepare', url)
             self.fill(job, slot)
             self.gate('review', url, allowed=False)  # no review package yet
 
+    def login_profile(self):
+        """The user logs in once in the Playwright profile; the executor reuses that login."""
+        ctx = self.pw.chromium.launch_persistent_context(str(self.profile), headless=True, executable_path=os.environ.get('CHROME_EXECUTABLE') or None)
+        page = ctx.new_page(); page.goto(self.base + '/login')
+        page.get_by_role('button', name='登录').click(); page.wait_for_url(self.base + '/center')
+        ctx.close()
+
+    def executor(self, plan_path, *extra):
+        result = subprocess.run([sys.executable, str(HERE / 'playwright_fill.py'), '--plan', str(plan_path), '--headless',
+                                 '--profile-dir', str(self.profile), '--timeout', '4000', *extra],
+                                capture_output=True, text=True, encoding='utf-8', env=ENV)
+        self.log.append({'executor': Path(plan_path).parent.name, 'exit': result.returncode})
+        return result.returncode, json.loads(result.stdout)
+
     def fill(self, job, slot):
         page, w = self.page, self.w
-        folder = w.role_folder(A, self.urls[job]['url'])
+        url = self.urls[job]['url']
+        folder = w.role_folder(A, url)
         page.goto(self.base + '/apply/' + job); page.wait_for_selector('#save')
         page.add_script_tag(path=str(HERE / 'inspect_form_controls.js'))
         inventory = page.evaluate('inspectApplicationForm(document)')
         self.assertTrue({'file', 'select', 'checkbox'} <= {c['kind'] for c in inventory['fields']})
         self.note(folder, '控件盘点.md', ['控件数: %d' % inventory['count']] + ['- %s | %s' % (c['label'], c['kind']) for c in inventory['fields']])
-        page.locator('input[type=file]').set_input_files(str(w.root / '简历.pdf'))
-        page.wait_for_function("document.querySelector('#resume-name').textContent.includes('简历')")
-        page.wait_for_timeout(150)
-        self.assertEqual(page.get_by_label('姓名 *').input_value(), '合成解析错误名')  # parse pollution corrected below
-        page.get_by_label('姓名 *').fill('合成候选人')
-        page.get_by_role('combobox', name='学历 *').click(); page.get_by_role('option', name='硕士').click()
-        page.get_by_label('毕业时间 *').click(); page.get_by_role('button', name='2026-06').click()
-        page.get_by_label('项目经历 *').fill('合成项目：负责 AI 产品需求、方案与迭代，指标提升 20%。')
-        page.get_by_label('第一意向部门 *').select_option(slot)  # user-choice slot, confirmed in 目标确认
-        page.get_by_label('我已阅读并同意《合成隐私条款》 *').check()  # terms-consent off: user step (simulated)
-        page.get_by_role('button', name='保存草稿').click()
-        page.wait_for_function("document.querySelector('#status').textContent==='草稿已保存'")
-        filled = self.readback()
-        self.shot(folder, '填写.png')
-        self.note(folder, '填写读回.md', ['%s: %s' % kv for kv in filled.items()])
+        # Skeleton from the inventory, then the Agent fills in values and the real click paths.
+        plan = fill_plan.from_inventory(inventory, 'e2e', A, url, 'Playwright')
+        plan['表单链接'] = self.base + '/apply/' + job
+        known = {f['标签']: f for f in plan_for(self.base, job)['字段']}
+        known['第一意向部门 *']['值'] = slot  # user-choice slot, confirmed later in 目标确认
+        for f in plan['字段']:
+            if f['标签'] in known:
+                keep, label = f['序号'], f['标签']
+                f.clear(); f.update(known[label]); f['序号'] = keep
+            elif not f.get('必填'):
+                f['状态'] = '跳过'; f['备注'] = '选填，本次不填'
+        plan['保存步骤'] = [{'点击': {'role': 'button', 'name': '保存草稿'}}]
+        path = folder / fill_plan.PLAN_NAME
+        fill_plan.save(path, plan)
+        self.assertEqual(fill_plan.validate(plan, ready=True), [])
+        self.gate('review', url, allowed=False)  # cache exists but nothing read back yet
+        if job == '101':
+            code, out = self.executor(path, '--max-fields', '2')  # interrupted
+            self.assertEqual(code, 0, out)
+            cached = fill_plan.load(path)['字段']
+            done = sum(1 for f in cached if f['状态'] in fill_plan.DONE)
+            self.assertEqual(sum(1 for f in cached if f['状态'] == '已读回'), 2)
+            self.assertIn('%d/%d 已读回' % (done, len(cached)), Batch(w.book, 'e2e').report()['填写进度'].values())
+        code, out = self.executor(path)
+        self.assertEqual(code, 0, out)
+        self.assertIn('已点击保存', out['保存'])
+        fill_plan.export_readback(path)
         page.goto(self.base + '/apply/' + job); page.wait_for_selector('#save')
         reopened = self.readback()
-        self.assertEqual(reopened, filled)
+        self.assertEqual(reopened, {'姓名': '合成候选人', '学历': '硕士', '毕业时间': '2026-06',
+                                    '项目经历': '合成项目：负责 AI 产品需求、方案与迭代，指标提升 20%。', '第一意向': slot,
+                                    '条款': 'True', '附件': '简历.pdf'})
+        self.shot(folder, '草稿.png')
         self.note(folder, '草稿读回.md', ['%s: %s' % kv for kv in reopened.items()])
 
     def readback(self):
@@ -241,7 +279,7 @@ class FullFlow(unittest.TestCase):
             self.write_target(job, slot)
             self.gate('submit', info['url'], allowed=False)  # 提交前复核 missing
             page.goto(self.base + '/center')
-            self.note(folder, '提交前复核.md', ['账号: synthetic-user', '已投: ' + page.locator('#history').inner_text().replace('\n', ' '),
+            self.note(folder, '提交前复核.md', ['复核时间: ' + now(), '账号: synthetic-user', '已投: ' + page.locator('#history').inner_text().replace('\n', ' '),
                                             '审核包哈希: ' + sha(folder / '审核包.md'), '材料: 简历.pdf'])
             self.assertEqual(self.hook('点击“提交申请”'), 2)  # no pass yet: the platform hook blocks
             result = self.cli_gate('submit', info['url'])

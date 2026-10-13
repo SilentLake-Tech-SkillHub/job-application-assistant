@@ -161,7 +161,8 @@ def make_handler(state):
             parts = path.strip('/').split('/')
             body = self.rfile.read(int(self.headers.get('Content-Length') or 0)).decode('utf-8')
             if path == '/login':
-                return self.send(302, '', headers={'Location': '/center', 'Set-Cookie': 'session=synthetic; Path=/'})
+                # A persistent login cookie, as most ATS sites set, so a persistent browser profile keeps it.
+                return self.send(302, '', headers={'Location': '/center', 'Set-Cookie': 'session=synthetic; Path=/; Max-Age=86400'})
             if not self.logged_in():
                 return self.send(401, '{}', 'application/json')
             if parts[:2] == ['api', 'draft'] and len(parts) == 3:

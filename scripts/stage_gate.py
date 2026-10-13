@@ -10,7 +10,7 @@
 Reads only the Excel tracker and 投递证据/. Exit 0 allowed, 1 blocked, 2 unreadable input.
 Every stage also enforces tracker consistency: a scanned company must carry one of the five
 盘点状态 labels, and a receipt must be booked as 投递状态=已提交 (and vice versa).
-A passing submit gate issues 投递证据/门禁通行证.json for the PreToolUse hook.
+A passing submit gate issues 投递证据/门禁通行证.md for the PreToolUse hook.
 """
 import argparse
 import datetime
