@@ -151,6 +151,43 @@ class Executor(unittest.TestCase):
         self.assertIn('拒绝点击', field['备注'])
         self.assertEqual(self.site.history, [])
 
+    def test_5_keyboard_fallback_cascade_reset_privacy_and_page_check(self):
+        self.login_in_profile()
+        vault = self.root / '档案.md'
+        vault.write_text('| 字段 | 取值 |\n|---|---|\n| 手机号 | 13800000000 |\n', encoding='utf-8')
+        query = self.root / '投递证据' / 'pw' / '批次' / 'Query.md'
+        saved_query = query.read_text(encoding='utf-8')
+        plan = {'方案版本': 1, '批次': 'pw', '公司': '合成公司', '岗位链接': self.base + '/jobs/lab', '表单链接': self.base + '/lab', '通道': 'Playwright',
+                '字段': [
+                    {'序号': 1, '标签': '城市 *', '定位': {'label': '城市 *'}, '控件': '文本', '填法': '批量', '值': '合成市', '必填': True, '状态': '待填'},
+                    {'序号': 2, '标签': '省份 *', '定位': {'label': '省份 *'}, '控件': '原生下拉', '填法': '批量', '值': '合成省', '必填': True, '状态': '待填'},
+                    {'序号': 3, '标签': '昵称 *', '定位': {'label': '昵称 *'}, '控件': '文本', '填法': '批量', '值': 'synthetic-nick', '必填': True, '状态': '待填'},
+                    {'序号': 4, '标签': '手机号 *', '定位': {'label': '手机号 *'}, '控件': '文本', '填法': '批量', '值来源': '档案:手机号', '必填': True, '状态': '待填'}]}
+        path = self.write_plan('lab', plan)
+        # privacy-info-fill is not enabled in this batch: the phone field goes to the user.
+        code, out = self.run_exec(path, '--vault', str(vault))
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out['需用户'], ['手机号 *'])
+        cached = fill_plan.load(path)
+        self.assertEqual([f['状态'] for f in cached['字段']], ['已读回', '已读回', '已读回', '需用户'])
+        self.assertIn('privacy-info-fill', cached['字段'][3]['备注'])
+        self.assertIn('城市 *', out['续跑复核重填'])  # the province change cleared the city; the final recheck refilled it
+        self.assertEqual(out['页面校验'], '未做（还有字段未读回）')
+        # Enable privacy-info-fill: the phone is filled at run time and never written anywhere.
+        query.write_text(saved_query + '\n## 自动化授权\n已开启: privacy-info-fill\n', encoding='utf-8')
+        try:
+            code, out = self.run_exec(path, '--vault', str(vault))
+        finally:
+            query.write_text(saved_query, encoding='utf-8')
+        self.assertEqual(code, 0, out)
+        final = fill_plan.load(path)
+        self.assertTrue(all(f['状态'] == '已读回' for f in final['字段']), final)
+        self.assertEqual(final['字段'][3]['读回'], '一致')
+        self.assertEqual(final['页面校验']['结果'], '通过')
+        self.assertTrue((path.parent / '填写截图.png').is_file())
+        self.assertNotIn('13800000000', path.read_text(encoding='utf-8') + json.dumps(out, ensure_ascii=False))
+        self.assertIn('页面校验: 通过', fill_plan.export_readback(path).read_text(encoding='utf-8'))
+
     def test_4_other_lanes_use_batch_actions_not_the_executor(self):
         plan = plan_for(self.base); plan['通道'] = 'Chrome'
         code, out = self.run_exec(self.write_plan('chrome', plan))

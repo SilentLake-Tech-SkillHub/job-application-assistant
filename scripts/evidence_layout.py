@@ -14,6 +14,7 @@ Layout under the application root (投递根目录):
 Records are Markdown with `键: 值` lines (full-width colon allowed) under `## 节` headings.
 State (盘点状态 / 投递状态 / 备注) lives only in the Excel tracker; 填写方案.json is a fill cache, not state.
 """
+import datetime
 import hashlib
 import re
 from pathlib import Path
@@ -106,6 +107,21 @@ def list_items(lines):
         if m and ('|' in m.group(1) or not KV.match(line)):
             items.append([part.strip() for part in m.group(1).split('|')])
     return items
+
+
+def parse_time(raw):
+    """ISO date or datetime → aware datetime (naive values are the machine's local time), or None."""
+    raw = str(raw or '').strip()
+    if not raw:
+        return None
+    try:
+        moment = datetime.datetime.fromisoformat(raw.replace('Z', '+00:00'))
+    except ValueError:
+        try:
+            moment = datetime.datetime.strptime(raw[:10], '%Y-%m-%d')
+        except ValueError:
+            return None
+    return moment if moment.tzinfo else moment.astimezone()
 
 
 def ref_exists(root, ref):

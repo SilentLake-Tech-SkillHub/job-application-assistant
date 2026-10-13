@@ -147,10 +147,15 @@ class Workspace:
         ]
         if done:
             fields[0]['读回'], fields[1]['读回'], fields[2]['读回'] = '合成候选人', '一致', '硕士'
+            for f in fields:
+                f['更新时间'] = now()
         plan = {'方案版本': 1, '批次': self.batch, '公司': company, '岗位链接': url, '通道': self.lane_of(company),
                 '生成时间': now(), '字段': fields}
         folder = self.role_folder(company, url)
         folder.mkdir(parents=True, exist_ok=True)
+        if done:
+            (folder / '填写截图.png').write_bytes(b'png')
+            plan['页面校验'] = {'结果': '通过', '时间': now(), '观察': (folder / '填写截图.png').relative_to(self.root).as_posix()}
         path = folder / fill_plan.PLAN_NAME
         path.write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding='utf-8')
         return path

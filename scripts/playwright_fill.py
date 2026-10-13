@@ -162,6 +162,15 @@ def fill_field(page, field, value, timeout):
         if control in ('文本', '多行文本'):
             loc.fill(str(value), timeout=timeout)
             loc.blur(timeout=timeout)
+            ok, got = poll(page, field, value, 1500)
+            if ok:
+                return ok, got
+            # fill() was not accepted (keyboard-driven widget): clear and type it key by key instead
+            loc.click(timeout=timeout)
+            loc.press('ControlOrMeta+a', timeout=timeout)
+            loc.press('Delete', timeout=timeout)
+            loc.press_sequentially(str(value), delay=20, timeout=timeout)
+            loc.blur(timeout=timeout)
         elif control == '原生下拉':
             loc.select_option(label=str(value), timeout=timeout)
         else:  # 复选 / 单选
@@ -174,6 +183,33 @@ def fill_field(page, field, value, timeout):
     return poll(page, field, value, max(timeout, 2000))
 
 
+ERROR_SELECTOR = ('[role="alert"], [aria-invalid="true"], .err, .error, .el-form-item__error, .ant-form-item-explain-error, '
+                  '.verify-tip-no-data, .invalid-feedback')
+
+
+def visible_errors(page):
+    """Read-only: texts of visible validation messages on the page."""
+    found = []
+    loc = page.locator(ERROR_SELECTOR)
+    for i in range(min(loc.count(), 50)):
+        item = loc.nth(i)
+        try:
+            text = item.inner_text(timeout=500).strip()
+            if item.is_visible() and (text or item.get_attribute('aria-invalid') == 'true'):
+                found.append(text[:60] or '字段标为无效')
+        except Exception:  # noqa: BLE001
+            pass
+    return found
+
+
+def redact(text, values):
+    text = str(text)
+    for v in values:
+        if isinstance(v, str) and len(v) >= 2:
+            text = text.replace(v, '***')
+    return text
+
+
 def recheck(page, plan, vault, root, save_to):
     """Resume safety: a field cached as 已读回 is trusted only if the page still shows it.
 
@@ -182,8 +218,8 @@ def recheck(page, plan, vault, root, save_to):
     """
     reset = []
     for field in plan['字段']:
-        if field.get('状态') != '已读回' or field.get('填法') == '用户':
-            continue
+        if field.get('状态') != '已读回' or fill_plan.blocked_reason(field, vault, root, plan.get('批次')):
+            continue  # user-filled fields are re-checked by the user's own readback, not refilled here
         value = fill_plan.resolve(field, vault, root, plan.get('批次'))
         try:
             ok, _ = poll(page, field, value, 1200)
@@ -193,8 +229,9 @@ def recheck(page, plan, vault, root, save_to):
             fill_plan.mark(plan, field['序号'], '待填')
             field['备注'] = '续跑复核：页面上已不是缓存的值（可能重载未保存），重新填写'
             reset.append(field['标签'])
-    if reset:
-        fill_plan.save(save_to, plan)
+        else:
+            field['更新时间'] = fill_plan.now()  # re-observed on the page just now
+    fill_plan.save(save_to, plan)
     return reset
 
 
@@ -211,6 +248,7 @@ def main(argv=None):
     parser.add_argument('--max-fields', type=int, default=0, help='本次最多处理几个字段（分段执行）')
     parser.add_argument('--no-save', action='store_true', help='不执行方案里的保存步骤')
     parser.add_argument('--timeout', type=int, default=8000)
+    parser.add_argument('--workbook', type=Path, help='追踪表：填写前核对岗位行唯一且仍为待投递（只读）')
     args = parser.parse_args(argv)
 
     def finish(code, **out):
@@ -230,6 +268,12 @@ def main(argv=None):
     if root is None:
         return finish(2, 通过=False, 错误=['找不到投递根目录（含 投递证据/ 的目录）'])
     vault = fill_plan.vault_values(args.vault) if args.vault else {}
+    if args.workbook:
+        bound = fill_plan.bind(plan, args.workbook)
+        if bound:
+            return finish(2, 通过=False, 错误=bound)
+    privacy = fill_plan.privacy_enabled(root, plan.get('批次'))
+    secrets = list(vault.values()) + [f.get('值') for f in plan['字段']]
     url = args.url or plan.get('表单链接') or plan['岗位链接']
     profile = args.profile_dir or (Path(root) / '.浏览器配置' / 'playwright')
 
@@ -282,24 +326,26 @@ def main(argv=None):
                         fill_plan.save(args.plan, plan)
                         continue
                     budget[0] -= 1
-                    value = fill_plan.resolve(field, vault, root, plan.get('批次'))
-                    if value is None:
+                    reason = fill_plan.blocked_reason(field, vault, root, plan.get('批次'), privacy)
+                    if reason:
                         fill_plan.mark(plan, field['序号'], '需用户')
-                        field['备注'] = '缺值：值来源 ' + str(field.get('值来源')) + ' 未找到，问用户后写进档案'
+                        field['备注'] = reason
                         fill_plan.save(args.plan, plan)
-                        waiting.append(field['标签'])
+                        if field['标签'] not in waiting:
+                            waiting.append(field['标签'])
                         continue
+                    value = fill_plan.resolve(field, vault, root, plan.get('批次'), privacy)
                     try:
                         ok, got = fill_field(page, field, value, args.timeout)
-                        fill_plan.mark(plan, field['序号'], '已读回' if ok else '不一致', str(got))
+                        fill_plan.mark(plan, field['序号'], '已读回' if ok else '不一致', str(got), vault=vault)
                         field.pop('备注', None) if ok else field.update({'备注': '读回与期望不一致：改用逐字输入或真实点击后重试'})
                     except Refused as exc:
-                        fill_plan.mark(plan, field['序号'], '不一致', '')
+                        fill_plan.mark(plan, field['序号'], '不一致', '', vault=vault)
                         field['备注'] = str(exc)
                         ok = False
                     except Exception as exc:  # noqa: BLE001 - keep going with the other fields
-                        fill_plan.mark(plan, field['序号'], '不一致', '')
-                        field['备注'] = '执行出错：' + type(exc).__name__ + ' ' + str(exc).splitlines()[0][:160]
+                        fill_plan.mark(plan, field['序号'], '不一致', '', vault=vault)
+                        field['备注'] = '执行出错：' + type(exc).__name__ + ' ' + redact(str(exc).splitlines()[0][:160], secrets + [value])
                         ok = False
                     fill_plan.save(args.plan, plan)  # progress survives an interruption
                     if ok:
@@ -316,18 +362,29 @@ def main(argv=None):
                     rechecked += again
                     fill_pending()
             left = fill_plan.pending(plan)
+            page_errors = visible_errors(page)
+            shot = Path(args.plan).parent / '填写截图.png'
+            page.screenshot(path=str(shot), full_page=True)
+            if not left:
+                try:
+                    observed = shot.resolve().relative_to(Path(root).resolve()).as_posix()
+                except ValueError:
+                    observed = str(shot)
+                fill_plan.page_check(plan, not page_errors, observed, root)
+                fill_plan.save(args.plan, plan)
             saved = None
             if plan.get('保存步骤') and not args.no_save and not [f for f in left if f.get('填法') != '用户']:
                 try:
                     run_steps(page, plan['保存步骤'], args.timeout)
                     saved = '已点击保存（重开表单逐字段读回后再写 草稿读回）'
                 except Exception as exc:  # noqa: BLE001
-                    saved = '保存失败：' + type(exc).__name__ + ' ' + str(exc).splitlines()[0][:160]
+                    saved = '保存失败：' + type(exc).__name__ + ' ' + redact(str(exc).splitlines()[0][:160], secrets)
         finally:
             if browser is None:
                 context.close()
     left = fill_plan.pending(plan)
-    out = {'通过': not failed, '续跑复核重填': rechecked, '本次已读回': done_now, '不一致': failed, '需用户': waiting,
+    out = {'通过': not failed, '页面校验': (plan.get('页面校验') or {}).get('结果', '未做（还有字段未读回）'),
+           '页面报错': page_errors, '续跑复核重填': rechecked, '本次已读回': done_now, '不一致': failed, '需用户': waiting,
            '未完成': [f['标签'] for f in left], '保存': saved, '方案': str(args.plan)}
     return finish(1 if failed else 0, **out)
 

@@ -20,8 +20,9 @@ from pathlib import Path
 
 from workbook_state import Workbook, INVENTORY_STATUSES, SCANNED_NO_ROLE, NOT_STARTED, canonical_url
 from evidence_layout import (EVIDENCE_DIR, batch_dir, company_dir, role_dir, find, parse, value, list_items,
-                             ref_exists, file_hash, safe_name)
+                             ref_exists, file_hash, safe_name, parse_time)
 import fill_plan
+import submit_pass
 
 QUERY_SECTIONS = ('入口', '硬范围', '偏好轴', '默认岗位次序', '公司清单', '目标与停止条件', '材料', '授权',
                   '执行方式', '自动化授权', '能力预检')
@@ -50,19 +51,6 @@ COUNT_RULE_DAYS = 7     # a verified 数量规则 older than this is re-verified
 LANE_NAME = {'in_app': '内置浏览器', 'chrome': 'Chrome', 'playwright': 'Playwright'}
 
 
-def parse_time(raw):
-    """ISO date or datetime (naive values are local time) → aware datetime, or None."""
-    raw = (raw or '').strip()
-    if not raw:
-        return None
-    try:
-        moment = datetime.datetime.fromisoformat(raw.replace('Z', '+00:00'))
-    except ValueError:
-        try:
-            moment = datetime.datetime.strptime(raw[:10], '%Y-%m-%d')
-        except ValueError:
-            return None
-    return moment if moment.tzinfo else moment.astimezone()
 
 
 def word(key, raw):
@@ -179,6 +167,8 @@ class Batch:
             for key in CHANNEL_KEYS:
                 if value(q, key, '能力预检') not in CHANNEL_STATES:
                     errors.append('能力预检节需要「' + key + ': 可用/不可用/不适用/未检查」')
+            if value(q, 'Chrome', '能力预检') == '不可用' and value(q, 'Playwright', '能力预检') == '未检查':
+                errors.append('Chrome 插件不可用：必须检查常备的 Playwright 备用通道（不需要另行同意），写 可用/不可用')
         return errors
 
     def automation_errors(self):
@@ -287,6 +277,8 @@ class Batch:
         lane = word('通道', value(lane_kv, '通道'))
         if not lane:
             errors.append(self.rel(lane_file) + ' 需要「通道: 内置浏览器 / Chrome / Playwright」')
+        elif lane in ('in_app', 'chrome') and value(self.query, LANE_NAME[lane], '能力预检') != '可用':
+            errors.append(company + ' 分到「' + LANE_NAME[lane] + '」通道，但 Query 能力预检里它不是「可用」：按实际可用能力分配')
         elif lane == 'playwright':
             if value(self.query, 'Playwright', '能力预检') != '可用':
                 errors.append(company + ' 走 Playwright 通道，但 Query 能力预检里 Playwright 不是「可用」（缺依赖时告诉用户怎么装，由用户调整环境）')
@@ -302,9 +294,38 @@ class Batch:
         return {k: f(k) for k in ('岗位包', '资格核对', '尝试指令', '用户选岗', '填写方案', '填写读回', '草稿读回', '无草稿说明',
                                   '审核包', '批准', '提交前复核', '目标确认', '回执', '结果不确定', '提交已点击', '追踪表读回')}
 
-    @staticmethod
-    def clicked_without_result(files):
-        return bool(files['提交已点击']) and not files['回执'] and not files['结果不确定']
+    def clicked_without_result(self, files_or_folder):
+        folder = files_or_folder if isinstance(files_or_folder, Path) else (
+            files_or_folder['提交已点击'][0].parent if files_or_folder['提交已点击'] else None)
+        return bool(folder) and submit_pass.unresolved_attempt(self.root, folder)
+
+    def other_batch_results(self, folder, row):
+        """A receipt or uncertain result for the same link in ANY batch blocks a new application."""
+        errors = []
+        base = self.root / EVIDENCE_DIR
+        for other in base.glob('*/岗位/' + folder.name) if base.is_dir() else []:
+            if other.resolve() == Path(folder).resolve():
+                continue
+            done = submit_pass.role_done(other)
+            if done == 'receipt recorded' and row.get('投递状态') != '已提交':
+                errors.append(self.rel(other) + ' 已有回执，但 Excel 这一行仍是「%s」：先入账为已提交，不能重投' % row.get('投递状态'))
+            elif done == 'result uncertain':
+                errors.append(self.rel(other) + ' 记录了结果不确定：先在申请中心核实，不能重投')
+        return errors
+
+    def attempt_errors(self, url=None):
+        """Unreconciled submit clicks in ANY batch (a new batch cannot bypass an old marker)."""
+        errors = []
+        target = canonical_url(url) if url else None
+        for folder, marker_url, unresolved in submit_pass.attempts(self.root):
+            if not marker_url:
+                errors.append(self.rel(folder) + '/提交已点击.md 里的岗位链接损坏：先查申请中心核实这次点击，不能忽略')
+                continue
+            if unresolved and (target is None or marker_url == target):
+                reasons = submit_pass.check_errors(self.root, folder)
+                errors.append(self.rel(folder) + ' 已点击提交但结果未核实：先查申请中心——查到就存回执入账，查不清写 结果不确定.md，'
+                              '确认未提交写 提交核查.md 后才能重试（' + reasons[0] + '）')
+        return errors
 
     def role_gate(self, url, stage):
         """Errors that block moving this role to stage ∈ prepare/review/submit."""
@@ -319,8 +340,9 @@ class Batch:
         errors = []
         if company not in self.scope:
             errors.append(company + ' 不在本批 Query 的公司清单里')
-        if self.clicked_without_result(files):
-            return errors + [here + ' 已点击过提交，但没有回执也没有 结果不确定.md：先查申请中心，存回执或写结果不确定，不能再次进入 ' + stage]
+        clicked = self.attempt_errors(url) + self.other_batch_results(folder, row)
+        if clicked:
+            return errors + clicked + ['不能再次进入 ' + stage + '：同一岗位链接有未核实的提交点击或其他批次的结果记录']
         if row.get('投递状态') == '已提交' or files['回执'] or files['结果不确定']:
             return errors + ['这个岗位已提交或结果不确定，不能再次进入 ' + stage + '（先查申请中心）']
         if row.get('投递状态') != '待投递':
@@ -428,7 +450,8 @@ class Batch:
             here = self.rel(folder)
             status = row.get('投递状态')
             if self.clicked_without_result(files):
-                errors.append(here + ' 已点击提交但没有回执也没有 结果不确定.md：先查申请中心，存回执（并把投递状态改为已提交）或写 结果不确定.md')
+                errors.append(here + ' 已点击提交但没有回执也没有 结果不确定.md：先查申请中心，存回执（并把投递状态改为已提交）、'
+                              '写 结果不确定.md，或确认未提交后写 提交核查.md')
             if files['填写方案']:
                 errors.extend(here + '/' + e for e in fill_plan.gate_errors(
                     files['填写方案'][0], files['填写读回'], self.batch_id, row, self.lane(row['公司']), need_complete=False))
@@ -468,10 +491,12 @@ class Batch:
             files = self.role_files(f)
             if files['填写方案'] and not files['回执']:
                 try:
-                    fields = fill_plan.load(files['填写方案'][0]).get('字段') or []
+                    fields = fill_plan.load(files['填写方案'][0]).get('字段')
+                    if not isinstance(fields, list):
+                        raise ValueError('字段 is not a list')
                     done = sum(1 for x in fields if isinstance(x, dict) and x.get('状态') in fill_plan.DONE)
                     filling[self.rel(f)] = '%d/%d 已读回' % (done, len(fields))
-                except (OSError, ValueError, AttributeError):
+                except (OSError, ValueError, AttributeError, TypeError):
                     filling[self.rel(f)] = '填写方案无法解析'
         return {
             '批次': self.batch_id,

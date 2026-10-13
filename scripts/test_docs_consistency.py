@@ -168,6 +168,23 @@ class StructureTexts(unittest.TestCase):
         self.assertIn('提交已点击.md', read('hooks/README.md'))
         self.assertIn('提交已点击.md', read('references/daily-batch.md'))
 
+    def test_profile_from_resume_and_write_back(self):
+        vault = read('skills/personal-info-vault/SKILL.md')
+        for needle in ('profile_vault.py init', '简历文本.md', '省 token', 'profile_vault.py add', 'vault-sync', '不覆盖'):
+            self.assertIn(needle, vault)
+        template = read('skills/personal-info-vault/assets/profile-template.md')
+        for needle in ('## 简历基础信息', '简历哈希:', '## 网申补充信息', '| 手机号 |', '| 邮箱 |'):
+            self.assertIn(needle, template)
+        self.assertIn('profile_vault.py add', read('skills/privacy-info-fill/SKILL.md'))
+
+    def test_codex_submit_protections_documented(self):
+        contract = read('references/stage-contract.md')
+        for needle in ('提交核查.md', '只放行一次首次提交', '加锁', '新批次'):
+            self.assertIn(needle, contract)
+        fill = read('references/browser-application.md').split('## 批量填写与填写缓存')[1].split('\n## ')[0]
+        for needle in ('page-check', '15 分钟', 'privacy-info-fill', '--workbook', '逐字输入'):
+            self.assertIn(needle, fill)
+
     def test_versions_bumped(self):
         self.assertTrue('version: "1.15.0"' in read('SKILL.md'))
 

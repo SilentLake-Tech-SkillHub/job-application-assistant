@@ -21,7 +21,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 ENV = dict(os.environ, PYTHONIOENCODING='utf-8', PYTHONDONTWRITEBYTECODE='1')
 
-UNIT = ['test_batch_check.py', 'test_fill_plan.py', 'test_docs_consistency.py', 'test_tracker_readback.py', 'test_hooks.py']
+UNIT = ['test_batch_check.py', 'test_fill_plan.py', 'test_profile_vault.py', 'test_docs_consistency.py', 'test_tracker_readback.py', 'test_hooks.py']
 
 
 def node_env():

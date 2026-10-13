@@ -85,6 +85,21 @@ def submit_like(tool_name, tool_input):
     return False
 
 
+CONFIRM_WORDS = re.compile(r'(确认投递|确认申请|确认提交|我已知晓|弹窗|对话框|confirm(?:ation)?\b)', re.I)
+
+
+def submit_actions(tool_name, tool_input):
+    """One entry per submit-like sub-action (a browser_batch can hold several): True = confirmation dialog."""
+    if isinstance(tool_input, str):
+        try:
+            tool_input = json.loads(tool_input)
+        except ValueError:
+            tool_input = {'text': tool_input}
+    for name, data in actions(tool_name, tool_input):
+        if submit_like(tool_name, {'actions': [{'name': name, 'input': data}]}):
+            yield bool(CONFIRM_WORDS.search(' '.join(strings(data))))
+
+
 def find_root(start):
     here = Path(start).resolve()
     for candidate in [here, *here.parents]:
@@ -123,13 +138,16 @@ def main(raw):
         if root is None:
             return 0  # not an application workspace
         from submit_pass import consume_submit_click
-        allowed, message = consume_submit_click(root)
+        messages = []
+        for confirmation in list(submit_actions(tool_name, tool_input)) or [False]:
+            allowed, message = consume_submit_click(root, confirmation=confirmation)
+            if not allowed:
+                return block(message)
+            messages.append(message)
     except Exception as exc:  # noqa: BLE001
         return block('提交通行证检查失败（' + type(exc).__name__ + '）')
-    if allowed:
-        sys.stdout.write('[job-application-assistant] ' + message + '\n')
-        return 0
-    return block(message)
+    sys.stdout.write('[job-application-assistant] ' + '; '.join(messages) + '\n')
+    return 0
 
 
 if __name__ == '__main__':

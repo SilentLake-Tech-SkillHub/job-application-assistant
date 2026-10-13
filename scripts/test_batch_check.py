@@ -355,12 +355,64 @@ class ClickMarkerAndFreshnessTests(Base):
         self.assertTrue((folder / '提交已点击.md').is_file())
         result = gate(self.w.book, 'b1', 'submit', U1)
         self.assertFalse(result['允许'])
-        self.assertTrue(has(result['错误'], '已点击过提交'))
+        self.assertTrue(has(result['错误'], '已点击提交但结果未核实'))
         self.assertNotIn('提交通行证', result)
         self.assertTrue(has(gate(self.w.book, 'b1', 'closeout')['错误'], '已点击提交但没有回执'))
+        self.assertTrue(has(gate(self.w.book, 'b1', 'query')['错误'], '已点击提交但结果未核实'))
         (folder / '结果不确定.md').write_text('申请中心暂未显示\n', encoding='utf-8')
         self.assertFalse(has(self.errors(), '已点击提交但没有回执'))
         self.assertTrue(has(gate(self.w.book, 'b1', 'submit', U1)['错误'], '已提交或结果不确定'))
+
+    def test_new_batch_cannot_bypass_an_old_click_on_the_same_link(self):
+        self.ready(); self.w.role_prepared(A, U1); self.w.role_approved(A, U1)
+        self.assertTrue(gate(self.w.book, 'b1', 'submit', U1)['允许'])
+        from submit_pass import consume_submit_click
+        self.assertTrue(consume_submit_click(self.w.root)[0])
+        w2 = Workspace.__new__(Workspace)  # same application root, a fresh batch b2
+        w2.__dict__.update(self.w.__dict__, batch='b2', bdir=self.w.root / '投递证据' / 'b2')
+        (w2.bdir / '批次').mkdir(parents=True)
+        w2.write_query('大厂=1, 银行=1', '补位', '有合格岗位的公司')
+        w2.company_ready(A); w2.role_ready(A, U1)
+        errors = gate(self.w.book, 'b2', 'prepare', U1)['错误']
+        self.assertTrue(has(errors, '已点击提交但结果未核实'), errors)
+        self.assertTrue(has(gate(self.w.book, 'b2', 'query')['错误'], 'b1/岗位'))
+
+    def test_other_batch_receipt_or_uncertain_blocks_and_corrupt_marker_is_flagged(self):
+        self.ready()
+        other = self.w.root / '投递证据' / 'b0' / '岗位' / self.w.role_folder(A, U1).name
+        other.mkdir(parents=True)
+        (other / '回执.png').write_bytes(b'png')
+        errors = gate(self.w.book, 'b1', 'prepare', U1)['错误']
+        self.assertTrue(has(errors, '已有回执，但 Excel 这一行仍是「待投递」'), errors)
+        (other / '回执.png').unlink(); (other / '结果不确定.md').write_text('x', encoding='utf-8')
+        self.assertTrue(has(gate(self.w.book, 'b1', 'prepare', U1)['错误'], '记录了结果不确定'))
+        (other / '结果不确定.md').unlink()
+        (other / '提交已点击.md').write_text('岗位链接: \n', encoding='utf-8')
+        self.assertTrue(has(gate(self.w.book, 'b1', 'query')['错误'], '岗位链接损坏'))
+
+    def test_lane_must_be_available_and_playwright_checked_when_chrome_missing(self):
+        self.ready()
+        self.w.write_query('大厂=1, 银行=1', '补位', '有合格岗位的公司',
+                           能力预检='内置浏览器: 不可用\nChrome: 不可用\ncomputer use: 未检查\n系统脚本: 不适用\nPlaywright: 未检查')
+        self.assertTrue(has(gate(self.w.book, 'b1', 'query')['错误'], '必须检查常备的 Playwright'))
+        self.assertTrue(has(gate(self.w.book, 'b1', 'prepare', U1)['错误'], '分到「内置浏览器」通道'))
+
+    def test_application_center_check_allows_a_retry(self):
+        import hashlib, datetime as dt
+        self.ready(); self.w.role_prepared(A, U1); self.w.role_approved(A, U1)
+        gate(self.w.book, 'b1', 'submit', U1)
+        from submit_pass import consume_submit_click
+        consume_submit_click(self.w.root)
+        folder = self.w.role_folder(A, U1)
+        (folder / '申请中心.png').write_bytes(b'png')
+        (folder / '提交核查.md').write_text(
+            '标记哈希: %s\n结论: 未提交\n核验时间: %s\n来源: https://example.test/center\n证据: %s\n' % (
+                hashlib.sha256((folder / '提交已点击.md').read_bytes()).hexdigest(),
+                dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds'),
+                (folder / '申请中心.png').relative_to(self.w.root).as_posix()), encoding='utf-8')
+        result = gate(self.w.book, 'b1', 'submit', U1)
+        self.assertTrue(result['允许'], result['错误'])
+        self.assertIn('提交通行证', result)
 
     def test_recheck_older_than_a_day_blocks_submit(self):
         self.ready(); self.w.role_prepared(A, U1); folder = self.w.role_approved(A, U1)
