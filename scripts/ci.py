@@ -21,8 +21,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 ENV = dict(os.environ, PYTHONIOENCODING='utf-8', PYTHONDONTWRITEBYTECODE='1')
 
-UNIT = ['test_preference_contract.py', 'test_validate_batch.py', 'test_ledger_checks.py',
-        'test_docs_consistency.py', 'test_tracker_readback.py', 'test_hooks.py']
+UNIT = ['test_batch_check.py', 'test_docs_consistency.py', 'test_tracker_readback.py', 'test_hooks.py']
 
 
 def node_env():
@@ -37,7 +36,7 @@ def stages(skip_browser):
     py = sys.executable
     plan = {
         'static': [[py, str(ROOT / 'docs' / 'validation' / 'check_package.py'), str(ROOT)],
-                   [py, '-m', 'py_compile', *[str(p) for p in [*HERE.glob('*.py'), *(ROOT / 'hooks').glob('*.py')]]]],
+                   [py, '-m', 'py_compile', *[str(p) for p in [*HERE.glob('*.py'), *(HERE / 'fixtures').glob('*.py'), *(ROOT / 'hooks').glob('*.py'), *ROOT.glob('skills/*/scripts/*.py')]]]],
         'unit': [[py, str(HERE / t)] for t in UNIT],
         'smoke': [[py, str(HERE / 'smoke_test.py')]],
         'browser': [['node', str(HERE / 'test_inspect_form_controls.cjs')],

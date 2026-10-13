@@ -57,14 +57,13 @@ for p in root.rglob('*.md'):
 scripts = list(root.rglob('*.py'))
 for p in scripts:
     ast.parse(p.read_text(encoding='utf-8'), filename=str(p))
-validators = [p for p in scripts if p.name in {'validate_batch.py', 'validate_research_progress.py', 'validate_assignments.py'}]
+validators = [p for p in scripts if p.name in {'batch_check.py', 'stage_gate.py', 'tracker_readback.py', 'validate_assignments.py'}]
 with tempfile.TemporaryDirectory() as temp:
-    invalid = Path(temp, 'invalid.json'); invalid.write_text('{}', encoding='utf-8')
-    for p in validators:
-        result = subprocess.run([sys.executable, str(p), str(invalid)], cwd=temp, capture_output=True, text=True,
+    for p in validators:  # each CLI loads from another cwd and answers --help
+        result = subprocess.run([sys.executable, str(p), '--help'], cwd=temp, capture_output=True, text=True,
                                 encoding='utf-8', env=dict(os.environ, PYTHONIOENCODING='utf-8'))
-        assert result.returncode == 1 and not result.stderr, (p, result.stdout, result.stderr)
-        json.loads(result.stdout)  # Independent CLI import/loading and controlled invalid-data failure.
+        assert result.returncode == 0 and not result.stderr, (p, result.stdout, result.stderr)
+assert not list(root.rglob('*.json')) or all('reports/' in p.as_posix() for p in root.rglob('*.json')), 'no JSON ledgers in the package'
 print(json.dumps({'passed': True, 'skill_entrypoints': len(skills), 'local_links': links, 'anchors_checked': anchored,
                   'python_sources': len(scripts), 'validators_loaded': len(validators),
                   'scope': 'complete copied package; static metadata/references and CLI loading, no platform registration or live ATS'}, ensure_ascii=False))

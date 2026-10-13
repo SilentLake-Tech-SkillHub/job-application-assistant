@@ -43,7 +43,7 @@ class ConflictTexts(unittest.TestCase):
 
     def test_c4_terms_mode_asked_in_query(self):
         terms = read('skills/terms-consent/SKILL.md')
-        self.assertIn('Query', terms); self.assertIn('terms_mode', terms)
+        self.assertTrue('Query' in terms and '条款方式:' in terms)
         self.assertNotIn('在首次遇到条款前，先问', terms)
 
     def test_c5_field_classification_table(self):
@@ -119,15 +119,28 @@ class StructureTexts(unittest.TestCase):
     def test_strict_evidence_and_hook_documented(self):
         contract = read('references/stage-contract.md')
         self.assertIn('## 10a. 严格证据模式与 `投递证据/`', contract)
-        self.assertIn('门禁通行证.json', contract)
-        self.assertNotIn('--evidence-root', contract + read('references/daily-batch.md') + read('README.md'))
+        self.assertTrue('门禁通行证.md' in contract)
+        self.assertFalse('--evidence-root' in contract + read('references/daily-batch.md') + read('README.md'))
         hooks = read('hooks/README.md')
         for platform in ['Claude Code', 'Codex', 'Kimi Code', 'Z.ai', 'ZCode']:
             self.assertIn(platform, hooks)
         self.assertIn('投递证据/', read('SKILL.md'))
 
+    def test_issue25_tracker_is_the_only_state_record(self):
+        contract = read('references/workbook-contract.md')
+        for needle in ('workbook-schema.md', 'research-progress.md', '只要扫过', '唯一的状态记录'):
+            self.assertTrue(needle in contract, needle)
+        for label in ('已有相关岗位记录', '无当年校招计划', '无用户要求岗位', '无法访问校招页面', '尚未推进', '待投递', '已提交'):
+            self.assertTrue(label in contract, label)
+        skill = read('SKILL.md')
+        self.assertTrue('盘点状态' in skill and 'there is no JSON ledger' in skill)
+        for path, text in all_md().items():
+            for stale in ('private batch record', 'batch ledger', 'validate_batch.py', 'preference_contract.py', '<batch.json>', 'batch.json'):
+                self.assertFalse(stale in text, (path, stale))
+        self.assertFalse(list(ROOT.glob('scripts/*ledger*')) or list(ROOT.glob('scripts/validate_batch.py')))
+
     def test_versions_bumped(self):
-        self.assertIn('version: "1.13.0"', read('SKILL.md'))
+        self.assertTrue('version: "1.14.0"' in read('SKILL.md'))
 
 
 if __name__ == '__main__':

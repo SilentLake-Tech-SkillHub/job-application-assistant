@@ -1,15 +1,17 @@
 """Submit pass: the link between the submit gate and the platform hook.
 
-`stage_gate.py --stage submit` writes a pass after the gate allows one role. The PreToolUse hook
-(`hooks/application_guard.py`) lets a final-submit-like browser click through only while a pass is
-valid, and spends one click per use. A pass covers one role for a short window and a few clicks
-(the submit button plus the site's confirmation modal), then expires.
+`stage_gate.py --stage submit` writes 投递证据/门禁通行证.md after the gate allows one role. The
+PreToolUse hook (`hooks/application_guard.py`) lets a final-submit-like browser click through only
+while the pass is valid and spends one click per use. A pass covers one role for 10 minutes and
+3 clicks (the submit button plus the site's confirmation modal). It is void as soon as that role's
+evidence folder holds a receipt (回执.*) or an uncertain-result record (结果不确定.md).
 """
 import datetime
-import json
 from pathlib import Path
 
-PASS_FILE = '门禁通行证.json'
+from evidence_layout import parse, value
+
+PASS_FILE = '门禁通行证.md'
 EVIDENCE_DIR = '投递证据'
 VALID_MINUTES = 10
 CLICKS = 3
@@ -23,38 +25,42 @@ def pass_path(root):
     return Path(root) / EVIDENCE_DIR / PASS_FILE
 
 
-def issue_submit_pass(root, data, role_key, minutes=VALID_MINUTES, clicks=CLICKS, ledger=None):
-    role = next((r for r in data.get('roles') or [] if isinstance(r, dict) and r.get('role_key') == role_key), {})
-    batch = data.get('batch') if isinstance(data.get('batch'), dict) else {}
+def issue_submit_pass(root, batch_id, url, role_folder, minutes=VALID_MINUTES, clicks=CLICKS):
     issued = now()
-    record = {'batch_id': batch.get('batch_id'), 'role_key': role_key, 'title': role.get('title'),
-              'review_hash': role.get('review_hash'), 'issued_at': issued.isoformat(timespec='seconds'),
-              'expires_at': (issued + datetime.timedelta(minutes=minutes)).isoformat(timespec='seconds'),
-              'clicks_left': clicks, 'ledger': ledger_ref(root, ledger)}
+    folder = Path(role_folder).resolve()
+    base = Path(root).resolve()
+    record = {'批次': batch_id, '岗位链接': url,
+              '岗位目录': folder.relative_to(base).as_posix() if base in folder.parents else str(folder),
+              '签发': issued.isoformat(timespec='seconds'),
+              '到期': (issued + datetime.timedelta(minutes=minutes)).isoformat(timespec='seconds'),
+              '剩余点击': str(clicks), '使用记录': ''}
+    write(root, record)
+    return {'文件': EVIDENCE_DIR + '/' + PASS_FILE, '岗位目录': record['岗位目录'], '到期': record['到期'], '点击次数': clicks}
+
+
+def write(root, record):
     path = pass_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding='utf-8')
-    return {'file': EVIDENCE_DIR + '/' + PASS_FILE, 'role_key': role_key, 'expires_at': record['expires_at'], 'clicks': clicks}
+    body = '# 提交通行证\n\n' + ''.join(k + ': ' + str(v) + '\n' for k, v in record.items())
+    path.write_text(body, encoding='utf-8')
 
 
-def ledger_ref(root, ledger):
-    if ledger is None:
-        return None
-    ledger, base = Path(ledger).resolve(), Path(root).resolve()
-    return ledger.relative_to(base).as_posix() if base in ledger.parents else str(ledger)
+def read(root):
+    kv, _ = parse(pass_path(root))
+    return {k: value(kv, k) for k in ('批次', '岗位链接', '岗位目录', '签发', '到期', '剩余点击', '使用记录')}
 
 
-def role_already_done(root, record):
-    """A pass is void once its role is recorded as submitted or uncertain in the ledger it came from."""
-    if not record.get('ledger'):
-        return None
-    path = Path(record['ledger'])
-    path = path if path.is_absolute() else Path(root) / path
-    data = json.loads(path.read_text(encoding='utf-8'))
-    role = next((r for r in data.get('roles') or [] if isinstance(r, dict) and r.get('role_key') == record.get('role_key')), None)
-    if role is None:
-        return 'role not in ledger'
-    return role.get('stage') if role.get('stage') in {'submitted', 'uncertain'} else None
+def role_done(root, record):
+    folder = Path(record['岗位目录'])
+    folder = folder if folder.is_absolute() else Path(root) / folder
+    if not folder.is_dir():
+        return 'role folder missing'
+    names = {p.stem for p in folder.iterdir() if p.is_file()}
+    if '回执' in names:
+        return 'receipt recorded'
+    if '结果不确定' in names:
+        return 'result uncertain'
+    return None
 
 
 def consume_submit_click(root):
@@ -63,22 +69,21 @@ def consume_submit_click(root):
     if not path.is_file():
         return False, 'no submit pass'
     try:
-        record = json.loads(path.read_text(encoding='utf-8'))
-        expires = datetime.datetime.fromisoformat(record['expires_at'])
-        left = int(record.get('clicks_left', 0))
-    except (OSError, ValueError, KeyError, TypeError):
+        record = read(root)
+        expires = datetime.datetime.fromisoformat(record['到期'])
+        left = int(record['剩余点击'])
+        if not record['岗位目录']:
+            raise ValueError('no role folder')
+        done = role_done(root, record)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return False, 'submit pass unreadable'
     if expires <= now():
-        return False, 'submit pass expired at ' + record['expires_at']
+        return False, 'submit pass expired at ' + record['到期']
     if left <= 0:
-        return False, 'submit pass already used for ' + str(record.get('role_key'))
-    try:
-        done = role_already_done(root, record)
-    except (OSError, ValueError, TypeError, AttributeError):
-        return False, 'submit pass ledger unreadable'
+        return False, 'submit pass already used'
     if done:
-        return False, 'submit pass void: ' + str(record.get('role_key')) + ' is ' + done + ' in the ledger'
-    record['clicks_left'] = left - 1
-    record.setdefault('used_at', []).append(now().isoformat(timespec='seconds'))
-    path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding='utf-8')
-    return True, 'submit pass for ' + str(record.get('role_key')) + ' (' + str(left - 1) + ' clicks left)'
+        return False, 'submit pass void: ' + done + ' for ' + str(record.get('岗位目录'))
+    record['剩余点击'] = str(left - 1)
+    record['使用记录'] = (record['使用记录'] + ' ' + now().isoformat(timespec='seconds')).strip()
+    write(root, record)
+    return True, 'submit pass for ' + str(record.get('岗位目录')) + ' (' + str(left - 1) + ' clicks left)'

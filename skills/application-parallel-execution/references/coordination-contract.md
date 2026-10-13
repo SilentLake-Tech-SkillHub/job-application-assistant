@@ -1,30 +1,38 @@
-# Private application coordination record
+# 并行分工记录：并行分工.md
 
-Use the [parent batch record](../../../references/daily-batch.md) for scope, quota and role stages. This companion manifest accepts:
+多个 AI 平行准备时，分工写在 `投递证据/<批次>/并行分工.md`。状态仍只在岗位追踪表（`盘点状态` / `投递状态`），过程证据仍在各公司和岗位目录（[父 Skill 目录约定](../../../references/daily-batch.md)）。没有 JSON manifest。
 
-| Field | Meaning |
-|---|---|
-| workflow | `application` |
-| batch_id / query_version | Confirmed private batch and scope version |
-| mode / mode_approval_ref | `single` or `parallel`, with this application's user-choice evidence |
-| execution_channel | `platform` or `manual_handoff` |
-| participants / coordinator | Distinct participant ID strings, including the coordinator |
-| output_roots | Non-overlapping relative output directories by participant |
-| source_hash / assignment_version | Current SHA256 source snapshot and positive allocation version |
-| assignments / roles | Exclusive account allocations and optional role-stage snapshot |
+```markdown
+批次: <批次>
+执行方式: 多个AI                     # 或 一个AI
+执行渠道: 平台子代理                 # 或 用户转交
+协调者: <参与者>
+分工版本: 1
+依据: 投递证据/<批次>/确认记录/分工确认.md
 
-Each assignment has `assignment_id`, `company_key`, `recruiting_entity`, `operation_scope` (canonical ATS/account/quota alias, never credentials or raw personal identifiers), `owner` and `output_dir` inside that owner's root. Aliases sharing history or quota use one assignment. Optional `handoff` requires `from_owner`, `to_owner`, `stopped_ref`, `accepted_ref`; new owner matches `owner`, both identities are participants and acknowledgement evidence refers to the current allocation version. A manifest is not a lock; verify old-owner stopping before a new owner operates.
+## 分工
+| 公司 | 招聘主体 | 账号范围 | 负责人 | 输出目录 |
+|---|---|---|---|---|
+| 公司A | 主体A | ATS-A | agent-1 | 投递证据/<批次>/输出/agent-1/公司A |
 
-An optional role snapshot has `role_key`, `assignment_id`, `owner`, `direct_url`, `stage`, `material_id`, `review_hash`, `approved_review_hash`, `approval_ref` and `receipt_ref` as applicable. Use the parent stage vocabulary. Prepared or later forms require material identity; reviewed/clicked/submitted forms require the current review Hash. Clicked/submitted forms require approval evidence for that exact Hash. Submitted requires official receipt evidence; uncertain cannot be marked as submitted in the tracker. Before resuming an uncertain record, inspect actual application history regardless of a validator result. References must identify protected evidence; the validator cannot authenticate them.
+## 交接
+| 公司 | 原负责人 | 新负责人 | 停止证据 | 接收证据 |
+|---|---|---|---|---|
+```
 
-Use sanitized reference IDs instead of contact details, form personal answers, credential/OTP/cookie or identity-document contents. The companion manifest does not replace the parent's quota ledger or browser checks. A received delta carries the same `batch_id`, `query_version`, `assignment_version`, owner and assignment ID; its role/review/material/approval lineage must match current records. Reject stale deltas pending reconciliation; never rewrite their version to bypass it. Tracker completion requires serial coordinator merge and saved readback, not merely receipt of a delta.
+规则（`scripts/validate_assignments.py <并行分工.md>` 结构检查）：
 
-## Allocation decision evidence
+- 同一公司、同一招聘主体、同一账号范围（共享申请历史或名额的 ATS / 账号别名）只能有一个负责人；共享历史或名额的别名放在同一行。
+- 每个输出目录在 `投递证据/<批次>/输出/<负责人>/` 下，互不重叠。账号范围只写别名，不写凭据或个人标识。
+- 交接：原负责人和新负责人都是参与者，新负责人等于当前负责人；`停止证据`（旧负责人已停）和 `接收证据`（新负责人已接）都是 `投递证据/` 下存在的文件。无法确认旧负责人已停时，不操作该账号，也不消耗其名额。分工表不是锁。
+- 只有协调者写岗位追踪表：从最新文件串行写入，先备份，按直链去重，写完用 `tracker_readback.py` 读回。负责人交回的是公司 / 岗位目录里的证据和需要入账的回执，不交整份工作簿。
+- 交回的内容必须属于当前分工版本和当前负责人；版本过期的先对账，不改版本号绕过。
+- 有回执的岗位当场由协调者入账为 `已提交`；结果不确定的先查申请中心再决定。
 
-Keep a private readable proposal alongside the manifest: the user's explicit requirements or ideas, Query/progress references, chosen grouping and count rationale, estimated workload and uncertainty, participant/worker/coordinator counts, actual concurrent capacity, wave/handoff arrangement where needed, configurable numeric or nonnumeric targets and stopping conditions, and user confirmation reference. These decision records precede dispatch. The snapshot validator does not judge allocation quality, confirm a proposal, optimize participant counts or enforce platform capacity. Reuse an unchanged confirmed proposal; version material changes and preserve their effective time and approval.
+## 分工依据
 
-## 独立偏好与执行证据
+派发前给用户看一份可读的分工方案并取得确认：用户的明确要求或想法、Query 与进度依据、分组与人数理由、工作量估计与不确定性、参与者 / 执行者 / 协调者人数、实际可并发能力、需要分批或转交的安排、数字或非数字的目标与停止条件。确认原话存成 `确认记录/分工确认.md`，作为 `依据:`。检查脚本不判断分工质量、不替用户确认方案，也不管平台容量。分工不变时续跑直接复用；范围、负责人或人数实质变化时提高 `分工版本` 并重新确认。
 
-manifest 顶层 preferences、prior_roles；assignment/role/delta 必填 preference_version，与当前确认版本相同。assignment 携带公司正式覆盖字段；roles 携带 [完整逐岗字段](../../../references/preference-contract.md)、前置报告和实际 execution。偏好更新拒收旧增量，复用 JD/指定复查范围；不合成偏好分或替换明确选岗，保留已投和回执；账号独占、协调者串行写、精确目标与表单版本审核照常。
+## 偏好与逐岗证据
 
-默认岗位次序与公司动作前确认的唯一规则见[偏好契约](../../../references/preference-contract.md#默认次序与公司动作前确认)。
+各负责人按[偏好契约](../../../references/preference-contract.md)交付逐岗包和实际填写 / 保存 / 提交证据；偏好更新后只复用已存 JD 和用户指定的复查范围，不合成偏好分、不替换明确选岗，已投和回执保留。账号独占、协调者串行写表、确切目标与审核版本确认照常。默认岗位次序与公司动作前确认见[偏好契约](../../../references/preference-contract.md#默认次序与公司动作前确认)。

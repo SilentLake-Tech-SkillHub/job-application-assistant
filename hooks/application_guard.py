@@ -91,8 +91,8 @@ def find_root(start):
 
 def block(message):
     sys.stderr.write('[job-application-assistant] 已拦截最终提交：' + message +
-                     '。先运行 scripts/stage_gate.py <batch.json> --stage submit --role <role_key>，'
-                     '通过后会在 投递证据/门禁通行证.json 发放 10 分钟、3 次点击的提交通行证。\n')
+                     '。先运行 scripts/stage_gate.py --workbook <追踪表.xlsx> --batch <批次> --stage submit --url <岗位链接>，'
+                     '通过后会在 投递证据/门禁通行证.md 发放 10 分钟、3 次点击的提交通行证。\n')
     return 2
 
 

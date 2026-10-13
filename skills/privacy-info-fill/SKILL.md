@@ -9,7 +9,7 @@ metadata:
 
 ## 调用前检查
 
-读取私有批次记录中的自动化授权（见[自动化授权](../../references/automation-authorization.md)）。`approved_subskills` 不含 `privacy-info-fill` 时，个人信息栏全部留给用户本人填写，Agent 只继续填其他栏目。
+读取本批 `Query.md` 的 `## 自动化授权` 节（见[自动化授权](../../references/automation-authorization.md#记录)）。`已开启` 不含 `privacy-info-fill` 时，个人信息栏全部留给用户本人填写，Agent 只继续填其他栏目。
 
 ## 字段分类表（与 application-content-fill 的分界）
 

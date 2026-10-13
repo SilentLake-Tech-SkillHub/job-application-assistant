@@ -9,7 +9,7 @@ metadata:
 
 ## 调用前检查
 
-读取私有批次记录中的自动化授权（见[自动化授权](../../references/automation-authorization.md)）。`approved_subskills` 不含 `login-wechat` 时不执行，请用户本人完成微信登录。
+读取本批 `Query.md` 的 `## 自动化授权` 节（见[自动化授权](../../references/automation-authorization.md#记录)）。`已开启` 不含 `login-wechat` 时不执行，请用户本人完成微信登录。
 
 本子Skill只准备登录入口并交接给用户。删除 Agent 自动微信快捷确认流程：不点击网页或桌面微信的“确认登录”“允许”等 OAuth 授权按钮，不通过 computer use、系统脚本或其他通道代授持续权限。
 

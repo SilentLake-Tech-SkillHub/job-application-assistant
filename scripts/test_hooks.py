@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Submit guard hook, submit pass, installer and strict evidence (synthetic workspaces only)."""
 import datetime
+import re
 import json
 import os
 import subprocess
@@ -16,8 +17,7 @@ sys.path.insert(0, str(GUARD.parent))
 
 import application_guard as guard  # noqa: E402
 from submit_pass import issue_submit_pass, consume_submit_click, pass_path  # noqa: E402
-from ledger_checks import evidence_errors, find_root  # noqa: E402
-from test_validate_batch import fixture  # noqa: E402
+from batch_check import find_root  # noqa: E402
 
 ENV = dict(os.environ, PYTHONIOENCODING='utf-8')
 
@@ -68,7 +68,13 @@ class GuardProcessTests(unittest.TestCase):
         self.root = Path(self.tmp.name) / '投递根目录'
         (self.root / '投递证据').mkdir(parents=True)
         self.cwd = self.root / 'sub'; self.cwd.mkdir()
+        self.folder = self.root / '投递证据' / 'b1' / '岗位' / '合成公司A-0ac9f2ea'
+        self.folder.mkdir(parents=True)
+
         self.click = payload(*SUBMIT_CALLS[1], self.cwd)
+
+    def issue(self, clicks=3):
+        return issue_submit_pass(self.root, 'b1', 'https://example.test/jobs/101', self.folder, clicks=clicks)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -84,23 +90,23 @@ class GuardProcessTests(unittest.TestCase):
         self.assertIn('已拦截', result.stderr.decode('utf-8'))
 
     def test_pass_allows_three_clicks_then_blocks(self):
-        info = issue_submit_pass(self.root, fixture(), 'alpha:id:1')
-        self.assertEqual(info['clicks'], 3)
+        info = self.issue()
+        self.assertEqual(info['点击次数'], 3)
         for _ in range(3):
             self.assertEqual(run_guard(self.click).returncode, 0)
         self.assertEqual(run_guard(self.click).returncode, 2)
 
     def test_expired_pass_is_blocked(self):
-        issue_submit_pass(self.root, fixture(), 'alpha:id:1')
-        record = json.loads(pass_path(self.root).read_text(encoding='utf-8'))
-        record['expires_at'] = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=1)).isoformat()
-        pass_path(self.root).write_text(json.dumps(record), encoding='utf-8')
+        self.issue()
+        text = pass_path(self.root).read_text(encoding='utf-8')
+        past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=1)).isoformat()
+        pass_path(self.root).write_text(re.sub(r'到期: .*', '到期: ' + past, text), encoding='utf-8')
         result = run_guard(self.click)
         self.assertEqual(result.returncode, 2)
         self.assertIn('expired', result.stderr.decode('utf-8'))
 
     def test_corrupt_pass_fails_closed(self):
-        pass_path(self.root).write_text('{broken', encoding='utf-8')
+        pass_path(self.root).write_text('# 提交通行证\n到期: 不是时间\n', encoding='utf-8')
         self.assertEqual(run_guard(self.click).returncode, 2)
 
     def test_safe_calls_and_other_events_pass(self):
@@ -115,23 +121,22 @@ class GuardProcessTests(unittest.TestCase):
                            'cwd': str(self.cwd), 'tool_input': SUBMIT_CALLS[2][1]}, ensure_ascii=False)
         self.assertEqual(run_guard(text).returncode, 2)
 
-    def test_pass_void_once_role_recorded_submitted(self):
-        data = fixture()
-        ledger = self.root / '投递证据' / 'batch.json'
-        ledger.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
-        issue_submit_pass(self.root, data, 'alpha:id:1', ledger=ledger)
-        self.assertEqual(run_guard(self.click).returncode, 0)
-        data['roles'][0]['stage'] = 'submitted'
-        ledger.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
-        result = run_guard(self.click)
-        self.assertEqual(result.returncode, 2)
-        self.assertIn('void', result.stderr.decode('utf-8'))
-        ledger.write_text('{broken', encoding='utf-8')
-        self.assertEqual(run_guard(self.click).returncode, 2)  # unreadable ledger fails closed
+    def test_pass_void_once_receipt_or_uncertain_recorded(self):
+        for marker in ('回执.png', '结果不确定.md'):
+            for p in self.folder.iterdir():
+                p.unlink()
+            self.issue()
+            self.assertEqual(run_guard(self.click).returncode, 0)
+            (self.folder / marker).write_text('x', encoding='utf-8')
+            result = run_guard(self.click)
+            self.assertEqual(result.returncode, 2, marker)
+            self.assertIn('void', result.stderr.decode('utf-8'))
+        self.folder.rename(self.folder.with_name('moved'))
+        self.assertEqual(run_guard(self.click).returncode, 2)  # missing role folder fails closed
 
     def test_direct_consume_api(self):
         self.assertEqual(consume_submit_click(self.root)[0], False)
-        issue_submit_pass(self.root, fixture(), 'alpha:id:1', clicks=1)
+        self.issue(clicks=1)
         self.assertTrue(consume_submit_click(self.root)[0])
         self.assertFalse(consume_submit_click(self.root)[0])
 
@@ -177,56 +182,15 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(len(settings['hooks']['PreToolUse']), 2)
 
 
-class StrictEvidenceTests(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name)
-        (self.root / '投递证据' / 'b1').mkdir(parents=True)
-        (self.root / '投递证据' / 'b1' / 'ok.json').write_text('{}', encoding='utf-8')
-        (self.root / 'resume.pdf').write_bytes(b'x')
-
-    def tearDown(self):
-        self.tmp.cleanup()
-
-    def test_every_reference_must_be_a_file_under_evidence(self):
-        data = {'batch': {'materials': [{'ref': 'file:resume.pdf'}], 'automation': {'approval_ref': 'user said yes',
-                'confirmation_refs': {'terms_batch': ['file:投递证据/b1/ok.json', 'loose text']}}},
-                'roles': [{'execution': {'fill': {'evidence_ref': 'file:resume.pdf'}}, 'receipt_ref': 'file:投递证据/b1/missing.png',
-                           'readback_ref': 'file:../escape.json', 'jd_capture_ref': 'file:C:/abs.json',
-                           'pre_form_report_ref': 'file:投递证据\\b1\\ok.json'}]}
-        errors = evidence_errors(data, self.root)
-        joined = '\n'.join(errors)
-        self.assertIn('approval_ref must be file:', joined)
-        self.assertIn("terms_batch[1] must be file:", joined)
-        self.assertIn('evidence_ref evidence must be stored under 投递证据/', joined)
-        self.assertIn('receipt_ref evidence file not found', joined)
-        self.assertIn('readback_ref points outside', joined)
-        self.assertIn('jd_capture_ref must be a relative path', joined)
-        self.assertNotIn('materials', joined)  # plain `ref` may name a workspace file such as the résumé
-        self.assertNotIn('pre_form_report_ref', joined)  # Windows separators are accepted
-        self.assertEqual(len(errors), 6)
-
-    def test_lenient_mode_checks_only_file_refs(self):
-        data = {'roles': [{'approval_ref': 'user said yes', 'receipt_ref': 'file:投递证据/b1/ok.json'}]}
-        self.assertEqual(evidence_errors(data, self.root, strict=False), [])
-
-    def test_missing_evidence_folder_and_root_discovery(self):
+class RootDiscoveryTests(unittest.TestCase):
+    def test_root_is_nearest_folder_with_evidence_dir(self):
         with tempfile.TemporaryDirectory() as tmp:
-            self.assertTrue(any('evidence folder missing' in e for e in evidence_errors({}, tmp)))
-        nested = self.root / '投递证据' / 'b1'
-        self.assertEqual(find_root(nested / 'ok.json'), self.root)
-
-    def test_cli_is_strict_by_default(self):
-        ledger = self.root / '投递证据' / 'b1' / 'batch.json'
-        ledger.write_text(json.dumps(fixture(), ensure_ascii=False), encoding='utf-8')
-        strict = subprocess.run([sys.executable, str(HERE / 'validate_batch.py'), str(ledger)], capture_output=True, text=True, encoding='utf-8', env=ENV)
-        self.assertEqual(strict.returncode, 1)
-        self.assertIn('strict evidence', strict.stdout)
-        lenient = subprocess.run([sys.executable, str(HERE / 'validate_batch.py'), str(ledger), '--lenient'], capture_output=True, text=True, encoding='utf-8', env=ENV)
-        self.assertEqual(lenient.returncode, 0, lenient.stdout)
-        gate = subprocess.run([sys.executable, str(HERE / 'stage_gate.py'), str(ledger), '--stage', 'query'], capture_output=True, text=True, encoding='utf-8', env=ENV)
-        self.assertEqual(gate.returncode, 1)
-
+            root = Path(tmp) / '投递根目录'
+            (root / '投递证据' / 'b1').mkdir(parents=True)
+            book = root / '岗位追踪表.xlsx'; book.write_bytes(b'x')
+            self.assertEqual(find_root(book), root.resolve())
+            self.assertEqual(find_root(root / '投递证据' / 'b1'), root.resolve())
+            self.assertIsNone(find_root(Path(tmp)))
 
 if __name__ == '__main__':
     unittest.main()

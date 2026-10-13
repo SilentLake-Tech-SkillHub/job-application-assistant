@@ -1,17 +1,58 @@
-# Role tracker contract
+# 岗位追踪表：唯一的状态记录
 
-Read for workbook discovery, writes and status reconciliation. Locate the current workbook and regional sheet through the workspace router and private profile. Do not embed a user's path, filename, columns or personal data in this public Skill. Inspect the actual header and validation before editing.
+岗位追踪表（Excel）是投递流程**唯一的状态记录**。没有 JSON 台账：公司扫没扫过、结论是什么、岗位投没投，都写在表里；过程证据（确认原话、截图、读回、审核包、回执）放在 [`投递证据/`](daily-batch.md)。
 
-- The company official recruiting entry and its current plan are separate from a role's **direct official detail URL**. Verify and read back both levels; a list URL or guessed job URL is not a verified role link.
-- Record one row per verified in-scope role, title, explicit location, full visible JD, employing unit if shown, plan and direct URL. Keep source wording faithful and document inaccessible portions instead of filling them from a snippet. A company with no verified role retains its existing placeholder semantics.
-- Deduplicate by direct URL or job ID, then compare employer, title, unit and location when URLs change. Search current site history as well as workbook status before opening a new application.
-- A recorded, unsubmitted role stays in the tracker's existing pending value. Fine-grained stages such as `prepared` and `uncertain` belong in the private run ledger. Set the tracker's submitted value only after an official success receipt; a button click, draft, modal or user statement alone cannot establish it.
-- Reread the live workbook immediately before writing; record its SHA-256 and make a recoverable backup for a structural edit. Apply the smallest update, preserve other sheets, formulas, validation and user edits, save, reopen and verify the company entry, role URL, JD, status and formula errors. If the file changed during editing, reconcile or stop before overwriting it. Never treat remembered row numbers as stable.
+## 表结构与标签：以 campus-job-skills 为准
 
-When site evidence conflicts with the tracker, leave the application stage unresolved until the site account/history is checked. Report the discrepancy and its exact affected roles; do not mass-change statuses or resubmit.
+表结构、列序和标签值由 [campus-job-skills](https://github.com/SilentLake-Tech-SkillHub/campus-job-skills) 的 `【校招岗位收集与投递】campus-job-application/references/workbook-schema.md` 定义，盘点与汇报规则见同目录的 `research-progress.md`。本 Skill 不另写一套，也不新增列、工作表或状态值；表结构变更须经用户批准，并在两个 Skill 里一起改。
 
-## 独立偏好与执行证据
+投递流程用到的三处标签：
 
-执行 [偏好证据契约](preference-contract.md)：硬范围之外的城市排序只分组；不更改现有 Excel 列/验证/枚举。用招聘主体内官方 ID 或规范直链识别岗位，同名不同 BU/城市/ID 不合并，多城市同一岗位不重复计数。BU 未披露写 未披露。就业/方向/筛选理由/偏好版本/逐岗证据保存在已有备注或私有流水；保留已投回执和明确选择，更新偏好不撤回申请。能力分不包含城市偏好，Top5 只展示。
+| 位置 | 取值 | 含义 |
+|---|---|---|
+| `校招计划` 表 `盘点状态` | `已有相关岗位记录` / `无当年校招计划` / `无用户要求岗位` / `无法访问校招页面` / `尚未推进` | 公司（按计划行）的招聘结论，五个值之一，不附加文字 |
+| 地区岗位表 `投递状态` | 空白（公司占位行）/ `待投递` / `已提交` | 岗位行的投递结果 |
+| 地区岗位表 `备注` | 文字 | 例外与原因：本批留空、受阻、停止决定、资格说明等，写日期和批次 |
 
-默认岗位次序与公司动作前确认的唯一规则见[偏好契约](preference-contract.md#默认次序与公司动作前确认)。
+## 什么时候写什么
+
+| 事件 | 写入 |
+|---|---|
+| 打开一家公司的校招页面、看过计划或岗位（**只要扫过**） | 当场把该公司 `盘点状态` 从 `尚未推进` 改成另外四个值之一；`尚未推进` 只留给真正没碰过的公司 |
+| 找到范围内岗位 | 每岗一行（先填公司占位行，再在该公司行下方插入），`投递状态` 写 `待投递`；公司 `盘点状态` 写 `已有相关岗位记录` |
+| 校招页面打不开 / 今年没开校招 / 没有用户要求的岗位 | `盘点状态` 写 `无法访问校招页面` / `无当年校招计划` / `无用户要求岗位`，`备注` 写日期、批次和证据位置 |
+| 本批留空（补位规则选「留空」）或受阻 | 标签按上一行写；`备注` 写“<日期> <批次>：留空/受阻，原因…，证据 投递证据/…” |
+| 拿到官方回执 | 岗位行 `投递状态` 改 `已提交`，并在同一轮重开工作簿读回 |
+| 结果不确定、点击后无回执 | 保持 `待投递`，`备注` 写“结果待核”，先查申请中心 |
+
+`投递状态` 只表达投递结果。`待投递` 是记录了但没投，不代表用户已选岗或授权填表；`prepared`、审核版本这类过程状态只体现在 `投递证据/` 的文件里，不写进表格。
+
+## 写入规程
+
+- 写入前重新读取工作簿，记录 SHA-256，复制一份可恢复的备份。
+- 只改受影响的单元格，保留其他工作表、公式、数据验证和用户编辑；不依赖记住的行号，按 `岗位链接`（岗位行）或 `公司`（计划行）重新定位。
+- 保存后立刻用 `scripts/tracker_readback.py` 对照备份读回：目标行取值正确，其他行、占位行、其他工作表和公式不变，没有 `#REF!` 之类错误值。读回结果用 `--record` 存成岗位目录里的 `追踪表读回.md`。
+- 文件在编辑期间被别的进程改过时，先合并最新内容，不能覆盖。
+
+## 身份与去重
+
+- 公司官方招聘入口、当前计划和岗位**直链**是三个层次，分别核实；列表页或猜测的链接不算岗位直链。
+- 以直链（规范化后去掉 utm_*、ref、source 等跟踪参数）为主键去重；链接变化时再比对公司、岗位名、BU、地点和官方岗位 ID。同名不同 BU / 城市 / ID 不合并，多城市同一 ID 不重复成多行。BU 缺失写 `未披露`。
+- 打开新申请前同时查站点申请历史和表格状态。
+
+## 状态冲突
+
+站点证据与表格不一致时，以[阶段契约第 7 节](stage-contract.md#7-状态冲突时以谁为准)的优先级为准：站点申请中心 > 官方回执 > `投递证据/` 记录 > 表格。逐条列出受影响的岗位，不批量改状态、不重投；有官方回执的提交当场入账为 `已提交`。
+
+## 自动检查
+
+`scripts/batch_check.py` 和每个阶段门禁都会核对：
+
+- 本批扫过的公司（有 `投递证据/<批次>/公司/<公司>/` 或岗位目录）`盘点状态` 不能是 `尚未推进` 或空白；
+- `盘点状态` 只能是五个固定值；`已有相关岗位记录` 的公司必须有带直链的岗位行；
+- 岗位目录里有回执 ⇔ 表格 `投递状态` 为 `已提交`，且有 `追踪表读回.md`；
+- `投递状态` 只能是 `待投递` / `已提交`，公司占位行留空；直链不重复。
+
+这些检查只看结构，不能证明网站真的保存或收到了申请。
+
+偏好、城市排序和逐岗证据的规则见[偏好证据契约](preference-contract.md)；默认岗位次序与公司动作前确认见[同一契约](preference-contract.md#默认次序与公司动作前确认)。

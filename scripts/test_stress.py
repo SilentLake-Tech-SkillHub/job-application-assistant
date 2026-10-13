@@ -1,140 +1,146 @@
 #!/usr/bin/env python3
-"""Stress and robustness: large ledgers stay fast and malformed input never crashes the tools.
+"""Stress and robustness for the Excel + 投递证据/ design.
 
+* a large tracker (STRESS_SCALE × 300 companies × 4 roles) with real evidence folders stays fast;
+* randomly broken Markdown records and odd cell values never crash the checker or the gates;
+* random hook payloads never crash the guard.
 Thresholds are generous ceilings for a laptop or CI runner, not performance promises.
-STRESS_SCALE (default 1) multiplies the batch size.
 """
-import copy
+import io
 import json
 import os
 import random
-import shutil
+import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
 
-from openpyxl import Workbook, load_workbook
+from openpyxl import load_workbook
 
-from validate_batch import validate
-from stage_gate import run as gate
-from ledger_checks import closeout_status
-from tracker_readback import check as tracker_check
-from test_validate_batch import fixture, make_submit_ready, H
-from test_ledger_checks import prepared
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE / 'fixtures'))
+sys.path.insert(0, str(HERE.parent / 'hooks'))
+from workspace import Workspace  # noqa: E402
+from batch_check import Batch  # noqa: E402
+from stage_gate import run as gate  # noqa: E402
+import application_guard as guard  # noqa: E402
 
 SCALE = max(1, int(os.environ.get('STRESS_SCALE', '1')))
-COMPANIES, ROLES_PER_COMPANY = 400 * SCALE, 5
+COMPANIES, ROLES = 300 * SCALE, 4
 
 
-def big_batch():
-    data = fixture()
-    template_company = data['companies'][0]
-    template_role = data['roles'][0]
-    data['batch']['quotas'] = {'large': COMPANIES}
-    data['companies'], data['roles'] = [], []
-    stages = ['verified', 'prepared', 'reviewed', 'submitted', 'submitted']
-    for c in range(COMPANIES):
-        company = copy.deepcopy(template_company)
-        company.update(company_key='co%d' % c, bucket='large')
-        company['count_rule']['max_applications'] = ROLES_PER_COMPANY
-        data['companies'].append(company)
-        for j in range(ROLES_PER_COMPANY):
-            r = copy.deepcopy(template_role)
-            job = '%d-%d' % (c, j)
-            r.update(company_key='co%d' % c, official_job_id=job, role_key='co%d:id:%s' % (c, job),
-                     direct_url='https://example.test/co%d/%s' % (c, job))
-            stage = stages[j]
-            if stage != 'verified':
-                prepared(r)
-            if stage in ('reviewed', 'submitted'):
-                r['stage'] = 'reviewed'
-                make_submit_ready(r)
-                r['stage'] = stage
-            if stage == 'submitted':
-                r['receipt_ref'] = 'synthetic-receipt-' + job
-                r['execution']['submit'] = {'status': 'complete', 'evidence_ref': r['receipt_ref']}
-            data['roles'].append(r)
-    return data
-
-
-def mutate(node, rng, depth=0):
-    """Randomly delete keys, change types or replace values somewhere in the structure."""
-    junk = [None, 0, -1, '', 'x', [], {}, True, 1.5, ['x'], {'x': None}]
-    if isinstance(node, dict) and node:
-        key = rng.choice(list(node))
-        action = rng.random()
-        if action < 0.3:
-            del node[key]
-        elif action < 0.6 or depth > 4:
-            node[key] = rng.choice(junk)
-        else:
-            mutate(node[key], rng, depth + 1)
-    elif isinstance(node, list) and node:
-        i = rng.randrange(len(node))
-        if rng.random() < 0.5:
-            node[i] = rng.choice(junk)
-        else:
-            mutate(node[i], rng, depth + 1)
-
-
-class StressTests(unittest.TestCase):
+class LargeTrackerTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.data = big_batch()
+        cls.tmp = tempfile.TemporaryDirectory()
+        names = [('合成压测%04d' % i, '桶%d' % (i % 3)) for i in range(COMPANIES)]
+        cls.w = w = Workspace(cls.tmp.name, companies=names, targets='桶0=%d, 桶1=%d, 桶2=无' % (COMPANIES // 3, COMPANIES // 3))
+        wb = load_workbook(w.book)
+        ws, plans = wb['中国大陆'], wb['校招计划']
+        statuses = ['已有相关岗位记录', '无用户要求岗位', '无法访问校招页面', '无当年校招计划']
+        cls.urls = []
+        for i, (company, _) in enumerate(names):
+            status = statuses[i % 4] if i % 7 else '已有相关岗位记录'
+            for row in plans.iter_rows(min_row=2):
+                if row[0].value == company:
+                    row[9].value = status
+            if status != '已有相关岗位记录':
+                continue
+            for j in range(ROLES):
+                url = 'https://example.test/%d/%d' % (i, j)
+                ws.append(['北京', company, '合成', '普通私企', '合成岗位%d' % j, '北京', 'jd', '合成BU', url, '待投递'])
+                cls.urls.append((company, url, j))
+        # remove the placeholder rows of companies that now have roles
+        for row in list(ws.iter_rows(min_row=2)):
+            if row[1].value in {c for c, _, _ in cls.urls} and not row[8].value:
+                ws.delete_rows(row[0].row)
+        wb.save(w.book)
+        for company in {c for c, _, _ in cls.urls}:
+            w.company_ready(company, limit=ROLES)
+        for company, url, j in cls.urls:
+            if j == 0:
+                w.role_prepared(company, url)
+                w.role_approved(company, url, title='合成岗位0', bu='合成BU')
+                (w.role_folder(company, url) / '回执.md').write_text('x', encoding='utf-8')
+                (w.role_folder(company, url) / '追踪表读回.md').write_text('结果: 通过', encoding='utf-8')
+        wb = load_workbook(w.book)
+        for row in wb['中国大陆'].iter_rows(min_row=2):
+            if row[8].value and str(row[8].value).endswith('/0'):
+                row[9].value = '已提交'
+        wb.save(w.book)
 
-    def test_large_ledger_validates_quickly(self):
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_consistency_report_and_gates_are_fast(self):
         start = time.perf_counter()
-        errors, report = validate(self.data)
+        batch = Batch(self.w.book, 'b1')
+        errors = batch.consistency_errors()
+        report = batch.report()
         elapsed = time.perf_counter() - start
         self.assertEqual(errors, [])
-        self.assertEqual(report['verified_submissions'], COMPANIES * 2)
-        self.assertEqual(report['prepared_applications'], COMPANIES * 4)
-        self.assertLess(elapsed, 20 * SCALE, 'validate took %.2fs for %d roles' % (elapsed, len(self.data['roles'])))
-        print('\n[stress] validate %d companies / %d roles: %.2fs' % (COMPANIES, len(self.data['roles']), elapsed))
-
-    def test_gate_and_closeout_on_large_ledger(self):
+        self.assertEqual(report['已提交且有回执'], len({c for c, _, _ in self.urls}))
+        self.assertLess(elapsed, 60 * SCALE, '%.1fs' % elapsed)
         start = time.perf_counter()
-        result = gate(self.data, 'prepare', 'co0:id:0-0')
-        self.assertTrue(result['allowed'], result['errors'][:3])
-        _, report = validate(self.data)
-        status = closeout_status(self.data, report)
-        self.assertFalse(status['can_close'])
-        self.assertEqual(sum('is verified' in r for r in status['reasons']), COMPANIES)
-        self.assertLess(time.perf_counter() - start, 40 * SCALE)
+        company, url, _ = next(u for u in self.urls if u[2] == 1)
+        self.w.role_ready(company, url)
+        result = gate(self.w.book, 'b1', 'prepare', url)
+        self.assertTrue(result['允许'], result['错误'][:3])
+        self.assertLess(time.perf_counter() - start, 60 * SCALE)
+        print('\n[stress] %d companies / %d role rows: consistency+report %.2fs' % (COMPANIES, len(self.urls), elapsed))
 
-    def test_fuzzed_ledgers_never_crash(self):
-        rng = random.Random(20261012)
-        base = fixture()
-        r = prepared(base['roles'][0]); r['stage'] = 'reviewed'; make_submit_ready(r)
-        for i in range(3000):
-            data = copy.deepcopy(base)
-            for _ in range(rng.randint(1, 4)):
-                mutate(data, rng)
-            try:
-                errors, report = validate(data)
-                closeout_status(data, report)
-                gate(data, rng.choice(['query', 'prepare', 'review', 'submit', 'closeout']), 'alpha:id:1')
-            except Exception as exc:  # noqa: BLE001 - any crash is a failure
-                self.fail('iteration %d crashed: %r\n%s' % (i, exc, json.dumps(data, ensure_ascii=False)[:800]))
 
-    def test_large_tracker_readback(self):
+class FuzzTest(unittest.TestCase):
+    def test_broken_records_and_cells_never_crash(self):
+        rng = random.Random(20261013)
+        junk_text = ['', '：', '## ', '依据: ../../x', '依据: C:/x', '- | | |', '目标: 大厂=abc, ,=3', '上限: -1',
+                     '结论: ？', '模式: 全自动\n已开启: ,,,', '\x00\x01', '```\n未闭合代码块', '批次: ' + 'x' * 500,
+                     '- 简历 | ../outside.pdf | zz', '通道: ' * 30, '审核包哈希: ' + 'a' * 64]
+        junk_cells = [None, 0, -5, 3.14, '', ' ', '已提交 ', '尚未推进', '#REF!', 'https://', 'x' * 300, '=1+1']
         with tempfile.TemporaryDirectory() as tmp:
-            book, backup = Path(tmp, 't.xlsx'), Path(tmp, 't.bak.xlsx')
-            wb = Workbook(); ws = wb.active; ws.title = '岗位'
-            ws.append(['公司', '岗位链接', '状态'])
-            rows = 5000 * SCALE
-            for i in range(rows):
-                ws.append(['co%d' % i, 'https://example.test/%d' % i, '待投递'])
-            wb.save(book); shutil.copy(book, backup)
-            import hashlib
-            pre = hashlib.sha256(backup.read_bytes()).hexdigest()
-            wb = load_workbook(book); wb['岗位'].cell(row=rows + 1, column=3, value='已投递'); wb.save(book)
-            start = time.perf_counter()
-            errors = tracker_check(book, backup, pre, '岗位', '岗位链接',
-                                   [{'key': 'https://example.test/%d' % (rows - 1), 'fields': {'状态': '已投递'}}])
-            self.assertEqual(errors, [])
-            self.assertLess(time.perf_counter() - start, 60 * SCALE)
+            w = Workspace(tmp)
+            w.tag('合成公司A', '已有相关岗位记录'); w.add_role('合成公司A', 'https://example.test/jobs/1')
+            w.company_ready('合成公司A'); w.role_prepared('合成公司A', 'https://example.test/jobs/1')
+            files = [p for p in Path(tmp, '投递证据').rglob('*.md')]
+            originals = {p: p.read_bytes() for p in files}
+            for i in range(120):
+                for p in rng.sample(files, k=rng.randint(1, 4)):
+                    p.write_text(rng.choice(junk_text) + '\n' + rng.choice(junk_text), encoding='utf-8')
+                if i % 25 == 0:
+                    def mutate(wb):
+                        ws = wb[rng.choice(['中国大陆', '校招计划'])]
+                        ws.cell(row=rng.randint(2, 6), column=rng.randint(1, 10), value=rng.choice(junk_cells))
+                    w.edit(mutate)
+                try:
+                    batch = Batch(w.book, 'b1')
+                    batch.consistency_errors(); batch.closeout(batch.report())
+                    for stage in ('query', 'prepare', 'review', 'submit', 'closeout'):
+                        gate(w.book, 'b1', stage, 'https://example.test/jobs/1')
+                except Exception as exc:  # noqa: BLE001 - any crash is a failure
+                    self.fail('iteration %d crashed: %r' % (i, exc))
+                for p, data in originals.items():
+                    p.write_bytes(data)
+
+    def test_hook_payloads_never_crash(self):
+        rng = random.Random(7)
+        junk = [None, 0, 1.5, '', [], {}, '提交', 'Submit', {'action': 'left_click'}, ['x', {'a': '提交'}],
+                {'actions': 'x'}, {'actions': [None, 1, {'name': None, 'input': '提交'}]}]
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, '投递证据').mkdir()
+            old = sys.stderr
+            try:
+                for _ in range(20000):
+                    payload = {'hook_event_name': rng.choice(['PreToolUse', 'Stop', None, 1]), 'cwd': rng.choice([tmp, '/nonexistent', None, 5]),
+                               'tool_name': rng.choice(['mcp__x__computer', 'mcp__playwright__browser_click', 'Bash', '', None, 3]),
+                               'tool_input': rng.choice(junk)}
+                    if rng.random() < 0.3:
+                        payload = rng.choice(junk)
+                    sys.stderr = io.StringIO()
+                    self.assertIn(guard.main(json.dumps(payload, ensure_ascii=False)), (0, 2))
+            finally:
+                sys.stderr = old
 
 
 if __name__ == '__main__':

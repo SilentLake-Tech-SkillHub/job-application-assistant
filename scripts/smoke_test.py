@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Smoke test: every shipped command starts, accepts a valid ledger and rejects a bad one.
+"""Smoke test: every shipped command starts and gives the expected verdict on a synthetic workspace.
 
 Fast (seconds), no browser. Run after install or copy to confirm the package is usable.
 """
+import hashlib
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -13,54 +13,60 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-sys.path.insert(0, str(HERE))
-ENV = dict(os.environ, PYTHONIOENCODING='utf-8')
+sys.path.insert(0, str(HERE / 'fixtures'))
+from workspace import Workspace  # noqa: E402
+
+URL = 'https://example.test/jobs/101'
 
 
-def run(*args):
-    return subprocess.run([sys.executable, *map(str, args)], capture_output=True, text=True, encoding='utf-8', env=ENV, cwd=HERE)
+def run(*args, stdin=None):
+    import os
+    return subprocess.run([sys.executable, *map(str, args)], input=stdin, capture_output=True, text=True,
+                          encoding='utf-8', env=dict(os.environ, PYTHONIOENCODING='utf-8'), cwd=HERE)
 
 
 def main():
-    from test_validate_batch import fixture
-    from openpyxl import Workbook
     checks = []
 
     def expect(name, result, code):
         ok = result.returncode == code
-        checks.append({'check': name, 'ok': ok, 'exit': result.returncode})
+        checks.append({'检查': name, '通过': ok, '退出码': result.returncode})
         if not ok:
             print(result.stdout[-1500:], result.stderr[-1500:], file=sys.stderr)
 
     with tempfile.TemporaryDirectory() as tmp:
-        tmp = Path(tmp)
-        good = tmp / 'batch.json'; good.write_text(json.dumps(fixture(), ensure_ascii=False), encoding='utf-8')
-        bad = tmp / 'bad.json'; bad.write_text('{"batch": {}}', encoding='utf-8')
-        for script in ('validate_batch.py', 'stage_gate.py', 'tracker_readback.py'):
+        w = Workspace(tmp)
+        book = ['--workbook', w.book, '--batch', 'b1']
+        for script in ('batch_check.py', 'stage_gate.py', 'tracker_readback.py', '../hooks/install_hooks.py',
+                       '../skills/application-parallel-execution/scripts/validate_assignments.py'):
             expect(script + ' --help', run(HERE / script, '--help'), 0)
-        expect('validate good ledger', run(HERE / 'validate_batch.py', good, '--lenient'), 0)
-        expect('strict evidence rejects text refs', run(HERE / 'validate_batch.py', good), 1)
-        expect('validate bad ledger', run(HERE / 'validate_batch.py', bad, '--lenient'), 1)
-        expect('gate query', run(HERE / 'stage_gate.py', good, '--stage', 'query', '--lenient'), 0)
-        expect('gate prepare', run(HERE / 'stage_gate.py', good, '--stage', 'prepare', '--role', 'alpha:id:1', '--lenient'), 0)
-        expect('gate submit blocked', run(HERE / 'stage_gate.py', good, '--stage', 'submit', '--role', 'alpha:id:1', '--lenient'), 1)
-        for script in ('../hooks/application_guard.py', '../hooks/install_hooks.py'):
-            expect(script + ' --help' if 'install' in script else script + ' empty stdin', run(HERE / script, '--help') if 'install' in script else subprocess.run([sys.executable, str(HERE / script)], input='', capture_output=True, text=True), 0)
-        book, backup = tmp / 't.xlsx', tmp / 't.bak.xlsx'
-        wb = Workbook(); ws = wb.active; ws.title = 'S'; ws.append(['url', 'status']); ws.append(['u1', 'pending']); wb.save(backup)
-        ws['B2'] = 'submitted'; wb.save(book)
-        import hashlib
-        expect_file = tmp / 'expect.json'; expect_file.write_text('[{"key": "u1", "fields": {"status": "submitted"}}]', encoding='utf-8')
-        expect('tracker readback', run(HERE / 'tracker_readback.py', '--workbook', book, '--backup', backup,
-                                       '--pre-sha256', hashlib.sha256(backup.read_bytes()).hexdigest(),
-                                       '--sheet', 'S', '--key-column', 'url', '--expect', expect_file), 0)
-        copy = tmp / 'package'
+        expect('batch check on fresh workspace', run(HERE / 'batch_check.py', *book), 0)
+        expect('query gate', run(HERE / 'stage_gate.py', *book, '--stage', 'query'), 0)
+        w.tag('合成公司A', '已有相关岗位记录'); w.add_role('合成公司A', URL)
+        expect('prepare gate blocks without evidence', run(HERE / 'stage_gate.py', *book, '--stage', 'prepare', '--url', URL), 1)
+        w.company_ready('合成公司A'); w.role_prepared('合成公司A', URL)
+        expect('prepare gate allows with evidence', run(HERE / 'stage_gate.py', *book, '--stage', 'prepare', '--url', URL), 0)
+        expect('submit gate blocks without approval', run(HERE / 'stage_gate.py', *book, '--stage', 'submit', '--url', URL), 1)
+        w.role_approved('合成公司A', URL)
+        expect('submit gate allows and issues pass', run(HERE / 'stage_gate.py', *book, '--stage', 'submit', '--url', URL), 0)
+        hook = json.dumps({'hook_event_name': 'PreToolUse', 'cwd': tmp, 'tool_name': 'mcp__x__computer',
+                           'tool_input': {'action': 'left_click', 'action_summary': '点击“提交申请”'}}, ensure_ascii=False)
+        expect('hook allows with pass', run(ROOT / 'hooks' / 'application_guard.py', stdin=hook), 0)
+        expect('hook ignores empty input', run(ROOT / 'hooks' / 'application_guard.py', stdin=''), 0)
+        backup = Path(tmp) / 'bak.xlsx'; shutil.copy(w.book, backup)
+        pre = hashlib.sha256(backup.read_bytes()).hexdigest()
+        w.set_apply_status(URL, '已提交')
+        expect('tracker readback', run(HERE / 'tracker_readback.py', '--workbook', w.book, '--backup', backup, '--pre-sha256', pre,
+                                       '--expect', '中国大陆|岗位链接|' + URL + '|投递状态=已提交'), 0)
+        expect('closeout blocked while work remains', run(HERE / 'stage_gate.py', *book, '--stage', 'closeout'), 1)
+        copy = Path(tmp) / 'package'
         shutil.copytree(ROOT, copy, ignore=shutil.ignore_patterns('.git', '__pycache__', 'node_modules'))
         expect('package check on a fresh copy', run(copy / 'docs' / 'validation' / 'check_package.py', copy), 0)
-        expect('node syntax inspect_form_controls.js', subprocess.run(['node', '--check', str(HERE / 'inspect_form_controls.js')],
-                                                                       capture_output=True, text=True), 0) if shutil.which('node') else None
-    passed = all(c['ok'] for c in checks)
-    print(json.dumps({'smoke_passed': passed, 'checks': checks}, ensure_ascii=False, indent=2))
+        if shutil.which('node'):
+            expect('node syntax inspect_form_controls.js',
+                   subprocess.run(['node', '--check', str(HERE / 'inspect_form_controls.js')], capture_output=True, text=True), 0)
+    passed = all(c['通过'] for c in checks)
+    print(json.dumps({'冒烟通过': passed, '检查': checks}, ensure_ascii=False, indent=2))
     return 0 if passed else 1
 
 
