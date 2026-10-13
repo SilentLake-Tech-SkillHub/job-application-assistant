@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     strategy:
@@ -18,15 +21,26 @@ jobs:
           python-version: "3.11"
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24.13.0"
       - name: Install test dependencies
         run: |
-          python -m pip install openpyxl==3.1.5 playwright==1.56.0 pypdf==5.9.0
+          python -m pip install -r requirements-test.txt
           python -m playwright install chromium
-          npm install --global playwright@1.56.0
-          npx playwright install chromium
+          npm ci --ignore-scripts
       - name: Run CI (static, unit, smoke, browser full flow, stress)
         shell: bash
         run: |
-          export NODE_PATH="$(npm root -g)"
-          python scripts/ci.py
+          python scripts/ci.py --report test-results/ci.json
+      - name: Paired five-template benchmark
+        run: python scripts/benchmark_forms.py --runs 3 --out test-results/rea-automation
+      - name: Install optional REA integration-test runtime
+        run: npm install --no-save --ignore-scripts --package-lock=false rea-agents@6.4.0
+      - name: Verify real REA passive capture on owned mock target
+        run: python scripts/verify_real_rea.py --rea-entry node_modules/rea-agents/scripts/rea.mjs --out test-results/rea-real
+      - name: Retain benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rea-automation-${{ matrix.os }}
+          path: test-results/
+          retention-days: 14

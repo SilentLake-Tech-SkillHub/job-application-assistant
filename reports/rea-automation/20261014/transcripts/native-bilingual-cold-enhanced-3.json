@@ -1,0 +1,47 @@
+[
+  {
+    "role": "tool",
+    "kind": "mapping-summary",
+    "content": {
+      "fingerprint": "84dce0a75224244b0b9f272a52e19564705b46bbe139d043708a16ee4ae9e9d7",
+      "cacheHit": false,
+      "automatic": 6,
+      "exceptions": [],
+      "coverageLimit": "Unrendered steps, collapsed sections, iframe contents, shadow roots and dynamic options require separate UI inspection and a new scan."
+    }
+  },
+  {
+    "role": "tool",
+    "kind": "readback-and-receipt",
+    "content": {
+      "readbacks": [
+        {
+          "label": "Full name *",
+          "matched": true
+        },
+        {
+          "label": "Mobile phone *",
+          "matched": true
+        },
+        {
+          "label": "Email address *",
+          "matched": true
+        },
+        {
+          "label": "本科毕业院校 *",
+          "matched": true
+        },
+        {
+          "label": "Degree *",
+          "matched": true
+        },
+        {
+          "label": "项目经历 *",
+          "matched": true
+        }
+      ],
+      "saved": true,
+      "receipt_verified": true
+    }
+  }
+]

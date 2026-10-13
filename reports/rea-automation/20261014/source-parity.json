@@ -1,0 +1,8 @@
+{
+  "source": "REA src/domain/canonicalDigest.ts",
+  "source_commit": "ed24604ee10362b063feb8610cee1f2049df65c8",
+  "source_sha256": "9d1ca03e3994cca139a69f7b510aea51777ea1f67b7e5ee9e2d7adf1935b8284",
+  "method": "Imported the original TypeScript source with Node 24 native type stripping and compared its digest to the CommonJS port",
+  "vectors": ["null", "key-order inversion", "array with Chinese text", "supplementary-plane object key", "3000-key streaming object"],
+  "passed": true
+}

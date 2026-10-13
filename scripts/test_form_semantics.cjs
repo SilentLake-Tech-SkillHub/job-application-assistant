@@ -1,0 +1,40 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {createHash}=require('node:crypto');
+const {mapInventory,fingerprint,verifiedCache,cacheFromReadback}=require('./form_semantics.cjs');
+const {digestCanonicalValue}=require('./vendor/rea_canonical_digest.cjs');
+const field=(label,index=0,group='')=>({index,label,group,kind:'text',locator:'#f'+index,controlLocator:'#f'+index,
+  labelSource:'label',required:true,evidence:['input','input_type=text'],disabled:false,readonly:false});
+const inv=fields=>({count:fields.length,readOnly:true,valuesIncluded:false,coverageLimit:'rendered only',fields});
+const url='https://mock.example.test/forms/one';
+assert.equal(digestCanonicalValue({b:2,a:1}),createHash('sha256').update('{"a":1,"b":2}').digest('hex'));
+assert.equal(digestCanonicalValue({a:1,b:2}),digestCanonicalValue({b:2,a:1}));
+assert.throws(()=>digestCanonicalValue(NaN));const cycle={};cycle.x=cycle;assert.throws(()=>digestCanonicalValue(cycle));
+let i=inv([field('姓名',0),field('就读院校',1,'本科教育经历'),field('就读院校',2,'硕士教育经历')]);
+let m=mapInventory(i,url);assert.deepEqual(m.fields.map(f=>f.semantic),['name','bachelor.school','master.school']);
+assert.deepEqual(m.fields[1].locator,{css:'#f1'});
+assert.throws(()=>verifiedCache(m,[0]));const cache=verifiedCache(m,[0,1,2]);
+assert(mapInventory(i,url,cache).cacheHit);
+let changed=structuredClone(i);changed.fields[0].locator='#renamed';changed.fields[0].controlLocator='#renamed';
+assert(mapInventory(changed,url,cache).cacheHit); // label identity survives DOM ID drift
+changed.fields[0].required=false;assert(!mapInventory(changed,url,cache).cacheHit);
+assert(!mapInventory(i,'https://other.example.test/forms/one',cache).cacheHit);
+assert(!mapInventory(i,'https://mock.example.test/forms/two',cache).cacheHit);
+assert(mapInventory(i,url+'?job=2',cache).cacheHit); // same template; role authorization stays outside cache
+changed=structuredClone(i);changed.fields[1].label='最高学历院校';assert(!mapInventory(changed,url,cache).cacheHit);
+const unknown=mapInventory(inv([field('最高学历'),field('学校',1),field('是否服从调剂',2),field('身份证号码',3)]),url);
+assert(unknown.fields.every(f=>f.disposition==='exception'));assert(unknown.fields.every(f=>!f.source));
+const choices=inv([{...field('学历'),kind:'select',evidence:['select'],optionLabels:['本科','硕士']}]);
+const a=fingerprint(choices,url);choices.fields[0].optionLabels=['本科','博士'];assert.notEqual(fingerprint(choices,url),a);
+const tampered=structuredClone(cache);tampered.assignments[0].source='档案:other';assert(!mapInventory(i,url,tampered).cacheHit);
+assert.throws(()=>mapInventory({...i,count:9},url));assert.throws(()=>mapInventory({...i,valuesIncluded:true},url));
+assert.throws(()=>mapInventory(i,'https://user:secret@mock.example.test/forms/one'));
+const raw=JSON.stringify(cache);assert(!raw.includes('合成候选人'));assert(!raw.includes('投递状态'));assert(!raw.includes('receipt'));
+const repeat=mapInventory(inv([field('学校',0,'本科'),field('学校',1,'本科')]),url);
+assert(repeat.fields.every(f=>f.disposition==='exception'));
+const now=new Date().toISOString();
+const plan={'岗位链接':url,'页面校验':{'结果':'通过','时间':now},'字段':m.fields.map(f=>({'定位':f.locator,'值来源':f.source,'状态':'已读回','更新时间':now}))};
+assert(cacheFromReadback(m,plan).verified);
+plan['字段'][0]['状态']='待填';assert.throws(()=>cacheFromReadback(m,plan));plan['字段'][0]['状态']='已读回';
+plan['页面校验']['时间']='2020-01-01T00:00:00Z';assert.throws(()=>cacheFromReadback(m,plan));
+console.log(JSON.stringify({passed:true,checks:25,cacheInvalidation:true,groupIdentity:true,unknownsFailClosed:true}));

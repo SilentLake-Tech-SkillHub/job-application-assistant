@@ -45,6 +45,8 @@ git clone \
 
 接下来是项目的完整介绍与流程说明。
 
+**REA 表单工具增强（1.16.0）**：明确的中英文字段、本科/硕士教育分组和结构缓存交由程序处理，输出既有填写方案，AI 集中处理例外。默认仍为内置浏览器与 Chrome 扩展；Playwright 保持备用角色。详见[实现设计](docs/rea-automation-design.md)、[执行指引](references/semantic-form-automation.md)和[5 类 mock 配对评测](reports/rea-automation/20261014/evaluation.md)。评测区分实测浏览器耗时、交互文本 token 和尚未测量的真实模型消耗。
+
 2022 年,我刚刚进入社会,那一年我投了 70 个简历,最后拿了 10 个 offer。人们都在说"工作不好找"。2026 年,我再次回到校招,发现没有 200-300 次简历投递,很难找到同样的机会;而找工作、投简历本身,就是非常麻烦且复杂的事情。因此,我做了这个。
 
 [`campus-job-skills`](https://github.com/SilentLake-Tech-SkillHub/campus-job-skills) 解决"找"的麻烦:逐家公司收集岗位,整理进 Excel 账本。这个仓库解决"投"的麻烦:你选好一批岗位之后,AI 帮你开页面、登录、填表、存草稿,整理成评审包给你过目;你批准了,才逐个提交,并且只有读到官方回执,才把状态改成"已提交"。面向**中国大陆的校招和实习**。

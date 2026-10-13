@@ -10,6 +10,8 @@
 
 ## 私有操作方案 = 填写方案.json
 
+程序辅助入口见[程序化语义映射与 REA 诊断](semantic-form-automation.md)：明确字段由 `form_semantics.cjs` 匹配，再用 `compile_form_mapping.py` 编译为同一方案；仅将例外摘要交给 AI。新增的 `group` 与 `optionLabels` 用于教育条目身份和原生枚举变化校验。重复 label 使用当前 scoped CSS，上传解析后重新扫描。
+
 盘点结果用 `python scripts/fill_plan.py skeleton <控件盘点.json> --batch <批次> --company <公司> --url <岗位链接> --lane <通道> --out <岗位目录>/填写方案.json` 生成骨架：按控件分好「批量 / 点击 / 上传 / 用户」，上传排在最前，证件号、验证码类字段直接标为用户填写；自定义组件里重复出现的显示框会合并。然后按条目与 label 对应来源事实，补全值（或 `值来源: 档案:<字段>`）、自定义组件的真实点击路径（`点击步骤`）和读回位置（`读回定位`），以及依赖顺序。先处理类型/上级选项，再处理下级选择；上传触发解析时先上传，再重新盘点并校正。`fill_plan.py check --ready` 通过后才执行。格式与执行方式见[批量填写与填写缓存](browser-application.md#批量填写与填写缓存三条通道通用)。
 
 | 控件 | 填法 | 操作与核验 |

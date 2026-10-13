@@ -1,0 +1,69 @@
+[
+  {
+    "role": "tool",
+    "kind": "mapping-summary",
+    "content": {
+      "fingerprint": "08c41e8914c60ed5ecda2d60f24300b3b8e7cc97d78a2db5eaa690ad8bc23568",
+      "cacheHit": false,
+      "automatic": 3,
+      "exceptions": [
+        {
+          "index": 1,
+          "label": "本科毕业院校 *",
+          "group": "",
+          "reason": "complex widget needs verified click recipe"
+        }
+      ],
+      "coverageLimit": "Unrendered steps, collapsed sections, iframe contents, shadow roots and dynamic options require separate UI inspection and a new scan."
+    }
+  },
+  {
+    "role": "assistant",
+    "kind": "exception-decisions",
+    "content": [
+      {
+        "field": 2,
+        "source": "档案:学校-本科",
+        "locator": {
+          "label": "本科毕业院校 *"
+        },
+        "recipe": [
+          {
+            "点击": {
+              "css": "#school-widget"
+            }
+          },
+          {
+            "选项": "合成本科大学"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "kind": "readback-and-receipt",
+    "content": {
+      "readbacks": [
+        {
+          "label": "姓名 *",
+          "matched": true
+        },
+        {
+          "label": "本科毕业院校 *",
+          "matched": true
+        },
+        {
+          "label": "学历 *",
+          "matched": true
+        },
+        {
+          "label": "项目经历 *",
+          "matched": true
+        }
+      ],
+      "saved": true,
+      "receipt_verified": true
+    }
+  }
+]

@@ -10,3 +10,5 @@ __pycache__/
 
 # Playwright persistent profiles hold login cookies (issue #27)
 .浏览器配置/
+node_modules/
+test-results/

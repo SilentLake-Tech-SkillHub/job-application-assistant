@@ -21,7 +21,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 ENV = dict(os.environ, PYTHONIOENCODING='utf-8', PYTHONDONTWRITEBYTECODE='1')
 
-UNIT = ['test_batch_check.py', 'test_fill_plan.py', 'test_profile_vault.py', 'test_docs_consistency.py', 'test_tracker_readback.py', 'test_hooks.py']
+UNIT = ['test_batch_check.py', 'test_fill_plan.py', 'test_profile_vault.py', 'test_docs_consistency.py', 'test_tracker_readback.py', 'test_hooks.py', 'test_rea_bridge.py', 'test_token_metrics.py']
 
 
 def node_env():
@@ -42,11 +42,14 @@ def stages(skip_browser):
         'browser': [['node', str(HERE / 'test_inspect_form_controls.cjs')],
                     ['node', str(HERE / 'test_field_binding_recovery.cjs')],
                     [py, str(HERE / 'test_playwright_fill.py')],
-                    [py, str(HERE / 'test_e2e_full_flow.py')]],
+                    [py, str(HERE / 'test_e2e_full_flow.py')],
+                    [py, str(HERE / 'test_form_automation.py')]],
         'stress': [[py, str(HERE / 'test_stress.py')]],
     }
     if shutil.which('node'):
-        plan['static'].append(['node', '--check', str(HERE / 'inspect_form_controls.js')])
+        for script in [*HERE.glob('*.cjs'), HERE / 'inspect_form_controls.js', *(HERE / 'vendor').glob('*.cjs')]:
+            plan['static'].append(['node', '--check', str(script)])
+        plan['unit'].append(['node', str(HERE / 'test_form_semantics.cjs')])
     if skip_browser:
         plan.pop('browser')
     return plan
@@ -56,6 +59,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--skip-browser', action='store_true')
     parser.add_argument('--only', choices=['static', 'unit', 'smoke', 'browser', 'stress'])
+    parser.add_argument('--report', type=Path, help='Write the complete selected-check summary as JSON')
     args = parser.parse_args()
     plan = stages(args.skip_browser)
     if args.only:
@@ -77,7 +81,11 @@ def main():
             print(('PASS ' if passed else 'FAIL ') + stage + ' · ' + name, flush=True)
             if not passed:
                 print((result.stdout + result.stderr)[-4000:], flush=True)
-    print(json.dumps({'ci_passed': ok, 'results': summary}, ensure_ascii=False, indent=2))
+    report = {'ci_passed': ok, 'results': summary}
+    if args.report:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if ok else 1
 
 

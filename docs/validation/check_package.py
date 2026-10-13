@@ -12,7 +12,14 @@ import sys
 import tempfile
 
 root = Path(sys.argv[1]).resolve()
-skills = list(root.rglob('SKILL.md'))
+EXCLUDED = {'node_modules', '.git', '__pycache__', '.venv', '.venv-test', 'test-results'}
+
+
+def package_files(pattern):
+    return [p for p in root.rglob(pattern) if not EXCLUDED.intersection(p.relative_to(root).parts)]
+
+
+skills = package_files('SKILL.md')
 assert skills, 'no skill entrypoints'
 for p in skills:
     source = p.read_text(encoding='utf-8')
@@ -43,7 +50,7 @@ def anchors(path):
 
 
 links = anchored = 0
-for p in root.rglob('*.md'):
+for p in package_files('*.md'):
     for target in re.findall(r'\]\(([^)]+)\)', p.read_text(encoding='utf-8')):
         if target.startswith(('https:', 'http:', '<')):
             continue
@@ -54,17 +61,18 @@ for p in root.rglob('*.md'):
             assert anchor in anchors(dest), ('broken anchor', p, target)
             anchored += 1
         links += 1
-scripts = list(root.rglob('*.py'))
+scripts = package_files('*.py')
 for p in scripts:
     ast.parse(p.read_text(encoding='utf-8'), filename=str(p))
 validators = [p for p in scripts if p.name in {'batch_check.py', 'stage_gate.py', 'tracker_readback.py', 'validate_assignments.py',
-                                                'fill_plan.py', 'playwright_fill.py', 'profile_vault.py'}]
+                                                'fill_plan.py', 'playwright_fill.py', 'profile_vault.py', 'compile_form_mapping.py', 'rea_bridge.py', 'benchmark_forms.py'}]
 with tempfile.TemporaryDirectory() as temp:
     for p in validators:  # each CLI loads from another cwd and answers --help
         result = subprocess.run([sys.executable, str(p), '--help'], cwd=temp, capture_output=True, text=True,
                                 encoding='utf-8', env=dict(os.environ, PYTHONIOENCODING='utf-8'))
         assert result.returncode == 0 and not result.stderr, (p, result.stdout, result.stderr)
-assert not list(root.rglob('*.json')) or all('reports/' in p.as_posix() for p in root.rglob('*.json')), 'no JSON ledgers in the package'
+assert all('reports' in p.relative_to(root).parts or p.relative_to(root).as_posix() in ('package.json', 'package-lock.json')
+           for p in package_files('*.json')), 'no private JSON state in the package; root dependency manifests are allowed'
 print(json.dumps({'passed': True, 'skill_entrypoints': len(skills), 'local_links': links, 'anchors_checked': anchored,
                   'python_sources': len(scripts), 'validators_loaded': len(validators),
                   'scope': 'complete copied package; static metadata/references and CLI loading, no platform registration or live ATS'}, ensure_ascii=False))

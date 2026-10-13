@@ -13,7 +13,7 @@ def read(rel):
 
 def all_md():
     return {p.relative_to(ROOT).as_posix(): p.read_text(encoding='utf-8')
-            for p in ROOT.rglob('*.md') if 'reports/' not in p.relative_to(ROOT).as_posix()}
+            for p in ROOT.rglob('*.md') if not {'reports', 'node_modules', '.git', 'test-results'}.intersection(p.relative_to(ROOT).parts)}
 
 
 class ConflictTexts(unittest.TestCase):
@@ -186,7 +186,7 @@ class StructureTexts(unittest.TestCase):
             self.assertIn(needle, fill)
 
     def test_versions_bumped(self):
-        self.assertTrue('version: "1.15.0"' in read('SKILL.md'))
+        self.assertTrue('version: "1.16.0"' in read('SKILL.md'))
 
 
 if __name__ == '__main__':

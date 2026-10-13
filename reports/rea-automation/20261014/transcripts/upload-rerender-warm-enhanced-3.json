@@ -1,0 +1,50 @@
+[
+  {
+    "role": "tool",
+    "kind": "mapping-summary",
+    "content": {
+      "fingerprint": "a67af1c1dacc7ee479d25e2297f231328852888d0e0d100756440fcd579e10fb",
+      "cacheHit": true,
+      "automatic": 4,
+      "exceptions": [],
+      "coverageLimit": "Unrendered steps, collapsed sections, iframe contents, shadow roots and dynamic options require separate UI inspection and a new scan."
+    }
+  },
+  {
+    "role": "tool",
+    "kind": "post-upload-summary",
+    "content": {
+      "fingerprint": "a67af1c1dacc7ee479d25e2297f231328852888d0e0d100756440fcd579e10fb",
+      "cacheHit": false,
+      "automatic": 4,
+      "exceptions": [],
+      "coverageLimit": "Unrendered steps, collapsed sections, iframe contents, shadow roots and dynamic options require separate UI inspection and a new scan."
+    }
+  },
+  {
+    "role": "tool",
+    "kind": "readback-and-receipt",
+    "content": {
+      "readbacks": [
+        {
+          "label": "简历附件 *",
+          "matched": true
+        },
+        {
+          "label": "姓名 *",
+          "matched": true
+        },
+        {
+          "label": "本科毕业院校 *",
+          "matched": true
+        },
+        {
+          "label": "项目经历 *",
+          "matched": true
+        }
+      ],
+      "saved": true,
+      "receipt_verified": true
+    }
+  }
+]

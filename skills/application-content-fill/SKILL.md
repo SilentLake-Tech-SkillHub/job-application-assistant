@@ -18,6 +18,8 @@ metadata:
 
 ## 先盘点控件，再确定填写方案
 
+盘点后优先运行[程序化语义映射](../../references/semantic-form-automation.md)：明确的中英文字段由脚本匹配私有档案来源，AI 只处理例外；编译结果仍使用现有 `填写方案.json`。重复教育经历需以本科/硕士分组分别识别，不能把同名学校字段合并。复杂控件继续通过当前通道核实实际点击路径，REA 只作按需诊断；上传或联动重渲染后重新盘点和定位。
+
 填写前运行[scripts/inspect_form_controls.js](../../scripts/inspect_form_controls.js)，按[控件盘点与操作方案](../../references/control-preflight.md)记录整页控件性质。脚本不直接读取control.value或修改页面；label、placeholder等DOM元数据仍可能包含个人内容，仅限本次授权求职用途，保持私有，不擅自分享。输出只是初步分类；对低置信度、动态选项、联动字段、折叠区与未渲染步骤继续通过实际UI核对。
 
 - 私有操作表就是岗位目录的 `填写方案.json`（[批量填写与填写缓存](../../references/browser-application.md#批量填写与填写缓存三条通道通用)）：由盘点结果 `fill_plan.py skeleton` 生成，值优先引用由简历生成的[个人信息档案](../personal-info-vault/SKILL.md)。它只缓存这一张表单的填写进度，Excel 仍是唯一状态记录。

@@ -1,0 +1,309 @@
+[
+  {
+    "role": "tool",
+    "kind": "inventory",
+    "content": {
+      "schemaVersion": 2,
+      "readOnly": true,
+      "valuesIncluded": false,
+      "scope": "rendered DOM including offscreen controls; excludes hidden sections and authentication inputs",
+      "coverageLimit": "Unrendered steps, collapsed sections, iframe contents, shadow roots and dynamic options require separate UI inspection and a new scan.",
+      "count": 6,
+      "fields": [
+        {
+          "index": 0,
+          "label": "姓名 *",
+          "locator": "#name-54",
+          "controlLocator": "#name-54",
+          "kind": "text",
+          "action": "type_text_and_blur",
+          "confidence": "high",
+          "evidence": [
+            "input",
+            "input_type=text"
+          ],
+          "required": true,
+          "disabled": false,
+          "readonly": false,
+          "multiple": false,
+          "maxLength": null,
+          "accept": null,
+          "placeholder": null,
+          "optionCount": null,
+          "optionsNeedOpening": false,
+          "validationErrorVisible": false,
+          "dependencyReview": false,
+          "displayedValueIsProof": false,
+          "group": "",
+          "optionLabels": [],
+          "labelSource": "label",
+          "sharedContainer": false,
+          "fieldIdentityNeedsReview": false,
+          "ariaInvalid": null,
+          "automationMatchCount": null,
+          "validationAssociationNeedsReview": false
+        },
+        {
+          "index": 1,
+          "label": "本科毕业院校 *",
+          "locator": "#cascade",
+          "controlLocator": "#school-readback",
+          "kind": "cascader",
+          "action": "click_each_level",
+          "confidence": "high",
+          "evidence": [
+            "div",
+            "wrapper=el-cascader",
+            "readonly",
+            "input_type=text"
+          ],
+          "required": false,
+          "disabled": false,
+          "readonly": true,
+          "multiple": false,
+          "maxLength": null,
+          "accept": null,
+          "placeholder": null,
+          "optionCount": null,
+          "optionsNeedOpening": true,
+          "validationErrorVisible": false,
+          "dependencyReview": true,
+          "displayedValueIsProof": false,
+          "group": "",
+          "optionLabels": [],
+          "labelSource": "aria-labelledby",
+          "sharedContainer": false,
+          "fieldIdentityNeedsReview": false,
+          "ariaInvalid": null,
+          "automationMatchCount": null,
+          "validationAssociationNeedsReview": false
+        },
+        {
+          "index": 2,
+          "label": "毕业时间 *",
+          "locator": "body > form:nth-of-type(1) > div:nth-of-type(2)",
+          "controlLocator": "#graduation",
+          "kind": "date_picker",
+          "action": "click_actual_date_cells",
+          "confidence": "high",
+          "evidence": [
+            "div",
+            "wrapper=el-date-editor",
+            "readonly",
+            "input_type=text"
+          ],
+          "required": true,
+          "disabled": false,
+          "readonly": true,
+          "multiple": false,
+          "maxLength": null,
+          "accept": null,
+          "placeholder": null,
+          "optionCount": null,
+          "optionsNeedOpening": false,
+          "validationErrorVisible": false,
+          "dependencyReview": true,
+          "displayedValueIsProof": false,
+          "group": "",
+          "optionLabels": [],
+          "labelSource": "label",
+          "sharedContainer": false,
+          "fieldIdentityNeedsReview": false,
+          "ariaInvalid": null,
+          "automationMatchCount": null,
+          "validationAssociationNeedsReview": false
+        },
+        {
+          "index": 3,
+          "label": "项目经历 *",
+          "locator": "#project-54",
+          "controlLocator": "#project-54",
+          "kind": "text",
+          "action": "type_text_and_blur",
+          "confidence": "high",
+          "evidence": [
+            "textarea",
+            "input_type=textarea"
+          ],
+          "required": true,
+          "disabled": false,
+          "readonly": false,
+          "multiple": false,
+          "maxLength": "200",
+          "accept": null,
+          "placeholder": null,
+          "optionCount": null,
+          "optionsNeedOpening": false,
+          "validationErrorVisible": false,
+          "dependencyReview": false,
+          "displayedValueIsProof": false,
+          "group": "",
+          "optionLabels": [],
+          "labelSource": "label",
+          "sharedContainer": false,
+          "fieldIdentityNeedsReview": false,
+          "ariaInvalid": null,
+          "automationMatchCount": null,
+          "validationAssociationNeedsReview": false
+        },
+        {
+          "index": 4,
+          "label": "",
+          "locator": "#save",
+          "controlLocator": "#save",
+          "kind": "button",
+          "action": "inspect_button_purpose",
+          "confidence": "high",
+          "evidence": [
+            "button",
+            "input_type=button"
+          ],
+          "required": false,
+          "disabled": false,
+          "readonly": false,
+          "multiple": false,
+          "maxLength": null,
+          "accept": null,
+          "placeholder": null,
+          "optionCount": null,
+          "optionsNeedOpening": false,
+          "validationErrorVisible": false,
+          "dependencyReview": false,
+          "displayedValueIsProof": false,
+          "group": "",
+          "optionLabels": [],
+          "labelSource": "unresolved",
+          "sharedContainer": false,
+          "fieldIdentityNeedsReview": true,
+          "ariaInvalid": null,
+          "automationMatchCount": null,
+          "validationAssociationNeedsReview": false
+        },
+        {
+          "index": 5,
+          "label": "",
+          "locator": "#submit",
+          "controlLocator": "#submit",
+          "kind": "button",
+          "action": "inspect_button_purpose",
+          "confidence": "high",
+          "evidence": [
+            "button",
+            "input_type=button"
+          ],
+          "required": false,
+          "disabled": false,
+          "readonly": false,
+          "multiple": false,
+          "maxLength": null,
+          "accept": null,
+          "placeholder": null,
+          "optionCount": null,
+          "optionsNeedOpening": false,
+          "validationErrorVisible": false,
+          "dependencyReview": false,
+          "displayedValueIsProof": false,
+          "group": "",
+          "optionLabels": [],
+          "labelSource": "unresolved",
+          "sharedContainer": false,
+          "fieldIdentityNeedsReview": true,
+          "ariaInvalid": null,
+          "automationMatchCount": null,
+          "validationAssociationNeedsReview": false
+        }
+      ]
+    }
+  },
+  {
+    "role": "assistant",
+    "kind": "field-decisions",
+    "content": [
+      {
+        "field": 1,
+        "source": "档案:姓名",
+        "locator": {
+          "label": "姓名 *"
+        },
+        "recipe": null
+      },
+      {
+        "field": 2,
+        "source": "档案:学校-本科",
+        "locator": {
+          "label": "本科毕业院校 *"
+        },
+        "recipe": [
+          {
+            "点击": {
+              "css": "#cascade"
+            }
+          },
+          {
+            "点击": {
+              "css": "#level-one"
+            }
+          },
+          {
+            "点击": {
+              "css": "#level-two"
+            }
+          }
+        ]
+      },
+      {
+        "field": 3,
+        "source": "档案:毕业时间",
+        "locator": {
+          "label": "毕业时间 *"
+        },
+        "recipe": [
+          {
+            "点击": {
+              "css": "#graduation"
+            }
+          },
+          {
+            "点击": {
+              "css": "#date-cell"
+            }
+          }
+        ]
+      },
+      {
+        "field": 4,
+        "source": "档案:项目经历",
+        "locator": {
+          "label": "项目经历 *"
+        },
+        "recipe": null
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "kind": "readback-and-receipt",
+    "content": {
+      "readbacks": [
+        {
+          "label": "姓名 *",
+          "matched": true
+        },
+        {
+          "label": "本科毕业院校 *",
+          "matched": true
+        },
+        {
+          "label": "毕业时间 *",
+          "matched": true
+        },
+        {
+          "label": "项目经历 *",
+          "matched": true
+        }
+      ],
+      "saved": true,
+      "receipt_verified": true
+    }
+  }
+]

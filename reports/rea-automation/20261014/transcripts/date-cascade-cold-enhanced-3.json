@@ -1,0 +1,101 @@
+[
+  {
+    "role": "tool",
+    "kind": "mapping-summary",
+    "content": {
+      "fingerprint": "9306ea311e818f4f4d658529c80b064c23003617c63a8af93556302d9ceb5be5",
+      "cacheHit": false,
+      "automatic": 2,
+      "exceptions": [
+        {
+          "index": 1,
+          "label": "本科毕业院校 *",
+          "group": "",
+          "reason": "complex widget needs verified click recipe"
+        },
+        {
+          "index": 2,
+          "label": "毕业时间 *",
+          "group": "",
+          "reason": "complex widget needs verified click recipe"
+        }
+      ],
+      "coverageLimit": "Unrendered steps, collapsed sections, iframe contents, shadow roots and dynamic options require separate UI inspection and a new scan."
+    }
+  },
+  {
+    "role": "assistant",
+    "kind": "exception-decisions",
+    "content": [
+      {
+        "field": 2,
+        "source": "档案:学校-本科",
+        "locator": {
+          "label": "本科毕业院校 *"
+        },
+        "recipe": [
+          {
+            "点击": {
+              "css": "#cascade"
+            }
+          },
+          {
+            "点击": {
+              "css": "#level-one"
+            }
+          },
+          {
+            "点击": {
+              "css": "#level-two"
+            }
+          }
+        ]
+      },
+      {
+        "field": 3,
+        "source": "档案:毕业时间",
+        "locator": {
+          "label": "毕业时间 *"
+        },
+        "recipe": [
+          {
+            "点击": {
+              "css": "#graduation"
+            }
+          },
+          {
+            "点击": {
+              "css": "#date-cell"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "kind": "readback-and-receipt",
+    "content": {
+      "readbacks": [
+        {
+          "label": "姓名 *",
+          "matched": true
+        },
+        {
+          "label": "本科毕业院校 *",
+          "matched": true
+        },
+        {
+          "label": "毕业时间 *",
+          "matched": true
+        },
+        {
+          "label": "项目经历 *",
+          "matched": true
+        }
+      ],
+      "saved": true,
+      "receipt_verified": true
+    }
+  }
+]

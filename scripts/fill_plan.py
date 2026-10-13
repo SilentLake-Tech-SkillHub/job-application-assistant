@@ -56,7 +56,7 @@ DONE = ('已读回', '跳过')
 LANES = ('内置浏览器', 'Chrome', 'Playwright')
 LOCATOR_KEYS = ('label', 'role', 'css', 'text', 'placeholder')
 READBACK_MODES = ('值', '文本', '勾选', '选中项')
-SENSITIVE = re.compile(r'(手机|电话|联系方式|邮箱|e-?mail|住址|地址|家庭|紧急联系人|微信|qq|出生|生日|民族|政治面貌|婚|健康|宗教)', re.I)
+SENSITIVE = re.compile(r'(手机|电话|联系方式|邮箱|e-?mail|mobile|phone|contact|address|date.?of.?birth|住址|地址|家庭|紧急联系人|微信|qq|出生|生日|民族|政治面貌|婚|健康|宗教)', re.I)
 NEVER = re.compile(r'(密码|口令|验证码|校验码|动态码|身份证|证件号|护照|银行卡|卡号|cookie|token|password|otp|captcha)', re.I)
 SOURCE = re.compile(r'^(档案|材料):\s*(.+)$')
 PII_LITERAL = re.compile(r'(?<!\d)(?:1[3-9]\d{9}|\d{17}[\dXx])(?![\dA-Za-z])|[\w.+-]+@[\w-]+\.[\w.-]+')
@@ -310,7 +310,8 @@ def from_inventory(inventory, batch, company, url, lane):
             control, method = INVENTORY_KIND[kind]
         else:
             control, method = '其他', '用户'
-        locator = {'label': label} if label and c.get('labelSource') in ('label', 'aria-labelledby', 'aria-label') else {'css': c.get('locator') or 'body'}
+        label_unique = sum((entry.get('label') or '').strip() == label for entry in entries if entry.get('kind') != 'button') == 1
+        locator = {'label': label} if label and label_unique and c.get('labelSource') in ('label', 'aria-labelledby', 'aria-label') else {'css': c.get('controlLocator') or c.get('locator') or 'body'}
         field = {'序号': len(fields) + 1, '标签': label or ('未识别标签 ' + str(c.get('index'))), '定位': locator,
                  '控件': control, '填法': method, '必填': bool(c.get('required')), '状态': '待填'}
         if method == '点击':

@@ -1,8 +1,8 @@
 ---
 name: job-application-assistant
-description: Run a user-confirmed campus application batch starting from a confirmed role list (or named existing roles): pre-application JD and eligibility recheck, form preparation, review, authorized submission, receipt verification and tracker readback. Use when the user asks to prepare, review or submit campus applications; job discovery and information-only company research belong to the research workflow (e.g. campus-job-skills), not this Skill.
+description: "Run a user-confirmed campus application batch starting from a confirmed role list (or named existing roles): pre-application JD and eligibility recheck, form preparation, review, authorized submission, receipt verification and tracker readback. Use when the user asks to prepare, review or submit campus applications; job discovery and information-only company research belong to the research workflow (e.g. campus-job-skills), not this Skill."
 metadata:
-  version: "1.15.0"
+  version: "1.16.0"
 ---
 
 # 岗位代投助手 / Job Application Assistant
@@ -12,6 +12,10 @@ This Skill starts from a **confirmed role list** handed over by the research wor
 ## Browser default and retained company tabs
 
 By default run **two browser lanes in parallel: the agent's in-app browser and the user's Chrome through a Chrome extension (e.g. Claude in Chrome)**, assigning each company (recruiting entity plus shared account) to exactly one lane. **Playwright is the standing backup for the second lane**: when the Chrome extension is missing (or disconnects and cannot be reconnected), tell the user and run that lane with Playwright (`scripts/playwright_fill.py`, persistent profile that keeps logins) without a per-batch consent question; if Playwright's dependencies are missing, tell the user what to install and let them fix the environment (the Agent installs nothing), continuing with the in-app browser meanwhile. computer use and system scripts are not browser lanes and need the user's confirmation before first use. The single source for lane assignment, missing-lane handling and these boundaries is [browser division of work](references/browser-application.md#浏览器分工内置浏览器与-chrome-默认并行); follow [browser preparation and submission](references/browser-application.md). Page retention and closing follow the single rule in [page retention](references/browser-application.md#page-retention): nothing is closed without a separate explicit instruction naming the company/pages, and protected pages are never closed.
+
+## Deterministic form preparation
+
+For form preparation, use the [programmatic semantic mapping and REA diagnostics](references/semantic-form-automation.md) after the existing batch/form gates. The deterministic tools map clear fields to private profile sources, preserve education-group identity, compile the existing fill-plan schema and return only an exception summary to the Agent. All three browser lanes retain their own real input APIs; complex widgets need verified click recipes, and REA passive diagnostics are optional when the assigned lane already exposes an authorized CDP endpoint. Verified structural caches never replace current-page readback, user decisions or submission approval.
 
 ## Application execution-mode Query
 

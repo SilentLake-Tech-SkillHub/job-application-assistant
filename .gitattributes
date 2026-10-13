@@ -1,0 +1,4 @@
+# Byte digests of retained benchmark transcripts must survive Windows checkout.
+reports/rea-automation/**/transcripts/*.json text eol=lf linguist-generated=true
+reports/rea-automation/**/real-rea-evidence.json text eol=lf linguist-generated=true
+reports/rea-automation/**/*.svg text eol=lf linguist-generated=true

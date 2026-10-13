@@ -1,0 +1,11 @@
+{
+  "name": "job-application-assistant-tools",
+  "version": "1.16.0",
+  "private": true,
+  "scripts": {
+    "test": "python scripts/ci.py",
+    "benchmark": "python scripts/benchmark_forms.py --runs 5 --out reports/rea-automation/latest"
+  },
+  "devDependencies": { "playwright": "1.56.0" },
+  "engines": { "node": ">=20" }
+}
