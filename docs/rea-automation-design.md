@@ -124,3 +124,42 @@ python scripts/benchmark_forms.py --runs 5 --out reports/rea-automation/20261014
 ```
 
 本次交付与限制见 [评测结果](../reports/rea-automation/20261014/evaluation.md)。
+
+## 真实模型全链路计量（补充）
+
+`scripts/full_chain_benchmark.py` 使用已登录 Codex CLI 启动两个独立新上下文，串行执行现有与增强流程，
+各完成同样的 5 类 mock。现有 Skill 文档固定在增强前 commit，增强文档来自本次分支。
+两轮使用相同模型与 high 设置，模型实际读取 Skill/档案、决定来源和点击路径；普通字段只在增强轮
+交给正式 mapper/compiler。受限 stdio MCP 提供真实浏览器观察、原有输入执行器、门禁、草稿、
+提交、回执和 Excel 读回；不向模型提供 fixture 预期答案或点击配方。
+增强轮另调用真实 REA CLI，返回其捕获的前端脚本让模型解读。REA 本身没有模型调用。
+
+时间从 CLI 进程启动到完整模型回合及进程退出，另记五份回执和批次门禁全部核验结束时刻。
+包含初始化、Skill/档案读取、模型/网络等待、所有工具和错误重试；工具按实际执行时间单列。
+总时间扣除工具执行后的剩余时间包含模型、网络和编排，不能声称是纯推理时间。
+输入已是确认岗位清单与合成档案，mock 用户审核明确模拟；不虚构登录、验证码、真人等待或求职调研时长。
+执行通道为现有 Playwright 备用执行器，不能外推为内置浏览器/Chrome 扩展的完整吞吐。
+
+真实 token 取自 `turn.completed.usage`，并与本轮独立会话的 `token_count` 累计记录交叉核对。
+input 含 cached input，output 含 reasoning；总量只加 input + output，缺失项保留 null。
+重复累计通知去重，失败回合保留已报告的部分消耗。REA 证据解读计入真实调用总量，不能仅按文本长度
+虚构“REA 独立 token”。每种流程一轮只说明本次执行，不能据此宣称稳定平均提速或统计显著性。
+
+```bash
+# 手动运行，消耗当前已登录 Codex 账户额度；不属于普通 CI。
+python scripts/full_chain_benchmark.py --model gpt-5.6-sol \
+  --private test-results/full-chain/manual/private --report reports/rea-automation/manual-full-chain
+python scripts/render_full_chain.py reports/rea-automation/manual-full-chain
+```
+
+原始 CLI/工具事件留在忽略的 `test-results/**/private/`；公开报告仅保留数字 usage、文档 SHA、合成回执、
+时间和评估。CLI 复用登录，不读取/复制凭据，不更改用户全局配置。
+普通 CI 只跑离线 usage 解析和真实 mock 控制器用例，绝不自动启动付费 AI。
+`gpt-6.1-sol` 曾被本机 CLI 的 ChatGPT 登录接口拒绝；该失败记录单独保存，未返回的 usage 不写成零。
+经用户确认，正式两轮改为 `gpt-5.6-sol / high`。
+
+正式 [全链路评估](../reports/rea-automation/20261015-full-chain/evaluation.md) 的结果为：
+现有流程 125.71 秒、1,151,884 实报 token；增强流程 179.02 秒、1,464,152 实报 token。
+均完成五份真实 mock 回执及台账读回；增强轮三个真实 REA 捕获合计 25.02 秒。
+token 总量包括缓存输入，不是新增文本长度或金额。逐请求累计、CLI 回合总量和会话累计记录一致。
+本次增强总量增加 27.1%、耗时增加 42.4%，没有实现全链路节省；生产 REA 仍按需使用。

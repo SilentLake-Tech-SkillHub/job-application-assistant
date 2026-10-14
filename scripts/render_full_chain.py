@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Render measured Codex usage and wall time, preserving unknown/failed runs."""
+import argparse
+import csv
+import html
+import json
+from pathlib import Path
+
+
+def render(folder):
+    data = json.loads((folder / 'results.json').read_bytes())
+    rows = data['results']
+    labels = {'baseline': '现有流程', 'enhanced': 'REA 增强流程'}
+    fields = ['mode', 'model', 'completed', 'wall_seconds', 'to_batch_verified_seconds', 'input_tokens',
+              'cached_input_tokens', 'uncached_input_tokens', 'output_tokens', 'reasoning_output_tokens',
+              'total_tokens', 'request_count', 'rea_cli_seconds', 'verified_receipts']
+    with (folder / 'comparison.csv').open('w', encoding='utf-8-sig', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fields); writer.writeheader()
+        for r in rows:
+            row = {k: r.get(k) for k in fields}
+            row.update(r.get('usage') or {})
+            row['verified_receipts'] = len((r.get('verified_batch') or {}).get('sites', {}))
+            writer.writerow({k: row.get(k) for k in fields})
+    def fmt(value, unit=''):
+        if value is None:
+            return '未返回'
+        return (f'{value:,.2f}' if isinstance(value, float) else f'{value:,}') + unit
+    table = []
+    for r in rows:
+        u = r.get('usage') or {}
+        table.append('<tr>' + ''.join('<td>' + html.escape(str(v)) + '</td>' for v in [
+            labels[r['mode']], r['model'] + ' / high', '完成' if r['completed'] else '失败',
+            fmt(r['wall_seconds'], ' 秒'), fmt(r['to_batch_verified_seconds'], ' 秒'),
+            fmt(u.get('input_tokens')), fmt(u.get('cached_input_tokens')), fmt(u.get('output_tokens')),
+            fmt(u.get('reasoning_output_tokens')), fmt(u.get('total_tokens')),
+            str(len((r.get('verified_batch') or {}).get('sites', {}))) + '/5']) + '</tr>')
+    success = len(rows) == 2 and all(r['completed'] and r.get('usage') for r in rows)
+    summary = '正式模型测试尚未完成；失败轮没有返回的 usage 保持未知，不能写成 0。'
+    interpretation = ''
+    if success:
+        a, b = rows
+        token_delta = (b['usage']['total_tokens'] / a['usage']['total_tokens'] - 1) * 100
+        time_delta = (b['wall_seconds'] / a['wall_seconds'] - 1) * 100
+        summary = f"本次配对实测：增强流程总 token {'增加' if token_delta >= 0 else '减少'} {abs(token_delta):.1f}%，完整耗时 {'增加' if time_delta >= 0 else '减少'} {abs(time_delta):.1f}%。两轮各验证 5/5 份回执。"
+        interpretation = f"本轮模型请求从 {a['request_count']} 次变为 {b['request_count']} 次；增强轮三次 REA 工具共耗时 {b['rea_cli_seconds']:.2f} 秒。程序减少了普通字段的人工映射决策，但本次没有减少模型往返总次数。REA 脚本证据、额外指南和持续重发的上下文均进入真实输入 usage。不能把先前 76%–90% 的交互文本减少当作全链路模型消耗节省。"
+    detail = []
+    for r in rows:
+        phases = r['tool_timing']['by_tool_seconds']
+        detail.append('<h3>' + labels[r['mode']] + '</h3><ul>' + ''.join(
+            f'<li>{html.escape(name)}：{seconds:.3f} 秒</li>' for name, seconds in phases.items()) +
+            f"<li>模型、网络和编排剩余时间：{r['model_network_orchestration_seconds']:.3f} 秒（不能等同于纯推理时间）</li>" +
+            f"<li>工具调用 {r['tool_timing']['calls']} 次，工具错误 {r['tool_timing']['errors']} 次；所有重试均保留。</li></ul>")
+    setup = []
+    setup_tokens, setup_seconds = 0, 0.0
+    for name in ('unavailable-model-attempts.json', 'tool-policy-attempts.json'):
+        path = folder / name
+        if path.is_file():
+            attempt = json.loads(path.read_bytes())
+            for r in attempt['results']:
+                setup_seconds += r['wall_seconds']
+                tokens = (r.get('usage') or {}).get('total_tokens')
+                if tokens is not None:
+                    setup_tokens += tokens
+                setup.append(f"<li>{html.escape(r['model'])} / {r['mode']}：{r['wall_seconds']:.2f} 秒，真实总 token {fmt(tokens)}；回执 0/5。</li>")
+    setup_section = ''
+    if setup:
+        formal_tokens = sum((r.get('usage') or {}).get('total_tokens') or 0 for r in rows)
+        setup_section = '<section><h2>前置失败尝试（单独保留）</h2><p>模型不可用和工具策略错误发生在正式完成轮之前。' + \
+            f'已返回 usage 的额外消耗 {setup_tokens:,} token，尝试耗时 {setup_seconds:.2f} 秒。正式轮加这些失败尝试的已报告总消耗 {formal_tokens + setup_tokens:,} token。未返回 usage 的请求仍是未知。</p><ul>' + ''.join(setup) + \
+            '</ul><p>未把失败尝试归为成功，未删掉其真实消耗；不混入两个已完成回合的工作流比较。开发会话、离线测试和 CI 的时间/token 不属于单次投递指标。</p></section>'
+    image = ''
+    if success:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        fig, axes = plt.subplots(1, 2, figsize=(12, 4.6), layout='constrained')
+        x = [0, 1]; names = ['Baseline', 'REA enhanced']
+        for i, r in enumerate(rows):
+            u = r['usage']; cached = u.get('cached_input_tokens') or 0
+            axes[0].bar(i, u['input_tokens'] - cached, color='#475569', label='Uncached input' if i == 0 else None)
+            axes[0].bar(i, cached, bottom=u['input_tokens'] - cached, color='#94a3b8', label='Cached input' if i == 0 else None)
+            axes[0].bar(i, u['output_tokens'], bottom=u['input_tokens'], color='#0d9488', label='Output (includes reasoning)' if i == 0 else None)
+            axes[0].text(i, u['total_tokens'], f"{u['total_tokens']:,}", ha='center', va='bottom')
+            tool = r['tool_timing']['union_seconds']
+            axes[1].bar(i, tool, color='#0d9488', label='Measured tools + startup' if i == 0 else None)
+            axes[1].bar(i, r['wall_seconds'] - tool, bottom=tool, color='#94a3b8', label='Model + network + orchestration' if i == 0 else None)
+            axes[1].text(i, r['wall_seconds'], f"{r['wall_seconds']:.1f}s", ha='center', va='bottom')
+        for ax in axes:
+            ax.set_xticks(x, names); ax.grid(axis='y', alpha=.15); ax.set_axisbelow(True)
+            ax.margins(y=.18); ax.legend(loc='upper center', bbox_to_anchor=(.5, -.13), fontsize=8)
+        axes[0].set_title('Actual model tokens, entire five-form batch'); axes[0].set_ylabel('Reported tokens')
+        axes[1].set_title('Complete CLI wall time, entire five-form batch'); axes[1].set_ylabel('Seconds')
+        fig.suptitle('One paired real-model mock run | same model / high | 5 verified receipts per mode', fontsize=11)
+        fig.savefig(folder / 'full-chain.png', dpi=160); fig.savefig(folder / 'full-chain.svg')
+        svg = folder / 'full-chain.svg'; svg.write_text('\n'.join(line.rstrip() for line in svg.read_text(encoding='utf-8').splitlines()) + '\n', encoding='utf-8')
+        plt.close(fig)
+        image = '<img src="full-chain.png" alt="真实模型 token 和完整耗时对比图">'
+    notes = '''
+<li><b>时间边界：</b>从启动 Codex CLI 到完整模型回合和进程退出；另列“批次核验完成”时间。包含 Skill/档案读取、浏览器/工作区初始化、模型与网络等待、DOM 观察、REA、填写/重试、草稿保存与读回、模拟审核批准、实际 mock 提交、服务端回执核验和 Excel 台账读回。</li>
+<li><b>真实 token：</b>来自 CLI turn.completed，并与该轮独立会话 rollout 的 token_count 交叉核对。input 包含 cached input；output 包含 reasoning。总量 = input + output，不能再次加缓存或推理。每次请求重新携带的上下文按实际 usage 累计。</li>
+<li><b>REA 口径：</b>增强轮在搜索下拉、日期级联、上传重渲染三类复杂表单主动调用真实 REA CLI，并把捕获的前端脚本交给模型判断。生产流程仍按需诊断。REA 自身不调用 LLM；解读其证据及后续推理的消耗已计入该轮真实 usage。没有凭文本长度虚构“REA 独立模型 token”。</li>
+<li><b>可比范围：</b>当前已登录 Codex CLI、相同模型/high、两个独立新上下文、每轮相同五类 mock、相同输入事实和完成条件、共用现有 Playwright 备用执行器。现有轮由模型选择全部字段来源和控件路径；增强轮用程序映射普通字段，模型处理异常并解读 REA。</li>
+<li><b>预置与模拟：</b>输入已是确认岗位清单、JD/资格/名额和档案事实；真实求职调研、登录、验证码、人工批准等待不在本轮范围。mock 审核确认显式模拟，未伪造真人耗时。草稿通过服务端 GET 并逐字段对照当前 UI，未计入离开后重开/恢复草稿。默认内置浏览器/Chrome 扩展的完整链路仍需独立测试。</li>
+<li><b>解释限制：</b>每种流程仅一轮，顺序为现有→增强。结果可说明这次执行，不能推断稳定平均速度、显著性或真实招聘网站效果。账户额度/金额不从 token 数擅自换算。</li>'''
+    page = '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>真实模型全链路测试</title><style>body{font:16px/1.65 system-ui,"Microsoft YaHei",sans-serif;color:#142638;background:#f6f8fb;margin:32px auto;max-width:1400px;padding:0 24px}h1{font-size:28px}section{background:white;padding:24px;border:1px solid #dce4ec;border-radius:12px;margin:20px 0}table{border-collapse:collapse;min-width:1250px;font-size:14px}td,th{padding:12px;text-align:left;border-bottom:1px solid #dde4ec}.scroll{overflow:auto}img{width:100%;height:auto}li{margin:10px 0}a{color:#087d76}</style><h1>真实模型全链路测试</h1><p>' + summary + '</p><section>' + image + '<div class="scroll"><table><thead><tr>' + ''.join('<th>' + t + '</th>' for t in ['流程','模型','状态','完整耗时','批次核验完成','输入 token','其中缓存输入','输出 token','其中推理输出','总 token','回执']) + '</tr></thead><tbody>' + ''.join(table) + '</tbody></table></div></section><section><h2>计量边界与读法</h2><ul>' + notes + '</ul></section><section><h2>工具执行时间明细</h2>' + ''.join(detail) + '</section><p><a href="results.json">完整数值与逐请求 usage</a> · <a href="comparison.csv">CSV</a> · <a href="evaluation.md">评估说明</a> · <a href="https://learn.chatgpt.com/docs/non-interactive-mode">Codex CLI 官方 usage 说明</a></p></html>'
+    page = page.replace('<p><a href="results.json">', setup_section + '<p><a href="results.json">')
+    if interpretation:
+        page = page.replace('<h2>计量边界与读法</h2>', '<h2>如何解释这次结果</h2><p>' + interpretation + '</p><h2>计量边界与读法</h2>')
+    page = page.replace(' · <a href="comparison.csv">', ' · <a href="audit.json">独立 usage / 回执 / REA 核验</a> · <a href="comparison.csv">')
+    page = page.replace(' · <a href="evaluation.md">', ' · <a href="environment.json">实际运行环境</a> · <a href="evaluation.md">')
+    (folder / 'dashboard.html').write_text(page, encoding='utf-8')
+    evaluation = '# 真实模型全链路测试\n\n' + summary + '\n\n' + interpretation + '\n\n'
+    for r in rows:
+        evaluation += '## ' + labels[r['mode']] + '\n\n```json\n' + json.dumps({k: r[k] for k in ('model','completed','wall_seconds','to_batch_verified_seconds','usage','request_count','rea_cli_seconds','verified_batch')}, ensure_ascii=False, indent=2) + '\n```\n\n'
+    evaluation += '\n'.join(line for line in notes.replace('<li>', '\n- ').replace('</li>', '').replace('<b>', '**').replace('</b>', '**').splitlines())
+    evaluation += '\n\n用法和 usage 字段：[Codex 官方文档](https://learn.chatgpt.com/docs/non-interactive-mode)。\n'
+    if setup:
+        evaluation += f'\n前置失败尝试额外已报告 {setup_tokens:,} token，{setup_seconds:.2f} 秒，独立保存在 unavailable-model-attempts.json 和 tool-policy-attempts.json。未知 usage 没有记为零。\n'
+    (folder / 'evaluation.md').write_text(evaluation, encoding='utf-8')
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__); parser.add_argument('folder', type=Path)
+    render(parser.parse_args().folder.resolve())
