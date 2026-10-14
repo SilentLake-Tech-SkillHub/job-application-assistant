@@ -1,0 +1,80 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "mode": "enhanced",
+      "usage_matched_cli_and_rollout": true,
+      "request_count": 40,
+      "summed_request_usage": {
+        "input_tokens": 1529583,
+        "cached_input_tokens": 1463040,
+        "output_tokens": 4829,
+        "reasoning_output_tokens": 1850,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 1534412,
+        "uncached_input_tokens": 66543
+      },
+      "verified_receipts": 5,
+      "rea_captures": [
+        {
+          "site": "search-dropdown",
+          "sha256": "6e21aa5af613cf1bc7ae5ba3386654b8fc2880d13b94c9336da2544b37224133",
+          "evidence_id": "ev_1534f68ccd65ca4168becd6f53b4e64cb96b236c06bb32f9134799ed395ad6a4",
+          "script_sources": 1,
+          "seconds": 19.3842119
+        },
+        {
+          "site": "date-cascade",
+          "sha256": "72421939aba0863fae99229e109841112acdc2d761102832b10ae6b2e9611fba",
+          "evidence_id": "ev_87fb81b16753b795c68c01cc9122bb84191754e395704bb5ae76de356449de51",
+          "script_sources": 1,
+          "seconds": 16.6933281
+        },
+        {
+          "site": "upload-rerender",
+          "sha256": "56f813fd2f74879c74014ececbf1ce561242e91a4a1602ad38178769930a79b6",
+          "evidence_id": "ev_2671d19b61ab32c2996660e8914f19b643abb03249c1646071c9bd009cab474f",
+          "script_sources": 1,
+          "seconds": 5.2691712
+        }
+      ],
+      "stage_gates": {
+        "current_review_hash_approved": 5,
+        "readback_plans": 5
+      },
+      "complete_output_delivery": true,
+      "cli_events_sha256": "95046d43083a5c951b51ed835a15f69705e0a326800e6908a6e29ac2aa589d31",
+      "tool_events_sha256": "2c587b0c0a28458854db088ab3321628eee092a2b4e839cda4240f3621bdcaf1",
+      "selected_rollout_sha256": "e2ff88d6260fcae29a32b31cadfbdeaa86d7d9b4148e02bdda090bde442081d3"
+    },
+    {
+      "mode": "optimized",
+      "usage_matched_cli_and_rollout": true,
+      "request_count": 13,
+      "summed_request_usage": {
+        "input_tokens": 454362,
+        "cached_input_tokens": 409216,
+        "output_tokens": 3075,
+        "reasoning_output_tokens": 1012,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 457437,
+        "uncached_input_tokens": 45146
+      },
+      "verified_receipts": 5,
+      "rea_captures": [],
+      "stage_gates": {
+        "query": true,
+        "prepare": 5,
+        "review": 5,
+        "submit": 5,
+        "closeout": true,
+        "current_review_hash_approved": 5,
+        "readback_plans": 5
+      },
+      "complete_output_delivery": true,
+      "cli_events_sha256": "40e555b8a2fe78d77468addcd7b1912c4945a4f96994fa330b2961805f411108",
+      "tool_events_sha256": "977ec1bfebc4b7a64c46cb7667bf58414c9375801c914406b1f443ef75b2a127",
+      "selected_rollout_sha256": "ca09da5df6e016dd126309658d5398e576c814afe85ce6f3eb8d06ac69703c64"
+    }
+  ]
+}

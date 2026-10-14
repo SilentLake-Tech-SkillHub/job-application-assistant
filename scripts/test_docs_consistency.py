@@ -186,7 +186,7 @@ class StructureTexts(unittest.TestCase):
             self.assertIn(needle, fill)
 
     def test_versions_bumped(self):
-        self.assertTrue('version: "1.16.0"' in read('SKILL.md'))
+        self.assertTrue('version: "1.17.0"' in read('SKILL.md'))
 
 
 if __name__ == '__main__':

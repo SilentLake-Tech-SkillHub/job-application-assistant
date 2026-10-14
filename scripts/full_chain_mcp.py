@@ -310,6 +310,9 @@ def schema(properties, required):
 
 
 def tools_for(mode):
+    if mode == 'optimized':
+        from optimized_form_controller import optimized_tools
+        return optimized_tools()
     site = {'type': 'string', 'enum': SITES}
     tools = [
         ('read_document', 'Read staged Skill Markdown by relative path, synthetic-profile, or batch-contract. Start with SKILL.md and batch-contract.', schema({'path': {'type': 'string'}}, ['path'])),
@@ -343,7 +346,11 @@ def run_server(args):
             elif method == 'tools/call':
                 if controller is None:
                     boot = time.perf_counter_ns(); boot_wall = time.time_ns()
-                    controller = Controller(args.mode, args.root, args.docs, args.rea_entry)
+                    if args.mode == 'optimized':
+                        from optimized_form_controller import OptimizedController
+                        controller = OptimizedController(args.mode, args.root, args.docs, args.rea_entry)
+                    else:
+                        controller = Controller(args.mode, args.root, args.docs, args.rea_entry)
                     controller.event(kind='tool_completed', name='controller_startup',
                                      seconds=(time.perf_counter_ns() - boot) / 1e9, start_wall_ns=boot_wall, error=False)
                 name = request['params']['name']; data = request['params'].get('arguments', {})
@@ -352,10 +359,13 @@ def run_server(args):
                 try:
                     if name not in {t['name'] for t in tools_for(args.mode)}:
                         raise ValueError('Unknown/unavailable tool')
-                    function = {'read_document': controller.document, 'observe': controller.observe, 'inspect_ui': controller.inspect_ui, 'configure_fill': controller.configure_fill,
+                    if args.mode == 'optimized':
+                        output = controller.dispatch(name, data)
+                    else:
+                        function = {'read_document': controller.document, 'observe': controller.observe, 'inspect_ui': controller.inspect_ui, 'configure_fill': controller.configure_fill,
                                 'auto_fill': controller.auto_fill, 'rea_inspect': controller.rea, 'review_submit': controller.review_submit,
                                 'finish_batch': controller.finish}[name]
-                    output = function(**data)
+                        output = function(**data)
                     controller.event(kind='tool_completed', name=name, seconds=(time.perf_counter_ns() - start) / 1e9,
                                      start_wall_ns=wall_start, result=output, error=False)
                     result = {'content': [{'type': 'text', 'text': json.dumps(output, ensure_ascii=False)}]}
@@ -375,7 +385,7 @@ def run_server(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', choices=['baseline', 'enhanced'], required=True)
+    parser.add_argument('--mode', choices=['baseline', 'enhanced', 'optimized'], required=True)
     parser.add_argument('--root', type=Path, required=True); parser.add_argument('--docs', type=Path, required=True)
     parser.add_argument('--rea-entry', type=Path, required=True)
     run_server(parser.parse_args())

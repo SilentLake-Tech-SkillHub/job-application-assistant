@@ -10,10 +10,45 @@ import hashlib
 import json
 import subprocess
 import sys
+import time
 from urllib.parse import urlsplit
 from pathlib import Path
 
 MAX_BYTES = 8 * 1024 * 1024
+
+
+def script_excerpts(artifacts, terms=(), budget=2400):
+    """Bound model-visible source while retaining complete raw Evidence on disk.
+
+Line/character coordinates and omissions are explicit; a snippet is never claimed to be a complete
+capture. Selectors come from the actual DOM, not a site-specific recipe.
+"""
+    if not 128 <= budget <= 16000:
+        raise ValueError('Invalid excerpt character budget')
+    result = []
+    remaining = budget
+    for artifact in artifacts:
+        lines = artifact.get('text', '').splitlines()
+        if not lines or remaining <= 0:
+            continue
+        selected = set()
+        needles = [str(t).lstrip('#.') for t in terms if len(str(t).lstrip('#.')) > 2]
+        for i, line in enumerate(lines):
+            if any(t in line for t in needles):
+                selected.update(range(max(0, i - 1), min(len(lines), i + 2)))
+        if not selected:
+            selected.update(range(min(len(lines), 8)))
+        snippets = []
+        for i in sorted(selected):
+            if remaining <= 0:
+                break
+            text = lines[i][:remaining]
+            snippets.append({'line': i + 1, 'start_character': 0, 'text': text,
+                             'partial_line': len(text) < len(lines[i])})
+            remaining -= len(text)
+        result.append({'sha256': artifact['sha256'], 'total_lines': len(lines), 'snippets': snippets,
+                       'omitted': len(snippets) != len(lines) or any(s['partial_line'] for s in snippets)})
+    return result
 
 
 def endpoint(value):
@@ -62,18 +97,24 @@ def inspect(command, cdp, target, allowed_origin, out, observation_ms=500, inclu
     # Capture in temporary files so stdout/stderr buffering has a fixed retained budget.
     import tempfile
     with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        started = time.perf_counter()
         result = subprocess.run([*command, 'inspect-web-page', cdp, target, '--allowed-origins', allowed_origin,
                                  '--observation-ms', str(observation_ms), *(['--include-script-sources'] if include_script_sources else []), '--json'],
                                 stdout=stdout, stderr=stderr, timeout=30, shell=False)
+        cli_seconds = time.perf_counter() - started
         if result.returncode:
             raise ValueError('REA CLI failed; no evidence accepted (exit %s)' % result.returncode)
         if stdout.tell() > MAX_BYTES:
             raise ValueError('REA Evidence exceeds retained budget')
         stdout.seek(0); raw = stdout.read()
+    post_started = time.perf_counter()
     evidence = json.loads(raw)
     compact = project(evidence, allowed_origin, target)
     Path(out).write_bytes(raw)
     compact['artifact_sha256'] = hashlib.sha256(raw).hexdigest()
+    compact['timing'] = {'cli_process_seconds': cli_seconds,
+                         'parse_validate_write_seconds': time.perf_counter() - post_started,
+                         'boundary': 'CLI includes process startup, CDP attach and capture; those internal phases are not independently timed'}
     return compact
 
 

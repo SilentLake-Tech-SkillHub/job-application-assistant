@@ -45,7 +45,11 @@ git clone \
 
 接下来是项目的完整介绍与流程说明。
 
-**REA 表单工具增强（1.16.0）**：明确的中英文字段、本科/硕士教育分组和结构缓存交由程序处理，输出既有填写方案，AI 集中处理例外。默认仍为内置浏览器与 Chrome 扩展；Playwright 保持备用角色。详见[实现设计](docs/rea-automation-design.md)、[执行指引](references/semantic-form-automation.md)和[5 类 mock 配对评测](reports/rea-automation/20261014/evaluation.md)。评测区分实测浏览器耗时、交互文本 token 和尚未测量的真实模型消耗。
+**程序化表单准备（1.17.0）**：普通字段的盘点、语义映射、输入、逐字段读回与上传重扫在程序内连续完成，AI 只处理例外；同批文档按源哈希只加载一次，REA 仅在正常 UI 探查仍有未知绑定或真实失败时诊断。默认仍为内置浏览器与 Chrome 扩展；Playwright 保持备用角色。批量准备不生成生产批准或提交，现有审核版本、提交门禁和回执台账读回保留。详见[实现设计](docs/rea-automation-design.md)与[执行指引](references/semantic-form-automation.md)。
+
+历史[5 类 mock 配对评测](reports/rea-automation/20261014/evaluation.md)的 token 是交互文本计数；后续[真实模型全链路测试](reports/rea-automation/20261015-full-chain/evaluation.md)记录了实际 usage，并发现旧增强流程增加了请求和耗时。真实 token、文本长度和模型/网络/工具时间分别记录，不能互相替代。
+
+最新[优化前后全链路配对测试](reports/rea-automation/20261015-optimized/evaluation.md)使用同一 `gpt-5.6-sol / high`，两轮均完整传输指令、完成五类 mock 的真实回执与台账读回。实报总 token 为 **1,534,412 → 457,437（减少 70.2%）**，完整耗时 **292.66 → 143.43 秒（减少 51.0%）**，模型请求 **40 → 13**，REA **3 → 0**。这是同一备用执行通道的一次配对结果；缓存输入已包含在总量中，不能解释为金额节省。首次文档被截断的无效尝试及其额外消耗单独保留，未混入正式比较。
 
 2022 年,我刚刚进入社会,那一年我投了 70 个简历,最后拿了 10 个 offer。人们都在说"工作不好找"。2026 年,我再次回到校招,发现没有 200-300 次简历投递,很难找到同样的机会;而找工作、投简历本身,就是非常麻烦且复杂的事情。因此,我做了这个。
 

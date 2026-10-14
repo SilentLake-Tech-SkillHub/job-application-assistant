@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 from pathlib import Path
-from full_chain_benchmark import normalize_usage, usage_from_events, rollout_usage, tool_time, command_for
+from full_chain_benchmark import normalize_usage, usage_from_events, rollout_usage, tool_time, command_for, truncated_outputs
 
 
 class AccountingTests(unittest.TestCase):
@@ -20,6 +20,14 @@ class AccountingTests(unittest.TestCase):
     def test_subsets_not_double_counted(self):
         u = normalize_usage({'input_tokens': 100, 'cached_input_tokens': 60, 'output_tokens': 20, 'reasoning_output_tokens': 12})
         self.assertEqual(u['total_tokens'], 120); self.assertEqual(u['uncached_input_tokens'], 40)
+
+    def test_outer_code_mode_truncation_is_detected(self):
+        record = {'timestamp': 'synthetic', 'type': 'response_item', 'payload': {
+            'type': 'custom_tool_call_output', 'output': [{'type': 'input_text', 'text': 'Script completed'},
+                                                        {'type': 'input_text', 'text': 'Warning: truncated output (original token count: 22000)'}]}}
+        self.assertEqual(len(truncated_outputs([record])), 1)
+        record['payload']['output'] = [{'text': '{"truncated_sections": []}'}]
+        self.assertEqual(truncated_outputs([record]), [])
 
     def test_unknown_reasoning_is_not_zero(self):
         u = usage_from_events([{'type': 'turn.completed', 'usage': {'input_tokens': 100, 'output_tokens': 20}}])

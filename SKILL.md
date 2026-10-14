@@ -2,7 +2,7 @@
 name: job-application-assistant
 description: "Run a user-confirmed campus application batch starting from a confirmed role list (or named existing roles): pre-application JD and eligibility recheck, form preparation, review, authorized submission, receipt verification and tracker readback. Use when the user asks to prepare, review or submit campus applications; job discovery and information-only company research belong to the research workflow (e.g. campus-job-skills), not this Skill."
 metadata:
-  version: "1.16.0"
+  version: "1.17.0"
 ---
 
 # 岗位代投助手 / Job Application Assistant
@@ -16,6 +16,8 @@ By default run **two browser lanes in parallel: the agent's in-app browser and t
 ## Deterministic form preparation
 
 For form preparation, use the [programmatic semantic mapping and REA diagnostics](references/semantic-form-automation.md) after the existing batch/form gates. The deterministic tools map clear fields to private profile sources, preserve education-group identity, compile the existing fill-plan schema and return only an exception summary to the Agent. All three browser lanes retain their own real input APIs; complex widgets need verified click recipes, and REA passive diagnostics are optional when the assigned lane already exposes an authorized CDP endpoint. Verified structural caches never replace current-page readback, user decisions or submission approval.
+
+Keep model turns small in number: load each relevant instruction once per batch, group independent form preparation and exception inspection, and let the program continue upload-triggered rescans through native readback. Return verified counts and unresolved controls rather than repeating successful fields or full inventories. Use REA after an unresolved binding survives ordinary UI exploration or a real readback/persistence failure; a complex-looking control alone does not require diagnostics. Batching never includes a production approval or final-submit action and never skips current readback or a stage gate.
 
 ## Application execution-mode Query
 

@@ -1,0 +1,3 @@
+﻿mode,model,completed,wall_seconds,to_batch_verified_seconds,input_tokens,cached_input_tokens,uncached_input_tokens,output_tokens,reasoning_output_tokens,total_tokens,request_count,rea_cli_seconds,verified_receipts
+enhanced,gpt-5.6-sol,True,292.6617714999993,288.1327739,1529583,1463040,66543,4829,1850,1534412,40,41.3467112,5
+optimized,gpt-5.6-sol,True,143.43396179999763,138.5519718,454362,409216,45146,3075,1012,457437,13,0,5

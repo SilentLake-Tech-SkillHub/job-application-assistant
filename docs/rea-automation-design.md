@@ -163,3 +163,48 @@ python scripts/render_full_chain.py reports/rea-automation/manual-full-chain
 均完成五份真实 mock 回执及台账读回；增强轮三个真实 REA 捕获合计 25.02 秒。
 token 总量包括缓存输入，不是新增文本长度或金额。逐请求累计、CLI 回合总量和会话累计记录一致。
 本次增强总量增加 27.1%、耗时增加 42.4%，没有实现全链路节省；生产 REA 仍按需使用。
+
+## 减少往返的准备协调器（1.17）
+
+`form_preparation.py` 将一次当前盘点、正式语义映射/编译、普通输入和读回放入同一有界程序循环。
+输入适配器仍使用所属通道的真实 API；上传后 DOM 失效在程序内部重扫续填。每次跳过已填字段前
+重新核对当前 UI，未知来源与复杂控件停止自动处理。没有固定网站点击配方、模拟 AI 决策或提交动作。
+`DocumentBundle` 按源内容哈希只返回一次完整指令；同源重复读取返回哈希确认，源变化重新读取。
+
+独占 mock 的 `OptimizedController` 为同一协调器提供批量入口：bootstrap、prepare_forms、
+inspect_widgets、complete_fields、review_submit_batch、finish_batch。普通字段准备与不同公司的
+例外探查可合并；Excel 与最终提交逐角色串行。最终 mock 审核沿用原模拟用户批准，但实际 Review、
+Submit 门禁、审核包哈希、当前 UI、服务端草稿与回执、台账读回均保留，逐门禁写入审计事件。
+绑定失败会使读回状态失效，阻止后续提交，不盲目重试；缺批准仍不能通过真实 Submit 门禁。
+此 mock 的批准/提交批处理不成为生产工具。生产默认仍是内置浏览器/Chrome 扩展，Playwright 备用。
+
+REA 只在普通 UI 探查后仍有未知绑定或真实失败时调用，成功控件不例行 capture。
+原始完整 Evidence 留在私有磁盘，模型先收当前选择器附近的有界片段，可再按哈希/行号展开；
+明确记录省略与部分行。桥接另外记录 CLI 进程总时间和后续解析/校验/写盘时间，不冒充已经测得
+REA 内部启动、CDP 连接和采集各自时间。
+
+优化对比将旧增强实现与 Skill 固定在 `00aaeb8fb7751af1ee4b42c2e85fb60d64f977d8`，
+新实现也在启动前复制为不可变快照。两轮都重新运行，使用相同模型/high、五类表单、合成资料和完成条件。
+优化前保留原三次主动 REA 测试模式，优化后条件触发；结果衡量整个优化组合，不单独推断每个模块贡献。
+所有重试和失败仍计入真实 usage/完整耗时；原始事件留在忽略的 private 目录，公开 SHA、数值和门禁核验。
+
+```bash
+python scripts/full_chain_benchmark.py --comparison optimization --model gpt-5.6-sol \
+  --private test-results/full-chain/optimized/private --report reports/rea-automation/optimized-full-chain
+python scripts/audit_full_chain.py --private test-results/full-chain/optimized/private --report reports/rea-automation/optimized-full-chain
+python scripts/render_full_chain.py reports/rea-automation/optimized-full-chain
+```
+
+### 本次优化结果与传输修复
+
+正式[优化报告](../reports/rea-automation/20261015-optimized/evaluation.md)两轮均使用 `gpt-5.6-sol / high`，
+旧增强为 1,534,412 token、292.66 秒、40 次模型请求；优化后为 457,437 token、143.43 秒、13 次请求。
+总 token 减少 70.2%，总耗时减少 51.0%，REA 从三次 41.35 秒变为零次。两轮都完成五份服务端回执、
+五份当前字段读回和审核哈希批准、Excel 读回及 closeout。优化后审核/提交工具本身仍耗时 52.09 秒，
+没有通过省略这些检查获得节省；其余模型、网络和编排剩余时间不能继续拆成纯推理或 REA 独立 token。
+
+首轮优化配对的外层 code-mode 输出预算截断了大段指令，虽然两轮各有五份回执，仍判为比较无效。
+修复为两臂共同使用 50,000-token 的 history/MCP/code-mode 输出预算，再完整重跑两轮；独立审计实际
+模型可见输出的截断标记、逐请求累计、回合 usage 与会话累计。无效配对额外已报告 1,534,285 token、
+279.96 秒，保留在 `truncated-delivery-attempts.json`，不当成零、不计入正式工作流改善比例。
+预算只在本次独立 CLI 进程配置中生效，不修改用户全局设置。
