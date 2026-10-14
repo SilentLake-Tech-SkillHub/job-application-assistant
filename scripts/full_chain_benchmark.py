@@ -28,6 +28,9 @@ BASELINE = 'ef9b403003ecb96004f27443842711be44f6ef86'
 OPTIMIZATION_BEFORE = '00aaeb8fb7751af1ee4b42c2e85fb60d64f977d8'
 DEFAULT_REA = Path(os.environ.get('LOCALAPPDATA', '')) / 'npm-cache/_npx/dea9475797100b20/node_modules/rea-agents/scripts/rea.mjs'
 DEFAULT_CODEX = Path(os.environ.get('APPDATA', '')) / 'npm/node_modules/@openai/codex/bin/codex.js'
+COMPARISONS = {'baseline-enhanced': ('baseline', 'enhanced'),
+               'optimization': ('enhanced', 'optimized'),
+               'baseline-optimized': ('baseline', 'optimized')}
 
 
 def read_jsonl(path):
@@ -329,6 +332,9 @@ def run_round(args, mode, private, runtime=ROOT):
               'error_events': sum(e.get('type') in ('error', 'turn.failed') for e in events)}
     result['truncated_outputs'] = truncations
     result['complete_delivery_valid'] = selected is not None and not truncations
+    if verified:
+        from full_chain_progress import receipt_progress
+        result['site_progress'] = receipt_progress(result, tools)
     (work / 'result.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
     return result
 
@@ -341,7 +347,7 @@ def main():
     p.add_argument('--rea-entry', type=Path, default=DEFAULT_REA)
     p.add_argument('--codex-entry', type=Path, default=DEFAULT_CODEX)
     p.add_argument('--timeout', type=int, default=1800)
-    p.add_argument('--comparison', choices=['baseline-enhanced', 'optimization'], default='baseline-enhanced')
+    p.add_argument('--comparison', choices=list(COMPARISONS), default='baseline-enhanced')
     p.add_argument('--before-ref', default=OPTIMIZATION_BEFORE, help='Frozen pre-optimization controller and Skill revision')
     args = p.parse_args()
     for entry in (args.rea_entry, args.codex_entry):
@@ -351,16 +357,20 @@ def main():
     args.private.mkdir(parents=True, exist_ok=True); args.report.mkdir(parents=True, exist_ok=True)
     (args.report / 'environment.json').write_text(json.dumps(runtime_environment(args), ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     results = []
-    modes = ('baseline', 'enhanced') if args.comparison == 'baseline-enhanced' else ('enhanced', 'optimized')
+    modes = COMPARISONS[args.comparison]
     runtimes = {m: ROOT for m in modes}
-    if args.comparison == 'optimization':
-        runtimes['enhanced'] = stage_runtime(args.private / 'runtime-before', args.before_ref)
+    if args.comparison in ('optimization', 'baseline-optimized'):
+        # Baseline uses the same pre-optimization executor, with mapper/REA tools disabled;
+        # stage_docs separately freezes its original pre-REA Skill at BASELINE.
+        runtimes[modes[0]] = stage_runtime(args.private / 'runtime-before', args.before_ref)
         runtimes['optimized'] = stage_runtime(args.private / 'runtime-optimized')
     for mode in modes:
         results.append(run_round(args, mode, args.private, runtimes[mode]))
         report = {'protocol_version': 2, 'comparison': args.comparison, 'baseline_commit': BASELINE,
-                  'before_commit': args.before_ref if args.comparison == 'optimization' else None,
+                  'before_commit': args.before_ref if args.comparison in ('optimization', 'baseline-optimized') else None,
                   'instruction_delivery': 'Same 50000-token history/MCP/code-mode output budget in both arms; zero truncation required',
+                  'site_progress_boundary': 'Cumulative from batch CLI start, not independent site cost or allocated tokens',
+                  'isolated_cold_warm_full_chain_measured': False,
                   'scope': 'one real model-driven fresh-context batch per mode, five owned mock forms each',
                   'lane': 'shipping Playwright backup executor + real Codex CLI + actual REA CLI in enhanced',
                   'timing_boundary': 'CLI process start through complete agent turn/process exit; batch verified boundary separately recorded',

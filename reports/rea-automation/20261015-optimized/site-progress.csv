@@ -1,0 +1,11 @@
+﻿mode,site,batch_start_to_receipt_seconds,reported_cumulative_tokens,reported_request_count,receipt,isolated_site_tokens,isolated_site_wall_seconds
+enhanced,native-bilingual,87.125265732,260596,11,mock-4e86635e451d,,
+enhanced,search-dropdown,137.767111732,524263,18,mock-18c15d2889d0,,
+enhanced,date-cascade,217.706874532,905781,27,mock-54611ea5f9a1,,
+enhanced,repeated-education,246.014822032,1044322,30,mock-8720633c9cb0,,
+enhanced,upload-rerender,284.516545232,1383337,37,mock-3102263771eb,,
+optimized,native-bilingual,87.462734248,246899,8,mock-ac656d9e23dd,,
+optimized,search-dropdown,96.989635148,246899,8,mock-045f203c2b0f,,
+optimized,date-cascade,106.188239448,246899,8,mock-2bf51171a6c6,,
+optimized,repeated-education,116.023690848,288547,9,mock-260dc5ff681d,,
+optimized,upload-rerender,128.844174748,330343,10,mock-e33865c13325,,

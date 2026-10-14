@@ -5,8 +5,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from full_chain_benchmark import read_jsonl, normalize_usage, usage_from_events, rollout_usage, truncated_outputs
+from full_chain_benchmark import read_jsonl, normalize_usage, usage_from_events, rollout_usage, truncated_outputs, COMPARISONS
 from fixtures.form_sites import SITES
+from full_chain_progress import receipt_progress
 
 
 def digest(path):
@@ -15,13 +16,15 @@ def digest(path):
 
 def audit(folder, private):
     report = json.loads((folder / 'results.json').read_bytes())
-    expected = ['enhanced', 'optimized'] if report.get('comparison') == 'optimization' else ['baseline', 'enhanced']
+    expected = list(COMPARISONS[report.get('comparison', 'baseline-enhanced')])
     assert [r['mode'] for r in report['results']] == expected
     audited = []
     for r in report['results']:
         work = private / r['mode']; controller = work / 'controller'
         events = read_jsonl(work / 'cli-events.jsonl'); tools = read_jsonl(controller / 'tool-events.jsonl')
         assert r['completed'] and r['exit_code'] == 0
+        if 'site_progress' in r:
+            assert r['site_progress'] == receipt_progress(r, tools), 'Cumulative receipt progress mismatch'
         assert usage_from_events(events) == r['usage'], 'CLI reported usage mismatch'
         session_root = Path(os.environ.get('CODEX_HOME', Path.home() / '.codex')) / 'sessions'
         selected = list(session_root.glob('**/rollout-*-' + r['thread_id'] + '.jsonl'))
@@ -88,11 +91,13 @@ def audit(folder, private):
         audited.append({'mode': r['mode'], 'usage_matched_cli_and_rollout': True, 'request_count': roll['request_count'],
                         'summed_request_usage': summed, 'verified_receipts': 5, 'rea_captures': rea_records,
                         'stage_gates': gate_checks,
+                        'site_progress_matched': True if 'site_progress' in r else None,
                         'complete_output_delivery': not truncated_outputs(read_jsonl(selected[0])),
                         'cli_events_sha256': digest(work / 'cli-events.jsonl'),
                         'tool_events_sha256': digest(controller / 'tool-events.jsonl'),
                         'selected_rollout_sha256': digest(selected[0])})
-    result = {'passed': True, 'checks': audited}
+    result = {'passed': True, 'eligible_for_complete_instruction_comparison':
+              all(r['complete_output_delivery'] for r in audited), 'checks': audited}
     (folder / 'audit.json').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     return result
 

@@ -1,5 +1,6 @@
 {
   "passed": true,
+  "eligible_for_complete_instruction_comparison": false,
   "checks": [
     {
       "mode": "baseline",
@@ -16,6 +17,12 @@
       },
       "verified_receipts": 5,
       "rea_captures": [],
+      "stage_gates": {
+        "current_review_hash_approved": 5,
+        "readback_plans": 5
+      },
+      "site_progress_matched": null,
+      "complete_output_delivery": false,
       "cli_events_sha256": "94669e44843c29ee382824aead9b7f9ad6a61424e4aff26ed77644cee00fb19e",
       "tool_events_sha256": "48576503c5521e812ac3688da9ccddc8e5a0ad69ef7d8cc33241b39c37fff3c6",
       "selected_rollout_sha256": "23799ec301d937250f9eb6fcd62ce3ba1d62f18397175b2bf124cfc71408fa4f"
@@ -57,6 +64,12 @@
           "seconds": 10.6013377
         }
       ],
+      "stage_gates": {
+        "current_review_hash_approved": 5,
+        "readback_plans": 5
+      },
+      "site_progress_matched": null,
+      "complete_output_delivery": false,
       "cli_events_sha256": "ed55985c12da6f47d06cb7e08613032f69bc62ffae523fafcd68b88c63c47346",
       "tool_events_sha256": "aa2f73e255f5ee921d5b81934f59cb8b3ab55cbd838162bf39e7d0a6c5cd3530",
       "selected_rollout_sha256": "2be80e4603520f96ac5dcc4a3195025206c3757de15a7e0b02bc27deec599945"

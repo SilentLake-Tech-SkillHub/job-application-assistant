@@ -457,7 +457,14 @@
         "skills/terms-consent/SKILL.md": "3923c5714f8c0013b63280b456f735c7304aca1c5317f6944f624eb6abde1e36"
       },
       "rea_cli_seconds": 0,
-      "error_events": 0
+      "error_events": 0,
+      "truncated_outputs": [
+        {
+          "timestamp": "2026-10-14T17:10:12.875Z",
+          "type": "custom_tool_call_output"
+        }
+      ],
+      "complete_delivery_valid": false
     },
     {
       "mode": "enhanced",
@@ -994,7 +1001,15 @@
         "skills/terms-consent/SKILL.md": "3923c5714f8c0013b63280b456f735c7304aca1c5317f6944f624eb6abde1e36"
       },
       "rea_cli_seconds": 25.0211229,
-      "error_events": 0
+      "error_events": 0,
+      "truncated_outputs": [
+        {
+          "timestamp": "2026-10-14T17:12:27.310Z",
+          "type": "custom_tool_call_output"
+        }
+      ],
+      "complete_delivery_valid": false
     }
-  ]
+  ],
+  "instruction_delivery_reaudit": "Retrospective actual model-visible output audit; truncated rounds retain receipts/usage but are ineligible for fair complete-instruction comparison."
 }

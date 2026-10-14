@@ -158,11 +158,13 @@ python scripts/render_full_chain.py reports/rea-automation/manual-full-chain
 `gpt-6.1-sol` 曾被本机 CLI 的 ChatGPT 登录接口拒绝；该失败记录单独保存，未返回的 usage 不写成零。
 经用户确认，正式两轮改为 `gpt-5.6-sol / high`。
 
-正式 [全链路评估](../reports/rea-automation/20261015-full-chain/evaluation.md) 的结果为：
+历史 [全链路评估](../reports/rea-automation/20261015-full-chain/evaluation.md) 记录的真实消耗为：
 现有流程 125.71 秒、1,151,884 实报 token；增强流程 179.02 秒、1,464,152 实报 token。
 均完成五份真实 mock 回执及台账读回；增强轮三个真实 REA 捕获合计 25.02 秒。
 token 总量包括缓存输入，不是新增文本长度或金额。逐请求累计、CLI 回合总量和会话累计记录一致。
-本次增强总量增加 27.1%、耗时增加 42.4%，没有实现全链路节省；生产 REA 仍按需使用。
+后续实际模型可见输出复核发现两臂都有指令截断。真实 usage、回执与台账核验仍成立，但原来的
+27.1%/42.4% 差值不能作为完整指令条件下的公平比较；历史报告已标注这一限制，数据没有删除。
+应使用后续重新执行、相同完整传输预算的配对结果；生产 REA 仍按需使用。
 
 ## 减少往返的准备协调器（1.17）
 
@@ -208,3 +210,22 @@ python scripts/render_full_chain.py reports/rea-automation/optimized-full-chain
 模型可见输出的截断标记、逐请求累计、回合 usage 与会话累计。无效配对额外已报告 1,534,285 token、
 279.96 秒，保留在 `truncated-delivery-attempts.json`，不当成零、不计入正式工作流改善比例。
 预算只在本次独立 CLI 进程配置中生效，不修改用户全局设置。
+
+### 原无 REA 对照与五网站覆盖
+
+使用 `--comparison baseline-optimized` 可独立重跑原无 REA 与当前优化流程。原轮使用
+`00aaeb8fb775` 的原输入执行器，Skill 固定在增强前 `ef9b403003ec`，不向模型暴露
+REA 和自动映射工具，全部来源与复杂点击由模型从真实页面判断。两臂同为完整指令预算，
+不把历史存在文档截断的消耗当作公平基准。
+
+本次[重新配对](../reports/rea-automation/20261015-baseline-optimized/evaluation.md)的真实总 token
+为 1,112,106 → 417,675（减少 62.4%），完整耗时 129.04 → 101.79 秒（减少 21.1%），
+请求 30 → 13，两臂零次 REA、五份回执与台账全部通过。结论只适用于这次整个流程组合，
+不能把两臂均未调用的 REA 当成收益来源。
+
+`full_chain_progress.py` 从真实回执事件恢复五网站的累计进度，并从逐请求日志展示共享 usage。
+它不把整批 token 均摊给网站，也不把相邻回执间隔当成独立网站全链路耗时。图表分别标出
+整批总量、五网站累计回执时间、共享 token 曲线；独立单站 time/token 和 cold/warm 完整模型
+测试明确未测。旧四图 cold/warm 仅指语义结构缓存，不是模型计费缓存。
+本次优化后首份回执晚于原无 REA（85.37 vs 41.36 秒），最后一份更早（93.53 vs 119.13 秒），
+反映先批量准备再串行提交的取舍，不能声称所有网站都更快。

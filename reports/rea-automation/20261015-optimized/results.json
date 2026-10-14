@@ -649,7 +649,54 @@
       "rea_cli_seconds": 41.3467112,
       "error_events": 0,
       "truncated_outputs": [],
-      "complete_delivery_valid": true
+      "complete_delivery_valid": true,
+      "site_progress": [
+        {
+          "site": "native-bilingual",
+          "batch_start_to_receipt_seconds": 87.125265732,
+          "reported_cumulative_tokens": 260596,
+          "reported_request_count": 11,
+          "receipt": "mock-4e86635e451d",
+          "isolated_site_tokens": null,
+          "isolated_site_wall_seconds": null
+        },
+        {
+          "site": "search-dropdown",
+          "batch_start_to_receipt_seconds": 137.767111732,
+          "reported_cumulative_tokens": 524263,
+          "reported_request_count": 18,
+          "receipt": "mock-18c15d2889d0",
+          "isolated_site_tokens": null,
+          "isolated_site_wall_seconds": null
+        },
+        {
+          "site": "date-cascade",
+          "batch_start_to_receipt_seconds": 217.706874532,
+          "reported_cumulative_tokens": 905781,
+          "reported_request_count": 27,
+          "receipt": "mock-54611ea5f9a1",
+          "isolated_site_tokens": null,
+          "isolated_site_wall_seconds": null
+        },
+        {
+          "site": "repeated-education",
+          "batch_start_to_receipt_seconds": 246.014822032,
+          "reported_cumulative_tokens": 1044322,
+          "reported_request_count": 30,
+          "receipt": "mock-8720633c9cb0",
+          "isolated_site_tokens": null,
+          "isolated_site_wall_seconds": null
+        },
+        {
+          "site": "upload-rerender",
+          "batch_start_to_receipt_seconds": 284.516545232,
+          "reported_cumulative_tokens": 1383337,
+          "reported_request_count": 37,
+          "receipt": "mock-3102263771eb",
+          "isolated_site_tokens": null,
+          "isolated_site_wall_seconds": null
+        }
+      ]
     },
     {
       "mode": "optimized",
@@ -982,7 +1029,56 @@
       "rea_cli_seconds": 0,
       "error_events": 0,
       "truncated_outputs": [],
-      "complete_delivery_valid": true
+      "complete_delivery_valid": true,
+      "site_progress": [
+        {
+          "site": "native-bilingual",
+          "batch_start_to_receipt_seconds": 87.462734248,
+          "reported_cumulative_tokens": 246899,
+          "reported_request_count": 8,
+          "receipt": "mock-ac656d9e23dd",
+          "isolated_site_tokens": null,
+          "isolated_site_wall_seconds": null
+        },
+        {
+          "site": "search-dropdown",
+          "batch_start_to_receipt_seconds": 96.989635148,
+          "reported_cumulative_tokens": 246899,
+          "reported_request_count": 8,
+          "receipt": "mock-045f203c2b0f",
+          "isolated_site_tokens": null,
+          "isolated_site_wall_seconds": null
+        },
+        {
+          "site": "date-cascade",
+          "batch_start_to_receipt_seconds": 106.188239448,
+          "reported_cumulative_tokens": 246899,
+          "reported_request_count": 8,
+          "receipt": "mock-2bf51171a6c6",
+          "isolated_site_tokens": null,
+          "isolated_site_wall_seconds": null
+        },
+        {
+          "site": "repeated-education",
+          "batch_start_to_receipt_seconds": 116.023690848,
+          "reported_cumulative_tokens": 288547,
+          "reported_request_count": 9,
+          "receipt": "mock-260dc5ff681d",
+          "isolated_site_tokens": null,
+          "isolated_site_wall_seconds": null
+        },
+        {
+          "site": "upload-rerender",
+          "batch_start_to_receipt_seconds": 128.844174748,
+          "reported_cumulative_tokens": 330343,
+          "reported_request_count": 10,
+          "receipt": "mock-e33865c13325",
+          "isolated_site_tokens": null,
+          "isolated_site_wall_seconds": null
+        }
+      ]
     }
-  ]
+  ],
+  "site_progress_boundary": "Cumulative from batch CLI start, shared setup/model context included; not independent site cost",
+  "isolated_cold_warm_full_chain_measured": false
 }

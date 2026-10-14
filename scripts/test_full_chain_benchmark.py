@@ -5,10 +5,30 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 from pathlib import Path
-from full_chain_benchmark import normalize_usage, usage_from_events, rollout_usage, tool_time, command_for, truncated_outputs
+from full_chain_benchmark import normalize_usage, usage_from_events, rollout_usage, tool_time, command_for, truncated_outputs, COMPARISONS
 
 
 class AccountingTests(unittest.TestCase):
+    def test_receipt_progress_is_cumulative_and_does_not_split_shared_tokens(self):
+        from full_chain_progress import receipt_progress, timestamp_ns
+        start = '2026-01-01T00:00:00+00:00'
+        run = {'started_utc': start, 'wall_seconds': 10,
+               'request_usage': [{'timestamp': start, 'usage': {'total_tokens': 42}}]}
+        events = [{'kind': 'verified_receipt', 'site': str(i), 'receipt': str(i),
+                   'wall_time_ns': timestamp_ns(start) + (i + 1) * 10**9} for i in range(5)]
+        rows = receipt_progress(run, events)
+        self.assertEqual([r['batch_start_to_receipt_seconds'] for r in rows], [1, 2, 3, 4, 5])
+        self.assertTrue(all(r['reported_cumulative_tokens'] == 42 and r['isolated_site_tokens'] is None for r in rows))
+        with self.assertRaises(ValueError): receipt_progress(run, events[:-1])
+
+    def test_no_rea_comparator_cannot_expose_enhanced_tools(self):
+        from full_chain_mcp import tools_for
+        self.assertEqual(COMPARISONS['baseline-optimized'], ('baseline', 'optimized'))
+        names = {t['name'] for t in tools_for(COMPARISONS['baseline-optimized'][0])}
+        self.assertNotIn('rea_inspect', names)
+        self.assertNotIn('auto_fill', names)
+        self.assertIn('configure_fill', names)
+
     def test_permissions_are_scoped_to_owned_mock_server(self):
         args = SimpleNamespace(codex_entry=Path('codex.js'), rea_entry=Path('rea.mjs'), model='synthetic-model')
         cmd = command_for(args, 'baseline', Path('owned root'), Path('docs'), Path('cwd'))

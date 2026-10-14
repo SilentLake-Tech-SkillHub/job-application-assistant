@@ -1,0 +1,61 @@
+{
+  "passed": true,
+  "eligible_for_complete_instruction_comparison": true,
+  "checks": [
+    {
+      "mode": "baseline",
+      "usage_matched_cli_and_rollout": true,
+      "request_count": 30,
+      "summed_request_usage": {
+        "input_tokens": 1106791,
+        "cached_input_tokens": 1040640,
+        "output_tokens": 5315,
+        "reasoning_output_tokens": 1601,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 1112106,
+        "uncached_input_tokens": 66151
+      },
+      "verified_receipts": 5,
+      "rea_captures": [],
+      "stage_gates": {
+        "current_review_hash_approved": 5,
+        "readback_plans": 5
+      },
+      "site_progress_matched": true,
+      "complete_output_delivery": true,
+      "cli_events_sha256": "4b916abcaef8c26fb1e1d69636a76f4681f1c26cfa5749c6460498d009acc742",
+      "tool_events_sha256": "b2d4c03d50b361e0b490f2580337417727c6b9d2610ee7934a000e8e63272ca3",
+      "selected_rollout_sha256": "fc8193b117b7c3da858c0ed8fc07f1fb88e9e57a60c6c5c1f12c6549adb4b8d8"
+    },
+    {
+      "mode": "optimized",
+      "usage_matched_cli_and_rollout": true,
+      "request_count": 13,
+      "summed_request_usage": {
+        "input_tokens": 414032,
+        "cached_input_tokens": 360960,
+        "output_tokens": 3643,
+        "reasoning_output_tokens": 1216,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 417675,
+        "uncached_input_tokens": 53072
+      },
+      "verified_receipts": 5,
+      "rea_captures": [],
+      "stage_gates": {
+        "query": true,
+        "prepare": 5,
+        "review": 5,
+        "submit": 5,
+        "closeout": true,
+        "current_review_hash_approved": 5,
+        "readback_plans": 5
+      },
+      "site_progress_matched": true,
+      "complete_output_delivery": true,
+      "cli_events_sha256": "919fc089f705409349bd5816484902808b735342b8fab182f8f4e986fa0ef07d",
+      "tool_events_sha256": "8f9d26de11e61a941c10a5c2926cb8584c4f48e7c7a0b415a916907b93c540e6",
+      "selected_rollout_sha256": "1fd2df0fb72cde010461c028bb4bd2c8ebac9ebfb007f779df434f7d3dd13834"
+    }
+  ]
+}
