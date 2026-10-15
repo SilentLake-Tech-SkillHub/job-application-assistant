@@ -45,18 +45,54 @@ git clone \
 
 接下来是项目的完整介绍与流程说明。
 
-**REA 跨投递规则复用**：新增浏览器中立的验证规则存储和编译核心，独占 mock 已接通首次真实 REA 分析、
-新空白页完整路径重放、当前读回/服务端草稿验证后保存，以及新工作区用当前资料复用。
-结构失配、错误规则和绑定失败会使规则失效，读回、审核批准和提交门禁保留。
-验证规则也可编译为内置浏览器、Chrome、Playwright 的既有待填方案/动作清单，三通道编译均通过五类真实 DOM 检查；
-完整模型实测使用原 Playwright 备用通道，不冒充内置浏览器/Chrome 的完整实测。
-最新[三组真实全链路报告](reports/rea-automation/20261015-rea-reuse/evaluation.md)使用 `gpt-5.6-sol / high`，
-五类 mock × 无 REA/首次 REA/后续复用共 15 次独立模型回合，全部通过 usage、当前资料、规则来源和门禁审计。
-无 REA（保留相同流程优化）为 **1,134,813 token / 362.50 秒**；首次学习为 **1,343,533 / 431.71 秒**；
-后续复用为 **824,169 / 325.45 秒**，相对无 REA 减少 **27.4% token、10.2% 完整耗时**，5/5 真实命中首次规则、零次重调 REA。
-搜索下拉/日期级联各少四次模型请求，原生字段等三类 token 略增；日期级联复用更慢的回合完整保留。
-每格一次，提供方缓存/主机负载未控制且本机 CI 有重叠，不声称稳定速度、单项因果或金额收益。
-详见[实施设计](docs/rea-reuse-plan.md)和[执行指引](references/rea-rule-reuse.md)。
+## 版本更新日志：2026-10-15 · 流程优化与 REA 跨投递复用
+
+本次更新在 [PR #29](https://github.com/SilentLake-Tech-SkillHub/job-application-assistant/pull/29) 的 `codex/rea-form-automation` 分支交付，截至本次记录尚未合并。两条路线分别减少普通表单的模型往返，以及重复投递时的复杂控件判断；以下三组数据只衡量相同优化流程下的 REA 学习与复用收益。
+
+### 本地更新方案
+
+1. **程序化准备**：盘点、语义映射、普通字段填写与读回、上传后重扫在程序内连续完成；文档按源哈希加载，模型集中处理例外，REA 按需诊断。
+2. **首次学习与保存**：从真实 REA 分析和成功 UI 操作提炼参数化规则，在新空白页重放完整路径，通过当前字段读回和服务端草稿核对后保存。
+3. **后续投递复用**：按当前网站范围及表单结构读取验证规则，用当前申请资料和当前控件定位生成新的待填方案；结构失配或读回/绑定失败时使规则失效并回到当前 UI 处理。
+4. **保留提交门禁**：规则不携带旧申请值、旧完成状态或批准。每次仍需读回、草稿核对、当前审核版本批准、提交门禁及回执/台账核验。
+
+已有 Git 安装需要体验此 PR 时，在 Skill 仓库目录先运行 `git status --short`，输出为空再按下列步骤更新；有本地修改时先保留并处理，避免覆盖。当前更新目标为 PR 分支。
+
+```bash
+git fetch origin
+git switch codex/rea-form-automation
+git merge --ff-only origin/codex/rea-form-automation
+```
+
+更新后重新打开项目或新建对话，显式读取该安装目录中的 `SKILL.md`。默认通道仍为内置浏览器与 Chrome，Playwright 为备用；规则核心和三通道待填方案编译已实现，但生产通道的自动验证晋升仍需接入实际读回/草稿回调，不能将安装更新理解为所有通道已全自动接通。私有档案、原始证据及规则留在私有工作区。接口与接线步骤见[规则复用指引](references/rea-rule-reuse.md)。
+
+### 更新效果：真实模型三组完整测试
+
+同一 **`gpt-5.6-sol / high`**，五类 mock × 三组共 **15 个独立模型回合**；A 保留相同流程优化但禁用 REA/派生规则，B 从空规则库首次学习，C 新上下文只继承对应 B 的验证规则。真实 usage、当前资料、规则来源和提交门禁审计全部通过。
+
+| 组别（各 5 次投递） | 真实总 token | 完整总耗时 | 模型请求 | REA 调用 | 后续规则命中 |
+|---|---:|---:|---:|---:|---:|
+| A 无 REA（相同流程优化） | 1,134,813 | 362.50 秒 | 38 | 0 | — |
+| B 首次 REA 分析＋验证保存 | 1,343,533 | 431.71 秒 | 43 | 5 | 新验证规则 5 份 |
+| C 后续验证规则复用 | 824,169 | 325.45 秒 | 30 | 0 | 5/5 |
+
+本轮汇总：首次学习相对无 REA 增加 **18.4% token、19.1% 耗时**；后续复用相对无 REA 减少 **27.4% token、10.2% 耗时**。首次分析与验证有成本，复用减少重复判断；结果不保证每次投递都更快。搜索下拉和日期级联 token 分别减少约 49.1% 和 48.7%，其余三类略增；日期级联复用耗时 110.64 秒，高于无 REA 的 68.25 秒，慢回合完整保留。
+
+![五类 mock 的无 REA、首次学习、后续复用真实 token 与完整耗时对比](reports/rea-automation/20261015-rea-reuse/comparison.png)
+
+图中展示逐网站三组结果及五站汇总，token 为 CLI 实报 input + output，缓存输入已包含在 input 中；耗时从 CLI 启动至完整退出，包含模型/网络、工具、REA、验证、门禁和失败重试。比例不能换算为金额节省。
+
+![首次学习加后续复用的累计 token 与耗时算术预测](reports/rea-automation/20261015-rea-reuse/amortization.png)
+
+累计图按 `B + N×C` 对比 `(N+1)×A`，每轮为五站各投递一次；本轮数值外推，额外复用 1 轮可抵消首次增加的 token，2 轮可抵消增加的时间。**这是算术预测，不是额外实测或稳定回本保证。**
+
+每网站每组仅一次，提供方缓存及主机负载未控制，本机 CI 与部分实测重叠；不声称统计显著性或单项因果。完整真实模型测试覆盖现有 Playwright 备用适配器，IAB/Chrome 仅验证共享规则编译；人工批准在 mock 中模拟，真实调研、登录、验证码及人工等待未测。未测试“仅 UI 学习并缓存”第四组，不证明 REA 是获得规则的唯一方式。
+
+规则生命周期、失败回退及三通道编译已验证；交付代码 `d084d1b` 的 [Windows/Ubuntu CI](https://github.com/SilentLake-Tech-SkillHub/job-application-assistant/actions/runs/38722322656) 通过 37 个检查入口及五网站真实 REA 学习/复用集成。文档归档的后续提交以 PR 当前 Checks 为准；普通 CI 不调用付费模型。
+
+完整资料：[逐站评估](reports/rea-automation/20261015-rea-reuse/evaluation.md) · [可视化网页](reports/rea-automation/20261015-rea-reuse/dashboard.html)（本地 HTTP 服务打开） · [实施设计](docs/rea-reuse-plan.md) · [最终分析文本](reports/rea-automation/archives/20261015-rea-reuse-final-analysis.txt) · [完整存档 ZIP](reports/rea-automation/archives/20261015-rea-reuse-final-analysis.zip) · [ZIP SHA-256](reports/rea-automation/archives/20261015-rea-reuse-final-analysis.zip.sha256)。存档包含最终结论、原始数值、审计与图表快照及逐文件校验清单，不包含私有原始日志或规则。
+
+### 先前流程优化与历史评测
 
 **程序化表单准备（1.17.0）**：普通字段的盘点、语义映射、输入、逐字段读回与上传重扫在程序内连续完成，AI 只处理例外；同批文档按源哈希只加载一次，REA 仅在正常 UI 探查仍有未知绑定或真实失败时诊断。默认仍为内置浏览器与 Chrome 扩展；Playwright 保持备用角色。批量准备不生成生产批准或提交，现有审核版本、提交门禁和回执台账读回保留。详见[实现设计](docs/rea-automation-design.md)与[执行指引](references/semantic-form-automation.md)。
 
