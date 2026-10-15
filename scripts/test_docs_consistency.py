@@ -13,7 +13,7 @@ def read(rel):
 
 def all_md():
     return {p.relative_to(ROOT).as_posix(): p.read_text(encoding='utf-8')
-            for p in ROOT.rglob('*.md') if 'reports/' not in p.relative_to(ROOT).as_posix()}
+            for p in ROOT.rglob('*.md') if not {'reports', 'node_modules', '.git', 'test-results'}.intersection(p.relative_to(ROOT).parts)}
 
 
 class ConflictTexts(unittest.TestCase):
@@ -152,7 +152,7 @@ class StructureTexts(unittest.TestCase):
     def test_issue27_fill_cache_and_excel_division(self):
         contract = read('references/workbook-contract.md')
         section = contract.split('## 填写缓存与 Excel 的分工')[1].split('\n## ')[0]
-        for needle in ('唯一的状态记录', '两边互不代写', '提交已点击.md', '当场**改 `已提交`', '方案哈希', '删掉 JSON'):
+        for needle in ('唯一的状态记录', '两边互不代写', '提交已点击.md', '当场**改 `已提交`', '方案哈希', '删掉 JSON', '门禁不读取、不要求、不解析'):
             self.assertIn(needle, section)
         fill = read('references/browser-application.md').split('## 批量填写与填写缓存')[1].split('\n## ')[0]
         for needle in ('form_input', 'playwright_fill.py', '仍然禁止', '派发合成事件', '值来源: 档案', '续跑时先看', '复核'):
@@ -186,7 +186,7 @@ class StructureTexts(unittest.TestCase):
             self.assertIn(needle, fill)
 
     def test_versions_bumped(self):
-        self.assertTrue('version: "1.15.0"' in read('SKILL.md'))
+        self.assertTrue('version: "1.17.0"' in read('SKILL.md'))
 
 
 if __name__ == '__main__':

@@ -1,0 +1,51 @@
+{
+  "complete_and_audited": true,
+  "aggregates": [
+    {
+      "cache_state": "cold",
+      "baseline": {
+        "total_tokens": 2337865,
+        "full_seconds": 703.2892711000168,
+        "seed_seconds": 0,
+        "model_requests": 82,
+        "rea_calls": 0
+      },
+      "optimized": {
+        "total_tokens": 1279503,
+        "full_seconds": 366.45101709997107,
+        "seed_seconds": 0,
+        "model_requests": 43,
+        "rea_calls": 1
+      }
+    },
+    {
+      "cache_state": "warm",
+      "baseline": {
+        "total_tokens": 2364289,
+        "full_seconds": 684.1249376000196,
+        "seed_seconds": 5.332279299997026,
+        "model_requests": 76,
+        "rea_calls": 0
+      },
+      "optimized": {
+        "total_tokens": 1106662,
+        "full_seconds": 278.8356993999914,
+        "seed_seconds": 5.532264900000882,
+        "model_requests": 38,
+        "rea_calls": 0
+      }
+    }
+  ],
+  "totals": {
+    "recorded_rounds": 20,
+    "reported_usage_rounds": 20,
+    "known_total_tokens": 7088319,
+    "full_cli_seconds_sum": 2032.700925199999,
+    "seed_seconds_included": 10.864544199997908,
+    "mcp_errors": 21,
+    "business_rejection_returns": 2,
+    "verified_readback_fields": 88,
+    "rea_calls_completed_rounds": 1,
+    "rea_seconds": 29.3137342
+  }
+}

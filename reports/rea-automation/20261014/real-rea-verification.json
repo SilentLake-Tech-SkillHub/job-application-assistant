@@ -1,0 +1,97 @@
+{
+  "provider": "REA",
+  "operation": "inspect_web_page",
+  "evidence_id": "ev_3b2b06294d61613aac36ed016ddfbe94b65bab00b321a3d4d0153753eb370391",
+  "target_id": "34160F680BEBBFE119E07546ABB66E62",
+  "origin": "http://127.0.0.1:4626",
+  "completeness": {
+    "status": "policy_filtered",
+    "conditions": [
+      "attach_limited",
+      "policy_filtered"
+    ],
+    "policy_filtered_sections": [
+      "accessibility",
+      "console_text",
+      "json_body_shapes",
+      "script_sources",
+      "scripts",
+      "storage_keys",
+      "websocket_shapes"
+    ],
+    "attach_limited_sections": [
+      "console_events",
+      "metadata",
+      "network_requests",
+      "websocket_connections",
+      "websocket_frames"
+    ],
+    "truncated_sections": [],
+    "unavailable_sections": [],
+    "excluded": [
+      {
+        "section": "accessibility",
+        "reason": "not_approved",
+        "count": 43
+      },
+      {
+        "section": "console_text",
+        "reason": "not_approved",
+        "count": null
+      },
+      {
+        "section": "json_body_shapes",
+        "reason": "not_approved",
+        "count": null
+      },
+      {
+        "section": "script_sources",
+        "reason": "not_approved",
+        "count": 1
+      },
+      {
+        "section": "scripts",
+        "reason": "unattributed_origin",
+        "count": 10
+      },
+      {
+        "section": "storage_keys",
+        "reason": "not_approved",
+        "count": null
+      },
+      {
+        "section": "websocket_shapes",
+        "reason": "not_approved",
+        "count": null
+      }
+    ],
+    "dropped_events": {
+      "scripts": 0,
+      "network_requests": 0,
+      "console_events": 0,
+      "websocket_connections": 0,
+      "websocket_frames": 0,
+      "webmcp_tools": 0,
+      "timeline_events": 0,
+      "total": 0
+    }
+  },
+  "counts": {
+    "scripts": 1,
+    "resources": 0,
+    "network_requests": 0
+  },
+  "limitations": [
+    "Artifact identity is unavailable for this observation.",
+    "Observation starts when REA attaches; prior network and console activity is unavailable.",
+    "Raw network headers, bodies, cookies, storage values, console objects, and WebSocket payloads are never retained; explicitly requested primitive console text is retained verbatim, while payload captures retain value-free shapes.",
+    "Source maps are reported only as declarative URLs and are not fetched.",
+    "URL-less scripts and console events without an allowed source URL are excluded because their origin cannot be proven.",
+    "Browser host platform and architecture were not observed."
+  ],
+  "authority": "diagnostic observation only; no locator, semantic or submission proof",
+  "artifact_sha256": "4197f5305c65bad576bf56e718e6cd937aec7c6cdde6b763d1a59ed69179ca29",
+  "page_preserved": true,
+  "fixture": "search-dropdown",
+  "measurement": "real REA CLI passive capture; not included in latency/token benchmark"
+}

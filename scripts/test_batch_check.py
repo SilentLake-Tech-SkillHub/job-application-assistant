@@ -265,81 +265,85 @@ class ReviewSubmitTests(Base):
 
 
 class FillCacheExcelTests(Base):
-    """#27: 填写方案.json is a fill cache; Excel stays the only state record and the two must agree."""
+    """Disposable cache cannot change gates, Excel facts, approval or replay protection."""
 
-    def plan(self, url=U1, **change):
-        path = self.w.role_folder(A, url) / '填写方案.json'
-        data = json.loads(path.read_text(encoding='utf-8'))
-        data.update(change)
-        path.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
-        return path
-
-    def test_review_requires_complete_plan_and_matching_readback(self):
-        self.ready()
-        self.w.plan(A, U1, done=False)
-        errors = gate(self.w.book, 'b1', 'review', U1)['错误']
-        self.assertTrue(has(errors, '3 个字段未读回'))
-        self.w.role_prepared(A, U1)
-        self.assertTrue(gate(self.w.book, 'b1', 'review', U1)['允许'])
-        self.plan(备注='改过方案')  # plan changed after the readback was exported
-        self.assertTrue(has(gate(self.w.book, 'b1', 'review', U1)['错误'], '方案哈希不符'))
-
-    def test_review_without_plan_is_blocked(self):
+    def test_missing_independent_readback_is_not_replaced_by_cache(self):
         self.ready(); folder = self.w.role_prepared(A, U1)
+        (folder / '填写读回.md').unlink()
+        self.assertTrue(has(gate(self.w.book, 'b1', 'review', U1)['错误'], '填写读回.* 不存在'))
         (folder / '填写方案.json').unlink()
-        self.assertTrue(has(gate(self.w.book, 'b1', 'review', U1)['错误'], '填写方案.json 不存在'))
+        self.assertTrue(has(gate(self.w.book, 'b1', 'review', U1)['错误'], '填写读回.* 不存在'))
 
-    def test_status_keys_cannot_enter_the_cache(self):
-        self.ready(); self.w.role_prepared(A, U1)
-        self.plan(投递状态='已提交')
-        self.assertTrue(has(self.errors(), '不属于填写缓存的键 投递状态'))
-        self.plan(投递状态=None)
-        path = self.w.role_folder(A, U1) / '填写方案.json'
-        data = json.loads(path.read_text(encoding='utf-8')); data.pop('投递状态')
-        data['字段'][0]['回执'] = 'APP-1'
-        path.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
-        self.assertTrue(has(self.errors(), '不属于填写缓存的键 回执'))
+    def test_cache_deletion_corruption_and_forgery_leave_all_gates_unchanged(self):
+        self.ready(); folder = self.w.role_prepared(A, U1); self.w.role_approved(A, U1)
+        cache = folder / '填写方案.json'
+        original = cache.read_bytes()
+        excel = self.w.book.read_bytes()
+        stages = ('query', 'prepare', 'review', 'submit', 'closeout')
+        def signatures():
+            results = {stage: gate(self.w.book, 'b1', stage, U1) for stage in stages}
+            return {stage: (r['允许'], r['错误'], r.get('收尾'), r.get('报告')) for stage, r in results.items()}
+        before = signatures()
+        self.assertTrue(before['review'][0]); self.assertTrue(before['submit'][0])
+        for data in (None, b'{broken', b'{}', original.replace(b'b1', b'other'),
+                     json.dumps({'投递状态': '已提交', '回执': 'FORGED', '批准': True}).encode('utf-8')):
+            if data is None:
+                cache.unlink(missing_ok=True)
+            else:
+                cache.write_bytes(data)
+            self.assertEqual(signatures(), before)
+            self.assertEqual(self.w.book.read_bytes(), excel)
+            self.assertEqual(Workbook(self.w.book).role_by_url(U1)[0]['投递状态'], '待投递')
 
-    def test_cache_must_match_the_excel_row_and_lane(self):
-        self.ready(); self.w.role_prepared(A, U1)
-        self.plan(岗位链接=U2)
-        self.assertTrue(has(self.errors(), '岗位链接与岗位表不一致'))
-        self.plan(岗位链接=U1, 公司='合成公司Z')
-        self.assertTrue(has(self.errors(), '公司与岗位表不一致'))
-        self.plan(公司=A, 通道='Chrome')
-        self.assertTrue(has(self.errors(), '通道与 公司/通道.md 不一致'))
-        self.plan(通道='内置浏览器', 批次='别的批次')
-        self.assertTrue(has(self.errors(), '批次不是本批'))
+    def test_gates_do_not_even_open_the_fill_cache(self):
+        from unittest.mock import patch
+        self.ready(); self.w.role_prepared(A, U1); self.w.role_approved(A, U1)
+        real_read = Path.read_text
+        def guard_read(path, *args, **kwargs):
+            if path.name == '填写方案.json':
+                raise AssertionError('A gate tried to read the disposable cache')
+            return real_read(path, *args, **kwargs)
+        with patch.object(Path, 'read_text', guard_read):
+            for stage in ('query', 'prepare', 'review', 'submit', 'closeout'):
+                gate(self.w.book, 'b1', stage, U1)
 
-    def test_plan_without_excel_row_is_orphan(self):
+    def test_cache_without_excel_row_still_does_not_create_a_role(self):
         folder = self.w.role_folder(A, U3); folder.mkdir(parents=True)
         (folder / '填写方案.json').write_text('{}', encoding='utf-8')
         self.assertTrue(has(self.errors(), '找不到对应的岗位表行'))
 
-    def test_cache_never_changes_excel_state(self):
-        """Deleting the cache after submission leaves every Excel-derived result unchanged."""
+    def test_cache_never_changes_submitted_excel_state(self):
         self.submitted()
-        before = (self.errors(), self.batch().report()['已提交且有回执'])
+        before = (self.errors(), self.batch().report()['已提交且有回执'], self.w.book.read_bytes())
         (self.w.role_folder(A, U1) / '填写方案.json').unlink()
-        after = (self.errors(), self.batch().report()['已提交且有回执'])
+        after = (self.errors(), self.batch().report()['已提交且有回执'], self.w.book.read_bytes())
         self.assertEqual(before, after)
         self.assertEqual(Workbook(self.w.book).role_by_url(U1)[0]['投递状态'], '已提交')
 
-    def test_progress_is_reported_for_resume(self):
-        self.ready(); self.w.plan(A, U1, done=False)
-        report = self.batch().report()
-        self.assertEqual(list(report['填写进度'].values()), ['0/3 已读回'])
+    def test_deleting_cache_cannot_release_an_unreconciled_submit_click(self):
+        from submit_pass import consume_submit_click
+        self.ready(); folder = self.w.role_prepared(A, U1); self.w.role_approved(A, U1)
+        self.assertTrue(gate(self.w.book, 'b1', 'submit', U1)['允许'])
+        self.assertTrue(consume_submit_click(self.w.root)[0])
+        (folder / '填写方案.json').unlink()
+        excel = self.w.book.read_bytes()
+        for stage in ('query', 'prepare', 'review', 'submit', 'closeout'):
+            result = gate(self.w.book, 'b1', stage, U1)
+            self.assertFalse(result['允许'])
+            self.assertNotIn('提交通行证', result)
+        self.assertEqual(self.w.book.read_bytes(), excel)
+        self.assertFalse(consume_submit_click(self.w.root)[0])
 
-    def test_sensitive_literal_and_never_store_fields_rejected(self):
-        self.ready(); self.w.role_prepared(A, U1)
-        path = self.w.role_folder(A, U1) / '填写方案.json'
-        data = json.loads(path.read_text(encoding='utf-8'))
-        data['字段'][1]['值'] = '13800000000'
-        data['字段'].append({'序号': 4, '标签': '身份证号 *', '定位': {'label': '身份证号 *'}, '控件': '文本', '填法': '批量', '值': 'x', '状态': '待填'})
-        path.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
-        errors = self.errors()
-        self.assertTrue(has(errors, '个人敏感信息'))
-        self.assertTrue(has(errors, '永不记录的信息'))
+    def test_forged_cache_cannot_replace_official_receipt(self):
+        self.ready(); folder = self.w.role_prepared(A, U1)
+        self.w.set_apply_status(U1, '已提交')
+        (folder / '填写方案.json').write_text(json.dumps({'回执': 'FAKE'}), encoding='utf-8')
+        self.assertTrue(has(self.errors(), '没有回执'))
+
+    def test_progress_is_optional_display_only(self):
+        self.ready(); self.w.plan(A, U1, done=False)
+        self.assertEqual(list(self.batch().report()['填写进度'].values()), ['0/3 已读回'])
+        self.assertEqual(self.batch().report(include_fill_progress=False)['填写进度'], {})
 
 
 class ClickMarkerAndFreshnessTests(Base):

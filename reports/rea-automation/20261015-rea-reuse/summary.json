@@ -1,0 +1,77 @@
+{
+  "groups": {
+    "no-rea": {
+      "token_total": 1134813,
+      "wall_seconds": 362.496799799992,
+      "measured_tool_seconds": 23.643527507781982,
+      "model_network_orchestration_seconds": 338.85327229221,
+      "actual_rea_cli_seconds": 0,
+      "requests": 38,
+      "rea_calls": 0,
+      "reused": 0
+    },
+    "first-rea": {
+      "token_total": 1343533,
+      "wall_seconds": 431.707693400007,
+      "measured_tool_seconds": 54.39519739151001,
+      "model_network_orchestration_seconds": 377.31249600849696,
+      "actual_rea_cli_seconds": 27.423248299994157,
+      "requests": 43,
+      "rea_calls": 5,
+      "reused": 0
+    },
+    "reuse": {
+      "token_total": 824169,
+      "wall_seconds": 325.4462124000129,
+      "measured_tool_seconds": 22.095099925994873,
+      "model_network_orchestration_seconds": 303.351112474018,
+      "actual_rea_cli_seconds": 0,
+      "requests": 30,
+      "rea_calls": 0,
+      "reused": 5
+    }
+  },
+  "comparison": {
+    "reuse_token_reduction_percent": 27.3740255002366,
+    "reuse_time_reduction_percent": 10.220941928431316,
+    "reuse_throughput_ratio": 1.1138455019241074,
+    "token_payback_additional_reuses": 1,
+    "time_payback_additional_reuses": 2
+  },
+  "audit_passed": true,
+  "all_turns_tokens": 3302515,
+  "all_turns_seconds": 1119.6507056000119,
+  "projection_formula": "B + N*C vs (N+1)*A; N=additional reuse cycles of the same five sites; arithmetic projection, not additional measurements",
+  "per_site": {
+    "native-bilingual": {
+      "reuse_token_reduction_percent": -0.9699113311344654,
+      "reuse_time_reduction_percent": 43.78709454752574,
+      "token_payback_additional_reuses": null,
+      "time_payback_additional_reuses": 0
+    },
+    "search-dropdown": {
+      "reuse_token_reduction_percent": 49.11860016977403,
+      "reuse_time_reduction_percent": 30.431777145625063,
+      "token_payback_additional_reuses": 1,
+      "time_payback_additional_reuses": 2
+    },
+    "date-cascade": {
+      "reuse_token_reduction_percent": 48.71778900356914,
+      "reuse_time_reduction_percent": -62.10231490965719,
+      "token_payback_additional_reuses": 1,
+      "time_payback_additional_reuses": null
+    },
+    "repeated-education": {
+      "reuse_token_reduction_percent": -0.599167754768315,
+      "reuse_time_reduction_percent": 1.9289814262931748,
+      "token_payback_additional_reuses": null,
+      "time_payback_additional_reuses": 25
+    },
+    "upload-rerender": {
+      "reuse_token_reduction_percent": -1.0761822115208375,
+      "reuse_time_reduction_percent": 19.773515994575085,
+      "token_payback_additional_reuses": null,
+      "time_payback_additional_reuses": 1
+    }
+  }
+}

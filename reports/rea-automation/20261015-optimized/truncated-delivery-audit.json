@@ -1,0 +1,77 @@
+{
+  "passed": false,
+  "checks": [
+    {
+      "mode": "enhanced",
+      "usage_matched_cli_and_rollout": true,
+      "request_count": 31,
+      "summed_request_usage": {
+        "input_tokens": 1253930,
+        "cached_input_tokens": 1204864,
+        "output_tokens": 3448,
+        "reasoning_output_tokens": 1320,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 1257378,
+        "uncached_input_tokens": 49066
+      },
+      "verified_receipts": 5,
+      "rea_captures": [
+        {
+          "site": "search-dropdown",
+          "sha256": "82e1f8ea7858fc96f0e812e1c3be2e10b9ab62e2dfbf0af910aedeb0d2291187",
+          "evidence_id": "ev_411c799bfe836b4655d5f4851aa58261071830aa4566f003345780c43763fc97",
+          "script_sources": 1,
+          "seconds": 5.5019354
+        },
+        {
+          "site": "date-cascade",
+          "sha256": "5e7ad0059f68261c99820637fba58bfe4bce3f5e5925ece41ba4d1036365d88f",
+          "evidence_id": "ev_1a09914232714c1d739b64332a64aafaa453a5f107bd16d9891a5620d843972a",
+          "script_sources": 1,
+          "seconds": 4.8350089
+        },
+        {
+          "site": "upload-rerender",
+          "sha256": "96f50f50400f7457d56688da931daccfaf7c50dd376dd8efae9586dff0a50ee8",
+          "evidence_id": "ev_a8615b3729c70c6edfb4e23f6a316b17d4454da7ca609eba962a931f2d030362",
+          "script_sources": 1,
+          "seconds": 6.4644984
+        }
+      ],
+      "stage_gates": null,
+      "cli_events_sha256": "b9a6a339ae686f4739358055923976ec6827f5e3eb0a5aabe3ecd15168fca832",
+      "tool_events_sha256": "8c258af47ffb80ba75dd30a60e3da8c86d3cae70732aa0f8bb6fc14f37274926",
+      "selected_rollout_sha256": "5c7918c980524e39e16276b31be6b9bdb83c7f4f6b94cc3e0730ed1afe8e34b2"
+    },
+    {
+      "mode": "optimized",
+      "usage_matched_cli_and_rollout": true,
+      "request_count": 12,
+      "summed_request_usage": {
+        "input_tokens": 273918,
+        "cached_input_tokens": 242560,
+        "output_tokens": 2989,
+        "reasoning_output_tokens": 1191,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 276907,
+        "uncached_input_tokens": 31358
+      },
+      "verified_receipts": 5,
+      "rea_captures": [],
+      "stage_gates": {
+        "query": true,
+        "prepare": 5,
+        "review": 5,
+        "submit": 5,
+        "closeout": true,
+        "current_review_hash_approved": 5,
+        "readback_plans": 5
+      },
+      "cli_events_sha256": "247c4d16b1ea21d1067925d66aa928f55cb78238fb31a631dcf6127792159334",
+      "tool_events_sha256": "208e6a0b35717ecbf899b58726148a46834ac67e2150ed2531a8da84f4ce319a",
+      "selected_rollout_sha256": "e45a4d92cd1fc677abc32acb0ce45f7eed8a3f213fb8c4873638eadce429f7f1"
+    }
+  ],
+  "usage_and_receipts_reconciled": true,
+  "reason": "Outer code-mode truncated instruction output in both arms; excluded from final complete-delivery comparison"
+}

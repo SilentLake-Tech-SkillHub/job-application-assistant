@@ -5,12 +5,14 @@
                      [--profile-dir <目录>] [--channel chrome|msedge] [--headless] [--cdp <http://127.0.0.1:9222>]
                      [--max-fields N] [--no-save]
 
-* Starts a persistent browser profile (default <投递根目录>/.浏览器配置/playwright) so logins made
+* Starts or reuses an independently running browser with a persistent profile (default <投递根目录>/.浏览器配置/playwright) so logins made
   there are kept between runs; or attaches to an existing browser with --cdp.
 * Text, textarea, native select, checkbox and radio fields use Playwright's own input APIs
   (fill / select_option / check), which produce the browser's real input events. Custom dropdowns,
   dates and cascaders run the plan's 点击步骤 (real clicks on the actual options). Uploads use
   set_input_files. Nothing is assigned through page scripts.
+* The browser remains open on success, login handoff, field failure, and interruption.
+  Subsequent runs reconnect to the same profile without navigating away from unsaved pages.
 * Every field is read back right away and its 状态 written to the plan before the next field, so an
   interrupted run resumes from the first unfinished field (already read-back fields are skipped).
 * It never submits: steps whose target looks like a final-submission control are refused, both from
@@ -30,6 +32,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import fill_plan  # noqa: E402
+from browser_session import connect as connect_session  # noqa: E402
 from submit_words import submit_like_text  # noqa: E402
 from evidence_layout import EVIDENCE_DIR  # noqa: E402
 
@@ -277,113 +280,119 @@ def main(argv=None):
     url = args.url or plan.get('表单链接') or plan['岗位链接']
     profile = args.profile_dir or (Path(root) / '.浏览器配置' / 'playwright')
 
-    from playwright.sync_api import sync_playwright
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return finish(2, 通过=False, 错误=['缺少 Playwright；请用户在所选环境安装 playwright 和 Chromium，Agent 不安装依赖'])
     done_now, failed, waiting = [], [], []
     with sync_playwright() as pw:
-        browser = None
-        if args.cdp:
-            browser = pw.chromium.connect_over_cdp(args.cdp)
-            context = browser.contexts[0] if browser.contexts else browser.new_context()
-        else:
-            profile.mkdir(parents=True, exist_ok=True)
-            options = {'headless': args.headless}
-            if args.channel:
-                options['channel'] = args.channel
-            elif os.environ.get('CHROME_EXECUTABLE'):
-                options['executable_path'] = os.environ['CHROME_EXECUTABLE']
-            context = pw.chromium.launch_persistent_context(str(profile), **options)
         try:
-            page = next((p for p in context.pages if p.url.split('#')[0] == url.split('#')[0]), None)
-            if page is None:
-                page = context.new_page()
-                page.goto(url)
-            first = next((f for f in plan['字段'] if f.get('填法') != '用户'), None)
-            if first is not None:
-                try:
-                    locate(page, first['定位']).first.wait_for(state='attached', timeout=args.timeout)
-                except Exception:  # noqa: BLE001
-                    return finish(3, 通过=False, 页面=page.url,
-                                  错误=['页面上找不到第一个字段「%s」：可能需要先在这个浏览器配置里登录（登录态会保留），或表单链接不对' % first['标签']])
-            rechecked = recheck(page, plan, vault, root, args.plan)
-            budget = [args.max_fields or 10 ** 6]
+            if args.cdp:
+                endpoint = args.cdp
+                browser = pw.chromium.connect_over_cdp(endpoint)
+                if not browser.contexts:
+                    raise RuntimeError('CDP 会话没有持久化上下文')
+                context = browser.contexts[0]
+            else:
+                browser, context, endpoint = connect_session(
+                    pw, profile, headless=args.headless, channel=args.channel,
+                    executable_path=os.environ.get('CHROME_EXECUTABLE'))
+        except Exception as exc:
+            return finish(2, 通过=False, 错误=['浏览器连接未就绪：' + type(exc).__name__ +
+                          '；请检查专用配置、既有浏览器或 --cdp 地址。Agent 不安装依赖，也不关闭已有页面。'])
+        retained = {'CDP': endpoint, '页面保留': True, '说明': '填写进程只断开连接；浏览器由用户另行关闭'}
+        page = next((p for p in context.pages if p.url.split('#')[0] == url.split('#')[0]), None)
+        if page is None:
+            page = context.new_page()
+            page.goto(url)
+        # Reused tabs may be in the background after the user visits another page.
+        # Activate the form so native input and screenshot rendering can proceed.
+        page.bring_to_front()
+        first = next((f for f in plan['字段'] if f.get('填法') != '用户'), None)
+        if first is not None:
+            try:
+                locate(page, first['定位']).first.wait_for(state='attached', timeout=args.timeout)
+            except Exception:  # noqa: BLE001
+                return finish(3, 通过=False, 页面=page.url, 浏览器会话=retained,
+                              错误=['页面上找不到第一个字段「%s」：可能需要先在这个浏览器配置里登录（登录态会保留），或表单链接不对' % first['标签']])
+        rechecked = recheck(page, plan, vault, root, args.plan)
+        budget = [args.max_fields or 10 ** 6]
 
-            def fill_pending():
-                for field in plan['字段']:
-                    if field.get('状态') in fill_plan.DONE or field['标签'] in failed:
-                        continue
-                    if field.get('填法') == '用户':
-                        if field.get('状态') != '需用户':
-                            fill_plan.mark(plan, field['序号'], '需用户')
-                            fill_plan.save(args.plan, plan)
-                        if field['标签'] not in waiting:
-                            waiting.append(field['标签'])
-                        continue
-                    if budget[0] <= 0:
-                        return
-                    deps = [f for f in plan['字段'] if f['序号'] in field.get('依赖', []) and f.get('状态') not in fill_plan.DONE]
-                    if deps:
-                        field['备注'] = '等待依赖字段：' + '、'.join(d['标签'] for d in deps)
-                        fill_plan.save(args.plan, plan)
-                        continue
-                    budget[0] -= 1
-                    reason = fill_plan.blocked_reason(field, vault, root, plan.get('批次'), privacy)
-                    if reason:
+        def fill_pending():
+            for field in plan['字段']:
+                if field.get('状态') in fill_plan.DONE or field['标签'] in failed:
+                    continue
+                if field.get('填法') == '用户':
+                    if field.get('状态') != '需用户':
                         fill_plan.mark(plan, field['序号'], '需用户')
-                        field['备注'] = reason
                         fill_plan.save(args.plan, plan)
-                        if field['标签'] not in waiting:
-                            waiting.append(field['标签'])
-                        continue
-                    value = fill_plan.resolve(field, vault, root, plan.get('批次'), privacy)
-                    try:
-                        ok, got = fill_field(page, field, value, args.timeout)
-                        fill_plan.mark(plan, field['序号'], '已读回' if ok else '不一致', str(got), vault=vault)
-                        field.pop('备注', None) if ok else field.update({'备注': '读回与期望不一致：改用逐字输入或真实点击后重试'})
-                    except Refused as exc:
-                        fill_plan.mark(plan, field['序号'], '不一致', '', vault=vault)
-                        field['备注'] = str(exc)
-                        ok = False
-                    except Exception as exc:  # noqa: BLE001 - keep going with the other fields
-                        fill_plan.mark(plan, field['序号'], '不一致', '', vault=vault)
-                        field['备注'] = '执行出错：' + type(exc).__name__ + ' ' + redact(str(exc).splitlines()[0][:160], secrets + [value])
-                        ok = False
-                    fill_plan.save(args.plan, plan)  # progress survives an interruption
-                    if ok:
-                        done_now.append(field['标签'])
-                    else:
-                        failed.append(field['标签'])
+                    if field['标签'] not in waiting:
+                        waiting.append(field['标签'])
+                    continue
+                if budget[0] <= 0:
+                    return
+                deps = [f for f in plan['字段'] if f['序号'] in field.get('依赖', []) and f.get('状态') not in fill_plan.DONE]
+                if deps:
+                    field['备注'] = '等待依赖字段：' + '、'.join(d['标签'] for d in deps)
+                    fill_plan.save(args.plan, plan)
+                    continue
+                budget[0] -= 1
+                reason = fill_plan.blocked_reason(field, vault, root, plan.get('批次'), privacy)
+                if reason:
+                    fill_plan.mark(plan, field['序号'], '需用户')
+                    field['备注'] = reason
+                    fill_plan.save(args.plan, plan)
+                    if field['标签'] not in waiting:
+                        waiting.append(field['标签'])
+                    continue
+                value = fill_plan.resolve(field, vault, root, plan.get('批次'), privacy)
+                try:
+                    ok, got = fill_field(page, field, value, args.timeout)
+                    fill_plan.mark(plan, field['序号'], '已读回' if ok else '不一致', str(got), vault=vault)
+                    field.pop('备注', None) if ok else field.update({'备注': '读回与期望不一致：改用逐字输入或真实点击后重试'})
+                except Refused as exc:
+                    fill_plan.mark(plan, field['序号'], '不一致', '', vault=vault)
+                    field['备注'] = str(exc)
+                    ok = False
+                except Exception as exc:  # noqa: BLE001 - keep going with the other fields
+                    fill_plan.mark(plan, field['序号'], '不一致', '', vault=vault)
+                    field['备注'] = '执行出错：' + type(exc).__name__ + ' ' + redact(str(exc).splitlines()[0][:160], secrets + [value])
+                    ok = False
+                fill_plan.save(args.plan, plan)  # progress survives an interruption
+                if ok:
+                    done_now.append(field['标签'])
+                else:
+                    failed.append(field['标签'])
 
-            fill_pending()
-            # An upload's auto-parse (or any re-render) can overwrite fields filled earlier in this run:
-            # read everything back once more and refill what changed, once.
-            if not args.max_fields:
-                again = recheck(page, plan, vault, root, args.plan)
-                if again:
-                    rechecked += again
-                    fill_pending()
-            left = fill_plan.pending(plan)
-            page_errors = visible_errors(page)
-            shot = Path(args.plan).parent / '填写截图.png'
-            page.screenshot(path=str(shot), full_page=True)
-            if not left:
-                try:
-                    observed = shot.resolve().relative_to(Path(root).resolve()).as_posix()
-                except ValueError:
-                    observed = str(shot)
-                fill_plan.page_check(plan, not page_errors, observed, root)
-                fill_plan.save(args.plan, plan)
-            saved = None
-            if plan.get('保存步骤') and not args.no_save and not [f for f in left if f.get('填法') != '用户']:
-                try:
-                    run_steps(page, plan['保存步骤'], args.timeout)
-                    saved = '已点击保存（重开表单逐字段读回后再写 草稿读回）'
-                except Exception as exc:  # noqa: BLE001
-                    saved = '保存失败：' + type(exc).__name__ + ' ' + redact(str(exc).splitlines()[0][:160], secrets)
-        finally:
-            if browser is None:
-                context.close()
+        fill_pending()
+        # An upload's auto-parse (or any re-render) can overwrite fields filled earlier in this run:
+        # read everything back once more and refill what changed, once.
+        if not args.max_fields:
+            again = recheck(page, plan, vault, root, args.plan)
+            if again:
+                rechecked += again
+                fill_pending()
+        left = fill_plan.pending(plan)
+        page_errors = visible_errors(page)
+        shot = Path(args.plan).parent / '填写截图.png'
+        page.screenshot(path=str(shot), full_page=True)
+        if not left:
+            try:
+                observed = shot.resolve().relative_to(Path(root).resolve()).as_posix()
+            except ValueError:
+                observed = str(shot)
+            fill_plan.page_check(plan, not page_errors, observed, root)
+            fill_plan.save(args.plan, plan)
+        saved = None
+        if plan.get('保存步骤') and not args.no_save and not [f for f in left if f.get('填法') != '用户']:
+            try:
+                run_steps(page, plan['保存步骤'], args.timeout)
+                saved = '已点击保存（重开表单逐字段读回后再写 草稿读回）'
+            except Exception as exc:  # noqa: BLE001
+                saved = '保存失败：' + type(exc).__name__ + ' ' + redact(str(exc).splitlines()[0][:160], secrets)
+
     left = fill_plan.pending(plan)
-    out = {'通过': not failed, '页面校验': (plan.get('页面校验') or {}).get('结果', '未做（还有字段未读回）'),
+    out = {'通过': not failed, '浏览器会话': retained, '页面校验': (plan.get('页面校验') or {}).get('结果', '未做（还有字段未读回）'),
            '页面报错': page_errors, '续跑复核重填': rechecked, '本次已读回': done_now, '不一致': failed, '需用户': waiting,
            '未完成': [f['标签'] for f in left], '保存': saved, '方案': str(args.plan)}
     return finish(1 if failed else 0, **out)

@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -35,6 +36,7 @@ from batch_check import Batch  # noqa: E402
 from workbook_state import Workbook  # noqa: E402
 import fill_plan  # noqa: E402
 from test_playwright_fill import plan_for  # noqa: E402
+from browser_session import profile_endpoint  # noqa: E402
 
 A, B = '合成公司', '合成公司B'
 ENV = dict(os.environ, PYTHONIOENCODING='utf-8')
@@ -62,7 +64,16 @@ class FullFlow(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.browser.close(); cls.pw.stop(); cls.server.shutdown()
+        endpoint = profile_endpoint(cls.profile)
+        if endpoint:
+            # Explicit cleanup of this test's own temporary retained browser.
+            retained = cls.pw.chromium.connect_over_cdp(endpoint)
+            retained.new_browser_cdp_session().send('Browser.close')
+            for _ in range(50):
+                if profile_endpoint(cls.profile) is None:
+                    break
+                time.sleep(0.1)
+        cls.browser.close(); cls.pw.stop(); cls.server.shutdown(); cls.server.server_close()
         if cls.out:
             cls.out.mkdir(parents=True, exist_ok=True)
             shutil.copytree(cls.w.root / '投递证据', cls.out / '投递证据', dirs_exist_ok=True)
@@ -188,9 +199,11 @@ class FullFlow(unittest.TestCase):
         ctx.close()
 
     def executor(self, plan_path, *extra):
+        before = sha(self.w.book)
         result = subprocess.run([sys.executable, str(HERE / 'playwright_fill.py'), '--plan', str(plan_path), '--headless',
-                                 '--profile-dir', str(self.profile), '--timeout', '4000', *extra],
+                                 '--profile-dir', str(self.profile), '--workbook', str(self.w.book), '--timeout', '4000', *extra],
                                 capture_output=True, text=True, encoding='utf-8', env=ENV)
+        self.assertEqual(sha(self.w.book), before, 'Filling must never write Excel state')
         self.log.append({'executor': Path(plan_path).parent.name, 'exit': result.returncode})
         return result.returncode, json.loads(result.stdout)
 
@@ -281,11 +294,17 @@ class FullFlow(unittest.TestCase):
             page.goto(self.base + '/center')
             self.note(folder, '提交前复核.md', ['复核时间: ' + now(), '账号: synthetic-user', '已投: ' + page.locator('#history').inner_text().replace('\n', ' '),
                                             '审核包哈希: ' + sha(folder / '审核包.md'), '材料: 简历.pdf'])
+            # Discard the fill cache after review; independent evidence remains valid.
+            excel = sha(w.book)
+            (folder / fill_plan.PLAN_NAME).unlink()
+            self.gate('review', info['url'])
             self.assertEqual(self.hook('点击“提交申请”'), 2)  # no pass yet: the platform hook blocks
             result = self.cli_gate('submit', info['url'])
             self.assertEqual(result.returncode, 0, result.stdout)
             page.goto(self.base + '/apply/' + job); page.wait_for_selector('#submit')
             self.assertEqual(self.hook('点击“提交申请”'), 0)
+            self.gate('submit', info['url'], allowed=False)  # marker blocks a new pass even without JSON
+            self.assertEqual(sha(w.book), excel)  # even the click marker never marks Excel submitted
             page.get_by_role('button', name='提交申请').click()
             modal = page.get_by_role('dialog', name='确认投递')
             self.assertIn(info['title'], modal.inner_text()); self.assertIn(slot, modal.inner_text())

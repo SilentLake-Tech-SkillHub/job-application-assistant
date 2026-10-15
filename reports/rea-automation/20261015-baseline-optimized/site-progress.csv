@@ -1,0 +1,11 @@
+﻿mode,site,batch_start_to_receipt_seconds,reported_cumulative_tokens,reported_request_count,receipt,isolated_site_tokens,isolated_site_wall_seconds
+baseline,native-bilingual,41.360042888,200734,9,mock-0501b6501d94,,
+baseline,search-dropdown,62.093737788,341759,13,mock-51a668462de8,,
+baseline,date-cascade,91.365268988,584945,19,mock-f4122213bd56,,
+baseline,repeated-education,102.417044788,720634,22,mock-aa870bbd5d9f,,
+baseline,upload-rerender,119.132347488,960731,27,mock-a92bd0f37112,,
+optimized,native-bilingual,85.369518752,293386,10,mock-e84b0ba5d90a,,
+optimized,search-dropdown,87.448848952,293386,10,mock-43991f69a04b,,
+optimized,date-cascade,89.379368552,293386,10,mock-93aeb8fb1253,,
+optimized,repeated-education,91.582621652,293386,10,mock-d165c4331c50,,
+optimized,upload-rerender,93.528297452,293386,10,mock-6ebef09aaf34,,

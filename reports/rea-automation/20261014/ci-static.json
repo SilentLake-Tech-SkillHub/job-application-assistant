@@ -1,0 +1,71 @@
+{
+  "ci_passed": true,
+  "results": [
+    {
+      "stage": "static",
+      "check": "check_package.py",
+      "passed": true,
+      "seconds": 2.27
+    },
+    {
+      "stage": "static",
+      "check": "py_compile",
+      "passed": true,
+      "seconds": 0.23
+    },
+    {
+      "stage": "static",
+      "check": "node --check",
+      "passed": true,
+      "seconds": 0.41
+    },
+    {
+      "stage": "static",
+      "check": "node --check",
+      "passed": true,
+      "seconds": 0.4
+    },
+    {
+      "stage": "static",
+      "check": "node --check",
+      "passed": true,
+      "seconds": 0.4
+    },
+    {
+      "stage": "static",
+      "check": "node --check",
+      "passed": true,
+      "seconds": 0.4
+    },
+    {
+      "stage": "static",
+      "check": "node --check",
+      "passed": true,
+      "seconds": 0.39
+    },
+    {
+      "stage": "static",
+      "check": "node --check",
+      "passed": true,
+      "seconds": 0.4
+    },
+    {
+      "stage": "static",
+      "check": "node --check",
+      "passed": true,
+      "seconds": 0.39
+    },
+    {
+      "stage": "static",
+      "check": "node --check",
+      "passed": true,
+      "seconds": 0.39
+    },
+    {
+      "stage": "static",
+      "check": "node --check",
+      "passed": true,
+      "seconds": 0.39
+    }
+  ]
+}

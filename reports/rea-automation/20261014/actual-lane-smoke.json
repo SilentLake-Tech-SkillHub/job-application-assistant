@@ -1,0 +1,30 @@
+{
+  "measurement": "actual-lane-draft-smoke",
+  "benchmark": false,
+  "in_app": {
+    "site": "native-bilingual",
+    "tool": "cua in-app browser native form APIs",
+    "draft": {
+      "name": "合成候选人",
+      "phone": "00000000000",
+      "email": "candidate@example.test",
+      "bachelor.school": "合成本科大学",
+      "degree": "本科",
+      "project": "合成项目：设计需求、验证交互并记录测试结果。"
+    }
+  },
+  "chrome_extension": {
+    "site": "search-dropdown",
+    "tool": "cua Chrome extension native form APIs and actual option click",
+    "draft": {
+      "name": "合成候选人",
+      "bachelor.school": "合成本科大学",
+      "degree": "本科",
+      "project": "合成项目：设计需求、验证交互并记录测试结果。"
+    }
+  },
+  "limitations": [
+    "Two live lane draft smoke cases; no lane latency/token benchmark",
+    "No live employer and no final submission"
+  ]
+}

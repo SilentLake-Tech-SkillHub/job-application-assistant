@@ -1,0 +1,180 @@
+{
+  "ci_passed": true,
+  "results": [
+    {
+      "stage": "static",
+      "check": "check_package.py",
+      "passed": true,
+      "seconds": 3.96
+    },
+    {
+      "stage": "static",
+      "check": "py_compile",
+      "passed": true,
+      "seconds": 0.36
+    },
+    {
+      "stage": "static",
+      "check": "node --check",
+      "passed": true,
+      "seconds": 0.7
+    },
+    {
+      "stage": "static",
+      "check": "node --check",
+      "passed": true,
+      "seconds": 0.65
+    },
+    {
+      "stage": "static",
+      "check": "node --check",
+      "passed": true,
+      "seconds": 0.65
+    },
+    {
+      "stage": "static",
+      "check": "node --check",
+      "passed": true,
+      "seconds": 0.61
+    },
+    {
+      "stage": "static",
+      "check": "node --check",
+      "passed": true,
+      "seconds": 0.62
+    },
+    {
+      "stage": "static",
+      "check": "node --check",
+      "passed": true,
+      "seconds": 0.55
+    },
+    {
+      "stage": "static",
+      "check": "node --check",
+      "passed": true,
+      "seconds": 0.54
+    },
+    {
+      "stage": "static",
+      "check": "node --check",
+      "passed": true,
+      "seconds": 0.56
+    },
+    {
+      "stage": "static",
+      "check": "node --check",
+      "passed": true,
+      "seconds": 0.56
+    },
+    {
+      "stage": "unit",
+      "check": "test_batch_check.py",
+      "passed": true,
+      "seconds": 68.14
+    },
+    {
+      "stage": "unit",
+      "check": "test_fill_plan.py",
+      "passed": true,
+      "seconds": 7.47
+    },
+    {
+      "stage": "unit",
+      "check": "test_profile_vault.py",
+      "passed": true,
+      "seconds": 4.02
+    },
+    {
+      "stage": "unit",
+      "check": "test_docs_consistency.py",
+      "passed": true,
+      "seconds": 0.55
+    },
+    {
+      "stage": "unit",
+      "check": "test_tracker_readback.py",
+      "passed": true,
+      "seconds": 11.42
+    },
+    {
+      "stage": "unit",
+      "check": "test_hooks.py",
+      "passed": true,
+      "seconds": 9.34
+    },
+    {
+      "stage": "unit",
+      "check": "test_rea_bridge.py",
+      "passed": true,
+      "seconds": 0.36
+    },
+    {
+      "stage": "unit",
+      "check": "test_token_metrics.py",
+      "passed": true,
+      "seconds": 0.8
+    },
+    {
+      "stage": "unit",
+      "check": "test_full_chain_benchmark.py",
+      "passed": true,
+      "seconds": 0.25
+    },
+    {
+      "stage": "unit",
+      "check": "test_form_semantics.cjs",
+      "passed": true,
+      "seconds": 0.67
+    },
+    {
+      "stage": "smoke",
+      "check": "smoke_test.py",
+      "passed": true,
+      "seconds": 22.0
+    },
+    {
+      "stage": "browser",
+      "check": "test_inspect_form_controls.cjs",
+      "passed": true,
+      "seconds": 10.13
+    },
+    {
+      "stage": "browser",
+      "check": "test_field_binding_recovery.cjs",
+      "passed": true,
+      "seconds": 4.2
+    },
+    {
+      "stage": "browser",
+      "check": "test_playwright_fill.py",
+      "passed": true,
+      "seconds": 46.9
+    },
+    {
+      "stage": "browser",
+      "check": "test_e2e_full_flow.py",
+      "passed": true,
+      "seconds": 30.13
+    },
+    {
+      "stage": "browser",
+      "check": "test_form_automation.py",
+      "passed": true,
+      "seconds": 16.87
+    },
+    {
+      "stage": "browser",
+      "check": "test_full_chain_benchmark.py",
+      "passed": true,
+      "seconds": 51.27
+    },
+    {
+      "stage": "stress",
+      "check": "test_stress.py",
+      "passed": true,
+      "seconds": 253.48
+    }
+  ],
+  "scope": "local offline/static/unit/smoke/browser/stress checks, separate from paid model benchmark"
+}

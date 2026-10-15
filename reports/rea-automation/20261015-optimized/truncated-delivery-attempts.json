@@ -1,0 +1,863 @@
+{
+  "protocol_version": 2,
+  "comparison": "optimization",
+  "baseline_commit": "ef9b403003ecb96004f27443842711be44f6ef86",
+  "before_commit": "00aaeb8fb7751af1ee4b42c2e85fb60d64f977d8",
+  "scope": "one real model-driven fresh-context batch per mode, five owned mock forms each",
+  "lane": "shipping Playwright backup executor + real Codex CLI + actual REA CLI in enhanced",
+  "timing_boundary": "CLI process start through complete agent turn/process exit; batch verified boundary separately recorded",
+  "preseeded": "synthetic confirmed role/JD list, Query/quota facts and approvals; mock-user review simulated",
+  "human_wait_measured": false,
+  "paid_api_or_account_credits": "current saved ChatGPT Codex login",
+  "rea_token_attribution": "REA has no LLM usage; model evidence interpretation is included in aggregate input/output. No unsupported module token split.",
+  "results": [
+    {
+      "mode": "enhanced",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "thread_id": "01a13bbe-8586-7500-bb63-678488986778",
+      "started_utc": "2026-10-14T18:48:23.365381+00:00",
+      "wall_seconds": 183.06957930000135,
+      "to_batch_verified_seconds": 179.1602805,
+      "exit_code": 0,
+      "timed_out": false,
+      "completed": true,
+      "usage": {
+        "input_tokens": 1253930,
+        "cached_input_tokens": 1204864,
+        "output_tokens": 3448,
+        "reasoning_output_tokens": 1320,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 1257378,
+        "uncached_input_tokens": 49066
+      },
+      "usage_source": "Codex turn.completed + selected rollout token_count",
+      "request_usage": [
+        {
+          "timestamp": "2026-10-14T18:48:31.536Z",
+          "usage": {
+            "input_tokens": 9688,
+            "cached_input_tokens": 7168,
+            "output_tokens": 147,
+            "reasoning_output_tokens": 56,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 9835,
+            "uncached_input_tokens": 2520
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:48:44.363Z",
+          "usage": {
+            "input_tokens": 10796,
+            "cached_input_tokens": 9472,
+            "output_tokens": 103,
+            "reasoning_output_tokens": 29,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 10899,
+            "uncached_input_tokens": 1324
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:48:47.927Z",
+          "usage": {
+            "input_tokens": 16788,
+            "cached_input_tokens": 10624,
+            "output_tokens": 178,
+            "reasoning_output_tokens": 57,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 16966,
+            "uncached_input_tokens": 6164
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:48:51.943Z",
+          "usage": {
+            "input_tokens": 28354,
+            "cached_input_tokens": 16640,
+            "output_tokens": 172,
+            "reasoning_output_tokens": 76,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 28526,
+            "uncached_input_tokens": 11714
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:48:55.343Z",
+          "usage": {
+            "input_tokens": 33598,
+            "cached_input_tokens": 28160,
+            "output_tokens": 38,
+            "reasoning_output_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 33636,
+            "uncached_input_tokens": 5438
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:48:58.631Z",
+          "usage": {
+            "input_tokens": 36600,
+            "cached_input_tokens": 33408,
+            "output_tokens": 73,
+            "reasoning_output_tokens": 39,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 36673,
+            "uncached_input_tokens": 3192
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:49:01.556Z",
+          "usage": {
+            "input_tokens": 36908,
+            "cached_input_tokens": 36480,
+            "output_tokens": 47,
+            "reasoning_output_tokens": 12,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 36955,
+            "uncached_input_tokens": 428
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:49:06.086Z",
+          "usage": {
+            "input_tokens": 37140,
+            "cached_input_tokens": 36736,
+            "output_tokens": 56,
+            "reasoning_output_tokens": 21,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 37196,
+            "uncached_input_tokens": 404
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:49:40.288Z",
+          "usage": {
+            "input_tokens": 37258,
+            "cached_input_tokens": 36992,
+            "output_tokens": 154,
+            "reasoning_output_tokens": 24,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 37412,
+            "uncached_input_tokens": 266
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:49:48.689Z",
+          "usage": {
+            "input_tokens": 38169,
+            "cached_input_tokens": 37120,
+            "output_tokens": 77,
+            "reasoning_output_tokens": 42,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 38246,
+            "uncached_input_tokens": 1049
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:49:51.324Z",
+          "usage": {
+            "input_tokens": 39618,
+            "cached_input_tokens": 38016,
+            "output_tokens": 97,
+            "reasoning_output_tokens": 50,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 39715,
+            "uncached_input_tokens": 1602
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:49:56.149Z",
+          "usage": {
+            "input_tokens": 40363,
+            "cached_input_tokens": 39424,
+            "output_tokens": 203,
+            "reasoning_output_tokens": 169,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 40566,
+            "uncached_input_tokens": 939
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:49:59.750Z",
+          "usage": {
+            "input_tokens": 40679,
+            "cached_input_tokens": 40192,
+            "output_tokens": 188,
+            "reasoning_output_tokens": 93,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 40867,
+            "uncached_input_tokens": 487
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:50:05.590Z",
+          "usage": {
+            "input_tokens": 40938,
+            "cached_input_tokens": 40448,
+            "output_tokens": 40,
+            "reasoning_output_tokens": 6,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 40978,
+            "uncached_input_tokens": 490
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:50:14.988Z",
+          "usage": {
+            "input_tokens": 41040,
+            "cached_input_tokens": 40704,
+            "output_tokens": 169,
+            "reasoning_output_tokens": 18,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 41209,
+            "uncached_input_tokens": 336
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:50:17.506Z",
+          "usage": {
+            "input_tokens": 43482,
+            "cached_input_tokens": 40832,
+            "output_tokens": 75,
+            "reasoning_output_tokens": 28,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 43557,
+            "uncached_input_tokens": 2650
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:50:19.532Z",
+          "usage": {
+            "input_tokens": 44493,
+            "cached_input_tokens": 43264,
+            "output_tokens": 59,
+            "reasoning_output_tokens": 11,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 44552,
+            "uncached_input_tokens": 1229
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:50:21.537Z",
+          "usage": {
+            "input_tokens": 45513,
+            "cached_input_tokens": 44288,
+            "output_tokens": 59,
+            "reasoning_output_tokens": 11,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 45572,
+            "uncached_input_tokens": 1225
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:50:25.856Z",
+          "usage": {
+            "input_tokens": 46558,
+            "cached_input_tokens": 45312,
+            "output_tokens": 66,
+            "reasoning_output_tokens": 31,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 46624,
+            "uncached_input_tokens": 1246
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:50:29.868Z",
+          "usage": {
+            "input_tokens": 46715,
+            "cached_input_tokens": 46336,
+            "output_tokens": 192,
+            "reasoning_output_tokens": 47,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 46907,
+            "uncached_input_tokens": 379
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:50:33.207Z",
+          "usage": {
+            "input_tokens": 47001,
+            "cached_input_tokens": 46592,
+            "output_tokens": 41,
+            "reasoning_output_tokens": 6,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 47042,
+            "uncached_input_tokens": 409
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:50:39.279Z",
+          "usage": {
+            "input_tokens": 47105,
+            "cached_input_tokens": 46848,
+            "output_tokens": 140,
+            "reasoning_output_tokens": 29,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 47245,
+            "uncached_input_tokens": 257
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:50:42.890Z",
+          "usage": {
+            "input_tokens": 47477,
+            "cached_input_tokens": 46976,
+            "output_tokens": 58,
+            "reasoning_output_tokens": 22,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 47535,
+            "uncached_input_tokens": 501
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:50:50.690Z",
+          "usage": {
+            "input_tokens": 47676,
+            "cached_input_tokens": 47360,
+            "output_tokens": 222,
+            "reasoning_output_tokens": 186,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 47898,
+            "uncached_input_tokens": 316
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:51:02.796Z",
+          "usage": {
+            "input_tokens": 47959,
+            "cached_input_tokens": 47488,
+            "output_tokens": 253,
+            "reasoning_output_tokens": 100,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 48212,
+            "uncached_input_tokens": 471
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:51:05.903Z",
+          "usage": {
+            "input_tokens": 49804,
+            "cached_input_tokens": 47744,
+            "output_tokens": 109,
+            "reasoning_output_tokens": 73,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 49913,
+            "uncached_input_tokens": 2060
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:51:08.788Z",
+          "usage": {
+            "input_tokens": 49999,
+            "cached_input_tokens": 49664,
+            "output_tokens": 45,
+            "reasoning_output_tokens": 10,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 50044,
+            "uncached_input_tokens": 335
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:51:12.792Z",
+          "usage": {
+            "input_tokens": 50278,
+            "cached_input_tokens": 49792,
+            "output_tokens": 57,
+            "reasoning_output_tokens": 21,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 50335,
+            "uncached_input_tokens": 486
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:51:18.002Z",
+          "usage": {
+            "input_tokens": 50451,
+            "cached_input_tokens": 50048,
+            "output_tokens": 43,
+            "reasoning_output_tokens": 7,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 50494,
+            "uncached_input_tokens": 403
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:51:22.552Z",
+          "usage": {
+            "input_tokens": 50554,
+            "cached_input_tokens": 50304,
+            "output_tokens": 143,
+            "reasoning_output_tokens": 18,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 50697,
+            "uncached_input_tokens": 250
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:51:25.867Z",
+          "usage": {
+            "input_tokens": 50928,
+            "cached_input_tokens": 50432,
+            "output_tokens": 144,
+            "reasoning_output_tokens": 28,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 51072,
+            "uncached_input_tokens": 496
+          }
+        }
+      ],
+      "request_count": 31,
+      "tool_timing": {
+        "by_tool_seconds": {
+          "controller_startup": 9.5326236,
+          "read_document": 0.020139,
+          "observe": 3.3085557,
+          "auto_fill": 1.9471810999999999,
+          "review_submit": 11.227273599999998,
+          "rea_inspect": 46.8734068,
+          "inspect_ui": 0.47587090000000004,
+          "configure_fill": 0.2539173,
+          "finish_batch": 0.5438717
+        },
+        "union_seconds": 74.19788765907288,
+        "calls": 41,
+        "errors": 3
+      },
+      "model_network_orchestration_seconds": 108.87169164092847,
+      "verified_batch": {
+        "sites": {
+          "native-bilingual": {
+            "receipt": "mock-16a2674c68d7",
+            "server_verified": true,
+            "tracker_verified": true
+          },
+          "search-dropdown": {
+            "receipt": "mock-e038f0d8e28a",
+            "server_verified": true,
+            "tracker_verified": true
+          },
+          "date-cascade": {
+            "receipt": "mock-972a4b2db1b4",
+            "server_verified": true,
+            "tracker_verified": true
+          },
+          "repeated-education": {
+            "receipt": "mock-aa1e1a76597c",
+            "server_verified": true,
+            "tracker_verified": true
+          },
+          "upload-rerender": {
+            "receipt": "mock-becc124fa3c7",
+            "server_verified": true,
+            "tracker_verified": true
+          }
+        },
+        "rea_calls": 3,
+        "closeout_gate": true,
+        "verified_at_ns": 1792003882524661500
+      },
+      "skill_sha256": {
+        "SKILL.md": "515b44eb7e8332a9873d7f4ded868c667d3ae3656cf6e529da215a58717dc180",
+        "hooks/README.md": "0272cb9e43048d686ae33b7c1752f145527f8ad1572a83810accff2719cc9b82",
+        "references/automation-authorization.md": "82b44bcee060d2e2db06dc298c448dde90b949695b631ad0efe78cfbdfaa427d",
+        "references/automation-continuity.md": "3d27b6518229fa0cef922b4322524ac7deb1d108fc7763b5ac871fab1217b0f9",
+        "references/browser-application.md": "f695a9646274548c66a0220ff0e4d13be20c07b1b471e1de93bf95d794ce4107",
+        "references/chrome-window-grouping.md": "99267006ddac1df3b44852b9b983575086b210cb8a11dddb485f6a02a5ba04d9",
+        "references/control-preflight.md": "f2ce037b87cf267b9a1f7c3ff08c3f60138975b44dde88a196fb0a7a0a3d4eda",
+        "references/daily-batch.md": "879987bcdddfd581f35453ca221f0715204717a542dadaca9728abda6a6a5819",
+        "references/eligibility-check.md": "8d9ca96629ffca79bbd983469ce4952a293180a8ab668e4f0d15387f1a8073de",
+        "references/field-binding-recovery.md": "3dd5fdd737506c99443f2147e2a599abc9b30573655ae19c4b500f62057f0d9e",
+        "references/preference-contract.md": "bc0cd1be9c5e2dea96057a2a45dceac041e39d6dc331b14f011359d606ea0110",
+        "references/preference-template.md": "821ae66c328710f810106963ce808d6740be1c26c83ddcbdbdb1179fa5b74c31",
+        "references/preparation-scenarios.md": "471e69b5067397b323561fc43a487dea7277e236d56048b2e58db763061093ef",
+        "references/semantic-form-automation.md": "008e626c0349db3528fcf7a15ca607fb1659368e0ed3e067a160428dc4afa2d3",
+        "references/stage-contract.md": "4d715e0d800cbbb4ad5e917ffb9ffc5e81d4c5911d2bea200d91a4e97e819e70",
+        "references/workbook-contract.md": "ba0b9f92ac6aae8f9d479ed5eaeaa8d90b571b22e55f9f78a6af42f16583df3f",
+        "skills/application-content-fill/SKILL.md": "0553b39f07704badd2342056b2d3eb77591fd081359340f72640fb02d77876fe",
+        "skills/application-login/SKILL.md": "e3ac427eb60785022395f9c6531203a6424654bac8702657ed379ad934faf4f7",
+        "skills/application-parallel-execution/SKILL.md": "8aef8478dc2c8c7c5c8c0a89c285b056dd22068faf9799b666a757e7ccc73ad7",
+        "skills/application-parallel-execution/references/coordination-contract.md": "56a602e11b14089b7e2f69f84107bae45b71f3554a81a28ce38d86e800416662",
+        "skills/captcha-solve/SKILL.md": "683cd218b1e7aec6040f22aff2828498e5cee5cfb3943d6017d209146ac14285",
+        "skills/login-phone-otp/SKILL.md": "4d167c6f28fe4f979c1eed28a3430cb9fa5d25eec7c2ed3386bb5131365111cd",
+        "skills/login-wechat/SKILL.md": "2424cfca4115077b6205298dc11a95f3cd4784fd433d8850c397ee0975816bdd",
+        "skills/personal-info-vault/SKILL.md": "cf66d41d666e1dd222ad3d4d4665d162db8803a3f52d69a5ba8340bf8a346fdd",
+        "skills/personal-info-vault/assets/profile-template.md": "98e7b26db037bb9f75e75c5d60ab111b7195bedf872a8d275493e74d641967a7",
+        "skills/privacy-info-fill/SKILL.md": "0b2b7fe02a8a1412528c8281f10b8d76e233c6db8fcb3eebdd2bb4f5fc69b32c",
+        "skills/terms-consent/SKILL.md": "6ff752b7abdf5dae3c8c78a49361e8acdccab11a103c79ab1228fb2e3b01ab3a"
+      },
+      "runtime_sha256": {
+        "scripts/audit_full_chain.py": "c1e1d65484a70e8a90dad6ca352e9c6448d5b61f61ce1e96e77f9da3d02a842a",
+        "scripts/batch_check.py": "cb2e0f6abb10ee88ee9ece835db26cb31ca2e76715cb2352a9974eb39cfa9a19",
+        "scripts/benchmark_forms.py": "d61cdcc1cd779c0b7551aaecc0f184a737b109df97219e6f4090130750bb6952",
+        "scripts/chrome_path.cjs": "4e185c65177f22f3a747cc293565e84a658fa11705dd81b0dc826f4bfe3c21b0",
+        "scripts/ci.py": "489cc4ba6b83a67add3f7f5ff1d0321519de772a90bbc32224a9b52dee0231c3",
+        "scripts/compile_form_mapping.py": "4ef200db323df5ded044a60fc1adbffb13777f1e4fdf9657860692f4dbdc2d7c",
+        "scripts/evidence_layout.py": "605d45d07ddf658883f95531bfe2ddc5997b595be3eabe764c1d74108466ef84",
+        "scripts/fill_plan.py": "179dfcfdf578a9a3b7a252a6d28477bf6171699842b15d7c9065f1544f8f9d63",
+        "scripts/form_semantics.cjs": "3825440976448bca09e0db8d96895fc86ac9f02d0867fc78b2bb0f2c9d7af9c4",
+        "scripts/form_test_support.py": "45d6566a77f5888acbda62c6072539d2f381aac61271a01930759d0159dfd58b",
+        "scripts/full_chain_benchmark.py": "1719fd093a1dd9d88cefd92481996c17c99f91dd3b22a379df868aa7dc7632cd",
+        "scripts/full_chain_mcp.py": "87c82195a65b87c8b4464835237f62032ea3930642e7361e02cd9f30d16ff538",
+        "scripts/inspect_form_controls.js": "49d4066a0ed208a46fc6445a9031a111479b3dc4a8e51296387214284f6e838f",
+        "scripts/map_form_stdin.cjs": "4ead140da39d89283e9ce3cc58acb8c075d86672676ed6be17b7aab6b0ebd8bc",
+        "scripts/playwright_fill.py": "17a7cb8859b6112d16c12d61ed127e94d1678411644f95a55dfed40bce9c5949",
+        "scripts/profile_vault.py": "3f340139b1d66f2dcc0db229c83ae1b148ecab3bfdd2af13b094348d24afcee5",
+        "scripts/rea_bridge.py": "83f747a5abb4a98b0189f499ffe2caff46d5c3acf0c0a1f3ee285915caafada2",
+        "scripts/render_form_benchmark.py": "bb532c705564b28f56cd07d7a3597e5eb99959deeb0d707c6d9ac5b6f0e3b90c",
+        "scripts/render_full_chain.py": "7463e0b2b5f3826a035dceb7435f8898656e9024ca7022448661b83568194e51",
+        "scripts/smoke_test.py": "1adc3567e5763c7c509f1b1024201ff7cc4d089d277aeba35091d889f2ca4fcd",
+        "scripts/stage_gate.py": "f76173bedf231d1bbdbe386ee727d08fc533ae162d00e3f094ee0d85f9257359",
+        "scripts/submit_pass.py": "bec5eecfce386ed2bccfd9f2341e37d0dfdfff47df8e09f1180f07940abb3493",
+        "scripts/submit_words.py": "23d21db7baca5ed8ef39ca1536d26b224ba43a47f9186668c3dda953cca4fb21",
+        "scripts/test_batch_check.py": "32e39f5891690cb5ee4e1eb9f3932aefcaf9d2af99d7afdc40ed137e8d59d05a",
+        "scripts/test_docs_consistency.py": "be6f6f75ff491727ca2f968d482d26e324eb179b1c4953008e19bb37780ed4c4",
+        "scripts/test_e2e_full_flow.py": "ac507c0356a698cd8df962a1749bd1460adb5da1bc4203df338d1e4b755eeb79",
+        "scripts/test_field_binding_recovery.cjs": "4db5613328712c73c404ad8b14cc27073bc631f7bd3931633731e7340cf610f9",
+        "scripts/test_fill_plan.py": "1450294d50e5b90dc1bc2d1ea16c7e185df7ba9b5ed6919533dd3c208391fcf1",
+        "scripts/test_form_automation.py": "207c09ec066cc13e93765fb029bda7a01ef649798c25990aa9509f12abfab33c",
+        "scripts/test_form_semantics.cjs": "ef0ee7dc19d247088b7b419c1a3251f367da3242546ced4ae6d90fe28744deab",
+        "scripts/test_full_chain_benchmark.py": "b2824d0ddcf94c8960db9343836ec74924761febc98f92b1718a17cde1824df5",
+        "scripts/test_hooks.py": "63a3b0ddaca2e0e9a1abbabc0c7220f71f0667ac246483e2f7b2b8d46408b1fa",
+        "scripts/test_inspect_form_controls.cjs": "7fa9d57a85a381cdc57ff211f5933790aa5281a182afbfea174538b20eb4e468",
+        "scripts/test_playwright_fill.py": "76f632254524ed1a65648294a8cef45b29b96355a93782d397fade19bb3a7e3e",
+        "scripts/test_profile_vault.py": "1f096496976c570d466ca93d374edfe5fb6fc1915a5b67b3faaa09102f2fbc78",
+        "scripts/test_rea_bridge.py": "3968fa2ae2207cd27716b1bdbf9ac9524264ee7ef8af6427bd25d27fdb369b6d",
+        "scripts/test_stress.py": "7462216a15ce2b2c4893e8db4a857adac64cb4824e2dbab885ab35d1a25c27d7",
+        "scripts/test_token_metrics.py": "359aebcf1d6e8a470a9584073c7cdf2d91b03c404914990be7093397a782cea4",
+        "scripts/test_tracker_readback.py": "aa61b740eafafa2c0133acfc9d69c47763875a7220639399bd964e459554be32",
+        "scripts/token_metrics.py": "045b30dbf1f35a35890cec7532fe8548301c61e61dbb845a443143536b9e4ab0",
+        "scripts/tracker_readback.py": "39c04024077cee9a11e64065d52857eb77a399d67897038d8c06df53fe393ed2",
+        "scripts/verify_form_mapping.cjs": "a4bdf58532b9cdae76bd9c0e2e667f93125a74f0927134867a3be9cd26e69ce4",
+        "scripts/verify_real_rea.py": "e8d12c4ee8b6c0390cad758ea73cb89fc52255a70cc09f9f8ea7e2aea199c603",
+        "scripts/workbook_state.py": "6f43a78297fde71fdb6a3869eedd16a8075bb1109e0452403555f244339d7dfb",
+        "scripts/fixtures/form_sites.py": "af158d9fec3b055dc4263b1cc6772446a5f65781b39fdcd3ff8ebac4d370a602",
+        "scripts/fixtures/synthetic_ats.py": "ab61cbdcd04099f314567c45cebc1dab65346315f3f953fff87ae921464b419d",
+        "scripts/fixtures/workspace.py": "fca5a6694205ed39c2e5021d9df5d52355d825cfe65502884e0e2a74329b9d45",
+        "scripts/vendor/rea_canonical_digest.cjs": "07f6a9a49416b1b93d671d99c66afafcc6a9467f0a98d0e5a098096f97557093",
+        "hooks/application_guard.py": "7b1ec2ac9b371c33a6092ce70b170893eb49f85e8cc0fbc3ccc42988bd9d27e5",
+        "hooks/install_hooks.py": "0788a2539084a4542573bd1fe1722b5ec601c9347c3a929671811c090baf0ea2"
+      },
+      "rea_cli_seconds": 46.8734068,
+      "error_events": 0
+    },
+    {
+      "mode": "optimized",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "thread_id": "01a13bc1-58ec-7e22-9107-e0a390b99672",
+      "started_utc": "2026-10-14T18:51:27.468826+00:00",
+      "wall_seconds": 96.89160840000113,
+      "to_batch_verified_seconds": 93.02657,
+      "exit_code": 0,
+      "timed_out": false,
+      "completed": true,
+      "usage": {
+        "input_tokens": 273918,
+        "cached_input_tokens": 242560,
+        "output_tokens": 2989,
+        "reasoning_output_tokens": 1191,
+        "cache_write_input_tokens": 0,
+        "total_tokens": 276907,
+        "uncached_input_tokens": 31358
+      },
+      "usage_source": "Codex turn.completed + selected rollout token_count",
+      "request_usage": [
+        {
+          "timestamp": "2026-10-14T18:51:38.142Z",
+          "usage": {
+            "input_tokens": 9671,
+            "cached_input_tokens": 0,
+            "output_tokens": 207,
+            "reasoning_output_tokens": 130,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 9878,
+            "uncached_input_tokens": 9671
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:51:45.106Z",
+          "usage": {
+            "input_tokens": 10941,
+            "cached_input_tokens": 9472,
+            "output_tokens": 117,
+            "reasoning_output_tokens": 8,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 11058,
+            "uncached_input_tokens": 1469
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:51:51.824Z",
+          "usage": {
+            "input_tokens": 20522,
+            "cached_input_tokens": 10752,
+            "output_tokens": 139,
+            "reasoning_output_tokens": 9,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 20661,
+            "uncached_input_tokens": 9770
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:51:59.241Z",
+          "usage": {
+            "input_tokens": 22014,
+            "cached_input_tokens": 20352,
+            "output_tokens": 363,
+            "reasoning_output_tokens": 200,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 22377,
+            "uncached_input_tokens": 1662
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:52:04.439Z",
+          "usage": {
+            "input_tokens": 22403,
+            "cached_input_tokens": 21888,
+            "output_tokens": 191,
+            "reasoning_output_tokens": 39,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 22594,
+            "uncached_input_tokens": 515
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:52:11.274Z",
+          "usage": {
+            "input_tokens": 23773,
+            "cached_input_tokens": 22272,
+            "output_tokens": 223,
+            "reasoning_output_tokens": 136,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 23996,
+            "uncached_input_tokens": 1501
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:52:18.037Z",
+          "usage": {
+            "input_tokens": 24744,
+            "cached_input_tokens": 23552,
+            "output_tokens": 243,
+            "reasoning_output_tokens": 156,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 24987,
+            "uncached_input_tokens": 1192
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:52:30.349Z",
+          "usage": {
+            "input_tokens": 25757,
+            "cached_input_tokens": 24576,
+            "output_tokens": 653,
+            "reasoning_output_tokens": 315,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 26410,
+            "uncached_input_tokens": 1181
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:52:37.796Z",
+          "usage": {
+            "input_tokens": 27762,
+            "cached_input_tokens": 25600,
+            "output_tokens": 424,
+            "reasoning_output_tokens": 142,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 28186,
+            "uncached_input_tokens": 2162
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:52:56.423Z",
+          "usage": {
+            "input_tokens": 28300,
+            "cached_input_tokens": 27520,
+            "output_tokens": 166,
+            "reasoning_output_tokens": 20,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 28466,
+            "uncached_input_tokens": 780
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:53:00.523Z",
+          "usage": {
+            "input_tokens": 28645,
+            "cached_input_tokens": 28160,
+            "output_tokens": 112,
+            "reasoning_output_tokens": 9,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 28757,
+            "uncached_input_tokens": 485
+          }
+        },
+        {
+          "timestamp": "2026-10-14T18:53:03.864Z",
+          "usage": {
+            "input_tokens": 29386,
+            "cached_input_tokens": 28416,
+            "output_tokens": 151,
+            "reasoning_output_tokens": 27,
+            "cache_write_input_tokens": 0,
+            "total_tokens": 29537,
+            "uncached_input_tokens": 970
+          }
+        }
+      ],
+      "request_count": 12,
+      "tool_timing": {
+        "by_tool_seconds": {
+          "controller_startup": 3.9590549,
+          "bootstrap": 0.0094044,
+          "prepare_forms": 3.6849066,
+          "inspect_widgets": 0.6965512,
+          "complete_fields": 0.3728128,
+          "review_submit_batch": 14.286567,
+          "finish_batch": 0.5026276
+        },
+        "union_seconds": 23.512688875198364,
+        "calls": 11,
+        "errors": 1
+      },
+      "model_network_orchestration_seconds": 73.37891952480277,
+      "verified_batch": {
+        "sites": {
+          "native-bilingual": {
+            "receipt": "mock-5fd63daf223f",
+            "server_verified": true,
+            "tracker_verified": true
+          },
+          "search-dropdown": {
+            "receipt": "mock-35f813f10086",
+            "server_verified": true,
+            "tracker_verified": true
+          },
+          "date-cascade": {
+            "receipt": "mock-82bbe87a4acf",
+            "server_verified": true,
+            "tracker_verified": true
+          },
+          "repeated-education": {
+            "receipt": "mock-663bc9375da5",
+            "server_verified": true,
+            "tracker_verified": true
+          },
+          "upload-rerender": {
+            "receipt": "mock-71af61fab8e4",
+            "server_verified": true,
+            "tracker_verified": true
+          }
+        },
+        "rea_calls": 0,
+        "closeout_gate": true,
+        "verified_at_ns": 1792003980495395800,
+        "preparation_passes": {
+          "native-bilingual": 1,
+          "search-dropdown": 1,
+          "date-cascade": 1,
+          "repeated-education": 1,
+          "upload-rerender": 2
+        },
+        "loaded_documents": {
+          "SKILL.md": "827368ccae3eb6b7db408b06f81eb02e2cf63b265625d8cfd718b4b37820cbc5",
+          "batch-contract": "4b2bd75b305d2c123494e6276bce6ee7886a3f13855e022ed1dccf16c34d3f2a",
+          "synthetic-profile": "e1a707e31b6ef2e595c95d25d8956d6e780af6df3abf3d9de41a6c4596e28c87",
+          "references/stage-contract.md": "404ce5c50c26618968aaa2a3d9803d82fe64b5defd25101f5f9c98854b249fae",
+          "references/browser-application.md": "58e0bcc3c47cbea7cb7ab7338e9a24e5fcdbd5e7e7a49310345445306a7c61cc",
+          "skills/application-content-fill/SKILL.md": "df35a09123cffe65f83cfced73fa9e8096822d684af18c642a5c160eca4053cf",
+          "skills/privacy-info-fill/SKILL.md": "396d94c821613671e149514fef868a2691f1c3364a1f75a7dd39b74bb1a887d2",
+          "references/semantic-form-automation.md": "06e5256526614d3fec00510061ee53d35af245f7a9de71c952e6ed272643d658"
+        }
+      },
+      "skill_sha256": {
+        "SKILL.md": "c65623b4fe635d9e9ca74427266bb7351564fe956d20c64170d2c4cf66931d37",
+        "hooks/README.md": "2dda4ae899d3a83f5dec19f1d26c758ad1f1974e36277e7acde3f285dd3db9a0",
+        "references/automation-authorization.md": "1d61c28e9091565ea676b018708a30e318f96f7802d515a6b92fbea2683f0abc",
+        "references/automation-continuity.md": "566eeb865effc07237144ece1789b9150d59ad9e9c8111c772500b761b24e267",
+        "references/browser-application.md": "14d3cf1d592aaf300ceb0fe6626cd885f5d4dc91a3a0b7a14ce2f26bfe2b0b0a",
+        "references/chrome-window-grouping.md": "f23ee1aa2d1571ccd8bb2b1ab8d662b74fa1f227dfdad13ec8d780a459ec1793",
+        "references/control-preflight.md": "968efc17128e7a7679472e31c44c16bb01cc9fea0ddde8d9e7d196aca81ba95e",
+        "references/daily-batch.md": "b1da5a30d65c2d242a36c8457f3be99874aec09a44a520a7c9d3c34f283e4228",
+        "references/eligibility-check.md": "05646c08d5b916af0ea30724acc1721ed2209dac9deed3f2a812ad75deb12728",
+        "references/field-binding-recovery.md": "4de796df9166b235768b25f88048f581208157a37e5b0dbee4c518b18e7d407b",
+        "references/preference-contract.md": "fee6285f00bb4963aa1967f97d435563b7f0a3da5dee9112205ed53750d98ea4",
+        "references/preference-template.md": "89f01d6a0eaecccf6dce5a8b24deb27cb76d37d1d4f7162d01286d4ce6e24dae",
+        "references/preparation-scenarios.md": "2aa3371c735a66f7e926462c5db7466ad7fd1809526d4358b33bc461acba2dec",
+        "references/semantic-form-automation.md": "546cc8d6a5515a3f1f7da66fb3bfbf8aa0360f453e1ea63aca3d794f19059ef5",
+        "references/stage-contract.md": "fe8a00203094fa8842fd71952359ca69826e0adaaa994f94ed0c351c977ff2d3",
+        "references/workbook-contract.md": "f7a23692dcc2f1d9324ef61c203c43162fe8aeb7f2dc35ac146727a6494a3d68",
+        "skills/application-content-fill/SKILL.md": "e2b99a969d59766e1255df83a39ec193e7c9ad16977456db95e1ebf8c7ce199f",
+        "skills/application-login/SKILL.md": "614f4c2f765d87af812ccbdaf022d5210cf02e6a4a32528d20087d7c499d7ee1",
+        "skills/application-parallel-execution/SKILL.md": "d389134f14ee870afe968c8681640bfde90cbb365dc589cd5ce7aa16691ae73b",
+        "skills/application-parallel-execution/references/coordination-contract.md": "f6d8c8f8b553285dfd235048d23400fd71e106c39bc8411675379ed383d7a2e5",
+        "skills/captcha-solve/SKILL.md": "03853467f979205c3c2adacc88f54f878c93942594fb72fa051dea6ca82ccd02",
+        "skills/login-phone-otp/SKILL.md": "b4aabdb1281e59455b6efa2390423e09d75a48d0226ba73df1b106c0cc06fc57",
+        "skills/login-wechat/SKILL.md": "e2177682c5119722f2e735f87aadcd3df7f0d2fa4918e6ee9d46503e9eb888d7",
+        "skills/personal-info-vault/SKILL.md": "9fc903551b944c8f0c620e08e4fbfb66e0a8b4caf41e9b7e056a7713dd323d0b",
+        "skills/personal-info-vault/assets/profile-template.md": "6c520b3c7316780c7ebaea1bc3f424a32c4c289ee8c0ba2605a856e5793a4654",
+        "skills/privacy-info-fill/SKILL.md": "61c515797218c2bf50238cab6a5938e5ae60ba11ea4dfe807683b7c73f4c0d12",
+        "skills/terms-consent/SKILL.md": "3923c5714f8c0013b63280b456f735c7304aca1c5317f6944f624eb6abde1e36"
+      },
+      "runtime_sha256": {
+        "scripts/audit_full_chain.py": "b74266b78484ffb9f53d662473e72c926715eb958fc28fdb8c2b201a03b86951",
+        "scripts/batch_check.py": "7702b4aea6a64326603767ec5303bb90c3388932d38e1605bdafc91207e003fb",
+        "scripts/benchmark_forms.py": "f030e479ae6b202b723ee518459c43555b1424d2ad9ded76888282835ce328a5",
+        "scripts/chrome_path.cjs": "ec5a9bb584814cb48dc127dcf058da47d4b1be97c86627c1c3e96f4accbd8905",
+        "scripts/ci.py": "7f386172b056051e33e17a0aec7d0744e63e132209a0b7fd6afee3e94c180882",
+        "scripts/compile_form_mapping.py": "1c4649f2ae0f38f40b21a5c9d10fba890ddcba8058b0f828e5380761f99dd890",
+        "scripts/evidence_layout.py": "d7699273cb85c050acd633ec8eb463319280cb713b036f58eeee24e33173e494",
+        "scripts/fill_plan.py": "dd03e99c3f9f2b214288339ca499fc7e4db12d3fdf8121ba11655ffcd9b256c1",
+        "scripts/form_preparation.py": "6f61aed0a0e3cd9f8ffa4a4dce44b1e6e4806cab3b11047a9bca1f4891256c64",
+        "scripts/form_semantics.cjs": "af15fd96069169799ed2eedecfdcf96ac142953678bb439f41ae5499057c0c76",
+        "scripts/form_test_support.py": "53d9845f8cf0a465d2010bef21ce4b7d6a1ac24711d942ea6323812cf0e61919",
+        "scripts/full_chain_benchmark.py": "f1fac95afeef8f21cac6f262015b0907072e9e674e82f2c741772344ff86cd12",
+        "scripts/full_chain_mcp.py": "7fe9f993963df9dcdcd38903f1807b67083e13aa8172943c08cf954538236c95",
+        "scripts/inspect_form_controls.js": "914cc03737f9d146f97d09d1cc0a41a9bcc9f266e2c86048a6bc641db1dd0e92",
+        "scripts/map_form_stdin.cjs": "f86113d10327e4b2357aa9503ca6b6c0fe833aa23464d5db6b15ca54695dd7e3",
+        "scripts/optimized_form_controller.py": "cccb09b5a773522c5fe89690eb369de0960ddb61a5a1b4be50613a7e54d2fe68",
+        "scripts/playwright_fill.py": "3438da3c8d6fda46c1c901fc23e17ea1be88ff5901f41ce74394052b67761318",
+        "scripts/profile_vault.py": "9c520ee9be0eb2f4e71502e7e6de52d1eeacb2c31e8f848a2f847f332f4e4f6b",
+        "scripts/rea_bridge.py": "599a55f1a6b33ffd98dd52d7249dd02be7f297947fa498f5e04e3567bdc4f716",
+        "scripts/render_form_benchmark.py": "16131cb2461900acd9a68f1118a783a65d4b5246b7fe9db0face0b1be761323f",
+        "scripts/render_full_chain.py": "75ea6ff12bbd54b0c3c7e937de9b1b1c05dcb2d4e42b8c9f96819390aa0f0936",
+        "scripts/smoke_test.py": "2cb40141a6783194a7b77940e3970fce9817e0135474df9972a380778d0e4b1b",
+        "scripts/stage_gate.py": "a7834a95187b088fb157bfbba47832fc21941f15f2b3d7bda39326309624c0be",
+        "scripts/submit_pass.py": "8f2b46d872c2d89e2c712f1d52d55e4b2760ec0de0507e7477a4f7a6575f8bb7",
+        "scripts/submit_words.py": "0d8ee9f6e1822d74845208d96dfda950f93060b3568e6093a0c8f1c37534b2d5",
+        "scripts/test_batch_check.py": "2f92a9d27809e2097b9896262180ab7f3541dccccb01e75675c2733721a22a3c",
+        "scripts/test_docs_consistency.py": "8cf47728a7a2f69f4cdf3303b367bb9a3093722468c78ecf53e1a3f376d3f6fe",
+        "scripts/test_e2e_full_flow.py": "af3932cdbe166dddcaad48e0b3c97740f4b976e8ef34aeeb3cd3d76a439688e5",
+        "scripts/test_field_binding_recovery.cjs": "fe95276d571ca3a34b954be22105668bdbeeb52d4b8c7457ca5984d7ddb79706",
+        "scripts/test_fill_plan.py": "e90dc68523ecbe34ecd4569d6a46d76e59a0ff6d08fc0d0aa30fb7e0bfb7abed",
+        "scripts/test_form_automation.py": "8ea4a358535f0722c3719ce71fa0fd657463ae50fee2035e67238d46b8199778",
+        "scripts/test_form_preparation.py": "4f71bd5b6abeea128c7dcbf5d8fa2751bf00e051240f88691dc89efd63ec4586",
+        "scripts/test_form_semantics.cjs": "b9f0a10500331a68b1f56e45b746b1fe5570cd1cd253cacccf78f31dbb2769fe",
+        "scripts/test_full_chain_benchmark.py": "eb084d6b1457dd207efae0866d4062a9fbfb5381d88012540957828fa73dee1d",
+        "scripts/test_hooks.py": "c41412fd7ec4d436def2b75444d2712ff162e68eab9bae270c315265b4e5086b",
+        "scripts/test_inspect_form_controls.cjs": "a40e53ac78ff785161aea345950652fa77776aeafb9842de84806806f79ac609",
+        "scripts/test_playwright_fill.py": "6cc1ef36cef7e06ed09be03137b7158a7220faf20609e06ec9ba5d712a2087e8",
+        "scripts/test_profile_vault.py": "c6eeb3272aa5d16dcb5f8ae197a2c7134f84a535142a8499be50a63767c2b0c8",
+        "scripts/test_rea_bridge.py": "28ffbe6c956b7b7ca9c690b426850aa8ceb72796a43f324559bd244bebcf3a2a",
+        "scripts/test_stress.py": "78ed31adaea0f45a5f2e9f1f099afd9ec24e226092ec8fa596afd7a45c5c8aa6",
+        "scripts/test_token_metrics.py": "f7a3c9b35ef202c9eb8a0b07dde9136219dac0abc44578b66c4a1115a94a25ca",
+        "scripts/test_tracker_readback.py": "c5e0d24ed4dc29fb137ec9dac519245daaf3563489293553ca8d2c16672d4455",
+        "scripts/token_metrics.py": "86fefbaa87dd34ac1003f27947fce989dd9f3dc13c499b9e06439fdc4e798f34",
+        "scripts/tracker_readback.py": "bd5c154ff9e9f56624c7731658d843f7d499d889acb536e0917f6b0bc99354e6",
+        "scripts/verify_form_mapping.cjs": "6b278038b270d140904a473ec7b3563bb521e5c12a7f2b185f00df595e2e1302",
+        "scripts/verify_real_rea.py": "e1c674f7f17f417d865da03fbf605332827e3d698b344a2b1880a5cfb7e296c5",
+        "scripts/workbook_state.py": "95f33fed96a1a44f9f9d14593c15e776e5d9382a445bfe8c4ae799b55aab36ac",
+        "scripts/fixtures/form_sites.py": "4e688fbb10f44299b279a1da063b539de8337a027a0db4f4fd9a60c8a7f5c67b",
+        "scripts/fixtures/synthetic_ats.py": "62dc94fdbd3db15c9a826a3aaf4677f26342fe1bebc73bdbe1820d86a0d16e2d",
+        "scripts/fixtures/workspace.py": "139ac1c59a04621f7748d3a20e82c1cd00a1073769a349c51659c407af4326be",
+        "scripts/vendor/rea_canonical_digest.cjs": "3fd43b285b94aa2e9358b2703f6203e212fe0cdd18ba70e045f8198f5c6d6424",
+        "hooks/application_guard.py": "3333e34ca77e9422185060b3d2e2948a0707291961c58b9c53b270394590fd54",
+        "hooks/install_hooks.py": "ef895839a40650a046ff762d82f0e70c10e8d7273053c5f9cd871e4c066014cf"
+      },
+      "rea_cli_seconds": 0,
+      "error_events": 0
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "ci_passed": true,
+  "results": [
+    {
+      "stage": "browser",
+      "check": "test_inspect_form_controls.cjs",
+      "passed": true,
+      "seconds": 1.65
+    },
+    {
+      "stage": "browser",
+      "check": "test_field_binding_recovery.cjs",
+      "passed": true,
+      "seconds": 1.79
+    },
+    {
+      "stage": "browser",
+      "check": "test_playwright_fill.py",
+      "passed": true,
+      "seconds": 30.97
+    },
+    {
+      "stage": "browser",
+      "check": "test_e2e_full_flow.py",
+      "passed": true,
+      "seconds": 20.98
+    },
+    {
+      "stage": "browser",
+      "check": "test_form_automation.py",
+      "passed": true,
+      "seconds": 9.57
+    }
+  ]
+}

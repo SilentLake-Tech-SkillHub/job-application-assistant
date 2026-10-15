@@ -1,0 +1,80 @@
+[
+  {
+    "case_ids": [
+      "native-bilingual-cold-baseline",
+      "native-bilingual-warm-baseline",
+      "search-dropdown-warm-baseline",
+      "date-cascade-cold-baseline",
+      "date-cascade-warm-baseline"
+    ],
+    "finding": "部分没有上传控件的页面中，原流程回合仍额外探查或尝试使用简历来源。共同提示词强调 upload-first 但没有显式写出‘仅在存在上传控件时’，模型对这一表述的理解影响了探索成本。所有尝试和拒绝均计入，未改写提示词或剔除慢回合；差值因此也包含提示词理解及模型行为，不能全归因于程序速度。",
+    "evidence_sha256_by_case": {
+      "native-bilingual-cold-baseline": {
+        "cli_events_sha256": "71904795313b8a4f6a28c49fa274e3105174de16841a77a74c20e25f008a3ea0",
+        "tool_events_sha256": "3383990caa9659cc9caabb07a0b743b4da12d81ab0dfbd78e82aedd316faab19"
+      },
+      "native-bilingual-warm-baseline": {
+        "cli_events_sha256": "dc10c24632c570ab059a13bfd9f32a4e789dc4681ffb45e3f0b92aa631a7534f",
+        "tool_events_sha256": "43430e56d8fb785eb7b89fdd29cda69025680f7f7db43251305e47685548e779"
+      },
+      "search-dropdown-warm-baseline": {
+        "cli_events_sha256": "24100625b7951d70d343fe38420a869a162c5dd07ddf867b2b7efc63ac8e8717",
+        "tool_events_sha256": "b9149c11ca7c1bae5693fbad91fccb7a394728b1aa4bd20367d97ec8d7566bcd"
+      },
+      "date-cascade-cold-baseline": {
+        "cli_events_sha256": "e3d2d7346c96dbe5729778d6326d770518b159fb6afc8e399c8df5a99c1e55c1",
+        "tool_events_sha256": "1b3d7d64439eb4c525ca9cb9cb7cf7480448a0ccd4829101e0dcb73ed2a294e2"
+      },
+      "date-cascade-warm-baseline": {
+        "cli_events_sha256": "85e31e6d865f75c2b5fe9b5fbdeaff2059cd65654f4fe90cb41632eac4186063",
+        "tool_events_sha256": "5ddebd7af01e323aadff5f6be2fd6dd26f9b8a04b8b543934ffb19a9b1a9d1a1"
+      }
+    }
+  },
+  {
+    "case_ids": [
+      "native-bilingual-cold-optimized",
+      "repeated-education-cold-optimized"
+    ],
+    "finding": "优化后部分回合在程序已返回全部字段读回、没有剩余例外时，模型仍调用空或重复的探查/例外阶段。门禁拒绝了无必要的探索，实际字段未重复填写，但额外模型往返仍计入本轮 usage 和耗时；当前执行还不是最少调用路径。",
+    "evidence_sha256_by_case": {
+      "native-bilingual-cold-optimized": {
+        "cli_events_sha256": "6b37eb0c0992342da47e8abffa1b429efbcff6cafbc76c6fa67c42967225ac75",
+        "tool_events_sha256": "52d03b90c01244eab19af3062fad2cef066852bad8199b4bb83899c0ca9ba308"
+      },
+      "repeated-education-cold-optimized": {
+        "cli_events_sha256": "ed77525aa7cc86e481b4dabe950edbe61115faff5e639b0411101c0994b69aeb",
+        "tool_events_sha256": "825355178e1ba0963dee85a7a44a93727124f093a88f4bbed05980f42506655f"
+      }
+    }
+  },
+  {
+    "case_ids": [
+      "native-bilingual-cold-optimized",
+      "native-bilingual-warm-optimized"
+    ],
+    "finding": "优化后原生页面的模型说明出现‘已上传简历/重扫解析结果’的描述，但工具证据只显示六个非上传字段。该口头描述不作为事实；实际上传数量为零，成功标准取当前字段读回、服务端回执、审核门禁和台账。",
+    "evidence_sha256_by_case": {
+      "native-bilingual-cold-optimized": {
+        "cli_events_sha256": "6b37eb0c0992342da47e8abffa1b429efbcff6cafbc76c6fa67c42967225ac75",
+        "tool_events_sha256": "52d03b90c01244eab19af3062fad2cef066852bad8199b4bb83899c0ca9ba308"
+      },
+      "native-bilingual-warm-optimized": {
+        "cli_events_sha256": "393626d0d46909e21d15b134ad13afd39551e4866d32917432637fc98f26c3a4",
+        "tool_events_sha256": "57881f94d8f108f6bcafd1fd2c2ad301563f843f0999635b2fe9c0962aed34fd"
+      }
+    }
+  },
+  {
+    "case_ids": [
+      "search-dropdown-cold-optimized"
+    ],
+    "finding": "搜索下拉的优化后 cold 回合先把读回定位设为外层 #school-widget，产生实际读回失败后调用了一次 REA；随后改为 #school-search 并取得回执。REA 触发路径真实，但此处首先是读回定位不匹配，尚未证明逆向诊断不可替代；后续应优先核对读回控件，避免把这种定位错误一律归因于隐藏绑定。",
+    "evidence_sha256_by_case": {
+      "search-dropdown-cold-optimized": {
+        "cli_events_sha256": "786d852d3ffa1e11a6ef34ec85d1b0fb9b973c8cfba0da934d54a93a26499832",
+        "tool_events_sha256": "bb0cca50078b7d3dd92d4b80f2de39806a9289b84db5270915b2e61943bfd585"
+      }
+    }
+  }
+]

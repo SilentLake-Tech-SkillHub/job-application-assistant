@@ -1,0 +1,59 @@
+{
+  "ci_passed": true,
+  "results": [
+    {
+      "stage": "unit",
+      "check": "test_batch_check.py",
+      "passed": true,
+      "seconds": 51.49
+    },
+    {
+      "stage": "unit",
+      "check": "test_fill_plan.py",
+      "passed": true,
+      "seconds": 3.37
+    },
+    {
+      "stage": "unit",
+      "check": "test_profile_vault.py",
+      "passed": true,
+      "seconds": 1.18
+    },
+    {
+      "stage": "unit",
+      "check": "test_docs_consistency.py",
+      "passed": true,
+      "seconds": 0.36
+    },
+    {
+      "stage": "unit",
+      "check": "test_tracker_readback.py",
+      "passed": true,
+      "seconds": 6.89
+    },
+    {
+      "stage": "unit",
+      "check": "test_hooks.py",
+      "passed": true,
+      "seconds": 4.68
+    },
+    {
+      "stage": "unit",
+      "check": "test_rea_bridge.py",
+      "passed": true,
+      "seconds": 0.26
+    },
+    {
+      "stage": "unit",
+      "check": "test_token_metrics.py",
+      "passed": true,
+      "seconds": 0.67
+    },
+    {
+      "stage": "unit",
+      "check": "test_form_semantics.cjs",
+      "passed": true,
+      "seconds": 0.43
+    }
+  ]
+}

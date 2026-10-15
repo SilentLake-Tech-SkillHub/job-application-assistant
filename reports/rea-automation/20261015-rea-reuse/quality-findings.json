@@ -1,0 +1,35 @@
+{
+  "scope": "20261015-rea-reuse only; operational success comes from actual readbacks, gates and independent receipts, never model narration",
+  "findings": [
+    {
+      "cases": ["search-dropdown-no-rea", "search-dropdown-first-rea"],
+      "observation": "The first complex-field recipe used unsupported locator keys. The actual executor returned a binding_failure before field input; the model corrected the locator schema and completed. Both rejected attempts and their subsequent model requests remain in usage/full time.",
+      "category": "business_rejection_and_recovery"
+    },
+    {
+      "cases": ["date-cascade-no-rea"],
+      "observation": "A grouped widget inspection repeated the same site ID. The adapter rejected it; the model regrouped clicks and recovered. This is an actual tool error, included in full cost.",
+      "category": "tool_error_and_recovery"
+    },
+    {
+      "cases": ["search-dropdown-first-rea", "date-cascade-first-rea"],
+      "observation": "Model narration claimed fresh-page replay had succeeded immediately after complete_fields. Actual replay happens later in review_submit_batch. The program did perform the later real replay, draft validation and promotion, and audit uses those events. The premature narration is not evidence.",
+      "category": "narrative_not_operational_evidence"
+    },
+    {
+      "cases": ["native-bilingual-first-rea", "repeated-education-first-rea"],
+      "observation": "The model expanded the captured script even though native preparation required no complex recipe. The first-learning protocol explicitly required REA analysis; this extra evidence read and learning cost is retained, and does not imply REA is necessary for native fields.",
+      "category": "learning_overhead_on_already_automatic_fields"
+    },
+    {
+      "cases": ["date-cascade-reuse"],
+      "observation": "Full CLI time was 110.64 seconds versus 68.25 for no-REA, despite six versus ten model requests and shorter tool time (4.82 versus 5.85 seconds). The remaining model/network/CLI interval was larger. No slow round was removed or rerun; no unsupported attribution to pure inference or network is made.",
+      "category": "timing_variability"
+    },
+    {
+      "cases": ["all"],
+      "observation": "One observation per cell. Provider prompt cache and local machine load were uncontrolled; local CI also overlapped part of the model test. First-learning facts differ from the matched no-REA/reuse facts to validate parameterization. These limit causal and latency-stability claims.",
+      "category": "experimental_limit"
+    }
+  ]
+}
