@@ -34,7 +34,7 @@ def run(workbook, batch_id, stage, url=None, root=None):
     result = {'阶段': stage, '岗位链接': url, '允许': not errors, '错误': list(dict.fromkeys(errors)),
               '检查时间': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')}
     if stage == 'closeout':
-        report = batch.report()
+        report = batch.report(include_fill_progress=False)
         result['报告'] = report
         result['收尾'] = batch.closeout(report)
         result['允许'] = result['允许'] and result['收尾']['可以收尾']

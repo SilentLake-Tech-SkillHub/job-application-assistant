@@ -21,7 +21,6 @@ from pathlib import Path
 from workbook_state import Workbook, INVENTORY_STATUSES, SCANNED_NO_ROLE, NOT_STARTED, canonical_url
 from evidence_layout import (EVIDENCE_DIR, batch_dir, company_dir, role_dir, find, parse, value, list_items,
                              ref_exists, file_hash, safe_name, parse_time)
-import fill_plan
 import submit_pass
 
 QUERY_SECTIONS = ('入口', '硬范围', '偏好轴', '默认岗位次序', '公司清单', '目标与停止条件', '材料', '授权',
@@ -365,11 +364,6 @@ class Batch:
         if not yes(value(self.query, '准备授权', '授权')):
             errors.append('Query 未授权准备表单（授权节「准备授权: 是」）')
         if stage in ('review', 'submit'):
-            if not files['填写方案']:
-                errors.append(here + '/' + fill_plan.PLAN_NAME + ' 不存在：填写缓存记录逐字段填法与读回，填完用 fill_plan.py export 导出填写读回')
-            else:
-                errors.extend(here + '/' + e for e in fill_plan.gate_errors(
-                    files['填写方案'][0], files['填写读回'], self.batch_id, row, self.lane(company), need_complete=True))
             if not files['填写读回']:
                 errors.append(here + '/填写读回.* 不存在：逐字段读回后才算填完')
             if not files['草稿读回'] and not files['无草稿说明']:
@@ -452,9 +446,6 @@ class Batch:
             if self.clicked_without_result(files):
                 errors.append(here + ' 已点击提交但没有回执也没有 结果不确定.md：先查申请中心，存回执（并把投递状态改为已提交）、'
                               '写 结果不确定.md，或确认未提交后写 提交核查.md')
-            if files['填写方案']:
-                errors.extend(here + '/' + e for e in fill_plan.gate_errors(
-                    files['填写方案'][0], files['填写读回'], self.batch_id, row, self.lane(row['公司']), need_complete=False))
             if files['回执'] and status != '已提交':
                 errors.append(here + ' 有回执，但岗位表投递状态仍是「%s」：回执要入账为「已提交」' % status)
             if status == '已提交':
@@ -472,7 +463,7 @@ class Batch:
         return errors
 
     # ------------------------------------------------------------ counts and closeout
-    def report(self):
+    def report(self, include_fill_progress=True):
         targets, _ = self.targets()
         basis = word('计数口径', value(self.query, '计数口径', '目标与停止条件'))
         rule = word('补位规则', value(self.query, '补位规则', '目标与停止条件'))
@@ -487,10 +478,12 @@ class Batch:
             achieved.update(gaps)
         prepared = [r for r, f in roles if (self.role_files(f)['填写读回'] and (self.role_files(f)['草稿读回'] or self.role_files(f)['无草稿说明']))]
         filling = {}
-        for _, f in roles:
+        for _, f in (roles if include_fill_progress else []):
             files = self.role_files(f)
             if files['填写方案'] and not files['回执']:
                 try:
+                    # Optional display only. Gates never invoke this cache reader.
+                    import fill_plan
                     fields = fill_plan.load(files['填写方案'][0]).get('字段')
                     if not isinstance(fields, list):
                         raise ValueError('字段 is not a list')
@@ -560,7 +553,7 @@ def main():
         print(json.dumps(out, ensure_ascii=False, indent=2))
         return 0
     errors = batch.errors + batch.consistency_errors()
-    report = batch.report()
+    report = batch.report(include_fill_progress=not args.closeout)
     result = {'通过': not errors, '错误': errors, '报告': report}
     if args.closeout:
         result['收尾'] = batch.closeout(report)

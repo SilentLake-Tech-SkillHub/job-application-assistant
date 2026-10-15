@@ -152,7 +152,7 @@ class StructureTexts(unittest.TestCase):
     def test_issue27_fill_cache_and_excel_division(self):
         contract = read('references/workbook-contract.md')
         section = contract.split('## 填写缓存与 Excel 的分工')[1].split('\n## ')[0]
-        for needle in ('唯一的状态记录', '两边互不代写', '提交已点击.md', '当场**改 `已提交`', '方案哈希', '删掉 JSON'):
+        for needle in ('唯一的状态记录', '两边互不代写', '提交已点击.md', '当场**改 `已提交`', '方案哈希', '删掉 JSON', '门禁不读取、不要求、不解析'):
             self.assertIn(needle, section)
         fill = read('references/browser-application.md').split('## 批量填写与填写缓存')[1].split('\n## ')[0]
         for needle in ('form_input', 'playwright_fill.py', '仍然禁止', '派发合成事件', '值来源: 档案', '续跑时先看', '复核'):
