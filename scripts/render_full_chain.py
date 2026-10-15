@@ -176,6 +176,7 @@ def render(folder):
     page = page.replace('<section><h2>计量边界与读法</h2>', progress_section + '<section><h2>计量边界与读法</h2>')
     if progress_section:
         coverage = '<section><h2>与最初四图的覆盖差异</h2><p>最初四图按 5 类网站 × cold/warm 展示脚本耗时和交互文本 token。cold/warm 指语义结构缓存未命中/预热，并非模型缓存计费。本报告新增真实模型整批 usage 和完整时间，恢复五网站累计进度，但尚未隔离测量单站 cold/warm 的完整模型成本；表中的未测项没有用早期代理指标或均摊数替代。</p><p><a href="../20261014/dashboard.html">最初四图：脚本与交互文本评测</a> · <a href="../20261015-optimized/dashboard.html">旧增强 vs 优化后</a> · <a href="../20261015-baseline-optimized/dashboard.html">原无 REA vs 优化后</a></p></section>'
+        coverage = coverage.replace('</section>', '<p>后续逐站独立测量见：<a href="../20261015-isolated/dashboard.html">20 格 cold/warm 真实模型测试</a>。本页仍只描述其原始整批测量，完整度以对应报告为准。</p></section>')
         page = page.replace('<section><h2>5 类网站', coverage + '<section><h2>5 类网站')
     page = page.replace('<p><a href="results.json">', setup_section + '<p><a href="results.json">')
     if interpretation:
@@ -188,7 +189,7 @@ def render(folder):
         evaluation += '## ' + labels[r['mode']] + '\n\n```json\n' + json.dumps({k: r[k] for k in ('model','completed','wall_seconds','to_batch_verified_seconds','usage','request_count','rea_cli_seconds','verified_batch')}, ensure_ascii=False, indent=2) + '\n```\n\n'
     evaluation += '\n'.join(line for line in notes.replace('<li>', '\n- ').replace('</li>', '').replace('<b>', '**').replace('</b>', '**').splitlines())
     if progress_note:
-        evaluation += '\n\n## 五网站与未测项\n\n' + progress_note + '\n\n单站 cold/warm 的完整模型成本尚未隔离测量；最初 cold/warm 只指语义结构缓存。详见 site-progress.csv，不能把累计值当作独立单站成本。\n'
+        evaluation += '\n\n## 五网站与未测项\n\n' + progress_note + '\n\n本页整批数据没有隔离单站 cold/warm；最初 cold/warm 只指语义结构缓存。详见 site-progress.csv，不能把累计值当作独立单站成本。后续另行执行的 [20 格独立模型测试](../20261015-isolated/evaluation.md) 单独报告。\n'
     evaluation += '\n\n用法和 usage 字段：[Codex 官方文档](https://learn.chatgpt.com/docs/non-interactive-mode)。\n'
     if setup:
         evaluation += f'\n前置无效尝试额外已报告 {setup_tokens:,} token，{setup_seconds:.2f} 秒，保存在本目录 *-attempts.json。未知 usage 没有记为零；被截断指令的尝试即使有五份回执也不用于完整传输比较。\n'

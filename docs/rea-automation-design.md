@@ -225,7 +225,49 @@ REA 和自动映射工具，全部来源与复杂点击由模型从真实页面�
 
 `full_chain_progress.py` 从真实回执事件恢复五网站的累计进度，并从逐请求日志展示共享 usage。
 它不把整批 token 均摊给网站，也不把相邻回执间隔当成独立网站全链路耗时。图表分别标出
-整批总量、五网站累计回执时间、共享 token 曲线；独立单站 time/token 和 cold/warm 完整模型
-测试明确未测。旧四图 cold/warm 仅指语义结构缓存，不是模型计费缓存。
+整批总量、五网站累计回执时间、共享 token 曲线；这份整批数据的独立单站 time/token 和 cold/warm
+模型指标没有被隔离。后续另行执行的 20 格见下一节。旧四图 cold/warm 仅指语义结构缓存，不是模型计费缓存。
 本次优化后首份回执晚于原无 REA（85.37 vs 41.36 秒），最后一份更早（93.53 vs 119.13 秒），
 反映先批量准备再串行提交的取舍，不能声称所有网站都更快。
+
+### 逐站 cold/warm 的 20 个独立模型回合
+
+`isolated_form_benchmark.py` 显式启动 5 网站 × cold/warm × 原无 REA/优化后共 20 个新 CLI 上下文，
+每个回合只有一个合成岗位、独立浏览器/工作区/回执/台账和完整模型 usage，不分摊批次 token。
+同一份原执行器、优化实现和单站适配器在全部测试启动前冻结；应用中不向模型提供 fixture 答案。
+两种流程的先后按网站/状态交替；普通 CI 仅跑离线单元及真实 mock 验证，不执行这些付费模型回合。
+
+`isolated_form_mcp.py` 只在独占测试子进程缩小允许的网站集合，沿用原 Query/Prepare/Review/Submit/
+Closeout、审核哈希和真实输入/读回执行器。warm 使用本地程序实际填写并读回原生 automatic 字段，
+由正式 mapper 提交验证后的语义缓存；复杂控件没有预置点击配方、草稿保存、批准或提交。
+随后关闭预热页面、丢弃已填方案，正式模型必须在新页面重新盘点/填入/读回。缓存只给语义源引用，
+不提供值、旧定位或完成状态。原无 REA 应用阶段不能消费该缓存，是 warm 的负对照。
+
+完整主指标始于 CLI 进程启动、终于模型回合及进程退出，**包含本次 warm 预热**。
+另列实测 `cache_seed_seconds`，`wall_excluding_seed_seconds` 仅为扣除这一已测区间的派生量，
+不能当成另一次计时实验。预热没有额外模型调用，其成本没有清零；cold/warm 不控制提供方的
+LLM prompt cache，真实 cached input 仍按 CLI 原样记录。每格一次，模型探索与网络波动保留，
+不声称统计显著性、稳定平均速度或独立缓存因果收益。
+
+`audit_isolated_form.py` 逐格核对真实回合/逐请求/会话 usage、模型实际可见的完整 Markdown 正文、
+零截断、当前字段读回、每阶段门禁、当前审核哈希、服务端/Excel 回执，以及预热缓存来源、
+零预热模型请求、正式阶段真实 cache hit。缺格保持未测。模型口头说明不当成成功证据。
+四图恢复最初的“每网站 cold 时间 / cold token / warm 时间 / warm token”，本次指标是完整 CLI
+墙钟与真实模型 usage，不能与初版脚本时长/交互文本 token 混用。行为问题单列质量观察，不剔除慢回合。
+
+本次 [20 格评估](../reports/rea-automation/20261015-isolated/evaluation.md)全部通过操作及 usage/文档核验，
+88 个当前字段读回、20 个当前审核哈希与回执/台账一致。cold 五个独立回合合计 token
+2,337,865 → 1,279,503、秒数 703.29 → 366.45；warm 为 2,364,289 → 1,106,662、684.12 → 278.84 秒。
+所有预热共 10.86 秒计入主时间；20 回合真实总 token 7,088,319，完整时间合计 2,032.70 秒。
+记录 21 次 MCP 错误和 2 次业务失败返回，均已恢复并保留消耗，没有剔除或重采样。
+唯一一次真实 REA 为搜索 cold 优化后回合，由外层读回定位不匹配触发，耗时 29.31 秒；
+随后修正为实际输入读回控件并得到回执。这不是逆向不可替代或 REA 独立节省的对照证据。
+无上传控件时的额外探查、无剩余例外时的重复调用及上传叙述失真均单列在质量观察中。
+
+```bash
+# 仅显式授权后手动执行；消耗当前 Codex 账户额度。
+python scripts/isolated_form_benchmark.py --model gpt-5.6-sol \
+  --private test-results/full-chain/isolated/private --report reports/rea-automation/isolated
+python scripts/audit_isolated_form.py --private test-results/full-chain/isolated/private --report reports/rea-automation/isolated
+python scripts/render_isolated_form.py reports/rea-automation/isolated
+```

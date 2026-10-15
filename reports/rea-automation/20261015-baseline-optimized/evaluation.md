@@ -149,7 +149,7 @@
 
 整批图每根柱子汇总五个网站；下方五网站图表示从同一批次启动到各站回执核验完成的累计时间，包含前置准备和其他网站等待，不是单站独立耗时。累计 token 是回执时 CLI 已报告的全批共享 usage，不是分配给该站的消耗，也不能把五行相加。模型可能在工具调用后才报告后续 usage，因此各站累计值不会等于最终总量。批量准备可能延迟首份回执，同时缩短整批完成时间。
 
-单站 cold/warm 的完整模型成本尚未隔离测量；最初 cold/warm 只指语义结构缓存。详见 site-progress.csv，不能把累计值当作独立单站成本。
+本页整批数据没有隔离单站 cold/warm；最初 cold/warm 只指语义结构缓存。详见 site-progress.csv，不能把累计值当作独立单站成本。后续另行执行的 [20 格独立模型测试](../20261015-isolated/evaluation.md) 单独报告。
 
 
 用法和 usage 字段：[Codex 官方文档](https://learn.chatgpt.com/docs/non-interactive-mode)。

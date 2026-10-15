@@ -21,7 +21,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 ENV = dict(os.environ, PYTHONIOENCODING='utf-8', PYTHONDONTWRITEBYTECODE='1')
 
-UNIT = ['test_batch_check.py', 'test_fill_plan.py', 'test_profile_vault.py', 'test_docs_consistency.py', 'test_tracker_readback.py', 'test_hooks.py', 'test_rea_bridge.py', 'test_token_metrics.py', 'test_full_chain_benchmark.py', 'test_form_preparation.py']
+UNIT = ['test_batch_check.py', 'test_fill_plan.py', 'test_profile_vault.py', 'test_docs_consistency.py', 'test_tracker_readback.py', 'test_hooks.py', 'test_rea_bridge.py', 'test_token_metrics.py', 'test_full_chain_benchmark.py', 'test_form_preparation.py', 'test_isolated_form_benchmark.py']
 
 
 def node_env():
@@ -45,7 +45,8 @@ def stages(skip_browser):
                     [py, str(HERE / 'test_e2e_full_flow.py')],
                     [py, str(HERE / 'test_form_automation.py')],
                     [py, str(HERE / 'test_full_chain_benchmark.py'), '--browser'],
-                    [py, str(HERE / 'test_form_preparation.py'), '--browser']],
+                    [py, str(HERE / 'test_form_preparation.py'), '--browser'],
+                    [py, str(HERE / 'test_isolated_form_benchmark.py'), '--browser']],
         'stress': [[py, str(HERE / 'test_stress.py')]],
     }
     if shutil.which('node'):

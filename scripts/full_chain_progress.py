@@ -10,7 +10,7 @@ def timestamp_ns(value):
     return round(datetime.datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp() * 1e9)
 
 
-def receipt_progress(run, events):
+def receipt_progress(run, events, expected_sites=None):
     start = timestamp_ns(run['started_utc'])
     progress = []
     for event in events:
@@ -24,8 +24,11 @@ def receipt_progress(run, events):
                          'reported_cumulative_tokens': sum(r['usage']['total_tokens'] for r in requests),
                          'reported_request_count': len(requests), 'receipt': event['receipt'],
                          'isolated_site_tokens': None, 'isolated_site_wall_seconds': None})
-    if len(progress) != 5 or len({p['site'] for p in progress}) != 5:
-        raise ValueError('Five distinct receipt events required')
+    expected_count = len(expected_sites) if expected_sites is not None else 5
+    if len(progress) != expected_count or len({p['site'] for p in progress}) != expected_count:
+        raise ValueError('Expected distinct receipt events not found')
+    if expected_sites is not None and {p['site'] for p in progress} != set(expected_sites):
+        raise ValueError('Receipt scope mismatch')
     return progress
 
 

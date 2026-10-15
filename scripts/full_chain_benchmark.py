@@ -209,14 +209,14 @@ def runtime_environment(args):
             'scope': 'confirmed-role synthetic application cycle; development/CI and real human/login waiting excluded'}
 
 
-def command_for(args, mode, root, docs, cwd, controller_entry=None):
+def command_for(args, mode, root, docs, cwd, controller_entry=None, controller_extra=None):
     cmd = ['node', str(args.codex_entry), 'exec', '--json', '--ignore-user-config', '--skip-git-repo-check',
            '--color', 'never', '-C', str(cwd), '-s', 'read-only', '-m', args.model,
            '-c', 'model_reasoning_effort="high"', '-c', 'web_search="disabled"',
            '-c', 'tool_output_token_limit=50000',
            '-c', 'mcp_servers.formbench.command=' + json.dumps(sys.executable),
            '-c', 'mcp_servers.formbench.args=' + json.dumps([str(controller_entry or HERE / 'full_chain_mcp.py'), '--mode', mode,
-                     '--root', str(root), '--docs', str(docs), '--rea-entry', str(args.rea_entry)]),
+                     '--root', str(root), '--docs', str(docs), '--rea-entry', str(args.rea_entry), *(controller_extra or [])]),
            '-c', 'mcp_servers.formbench.tool_timeout_sec=240', '-c', 'mcp_servers.formbench.startup_timeout_sec=30']
     # This one synthetic, owned server is explicitly authorized for the benchmark. Do not change
     # any global approval policy or permissions for other servers/apps.
@@ -248,13 +248,15 @@ def stage_runtime(destination, ref=None):
     return destination
 
 
-def run_round(args, mode, private, runtime=ROOT):
+def run_round(args, mode, private, runtime=ROOT, context=None):
     work = private / mode; work.mkdir(parents=True)
     docs, runroot, cwd = work / 'docs', work / 'controller', work / 'cwd'
     cwd.mkdir()
     hashes = stage_docs(docs, mode, runtime)
-    cmd = command_for(args, mode, runroot, docs, cwd, runtime / 'scripts/full_chain_mcp.py')
-    (work / 'prompt.txt').write_text(prompt_for(mode), encoding='utf-8')
+    context = context or {}
+    cmd = command_for(args, mode, runroot, docs, cwd, context.get('controller_entry', runtime / 'scripts/full_chain_mcp.py'), context.get('controller_extra'))
+    prompt = context.get('prompt', prompt_for(mode))
+    (work / 'prompt.txt').write_text(prompt, encoding='utf-8')
     t0, mono0 = time.time_ns(), time.perf_counter()
     env = dict(os.environ, PYTHONIOENCODING='utf-8', PYTHONUNBUFFERED='1')
     eventpath = work / 'cli-events.jsonl'
@@ -262,7 +264,7 @@ def run_round(args, mode, private, runtime=ROOT):
     with (work / 'stderr.log').open('w', encoding='utf-8') as stderr:
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=stderr,
                                 cwd=cwd, text=True, encoding='utf-8', errors='replace', env=env)
-        proc.stdin.write(prompt_for(mode)); proc.stdin.close()
+        proc.stdin.write(prompt); proc.stdin.close()
         def collect():
             for line in proc.stdout:
                 lines.put(line)
@@ -332,9 +334,14 @@ def run_round(args, mode, private, runtime=ROOT):
               'error_events': sum(e.get('type') in ('error', 'turn.failed') for e in events)}
     result['truncated_outputs'] = truncations
     result['complete_delivery_valid'] = selected is not None and not truncations
+    if context.get('site'):
+        result.update(site=context['site'], cache_state=context['cache_state'])
+        seed = (verified or {}).get('isolated_case', {}).get('cache', {})
+        result['cache_seed_seconds'] = seed.get('seconds')
+        result['wall_excluding_seed_seconds'] = wall_seconds - seed['seconds'] if seed.get('seconds') is not None else None
     if verified:
         from full_chain_progress import receipt_progress
-        result['site_progress'] = receipt_progress(result, tools)
+        result['site_progress'] = receipt_progress(result, tools, [context['site']] if context.get('site') else None)
     (work / 'result.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
     return result
 
