@@ -45,6 +45,13 @@ git clone \
 
 接下来是项目的完整介绍与流程说明。
 
+**REA 跨投递规则复用**：新增浏览器中立的验证规则存储和编译核心，独占 mock 已接通首次真实 REA 分析、
+新空白页完整路径重放、当前读回/服务端草稿验证后保存，以及新工作区用当前资料复用。
+结构失配、错误规则和绑定失败会使规则失效，读回、审核批准和提交门禁保留。
+内置浏览器/Chrome 仍需各自适配器接线，本次完整模型实测使用原 Playwright 备用通道。
+三组 `gpt-5.6-sol / high`、五类 mock 的真实 token/耗时测试正在执行，尚不发布新的效果结论。
+详见[实施设计](docs/rea-reuse-plan.md)和[执行指引](references/rea-rule-reuse.md)。
+
 **程序化表单准备（1.17.0）**：普通字段的盘点、语义映射、输入、逐字段读回与上传重扫在程序内连续完成，AI 只处理例外；同批文档按源哈希只加载一次，REA 仅在正常 UI 探查仍有未知绑定或真实失败时诊断。默认仍为内置浏览器与 Chrome 扩展；Playwright 保持备用角色。批量准备不生成生产批准或提交，现有审核版本、提交门禁和回执台账读回保留。详见[实现设计](docs/rea-automation-design.md)与[执行指引](references/semantic-form-automation.md)。
 
 历史[5 类 mock 配对评测](reports/rea-automation/20261014/evaluation.md)的 token 是交互文本计数；后续[真实模型全链路测试](reports/rea-automation/20261015-full-chain/evaluation.md)记录了实际 usage，并发现旧增强流程增加了请求和耗时。真实 token、文本长度和模型/网络/工具时间分别记录，不能互相替代。
