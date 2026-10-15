@@ -61,6 +61,12 @@ def connect(pw, profile, headless=False, channel=None, executable_path=None, tim
                    '--disable-dev-shm-usage', 'about:blank']
         if headless:
             command.insert(1, '--headless=new')
+        # GitHub's Linux synthetic-browser tests cannot use Chromium's user-namespace
+        # sandbox. Match the previous Playwright test launcher only on explicit CI
+        # opt-in; normal user sessions keep their default sandbox configuration.
+        if (headless and sys.platform.startswith('linux') and os.environ.get('GITHUB_ACTIONS') == 'true'
+                and os.environ.get('JOB_APPLICATION_TEST_NO_SANDBOX') == '1'):
+            command.insert(1, '--no-sandbox')
         options = {'stdin': subprocess.DEVNULL, 'stdout': subprocess.DEVNULL,
                    'stderr': subprocess.DEVNULL, 'close_fds': True}
         if os.name == 'nt':
