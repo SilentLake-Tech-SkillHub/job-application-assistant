@@ -7,8 +7,8 @@
 
 `scripts/rea_rule_store.py` 是浏览器中立的规则存储和编译核心。各浏览器适配器提供当前只读盘点、
 真实输入和当前读回；它不保存草稿、不批准、不提交。`reuse_form_mcp.py` 是独占 mock 的完整接线示例，
-其中的浏览器启动、模拟批准、测试域名别名及提交操作不可用于生产。未接入规则适配器的通道继续现有手动方案，
-不能宣称仅安装 Skill 即自动命中规则。
+其中的浏览器启动、模拟批准、测试域名别名及提交操作不可用于生产。当前通道可通过下述编译入口生成既有动作清单；
+全自动候选规则验证晋升仍需要当前通道提供实际读回/草稿回调，不能宣称仅安装 Skill 即获得所有通道的自动验证。
 
 1. 用 `form_scope(当前表单URL)` 建立精确 origin/path 范围，不跨域推断等价。调用现有盘点和 mapper 获得当前字段身份。
 2. `RuleStore.load(scope, inventory, mapping)` 查找已验证规则；字段语义、分组、控件种类、约束和原生选项必须一致。
@@ -34,6 +34,20 @@
 `invalidate(scope, reason)`，记录失败、停止依赖该规则并回到当前 UI。未解决字段保持待处理，禁止进入提交。
 不因一次命中而跳过字段读回、服务端草稿检查、审核版本哈希、当前用户批准、Submit 门禁和官方回执/台账读回。
 已经取得回执的角色不得重试真实提交。
+
+## 接入现有内置浏览器、Chrome 与备用执行器
+
+`compile_rea_rule.py` 从真实当前盘点、mapper 验证映射、已晋升规则和当前授权档案，生成全新的既有 `填写方案.json`。
+所有字段重置为待填，无旧读回或页面校验通过状态。它不会启动或切换浏览器，也不会点击或提交。
+
+```bash
+python scripts/compile_rea_rule.py --inventory <当前盘点.json> --mapping <当前映射.json> --profile <当前授权档案源键值.json> --rules <私有验证规则目录> --batch <批次> --company <公司> --url <当前表单URL> --lane <内置浏览器|Chrome|Playwright> --out <新填写方案.json>
+python scripts/fill_plan.py actions <新填写方案.json> --vault <私有档案> --root <求职工作区>
+```
+
+档案 JSON 使用当前 mapper 的语义键（如 `bachelor.school`、`graduation`），值来自当前已批准档案；文件及生成方案只放私有工作区。
+随后留在当前通道执行现有动作清单、逐字段读回并更新本次方案，不沿用旧任务状态；Playwright 备用仍使用既有执行入口。
+没有规则、来源缺失、完整性或结构不一致时编译失败，继续正常 UI 准备。岗位链接与表单 URL 不同时沿用原语义编译指引的岗位绑定步骤。
 
 ## 如何解读三组评测
 

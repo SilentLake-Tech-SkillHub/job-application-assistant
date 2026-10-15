@@ -1,6 +1,7 @@
 """Rule invariants and owned browser closed-loop tests. No paid model calls."""
 import argparse
 import copy
+from contextlib import nullcontext
 import hashlib
 import json
 from pathlib import Path
@@ -171,7 +172,7 @@ def browser_arm(args):
 def browser_all(args):
     from fixtures.form_sites import SITES
     import shutil
-    with tempfile.TemporaryDirectory() as temp:
+    with (nullcontext(args.root) if args.root else tempfile.TemporaryDirectory()) as temp:
         for site in SITES:
             for arm in ('no-rea', 'first-rea', 'reuse'):
                 command = [sys.executable, __file__, '--browser-arm', '--runtime', str(args.runtime),

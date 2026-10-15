@@ -37,6 +37,8 @@ jobs:
         run: npm install --no-save --ignore-scripts --package-lock=false rea-agents@6.4.0
       - name: Verify real REA passive capture on owned mock target
         run: python scripts/verify_real_rea.py --rea-entry node_modules/rea-agents/scripts/rea.mjs --out test-results/rea-real
+      - name: Verify actual REA learning and cross-application reuse on all five templates
+        run: python scripts/test_rea_reuse.py --browser --rea-entry node_modules/rea-agents/scripts/rea.mjs --root test-results/rea-rule-integration
       - name: Retain benchmark evidence
         if: always()
         uses: actions/upload-artifact@v4

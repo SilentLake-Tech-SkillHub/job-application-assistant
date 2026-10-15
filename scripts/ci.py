@@ -47,7 +47,8 @@ def stages(skip_browser):
                     [py, str(HERE / 'test_full_chain_benchmark.py'), '--browser'],
                     [py, str(HERE / 'test_form_preparation.py'), '--browser'],
                     [py, str(HERE / 'test_isolated_form_benchmark.py'), '--browser'],
-                    [py, str(HERE / 'test_rea_reuse.py'), '--browser']],
+                    [py, str(HERE / 'test_rea_reuse.py'), '--browser'],
+                    [py, str(HERE / 'test_compile_rea_rule.py')]],
         'stress': [[py, str(HERE / 'test_stress.py')]],
     }
     if shutil.which('node'):
