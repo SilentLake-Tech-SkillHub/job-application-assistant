@@ -7,6 +7,10 @@ REA 来源为本机 `REA 逆向工程` checkout，版本 6.4.0，commit
 
 ## 目标与现状
 
+下一阶段的两条路线、REA 分析成果跨投递复用闭环及三组真实模型对照，见
+[复用闭环实施与评测计划](rea-reuse-plan.md)。该计划尚未实现；历史 warm 缓存不是首次 REA 分析的产物，
+历史整体优化收益不能作为 REA 跨投递复用收益。
+
 已有 `inspect_form_controls.js` 负责盘点，`profile_vault.py` 负责私有事实，
 `fill_plan.py` 负责缓存和跨通道动作清单，`playwright_fill.py` 是 Chrome 扩展缺失时的备用执行器。
 默认仍是内置浏览器与 Chrome 扩展两个通道。现有流程已经批量填写，比较基线必须保留这一点。
