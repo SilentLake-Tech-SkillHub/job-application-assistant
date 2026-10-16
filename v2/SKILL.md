@@ -2,7 +2,7 @@
 name: job-application-assistant-v2
 description: Coordinate company-configured login and application MCP tools, stage checks and user review for confirmed recruiting roles. Use for V2 preparation and testing; preserve the installed previous version.
 metadata:
-  version: "2.0.0-alpha.4"
+  version: "2.0.0-alpha.5"
 ---
 
 # 岗位代投助手 V2
@@ -10,6 +10,8 @@ metadata:
 Start from the workspace router, confirmed role scope, current materials and existing authorization. Reuse same-batch decisions; ask only genuinely missing facts. This version is separate from the installed previous Skill. It does not switch global MCP configuration or migrate original private data automatically.
 
 ## Start and route
+
+On explicit workflow startup, run `hooks/conversation_scope.py enable` in the host execution context with the installed private scope/policy paths and this batch's authorization reference. The script derives the current conversation from the host; never supply or copy a conversation ID. Reuse an active registration. Other conversations and forks remain independent. Read [conversation hooks](docs/conversation-hooks.md) for installation details. Check both modules with `runtime_info`, then use `workflow_next` / `form_route` for the existing-asset IF branch before any filling; the returned MCP evidence determines the next call.
 
 1. Before opening websites, call `company_batch_create` with the upstream-confirmed company plan JSON and current preparation authorization, then `company_batch_take`. MCP extracts companies and splits Chrome/IAB work; the default capacity is ten companies per channel, twenty total. Multiple roles count as one company, and a shared verified login scope stays on one channel. Read [dual-browser batches](docs/company-batches.md) and [role entry](docs/role-entry.md). The upstream workflow owns selection, approval and Excel-to-JSON preparation. The entry consumes the confirmed JSON without converting Excel; outcome persistence and tracker synchronization belong to MCP internals. Do not invent selections, reorder company/role priorities or silently bypass missing input. Legacy explicit sequential/same-company runners remain supported; they are not the default new-batch coordinator.
 2. Check the actual executor for each assigned browser channel. Chrome uses the existing managed broker; IAB uses the host's in-app browser executor and its independent login state. Never send an IAB assignment to Chrome as a silent fallback, or claim that the Chrome socket controls IAB. Follow each company's frozen role order; its first navigation is the confirmed role URL, and login stays bound to the original role and tab. Never attach to daily Chrome or invoke REA during normal use. Keep active browsers alive. Record user waits and blockers per company so independent tasks continue; dispatch alone is not execution evidence.
