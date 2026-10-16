@@ -21,3 +21,25 @@ test('first navigation is role URL, login redirect preserves task and resume res
 }));
 
 test('explicit parallel roles skip only same-company predecessor; default still serial',()=>fixture(async({input,queues})=>{input.execution={mode:'parallel_roles',authorizationRef:'synthetic explicit parallel authorization'};const q=await queues.import({companyPlan:input});assert.equal((await queues.task({...q,taskId:q.tasks[1].taskId})).t.roleId,'B');delete input.execution.authorizationRef;await assert.rejects(queues.import({companyPlan:input}),/PARALLEL_ROLE_AUTHORIZATION_REQUIRED/);}));
+
+test('observed application entry is persisted and reuses its original tab without an input applyUrl',()=>fixture(async({input,queues})=>{
+ input.companies[0].roles=input.companies[0].roles.filter(r=>r.roleId==='A');
+ const q=await queues.import({companyPlan:input}),task=q.tasks[0],args={...q,taskId:task.taskId};
+ await queues.put(task.taskId,{queueId:q.queueId,pageId:'original-tab',status:'authenticated_at_role'});
+ const c={companyId:'sample',origin:'https://example.com',fields:{root:'.login'},account:{selector:'.account',source:'phone',countryCode:'+86'}};
+ const calls=[],login={company:async()=>c,locked:async(c,fn)=>fn(),profile:async()=>({facts:{phone:{status:'known',value:'13800001234',sourceIds:['synthetic']}}})};
+ const apply='https://example.com/campus/resume/123/apply';
+ const browser={request:async(method,a)=>{calls.push({method,...a});if(method==='openPage')return {pageId:'original-tab',pageUrl:a.pageUrl};if(method==='roleSnapshot')return {account:'1380****234',loginFormPresent:false};if(method==='roleEnterApplication')return {pageId:'original-tab',pageUrl:apply,roleTitle:'Role A',accountMatched:true};}};
+ const r=await new RoleFlow({queues,login,browser}).enter(args);assert.equal(r.status,'ready_to_fill');
+ const saved=await queues.read(task.taskId);assert.equal(saved.applicationUrl,apply);assert.equal(saved.returnUrl,apply);assert.equal(calls[0].pageId,'original-tab');
+ await new RoleFlow({queues,login,browser}).enter(args);assert.equal(calls.filter(x=>x.method==='openPage').at(-1).pageUrl,apply);
+}));
+
+test('a new company form is not a prerequisite for opening its confirmed role',()=>fixture(async({input,queues})=>{
+ input.companies[0].roles=input.companies[0].roles.filter(r=>r.roleId==='A');const q=await queues.import({companyPlan:input}),args={...q,taskId:q.tasks[0].taskId};
+ const c={companyId:'sample',origin:'https://example.com',allowedPaths:['/campus/'],fields:{root:'.login'},account:{selector:'.account',source:'phone',countryCode:'+86'}};
+ const login={company:async()=>c,locked:async(c,fn)=>fn(),profile:async()=>({facts:{phone:{status:'known',value:'13800001234',sourceIds:['synthetic']}}})};
+ let url;const browser={request:async(method,a)=>{if(method==='openPage'){url=a.pageUrl;return {pageId:'existing',pageUrl:url};}return {pageUrl:url,account:'1380****234',loginFormPresent:false};}};
+ const flow=new RoleFlow({queues,login,browser,templates:async()=>{throw Object.assign(Error('missing'),{code:'ENOENT'});}});
+ const r=await flow.open(args);assert.equal(r.status,'authenticated_at_role');assert.deepEqual(r.nextTools,['role_enter_application']);assert.equal(r.formAssetRequiredBeforeFill,true);
+}));

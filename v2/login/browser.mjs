@@ -2,7 +2,7 @@
 // cookie access, arbitrary evaluate endpoint or direct authentication HTTP API.
 import {BrokerBrowserAdapter} from '../shared/browser-rpc.mjs';
 export class LoginBrowser{
-  constructor(socket){if(!socket)throw Error('SHARED_BROWSER_SOCKET_REQUIRED');this.broker=new BrokerBrowserAdapter(socket,{requestTimeoutMs:45000});}
+  constructor(socket,{broker}={}){if(!socket)throw Error('SHARED_BROWSER_SOCKET_REQUIRED');this.broker=broker||new BrokerBrowserAdapter(socket,{requestTimeoutMs:45000});}
   status(){return this.broker.status();}
   open(url){return this.broker.request('openPage',{pageUrl:url});}
   async ready(c,url){const page=await this.broker.existingPage(url);await page.wait(c.fields.root+','+c.account.selector);}

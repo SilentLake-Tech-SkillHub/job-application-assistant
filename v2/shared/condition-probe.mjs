@@ -11,7 +11,7 @@ export async function probeConditions({page,plan,pageUrl,origin,onInventory,chec
   const matches=plan.fields.filter(f=>f.source===source);
   if(matches.length!==1)throw Error('AMBIGUOUS_CONDITION_DEPENDENCY');
   const f=matches[0];
-  if(f.kind!=='choice'||f.userOnly||f.sensitive||f.readonly||f.actions?.length!==1||!['radio','dropdown'].includes(f.actions[0].method)||!f.control?.options?.length)throw Error('UNSUPPORTED_CONDITION_PROBE');
+  if(f.kind!=='choice'||f.userOnly||f.sensitive||f.readonly||f.actions?.length!==1||!['radio','dropdown','ud_dropdown'].includes(f.actions[0].method)||!f.control?.options?.length)throw Error('UNSUPPORTED_CONDITION_PROBE');
   return f;
  });
  if(!parents.length)return {status:'not_required',branches,restoration:'not_needed'};

@@ -7,11 +7,12 @@ import {compileExecutionPlan,assertPreparedPlan} from './execution-plan.mjs';
 import {validateControlContract} from './value-contract.mjs';
 import {acquireLease,leasePath,defaultLeaseRoot} from './leases.mjs';
 import {probeConditions} from './condition-probe.mjs';
+import {FormRouter} from './form-route.mjs';
 
 export const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const idOK = value => typeof value === 'string' && /^[a-z0-9][a-z0-9_-]{0,79}$/.test(value);
 const blocked = /提交|投递|撤回|删除|同意|签名|验证码|密码|身份证|银行卡|submit|apply now|withdraw|delete|consent|signature|password|otp|captcha/i;
-const methods = new Set(['fill','select','check','click','upload','wait','dropdown','radio','feishu_month','feishu_year']);
+const methods = new Set(['fill','select','check','click','upload','wait','dropdown','radio','feishu_month','feishu_year','ud_dropdown','ud_date']);
 export function validateTemplate(t) {
   if (!idOK(t.id) || !Number.isInteger(t.version) || t.version < 1) throw Error('INVALID_TEMPLATE_ID_OR_VERSION');
   if (!Array.isArray(t.pages) || !t.pages.length) throw Error('EMPTY_TEMPLATE');
@@ -40,7 +41,7 @@ export function validateTemplate(t) {
         if (!methods.has(a.method) || !a.selector || blocked.test(a.label || '')) throw Error('UNSAFE_OR_UNKNOWN_ACTION');
         if (a.method === 'click' && !a.label) throw Error('CLICK_NEEDS_OBSERVED_LABEL');
         if (Object.hasOwn(a, 'value') || Object.hasOwn(a, 'code')) throw Error('VALUES_AND_CODE_DO_NOT_BELONG_IN_TEMPLATE');
-        if(['dropdown','radio'].includes(a.method)&&(!Array.isArray(a.options)||!a.options.length))throw Error('CAPTURED_OPTIONS_REQUIRED');
+        if(['dropdown','radio','ud_dropdown'].includes(a.method)&&(!Array.isArray(a.options)||!a.options.length))throw Error('CAPTURED_OPTIONS_REQUIRED');
       }
       validateControlContract(f);
     }
@@ -82,6 +83,7 @@ export function compare(actual, expected) {
 
 export class Engine {
   constructor({store,companies,browser,onInventory,refreshCompanies,resolveTask,leaseRoot=defaultLeaseRoot()}) { Object.assign(this,{store,companies,browser,onInventory,refreshCompanies,resolveTask,leaseRoot}); this.locks = new Set(); }
+  formRoute(task){return new FormRouter({store:this.store,companies:this.companies,validateTemplate}).resolve(task);}
   companyForTask(task){const c=this.companies.find(c=>c.id===task.companyId);return c?{...c,templateId:c.roleTemplates?.[task.roleId]||c.templateId}:null;}
   async acquireCompanies(companies){
     const origins=[...new Set(companies.map(c=>new URL(c.origin).origin))].sort(),releases=[];
@@ -120,15 +122,17 @@ export class Engine {
     });
   }
   async preparePlan(task){
+    const route=await this.formRoute(task);
+    if(route.route==='acquire'&&route.reason!=='COMPANY_FORM_ASSET_INCOMPLETE')return {...route,status:'needs_form_acquisition',readyForExecution:false};
     const company=this.companyForTask(task);
-    if(!company?.templateId)throw Error('COMPANY_NOT_COVERED');
+    if(!company?.templateId)return {...route,status:'needs_form_acquisition',readyForExecution:false};
     if(new URL(task.pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
     const template=validateTemplate(await this.store.get('templates',company.templateId));
     if(hash(template)!==task.templateHash)throw Error('TEMPLATE_VERSION_CHANGED');
     if(!template.pages.some(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix)))throw Error('PLAN_PAGE_NOT_COVERED');
     const plan=await compileExecutionPlan(template,task);
     await this.store.put('plans',plan.id,plan);
-    return {companyId:task.companyId,planId:plan.id,planHash:plan.planHash,templateHash:plan.templateHash,counts:plan.counts,allKnown:plan.allKnown,status:plan.allKnown?'ready':'ready_with_pending_answers',browserAccess:false,pending:plan.pages.flatMap(p=>p.fields).filter(f=>f.disposition==='needs_user').map(f=>({id:f.id,source:f.source,label:f.label,required:!!f.required}))};
+    return {companyId:task.companyId,route:route.route,nextStage:route.nextStage,routeReason:route.reason,planId:plan.id,planHash:plan.planHash,templateHash:plan.templateHash,counts:plan.counts,allKnown:plan.allKnown,readyForExecution:plan.readyForExecution,constructionBlockers:plan.constructionBlockers,status:plan.constructionBlockers.length?'blocked_construction':plan.counts.needs_user?'needs_answers':plan.counts.user_only?'ready_with_user_steps':'ready',browserAccess:false,pending:plan.pages.flatMap(p=>p.fields).filter(f=>f.disposition==='needs_user').map(f=>({id:f.id,source:f.source,label:f.label,required:!!f.required}))};
   }
   async coverage(ids) {
     return Promise.all(ids.map(async id => {
@@ -136,6 +140,8 @@ export class Engine {
       if (!c) return {companyId:id,status:'unknown_company'};
       if (!c.templateId) return {companyId:id,status:'missing_template'};
       try { const t=validateTemplate(await this.store.get('templates',c.templateId));
+        const route=await this.formRoute({companyId:id,pageUrl:t.evidence.sourceUrl});
+        if(route.route==='acquire')return {companyId:id,status:'needs_construction_or_migration',templateId:t.id,reason:route.reason,blockers:route.blockers||[],executionVerified:false};
         let probe;try{probe=await this.store.get('templates',`${t.id}-conditions`);}catch{}
         const conditionalFields=t.pages.flatMap(p=>p.fields).some(f=>f.when);
         const conditionCoverage=!conditionalFields?'not_required':probe?.templateHash===hash(t)?'declared_branches_verified':'not_probed';
@@ -257,6 +263,8 @@ export class Engine {
         if(missing.length)throw Error('UNMAPPED_FORM_FIELDS');
         const initial=await page.observe(plan);
         if(initial.pageUrl!==task.pageUrl||initial.roleTitle!==plan.roleTitle)throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
+        const unavailable=frozenFields.filter(f=>!['inactive','omitted','user_only'].includes(f.disposition)&&!initial.fields[f.id]?.present);
+        if(unavailable.length)throw Error('PLANNED_FIELDS_MISSING_BEFORE_WRITE');
         // Upload first because parsing may replace the form; then create the planned records.
         const uploads=frozenFields.filter(f=>f.kind==='file'&&f.disposition==='fill');
         for(const f of uploads){
@@ -265,12 +273,16 @@ export class Engine {
         for(const f of frozenFields.filter(f=>f.prepareBeforeGroups&&f.disposition==='fill')){
           for(const action of f.actions||[])await page.act(action,f.value,prepared.files);
         }
-        if(plan.provider==='feishu')await page.ensureGroups(plan.groups);
-        const expanded=plan.provider==='feishu'?await page.inventory(plan):live;
-        if(plan.provider==='feishu'&&this.onInventory)await this.onInventory(company.id,task.pageUrl,expanded,plan);
+        if(plan.groups?.length)await page.ensureGroups(plan.groups);
+        const expanded=uploads.length||plan.groups?.length?await page.inventory(plan):live;
+        if((uploads.length||plan.groups?.length)&&this.onInventory)await this.onInventory(company.id,task.pageUrl,expanded,plan);
         if(expanded.some(f=>!mapped.has(f.selector)))throw Error('UNMAPPED_FORM_FIELDS_AFTER_EXPANSION');
         for(const f of frozenFields){
           if(f.disposition!=='fill'||uploads.includes(f)||f.prepareBeforeGroups)continue;
+          const current=initial.fields[f.id];
+          if(current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'&&(!['choice','date'].includes(f.kind)||current.selected===true)){
+            (result.skippedMatchingFields??=[]).push(f.id);continue;
+          }
           for(const action of f.actions||[]){
             await page.assertLocation(company.origin,plan.pathPrefix);
             await page.act(action, f.value, prepared.files);

@@ -76,7 +76,17 @@ export async function compileExecutionPlan(template,task){
         {stage:'observe_and_verify',fieldIds:fields.filter(f=>f.disposition!=='inactive').map(f=>f.id)}],
       expected:compileExpected(page,task)});
   }
-  const body=json({schemaVersion:1,compilerVersion:1,companyId:task.companyId,pageUrl:task.pageUrl,templateHash:task.templateHash,inputHash:digest(inputSnapshot(template,task)),files:inputSnapshot(template,task).files,pages,counts,allKnown:counts.needs_user===0&&counts.user_only===0});
+  // Captured/mapped does not mean construction is complete. Preserve explicit
+  // failures in the frozen plan so every entry path rejects them before I/O.
+  const constructionBlockers=[];
+  const globalPositional = selector => typeof selector==='string' && /^\s*(?:html\s*>\s*)?body\s*>/i.test(selector) && /:nth-(?:of-type|child)\(/.test(selector);
+  const unstableFields=template.pages.flatMap(p=>p.fields).filter(f=>[f.read?.selector,f.read?.selectedSelector,...(f.inventorySelectors||[]),...(f.actions||[]).flatMap(a=>[a.selector,a.labelSelector])].some(globalPositional)).map(f=>f.id);
+  if(unstableFields.length)constructionBlockers.push('PAGE_GLOBAL_POSITIONAL_LOCATORS');
+  if(template.pages.some(p=>p.fields.some(f=>f.prepareBeforeGroups)))constructionBlockers.push('PRE_GROUP_WRITES_REQUIRE_REBUILD');
+  if(template.coverage?.allConditionalBranchesVerified!==true)constructionBlockers.push('CONDITIONAL_BRANCHES_NOT_VERIFIED');
+  if(template.coverage?.allControlsMapped!==true)constructionBlockers.push('CONTROLS_NOT_FULLY_MAPPED');
+  if(template.coverage?.allDriversSupported!==true)constructionBlockers.push('CONTROL_DRIVERS_NOT_SUPPORTED');
+  const body=json({schemaVersion:1,compilerVersion:3,companyId:task.companyId,pageUrl:task.pageUrl,templateHash:task.templateHash,inputHash:digest(inputSnapshot(template,task)),files:inputSnapshot(template,task).files,pages,counts,constructionBlockers,unstableFields,readyForExecution:constructionBlockers.length===0&&counts.needs_user===0,allKnown:counts.needs_user===0&&counts.user_only===0});
   const planHash=digest(body);
   return {id:randomUUID(),createdAt:new Date().toISOString(),...body,planHash};
 }
@@ -85,12 +95,14 @@ export async function assertPreparedPlan(prepared,template,task,authorization){
   if(!prepared||!task.planId||!task.planHash)throw Error('PREPARED_PLAN_REQUIRED');
   const {id,createdAt,planHash,...body}=prepared;
   if(id!==task.planId||planHash!==task.planHash||digest(body)!==planHash)throw Error('PREPARED_PLAN_HASH_MISMATCH');
-  if(prepared.companyId!==task.companyId||prepared.pageUrl!==task.pageUrl||prepared.templateHash!==task.templateHash||prepared.compilerVersion!==1)throw Error('PREPARED_PLAN_IDENTITY_CHANGED');
+  if(prepared.companyId!==task.companyId||prepared.pageUrl!==task.pageUrl||prepared.templateHash!==task.templateHash||prepared.compilerVersion!==3)throw Error('PREPARED_PLAN_IDENTITY_CHANGED');
   if(prepared.inputHash!==digest(inputSnapshot(template,task)))throw Error('PREPARED_PLAN_INPUTS_CHANGED');
   // Recompile before any browser operation to reject corrupted plan bodies and
   // changed file bytes; deterministic values must still match the frozen plan.
   const current=await compileExecutionPlan(template,task);
   if(current.planHash!==planHash)throw Error('PREPARED_PLAN_CONTENT_CHANGED');
+  if(prepared.constructionBlockers.length)throw Error('FORM_CONSTRUCTION_INCOMPLETE');
+  if(prepared.counts.needs_user&&!authorization.allowPartialPreparation)throw Error('PROFILE_PREPARATION_INCOMPLETE');
   for(const f of prepared.pages.flatMap(p=>p.fields).filter(f=>f.disposition==='fill')){
     if(f.sensitive&&!authorization.sensitiveFields)throw Error('SENSITIVE_FIELD_AUTHORIZATION_REQUIRED');
     if(f.kind==='file'&&!authorization.uploads)throw Error('UPLOAD_AUTHORIZATION_REQUIRED');

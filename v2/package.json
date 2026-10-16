@@ -1,6 +1,6 @@
 {
   "name": "job-application-suite-v2",
-  "version": "2.0.0-alpha.4",
+  "version": "2.0.0-alpha.5",
   "private": true,
   "type": "module",
   "files": [
@@ -12,7 +12,8 @@
     "scripts/",
     "docs/",
     "SKILL.md",
-    "agents/"
+    "agents/",
+    "catalog/"
   ],
   "scripts": {
     "start:login": "node scripts/start.mjs login",

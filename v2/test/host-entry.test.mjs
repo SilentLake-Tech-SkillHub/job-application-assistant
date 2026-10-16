@@ -1,0 +1,8 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,rm} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
+import {withHostBrowserBridge} from '../shared/host-browser-bridge.mjs';import {BrokerBrowserAdapter} from '../shared/browser-rpc.mjs';
+test('IAB uses its real detail button and never clicks final submit on repeat entry',async()=>{
+ const d=await mkdtemp(path.join(os.tmpdir(),'host-entry-'));let url='https://example.com/campushirecn/position/123/detail',clicks=0;
+ const tab={id:'3',url:async()=>url,playwright:{locator:s=>({innerText:async()=>s==='.account'?'1380****234':'Role',waitFor:async()=>{}}),getByRole:(r,o)=>{assert.equal(r,'button');assert.equal(o.name,'投递');return {count:async()=>1,click:async()=>{clicks++;url='https://example.com/campushirecn/resume/123/apply';}};}}};
+ const browser={tabs:{list:async()=>[{id:'3',url,title:'Role - Company'}],get:async()=>tab}};
+ try{await withHostBrowserBridge({browser,socketPath:path.join(d,'b.sock'),allowedOrigins:['https://example.com']},async({socketPath})=>{const b=new BrokerBrowserAdapter(socketPath),args={pageId:'3',expectedTitle:'Role',expectedAccount:'1380****234',accountSelector:'.account',roleSelector:'.role'};assert.equal((await b.request('roleEnterApplication',args)).accountMatched,true);assert.equal((await b.request('roleEnterApplication',args)).entryClicked,false);assert.equal(clicks,1);await assert.rejects(b.request('roleEnterApplication',{...args,expectedAccount:'wrong'}),/ACCOUNT_CHANGED/);assert.equal(clicks,1);});}finally{await rm(d,{recursive:true,force:true});}
+});

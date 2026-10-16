@@ -1,7 +1,18 @@
 import {accountMatches,resolveAccount,assertScope} from '../login/contracts.mjs';
 export class RoleFlow{
  constructor({queues,login,templates,browser}){Object.assign(this,{queues,login,templates,browser});}
- async context(args){const {q,t}=await this.queues.task(args),c=await this.login.company(t.companyId),template=await this.templates(t.companyId,t.roleId);if(!template)throw Error('ROLE_COMPANY_TEMPLATE_REQUIRED');const target=t.applyUrl||t.url;assertScope(c,t.url);assertScope(c,target);const u=new URL(target),plans=template.pages.filter(p=>u.pathname.startsWith(p.pathPrefix));if(plans.length!==1)throw Error('ROLE_ENTRY_RECIPE_REQUIRED');const plan=plans[0];if(plan.roleTitle!==t.title)throw Error('CONFIRMED_ROLE_TITLE_TEMPLATE_MISMATCH');return {q,t,c,template,plan,target};}
+ async context(args){
+  const {q,t}=await this.queues.task(args),c=await this.login.company(t.companyId);let template;
+  try{template=await this.templates(t.companyId,t.roleId);}catch(e){if(e.code!=='ENOENT')throw e;}
+  const target=t.applyUrl||t.url;assertScope(c,t.url);assertScope(c,target);
+  const plans=template?.pages.filter(p=>new URL(target).pathname.startsWith(p.pathPrefix))||[];
+  if(plans.length>1)throw Error('ROLE_ENTRY_RECIPE_REQUIRED');
+  let plan=plans[0];
+  if(!plan&&!t.applyUrl)plan={entryOnly:true,readySelector:c.account.selector,roleSelector:c.entry?.roleSelector||template?.pages[0]?.roleSelector};
+  if(!plan)throw Error('ROLE_ENTRY_RECIPE_REQUIRED');
+  if(!plan.entryOnly&&plan.roleTitle!==t.title)throw Error('CONFIRMED_ROLE_TITLE_TEMPLATE_MISMATCH');
+  return {q,t,c,template,plan,target};
+ }
  async snapshot(x,pageId){return this.browser.request('roleSnapshot',{pageId,roleSelector:x.plan.roleSelector,accountSelector:x.c.account.selector,loginRoot:x.c.fields.root});}
  async open(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{
   let prior;try{prior=await this.queues.read(x.t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
@@ -14,6 +25,10 @@ export class RoleFlow{
   if(s.account&&!accountMatches(s.account,account.phone))throw Error('LOGIN_ACCOUNT_MISMATCH');
   if(accountMatches(s.account,account.phone)&&!s.loginFormPresent){
    if(s.pageUrl!==state.returnUrl){await this.browser.request('openPage',{pageId:state.pageId,pageUrl:state.returnUrl,readySelectors:[x.plan.readySelector,x.c.fields.root]});}
+   if(x.plan.entryOnly){
+    state.status='authenticated_at_role';state.accountMatched=true;await this.queues.put(x.t.taskId,state);
+    return {status:state.status,taskId:state.taskId,pageId:state.pageId,companyId:x.t.companyId,roleId:x.t.roleId,pageUrl:state.returnUrl,accountMatched:true,nextTools:['role_enter_application'],formAssetRequiredBeforeFill:true,submission:'not_performed'};
+   }
    await this.browser.request('wait',{pageUrl:state.returnUrl,selector:x.plan.readySelector});
    const restored=await this.snapshot(x,state.pageId);
    if(restored.pageUrl!==state.returnUrl||restored.roleTitle!==state.expectedTitle||restored.loginFormPresent||!accountMatches(restored.account,account.phone))throw Error('LOGIN_RETURN_ROLE_VERIFICATION_FAILED');
@@ -28,10 +43,15 @@ export class RoleFlow{
  }
  async resume(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{const state=await this.queues.read(x.t.taskId);if(state.queueId!==x.q.id||state.returnUrl!==x.target||state.expectedTitle!==x.t.title)throw Error('ROLE_TASK_STATE_CHANGED');return this.assess(x,state);});}
  async enter(args){const {q,t}=await this.queues.task(args),c=await this.login.company(t.companyId);return this.login.locked(c,async()=>{
-  const opened=await this.browser.request('openPage',{pageUrl:t.url,readySelectors:[c.account.selector,c.fields.root]});
+  let prior;try{prior=await this.queues.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
+  if(prior?.queueId&&prior.queueId!==q.id)throw Error('ROLE_TASK_STATE_CHANGED');
+  const opened=await this.browser.request('openPage',{pageUrl:prior?.applicationUrl||t.url,...(prior?.pageId?{pageId:prior.pageId}:{}),readySelectors:[c.account.selector,c.fields.root]});
   const snapshot=await this.browser.request('roleSnapshot',{pageId:opened.pageId,accountSelector:c.account.selector,loginRoot:c.fields.root});
   if(snapshot.loginFormPresent||!accountMatches(snapshot.account,resolveAccount(await this.login.profile(),c).phone))throw Error('SHARED_LOGIN_SESSION_REQUIRED');
-  return this.browser.request('roleEnterApplication',{pageId:opened.pageId,expectedTitle:t.title,accountSelector:c.account.selector,expectedAccount:snapshot.account,roleSelector:'.resumeEditForm-headerText'});
+  const result=await this.browser.request('roleEnterApplication',{pageId:opened.pageId,expectedTitle:t.title,accountSelector:c.account.selector,expectedAccount:snapshot.account,roleSelector:'.resumeEditForm-headerText'});
+  if(new URL(result.pageUrl).origin!==c.origin||result.roleTitle!==t.title||result.accountMatched!==true)throw Error('APPLICATION_ENTRY_RESULT_CHANGED');
+  await this.queues.put(t.taskId,{...prior,queueId:q.id,taskId:t.taskId,pageId:result.pageId||opened.pageId,originalRoleUrl:t.url,applicationUrl:result.pageUrl,returnUrl:result.pageUrl,expectedTitle:t.title,status:'ready_to_fill',accountMatched:true,entryVerifiedAt:new Date().toISOString()});
+  return {...result,status:'ready_to_fill',taskId:t.taskId,applicationUrl:result.pageUrl,submission:'not_performed'};
  });}
  async screenshot(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{const state=await this.queues.read(x.t.taskId),s=await this.snapshot(x,state.pageId);if(new URL(s.pageUrl).origin!==x.c.origin)throw Error('ROLE_SCREENSHOT_SCOPE_CHANGED');return this.browser.request('screenshot',{pageId:state.pageId});});}
 }

@@ -17,12 +17,12 @@ export function ingestFactValue(value,precision) {
 
 export function validateControlContract(f) {
   const c=f.control;
-  const types={text:['text','string','string',['fill']],searchable_text:['text','string','string',['fill']],readonly_text:['text','string','string',[]],dropdown:['choice','string','string',['dropdown','select']],radio:['choice','string','string',['radio']],year_picker:['date','string','string',['feishu_year']],month_picker:['date','string','string',['feishu_month']],checkbox:['boolean','boolean','boolean',['check']],file_upload:['file','string','string[]',['upload']]};
+  const types={text:['text','string','string',['fill']],searchable_text:['text','string','string',['fill']],readonly_text:['text','string','string',[]],dropdown:['choice','string','string',['dropdown','select','ud_dropdown']],radio:['choice','string','string',['radio']],year_picker:['date','string','string',['feishu_year','ud_date']],month_picker:['date','string','string',['feishu_month','ud_date']],checkbox:['boolean','boolean','boolean',['check']],file_upload:['file','string','string[]',['upload']]};
   const t=types[c?.type];
   if(!t||f.kind!==t[0]||c.valueType!==t[1]||c.readbackType!==t[2])throw Error('CONTROL_TYPE_CONTRACT_REQUIRED');
   if(f.readonly!==true&&!f.userOnly&&!(f.actions||[]).length)throw Error('CONTROL_ACTION_REQUIRED');
   if((f.actions||[]).some(a=>!t[3].includes(a.method)))throw Error('CONTROL_ACTION_TYPE_MISMATCH');
-  const readKinds={text:['value','text'],searchable_text:['value'],readonly_text:['value','text'],dropdown:['value','text'],radio:['radio'],year_picker:['value','text'],month_picker:['month'],checkbox:['checked'],file_upload:['files']};
+  const readKinds={text:['value','text'],searchable_text:['value'],readonly_text:['value','text'],dropdown:['value','text'],radio:['radio'],year_picker:['value','text'],month_picker:['month','value'],checkbox:['checked'],file_upload:['files']};
   if(!readKinds[c.type].includes(f.read.kind))throw Error('CONTROL_READBACK_TYPE_MISMATCH');
   if(f.kind==='date'&&f.precision!==(c.type==='year_picker'?'year':'month'))throw Error('DATE_CONTROL_PRECISION_MISMATCH');
   if(f.kind==='choice'){
