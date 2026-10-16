@@ -1,3 +1,4 @@
+import {enrichControlContext} from './control-context.mjs';
 // Internal maintenance only. Traverse captured branch choices through real UI
 // controls, persist every discovery, then restore and read back the initial form.
 const signature=f=>JSON.stringify({selector:f.selector,label:f.label,type:f.type,required:!!f.required});
@@ -6,6 +7,7 @@ const state=o=>({pageUrl:o.pageUrl,roleTitle:o.roleTitle,groups:o.groups,section
 const mapped=(f,plan)=>plan.fields.some(p=>(p.inventorySelectors||[p.read.selector]).includes(f.selector)&&p.inventoryLabel===f.label&&p.inventoryType===f.type&&!!p.required===!!f.required);
 
 export async function probeConditions({page,plan,pageUrl,origin,onInventory,checkpoint=async()=>{},settleMs=2000}){
+ const inventory=async()=>{const raw=await page.inventory(plan);return plan.provider==='feishu'?raw:enrichControlContext(page,raw);};
  const branches=[],dependencies=[...new Set(plan.fields.map(f=>f.when?.source).filter(Boolean))];
  const parents=dependencies.map(source=>{
   const matches=plan.fields.filter(f=>f.source===source);
@@ -14,12 +16,18 @@ export async function probeConditions({page,plan,pageUrl,origin,onInventory,chec
   if(f.kind!=='choice'||f.userOnly||f.sensitive||f.readonly||f.actions?.length!==1||!['radio','dropdown','ud_dropdown'].includes(f.actions[0].method)||!f.control?.options?.length)throw Error('UNSUPPORTED_CONDITION_PROBE');
   return f;
  });
- if(!parents.length)return {status:'not_required',branches,restoration:'not_needed'};
  await page.assertLocation(origin,plan.pathPrefix);await page.wait(plan.readySelector);
- const baselineInventory=await page.inventory(plan);await onInventory(baselineInventory);
+ const baselineInventory=await inventory();await onInventory(baselineInventory);
  if(baselineInventory.some(f=>!mapped(f,plan)))throw Error('BASELINE_HAS_UNMAPPED_QUESTIONS');
  const baseline=await page.observe(plan);
  if(baseline.pageUrl!==pageUrl||baseline.roleTitle!==plan.roleTitle)throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
+ if(!parents.length){
+  const finalInventory=await inventory();await onInventory(finalInventory);const restored=await page.observe(plan);
+  const same=JSON.stringify(finalInventory.map(signature).sort())===JSON.stringify(baselineInventory.map(signature).sort())&&JSON.stringify(state(restored))===JSON.stringify(state(baseline));
+  const branch={source:'__baseline__',value:null,status:same?'verified':'needs_attention',inventory:finalInventory,newQuestions:finalInventory.filter(f=>!mapped(f,plan)).length,selected:true,conditionFieldsMatched:true,roleMatched:restored.pageUrl===pageUrl&&restored.roleTitle===plan.roleTitle};
+  return {status:same&&branch.roleMatched&&!branch.newQuestions?'verified':'needs_attention',branches:[branch],restoration:same?'verified':'failed',baseline,restored,scope:'declared_conditions_none_readonly_baseline'};
+ }
+
  for(const f of parents){
   const actual=baseline.fields?.[f.id];
   if(!actual?.present||actual.selected!==true||!f.control.options.includes(actual.value))throw Error('CONDITION_INITIAL_SELECTION_NOT_RESTORABLE');
@@ -35,20 +43,20 @@ export async function probeConditions({page,plan,pageUrl,origin,onInventory,chec
    await page.act(parent.actions[0],value,{});
    const expected=conditional.filter(f=>f.when.source===parent.source&&f.when.equals===value);
    for(const f of expected)await page.wait(f.read.presenceSelector||f.read.selector);
-   let inventory,matched=false;const deadline=Date.now()+settleMs;
+   let controls,matched=false;const deadline=Date.now()+settleMs;
    do{
-    inventory=await page.inventory(plan);await onInventory(inventory);
+    controls=await inventory();await onInventory(controls);
     const wanted=conditional.filter(f=>f.when.source===parent.source);
     matched=wanted.every(f=>{
-     const present=inventory.some(i=>(f.inventorySelectors||[f.read.selector]).includes(i.selector));
+     const present=controls.some(i=>(f.inventorySelectors||[f.read.selector]).includes(i.selector));
      return present===(f.when.equals===value);
     });
     if(matched||Date.now()>=deadline)break;
     await new Promise(resolve=>setTimeout(resolve,40));
    }while(true);
    const observation=await page.observe({...plan,fields:[parent]});
-   const unknown=inventory.filter(f=>!mapped(f,plan));
-   const branch={source:parent.source,value,inventory,selected:observation.fields?.[parent.id]?.selected===true&&observation.fields?.[parent.id]?.value===value,
+   const unknown=controls.filter(f=>!mapped(f,plan));
+   const branch={source:parent.source,value,inventory:controls,selected:observation.fields?.[parent.id]?.selected===true&&observation.fields?.[parent.id]?.value===value,
     expectedFieldIds:expected.map(f=>f.id),newQuestions:unknown.length,conditionFieldsMatched:matched,roleMatched:observation.pageUrl===pageUrl&&observation.roleTitle===plan.roleTitle};
    branch.status=branch.selected&&branch.roleMatched&&matched&&!unknown.length?'verified':'needs_attention';
    branches.push(branch);await checkpoint({branches,restoration:'pending'});
@@ -58,9 +66,9 @@ export async function probeConditions({page,plan,pageUrl,origin,onInventory,chec
   if(changed){
    try{
     for(const parent of parents){await page.assertLocation(origin,plan.pathPrefix);await page.act(parent.actions[0],baseline.fields[parent.id].value,{});}
-    await page.inventory(plan); // Refresh logical row selectors before restoring.
+    await inventory(); // Refresh logical row selectors before restoring.
     for(const f of originalFields){await page.wait(f.read.presenceSelector||f.read.selector);for(const action of f.actions)await page.act(action,baseline.fields[f.id].value??'',{});}
-    const finalInventory=await page.inventory(plan);await onInventory(finalInventory);restored=await page.observe(plan);
+    const finalInventory=await inventory();await onInventory(finalInventory);restored=await page.observe(plan);
     const sameInventory=JSON.stringify(finalInventory.map(signature).sort())===JSON.stringify(baselineInventory.map(signature).sort());
     restoration=sameInventory&&JSON.stringify(state(restored))===JSON.stringify(state(baseline))?'verified':'failed';
    }catch{restoration='failed';}

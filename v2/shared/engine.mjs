@@ -7,12 +7,14 @@ import {compileExecutionPlan,assertPreparedPlan} from './execution-plan.mjs';
 import {validateControlContract} from './value-contract.mjs';
 import {acquireLease,leasePath,defaultLeaseRoot} from './leases.mjs';
 import {probeConditions} from './condition-probe.mjs';
+import {enrichControlContext} from './control-context.mjs';
+import {controlContractChanges} from './control-contract.mjs';
 import {FormRouter} from './form-route.mjs';
 
 export const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const idOK = value => typeof value === 'string' && /^[a-z0-9][a-z0-9_-]{0,79}$/.test(value);
 const blocked = /提交|投递|撤回|删除|同意|签名|验证码|密码|身份证|银行卡|submit|apply now|withdraw|delete|consent|signature|password|otp|captcha/i;
-const methods = new Set(['fill','select','check','click','upload','wait','dropdown','radio','feishu_month','feishu_year','ud_dropdown','ud_date']);
+const methods = new Set(['fill','select','check','click','upload','wait','dropdown','radio','feishu_month','feishu_year','ud_dropdown','ud_date','ant_day']);
 export function validateTemplate(t) {
   if (!idOK(t.id) || !Number.isInteger(t.version) || t.version < 1) throw Error('INVALID_TEMPLATE_ID_OR_VERSION');
   if (!Array.isArray(t.pages) || !t.pages.length) throw Error('EMPTY_TEMPLATE');
@@ -40,6 +42,7 @@ export function validateTemplate(t) {
       for (const a of f.actions||[]) {
         if (!methods.has(a.method) || !a.selector || blocked.test(a.label || '')) throw Error('UNSAFE_OR_UNKNOWN_ACTION');
         if (a.method === 'click' && !a.label) throw Error('CLICK_NEEDS_OBSERVED_LABEL');
+        if(a.method==='ant_day'&&(!a.openSelector||!a.openLabel||blocked.test(a.openLabel)))throw Error('ANT_DAY_CAPTURE_CONTRACT_REQUIRED');
         if (Object.hasOwn(a, 'value') || Object.hasOwn(a, 'code')) throw Error('VALUES_AND_CODE_DO_NOT_BELONG_IN_TEMPLATE');
         if(['dropdown','radio','ud_dropdown'].includes(a.method)&&(!Array.isArray(a.options)||!a.options.length))throw Error('CAPTURED_OPTIONS_REQUIRED');
       }
@@ -233,12 +236,15 @@ export class Engine {
     if(matches.length!==1)throw Error('AMBIGUOUS_VERIFICATION_PAGE');
     const plan=matches[0],page=await this.browser.existingPage(task.pageUrl);
     await page.assertLocation(company.origin,plan.pathPrefix);await page.wait(plan.readySelector);
-    const inventory=await page.inventory(plan);
+    const rawInventory=await page.inventory(plan);
+    const inventory=plan.provider==='feishu'?rawInventory:await enrichControlContext(page,rawInventory);
     let mappingError=null;
     try{if(this.onInventory)await this.onInventory(company.id,task.pageUrl,inventory,plan);}catch(e){mappingError=/^[A-Z_]+$/.test(e.message)?e.message:'PROFILE_REGISTRATION_FAILED';}
     const observation=attachInventory(await page.observe(plan),plan,inventory),observationRunId=randomUUID();
     await this.store.put('runs',observationRunId,{operation:'live_observation',companyId:company.id,observation});
     const result=verifyForm(compileExpected(plan,task),observation);
+    const contractChanges=controlContractChanges(plan,inventory);
+    if(contractChanges.length){result.status='needs_attention';result.controlContractChanges=contractChanges;}
     if(mappingError){result.status='needs_attention';result.mappingError=mappingError;}
     const run={id:randomUUID(),operation:'verify_current',companyId:company.id,templateHash:hash(template),profileHash:task.profileHash,observationRunId,...result};
     await this.store.put('runs',run.id,run);return run;
@@ -255,12 +261,14 @@ export class Engine {
         activePlan=plan;
         await page.assertLocation(company.origin,plan.pathPrefix);
         await page.wait(plan.readySelector);
-        const live=await page.inventory(plan);
+        const inventory=async()=>{const controls=await page.inventory(plan);return plan.provider==='feishu'?controls:enrichControlContext(page,controls);};
+        const live=await inventory();
         if(this.onInventory)await this.onInventory(company.id,task.pageUrl,live,plan);
         const mapped=new Set(plan.fields.flatMap(f=>f.inventorySelectors||[f.read.selector]));
         const missing=live.filter(f=>!mapped.has(f.selector));
         result.pageChecks.push({pathPrefix:plan.pathPrefix,unmapped:missing.map(f=>({selector:f.selector,label:f.label,required:f.required}))});
         if(missing.length)throw Error('UNMAPPED_FORM_FIELDS');
+        if(controlContractChanges(plan,live).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
         const initial=await page.observe(plan);
         if(initial.pageUrl!==task.pageUrl||initial.roleTitle!==plan.roleTitle)throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
         const unavailable=frozenFields.filter(f=>!['inactive','omitted','user_only'].includes(f.disposition)&&!initial.fields[f.id]?.present);
@@ -274,9 +282,10 @@ export class Engine {
           for(const action of f.actions||[])await page.act(action,f.value,prepared.files);
         }
         if(plan.groups?.length)await page.ensureGroups(plan.groups);
-        const expanded=uploads.length||plan.groups?.length?await page.inventory(plan):live;
+        const expanded=uploads.length||plan.groups?.length?await inventory():live;
         if((uploads.length||plan.groups?.length)&&this.onInventory)await this.onInventory(company.id,task.pageUrl,expanded,plan);
         if(expanded.some(f=>!mapped.has(f.selector)))throw Error('UNMAPPED_FORM_FIELDS_AFTER_EXPANSION');
+        if(controlContractChanges(plan,expanded).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
         for(const f of frozenFields){
           if(f.disposition!=='fill'||uploads.includes(f)||f.prepareBeforeGroups)continue;
           const current=initial.fields[f.id];
@@ -289,11 +298,12 @@ export class Engine {
           }
         }
         // A final read of the entire page catches later cascades or resume parsing overwriting earlier values.
-        const inventory=await page.inventory(plan);
+        const finalInventory=await inventory();
         // Dependencies and parsing can reveal new optional questions after writing.
         // Persist these before any completion verdict, just like the initial capture.
-        if(this.onInventory)await this.onInventory(company.id,task.pageUrl,inventory,plan);
-        const observation=attachInventory(await page.observe(plan),plan,inventory);
+        if(this.onInventory)await this.onInventory(company.id,task.pageUrl,finalInventory,plan);
+        if(controlContractChanges(plan,finalInventory).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
+        const observation=attachInventory(await page.observe(plan),plan,finalInventory);
         const observationRunId=randomUUID();
         await this.store.put('runs',observationRunId,{operation:'live_observation',companyId:company.id,observation});
         (result.observationRunIds??=[]).push(observationRunId);

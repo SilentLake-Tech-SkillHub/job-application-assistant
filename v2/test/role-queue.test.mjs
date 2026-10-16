@@ -31,7 +31,7 @@ test('observed application entry is persisted and reuses its original tab withou
  const apply='https://example.com/campus/resume/123/apply';
  const browser={request:async(method,a)=>{calls.push({method,...a});if(method==='openPage')return {pageId:'original-tab',pageUrl:a.pageUrl};if(method==='roleSnapshot')return {account:'1380****234',loginFormPresent:false};if(method==='roleEnterApplication')return {pageId:'original-tab',pageUrl:apply,roleTitle:'Role A',accountMatched:true};}};
  const r=await new RoleFlow({queues,login,browser}).enter(args);assert.equal(r.status,'ready_to_fill');
- const saved=await queues.read(task.taskId);assert.equal(saved.applicationUrl,apply);assert.equal(saved.returnUrl,apply);assert.equal(calls[0].pageId,'original-tab');
+ const saved=await queues.read(task.taskId);assert.equal(saved.applicationUrl,apply);assert.equal(saved.returnUrl,apply);assert.equal(calls.find(c=>c.method==='openPage').pageId,'original-tab');
  await new RoleFlow({queues,login,browser}).enter(args);assert.equal(calls.filter(x=>x.method==='openPage').at(-1).pageUrl,apply);
 }));
 

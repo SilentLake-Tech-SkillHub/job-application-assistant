@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {assertBoundRoleState} from '../shared/role-state.mjs';
+const q={id:'queue'},t={title:'Role',url:'https://a.example/detail'},s={queueId:'queue',expectedTitle:'Role',status:'needs_attention',accountMatched:true,fillRunId:'run',applicationUrl:'https://a.example/form',returnUrl:'https://a.example/form'};
+test('genuine partial form remains independently reviewable without re-login',()=>{assert.equal(assertBoundRoleState(q,t,s),s);});
+test('attention state alone never certifies a role, account or actual previous fill',()=>{for(const delta of [{fillRunId:null},{accountMatched:false},{queueId:'other'},{expectedTitle:'other'},{returnUrl:t.url},{applicationUrl:null}])assert.throws(()=>assertBoundRoleState(q,t,{...s,...delta}),/ROLE_NOT_READY/);});

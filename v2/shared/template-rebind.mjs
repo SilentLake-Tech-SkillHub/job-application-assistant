@@ -1,3 +1,4 @@
+import {unsealedTemplate} from './form-seal.mjs';
 import {compareControlStructures} from './control-structure.mjs';
 const key=c=>JSON.stringify([c.group||null,c.repeatIndex??null,c.fieldKey||null,c.controlIndex??null,c.type,c.label]);
 // Offline only: same company, verified role and actual control correspondence.
@@ -19,5 +20,5 @@ export function rebindTemplate({template,baseline,current,roleId,confirmedTitle}
  result.id=(template.id.slice(0,40)+'-'+roleId.replace(/[^a-z0-9_-]/g,'').slice(0,30)).slice(0,79);result.version=template.version+1;
  result.evidence={...result.evidence,sourceUrl:current.pageUrl,observedAt:current.observedAt,reboundFrom:template.id,baselineCaptureId:baseline.captureId,targetCaptureId:current.captureId};
  result.pages=result.pages.map(p=>({...p,pathPrefix:new URL(current.pageUrl).pathname,roleTitle:confirmedTitle,fields:p.fields.map(f=>({...f,prepareBeforeGroups:false}))}));result.validation={livePassed:false};
- return {template:result,comparison,requiresLiveVerification:true};
+ return {template:unsealedTemplate(result),comparison,requiresLiveVerification:true};
 }

@@ -9,12 +9,14 @@ import { BrowserAdapter } from './browser.mjs';
 import { BrokerBrowserAdapter } from './browser-rpc.mjs';
 import { loadProfile, updateProfile, registerObservedQuestions, registerPlannedQuestions, registerTemplateContract, assertQuestionsMapped, resolveProfile, profileStatus, recordProfileAnswers, mapProfileQuestions } from './profile.mjs';
 import {queueFromEnv} from './queue-config.mjs';
+import {assertBoundRoleState} from './role-state.mjs';
 import {outcomeSchema} from './application-outcome.mjs';
 import {enrichControlContext} from './control-context.mjs';
 import {compareControlStructures} from './control-structure.mjs';
 import {CompanyBatch} from './company-batch.mjs';
 import {MaterialImport} from './material-import.mjs';
 import {RoutedBrowserAdapter} from './routed-browser.mjs';
+import {sealFormTemplate,unsealedTemplate} from './form-seal.mjs';
 import {rebindTemplate} from './template-rebind.mjs';
 import {closeApplication} from './application-closeout.mjs';
 import {accountMatches,resolveAccount} from '../login/contracts.mjs';
@@ -29,11 +31,11 @@ const companyBatches=queues?new CompanyBatch({store,queues,catalog:catalog.compa
 async function boundRole(args){
   if(!queues)throw Error('PRIVATE_PROFILE_REQUIRED');
   const {q,t}=await queues.task(args),state=await queues.read(t.taskId);
-  if(state.queueId!==q.id||!['ready_to_fill','ready_for_user_review'].includes(state.status)||state.returnUrl!==(state.applicationUrl||t.applyUrl||t.url)||state.expectedTitle!==t.title)throw Error('ROLE_NOT_READY_FOR_FILL');
+  assertBoundRoleState(q,t,state);
   const c=catalog.companies.find(c=>c.id===t.companyId);if(!c?.templateId)throw Error('COMPANY_NOT_COVERED');
   const template=await store.get('templates',c.roleTemplates?.[t.roleId]||c.templateId),plan=template.pages.find(p=>new URL(state.returnUrl).pathname.startsWith(p.pathPrefix));
   if(!plan||plan.roleTitle!==t.title)throw Error('CONFIRMED_ROLE_TITLE_TEMPLATE_MISMATCH');
-  const login=JSON.parse(await readFile(path.join(root,'companies',t.companyId+'.login.json'),'utf8'));
+  const login=JSON.parse(await readFile(path.join(process.env.RECRUITING_LOGIN_COMPANY_DIR||path.join(root,'companies'),t.companyId+'.login.json'),'utf8'));
   const snapshot=await browser.request('roleSnapshot',{pageId:state.pageId,roleSelector:plan.roleSelector,accountSelector:login.account.selector,loginRoot:login.fields.root});
   if(snapshot.pageUrl!==state.returnUrl||snapshot.roleTitle!==t.title||snapshot.loginFormPresent||!accountMatches(snapshot.account,resolveAccount(await loadProfile(profileFile),login).phone))throw Error('ROLE_OR_ACCOUNT_CHANGED_BEFORE_FILL');
   return {q,t,state,template};
@@ -67,7 +69,7 @@ const queueTask={queueId:z.string().uuid(),queueHash:z.string().length(64),taskI
 server.registerTool('runtime_info',{description:'只读返回当前实际运行版本与能力，识别旧安装端；不连接浏览器。',annotations:{readOnlyHint:true}},wrap(()=>({version:packageInfo.version,compilerVersion:3,capabilities:['company_batch','form_route','workflow_next','role_bindings','frozen_plan','independent_readback','fixed_closeout'],browserAccess:false}),false));
 server.registerTool('workflow_next',{description:'确定性调用路由：先判断公司资产，复用则离线映射与编译；缺失或失效才返回增量建库接口。只返回下一调用及真实阻塞，不替模型宣称完成。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),roleId:z.string().optional()},annotations:{readOnlyHint:true}},wrap(async task=>{
  const route=await engine.formRoute(task);
- if(route.route==='acquire')return {...route,nextTools:['capture_controls','capture_choice_options','probe_conditions','template_register'],submission:'not_performed'};
+ if(route.route==='acquire')return {...route,nextTools:['capture_controls','capture_choice_options','template_register','probe_conditions','template_finalize','prepare_plan'],submission:'not_performed'};
  const profile=await loadProfile(profileFile),company=engine.companyForTask(task),template=await store.get('templates',company.templateId);
  try{assertQuestionsMapped(profile,task.companyId,task.pageUrl);}catch{return {...route,nextStage:'local_mapping',nextTools:['profile_status','profile_map_questions'],submission:'not_performed'};}
  const plan=await engine.preparePlan({...task,templateHash:hash(template),...resolveProfile(profile,template,{},task.companyId)});
@@ -181,6 +183,13 @@ server.registerTool('capture_controls',{description:'建库阶段批量读取控
   const summarize=rows=>rows.map(({selectors,...row})=>row);
   return {...result,controls:undefined,structure:{...structure,added:summarize(structure.added),removed:summarize(structure.removed)}};
 })));
+server.registerTool('template_finalize',{description:'只接受匹配当前资产Hash、全部声明分支通过并恢复的真实探测回执；代码检查实际控件覆盖和类型后封存公司资产。不把资料缺失或页面填写当作完成。',inputSchema:{companyId:z.string(),roleId:z.string().optional(),templateHash:z.string(),probeRunId:z.string().uuid()}},wrap(args=>engine.withCompanyLease(args.companyId,async()=>{
+ const c=engine.companyForTask(args),t=await store.get('templates',c.templateId);if(hash(t)!==args.templateHash)throw Error('TEMPLATE_VERSION_CHANGED');
+ const probe=await store.get('runs',args.probeRunId);const profile=await loadProfile(profileFile);assertQuestionsMapped(profile,args.companyId,t.evidence.sourceUrl);
+ const channel=await browser.channel({pageUrl:t.evidence.sourceUrl});const sealed=sealFormTemplate(t,probe,{companyId:args.companyId,profileMapped:true,channel});validateTemplate(sealed);
+ await updateProfile(profileFile,p=>registerTemplateContract(p,{companyId:args.companyId,template:sealed,templateHash:hash(sealed)}));await store.put('templates',sealed.id,sealed);
+ return {templateId:sealed.id,templateHash:hash(sealed),status:'asset_sealed_require_profile_preflight',probeRunId:probe.id,browserAccess:false,submission:'not_performed'};
+})));
 server.registerTool('template_rebind_role',{description:'建库阶段离线复用同公司表单：核对真实采集、字段一一对应及冻结岗位标题，生成岗位独立资产；不重新试填，不宣称建库缺口已通过。',inputSchema:{...queueTask,baselineCaptureId:z.string(),captureId:z.string(),sourceTemplateId:z.string()}},wrap(async args=>{
  const {t}=await queues.task(args);
  return engine.withCompanyLease(t.companyId,async()=>{
@@ -188,18 +197,18 @@ server.registerTool('template_rebind_role',{description:'建库阶段离线复�
   if(current.companyId!==t.companyId)throw Error('REBIND_COMPANY_SCOPE_CHANGED');
   const result=rebindTemplate({template:source,baseline,current,roleId:t.roleId,confirmedTitle:t.title});validateTemplate(result.template);
   await updateProfile(profileFile,p=>{registerTemplateContract(p,{companyId:t.companyId,template:result.template,templateHash:hash(result.template)});return registerPlannedQuestions(p,{companyId:t.companyId,pageUrl:current.pageUrl,fields:current.controls,observedAt:current.observedAt},result.template.pages[0]);});
-  const incomplete=['allConditionalBranchesVerified','allControlsMapped','allDriversSupported'].filter(k=>result.template.coverage?.[k]!==true);
-  const unstable=result.template.pages.flatMap(p=>p.fields).filter(f=>[f.read?.selector,...(f.inventorySelectors||[]),...(f.actions||[]).map(a=>a.selector)].some(s=>/^\s*body\s*>/i.test(s||'')&&/:nth-(?:of-type|child)\(/.test(s))).map(f=>f.id);
+  const incomplete=['allConditionalBranchesVerified','allControlsMapped','allDriversSupported'].filter(k=>source.coverage?.[k]!==true);
+  const unstable=result.template.pages.flatMap(p=>p.fields).filter(f=>[f.read?.selector,...(f.inventorySelectors||[]),...(f.actions||[]).flatMap(a=>[a.selector,a.labelSelector,a.openSelector])].some(s=>/^\s*body\s*>/i.test(s||'')&&/:nth-(?:of-type|child)\(/.test(s))).map(f=>f.id);
   if(incomplete.length||unstable.length){const candidateId='rebind-'+result.template.id;await store.put('runs',candidateId,{operation:'incomplete_rebind_candidate',template:result.template,blockers:incomplete,unstableFields:unstable});return {candidateId,status:'needs_asset_completion',blockers:incomplete,unstableFields:unstable,boundForExecution:false,browserAccess:false};}
   await store.put('templates',result.template.id,result.template);
   await store.update('templates','role-bindings',b=>({...b,[t.companyId]:{...(b[t.companyId]||{}),[t.roleId]:result.template.id}}));await refreshBindings();
-  return {templateId:result.template.id,templateHash:hash(result.template),status:'rebound_require_preflight',requiresLiveVerification:true,browserAccess:false};
+  return {templateId:result.template.id,templateHash:hash(result.template),status:'rebound_require_construction_probe',nextTools:['capture_controls','probe_conditions','template_finalize','prepare_plan'],requiresLiveVerification:true,browserAccess:false};
  });
 }));
 server.registerTool('template_register',{description:'持久化已采集并人工确定的操作方案；不把建库等同于实测通过。',inputSchema:{companyId:z.string(),roleId:z.string().optional(),template:z.record(z.unknown())}},wrap(async ({companyId,roleId,template})=>engine.withCompanyLease(companyId,async()=>{
   const c=catalog.companies.find(c=>c.id===companyId);if(!c)throw Error('UNKNOWN_COMPANY');
   validateTemplate(template);if(new URL(template.evidence.sourceUrl).origin!==c.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
-  const t={...template,validation:{livePassed:false}};
+  const t=unsealedTemplate(template);
   if(!profileFile)throw Error('PROFILE_REQUIRED_FOR_NEW_QUESTIONS');
   await store.update('templates',t.id,async previous=>{
     if(previous.evidence?.sourceUrl&&new URL(previous.evidence.sourceUrl).origin!==c.origin)throw Error('SHARED_TEMPLATE_ORIGIN_MISMATCH');

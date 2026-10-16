@@ -1,3 +1,4 @@
+import {performAntDay} from './ant-date.mjs';
 import {stat,readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
@@ -90,6 +91,7 @@ export class PageAdapter {
     }
   }
   async act(action,value,files){
+    if(action.method==='ant_day')return performAntDay(this,action,value);
     if(action.provider==='feishu'&&!action.selectorsResolved)action=await this.page.evaluate(remapFeishuSpecDOM,action);
     const l=this.page.locator(action.selector);
     if(await l.count()!==1)throw Error('AMBIGUOUS_ACTION_TARGET');

@@ -80,7 +80,7 @@ export async function compileExecutionPlan(template,task){
   // failures in the frozen plan so every entry path rejects them before I/O.
   const constructionBlockers=[];
   const globalPositional = selector => typeof selector==='string' && /^\s*(?:html\s*>\s*)?body\s*>/i.test(selector) && /:nth-(?:of-type|child)\(/.test(selector);
-  const unstableFields=template.pages.flatMap(p=>p.fields).filter(f=>[f.read?.selector,f.read?.selectedSelector,...(f.inventorySelectors||[]),...(f.actions||[]).flatMap(a=>[a.selector,a.labelSelector])].some(globalPositional)).map(f=>f.id);
+  const unstableFields=template.pages.flatMap(p=>p.fields).filter(f=>[f.read?.selector,f.read?.selectedSelector,...(f.inventorySelectors||[]),...(f.actions||[]).flatMap(a=>[a.selector,a.labelSelector,a.openSelector])].some(globalPositional)).map(f=>f.id);
   if(unstableFields.length)constructionBlockers.push('PAGE_GLOBAL_POSITIONAL_LOCATORS');
   if(template.pages.some(p=>p.fields.some(f=>f.prepareBeforeGroups)))constructionBlockers.push('PRE_GROUP_WRITES_REQUIRE_REBUILD');
   if(template.coverage?.allConditionalBranchesVerified!==true)constructionBlockers.push('CONDITIONAL_BRANCHES_NOT_VERIFIED');

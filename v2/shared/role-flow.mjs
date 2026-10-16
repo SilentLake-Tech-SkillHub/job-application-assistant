@@ -45,7 +45,12 @@ export class RoleFlow{
  async enter(args){const {q,t}=await this.queues.task(args),c=await this.login.company(t.companyId);return this.login.locked(c,async()=>{
   let prior;try{prior=await this.queues.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
   if(prior?.queueId&&prior.queueId!==q.id)throw Error('ROLE_TASK_STATE_CHANGED');
-  const opened=await this.browser.request('openPage',{pageUrl:prior?.applicationUrl||t.url,...(prior?.pageId?{pageId:prior.pageId}:{}),readySelectors:[c.account.selector,c.fields.root]});
+  let observedForm;
+  if(!prior?.applicationUrl){
+   const role=new URL(t.url).pathname.match(/^\/(campus|campushirecn)\/(?:m\/)?position\/(\d+)\/detail$/);
+   if(role){const tabs=await this.browser.request('tabs');const matches=(tabs||[]).filter(p=>{const u=new URL(p.url);return u.origin===c.origin&&u.pathname==='/'+role[1]+'/resume/'+role[2]+'/apply';});if(matches.length>1)throw Error('AMBIGUOUS_ROLE_FORM');observedForm=matches[0]?.url;}
+  }
+  const opened=await this.browser.request('openPage',{pageUrl:prior?.applicationUrl||observedForm||t.url,...(prior?.pageId?{pageId:prior.pageId}:{}),readySelectors:[c.account.selector,c.fields.root]});
   const snapshot=await this.browser.request('roleSnapshot',{pageId:opened.pageId,accountSelector:c.account.selector,loginRoot:c.fields.root});
   if(snapshot.loginFormPresent||!accountMatches(snapshot.account,resolveAccount(await this.login.profile(),c).phone))throw Error('SHARED_LOGIN_SESSION_REQUIRED');
   const result=await this.browser.request('roleEnterApplication',{pageId:opened.pageId,expectedTitle:t.title,accountSelector:c.account.selector,expectedAccount:snapshot.account,roleSelector:'.resumeEditForm-headerText'});

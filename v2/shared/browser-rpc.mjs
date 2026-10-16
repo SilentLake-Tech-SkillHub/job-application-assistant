@@ -1,3 +1,4 @@
+import {performAntDay} from './ant-date.mjs';
 import http from 'node:http';
 import {canonicalizeInventory,remapSpec} from './feishu-selectors.mjs';
 export class BrokerBrowserAdapter {
@@ -32,6 +33,6 @@ class BrokerPage {
     }
     return this.call('observe',{plan});
   }
-  act(action,value,files){return this.call('act',{action:action.provider==='feishu'?{...remapSpec(action,this.rowKeys||{}),selectorsResolved:true}:action,value,files});}
+  act(action,value,files){if(action.method==='ant_day')return performAntDay(this,action,value);return this.call('act',{action:action.provider==='feishu'?{...remapSpec(action,this.rowKeys||{}),selectorsResolved:true}:action,value,files});}
   ensureGroups(groups){return this.call('ensureGroups',{groups});}
 }
