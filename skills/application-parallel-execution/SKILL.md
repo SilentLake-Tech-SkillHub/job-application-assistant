@@ -2,7 +2,7 @@
 name: application-parallel-execution
 description: Coordinate user-approved parallel application preparation and role-version-approved submissions across independent recruiting account scopes. Use after an application batch chooses multiple AI; preserve exclusive ownership, approval evidence, receipts and serial tracker merging.
 metadata:
-  version: "1.1.0"
+  version: "1.2.0"
 ---
 
 # 多 Agent 平行准备与投递
@@ -54,3 +54,5 @@ Report assigned/checked/eligible companies, prepared forms, reviewed and approve
 ## 公司方案交接
 
 分派前读取[公司方案契约](../../references/company-review-handoff.md)，仅准备用户已确认且Excel/JSON一致的岗位。参与者不得用推荐替换最终选择；协调者每次刷新Excel后同步所有受影响批次导出，真实账号变化导致方案变化时更新HTML重新确认。
+
+公司交接另须遵守[完整数据与志愿契约](../../references/storage-workflow.md)。共享写入由协调者串行完成，刷新全量及全部批次 JSON；参与者检查自己岗位的志愿，不能用执行次序替代。

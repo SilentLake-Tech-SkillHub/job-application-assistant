@@ -173,12 +173,11 @@ def main():
         print(json.dumps({'读回通过': False, '错误': [str(exc)]}, ensure_ascii=False))
         return 2
     if not errors:
-        from company_handoff import export
-        for snapshot in (args.workbook.resolve().parent / '岗位交接').glob('*/公司方案.json'):
-            try:
-                export(args.workbook, snapshot.parent.name)
-            except (OSError, ValueError, KeyError) as exc:
-                errors.append('公司方案同步失败：' + str(exc))
+        from workbook_store import refresh
+        try:
+            refresh(args.workbook)
+        except (OSError, ValueError, KeyError) as exc:
+            errors.append('完整数据及公司方案同步失败：' + str(exc))
     if args.record:
         record(args.record, args.workbook, args.pre_sha256, expectations, errors)
     print(json.dumps({'读回通过': not errors, '错误': errors, '核对行数': len(expectations),

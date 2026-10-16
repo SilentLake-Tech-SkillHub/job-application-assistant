@@ -184,6 +184,15 @@ class FullFlow(unittest.TestCase):
         self.gate('prepare', self.urls['101']['url'], allowed=False)
         self.note(a_dir, '次序确认.md', ['决定: 不变', '依据: ' + w.say('order', '合成公司两个岗位次序不变')])
         w.confirm_company_review(A, limit=2)
+        # The owned mock has a first-department intent in each separate application.
+        import company_handoff as handoff
+        company=handoff.read(w.book,'e2e')[0];company['version']='v2'
+        for pref,role in zip(company['preferences'],company['roles']):
+            slot='合成智能事业群' if role['url']==self.urls['101']['url'] else '合成数据平台部'
+            pref.update(status='selected',mode='ordered',group_id=role['id'],rank=1,label=slot,bu=slot,cities=role['cities'])
+        next(r for r in company['rules'] if r['dimension']=='preference')['preference_mode']='ordered'
+        handoff.write(w.book,'e2e',{'companies':[company]})
+        handoff.confirm(w.book,'e2e',A,w.say('intent-review','synthetic: 确认两个岗位各自第一志愿'),handoff.sha(handoff.paths(w.book,'e2e')/'公司核对.html'))
         self.page.goto((w.root / '岗位交接' / 'e2e' / '公司核对.html').as_uri())
         self.assertIn('合成公司', self.page.locator('body').inner_text())
         self.shot(a_dir, '公司HTML核对.png')
@@ -289,8 +298,12 @@ class FullFlow(unittest.TestCase):
         info = self.urls[job]
         folder = self.w.role_folder(A, info['url'])
         digest = digest or sha(folder / '审核包.md')
+        import company_handoff as handoff
+        company=handoff.read(self.w.book,'e2e')[0]
+        role=next(r for r in company['roles'] if r['url']==info['url'])
+        intent=role['id']+'/1/'+slot+'/'+slot+'/'+info['city']
         self.note(folder, '目标确认.md', ['公司: ' + A, 'BU: ' + info['bu'], '办公地: ' + info['city'], '岗位: ' + info['title'],
-                                       '意向: 第一意向 ' + slot, '数量规则: 每账号最多 2 个，提交后不可改志愿', '审核包哈希: ' + digest,
+                                       '意向: ' + intent, '数量规则: 每账号最多 2 个，提交后不可改志愿', '审核包哈希: ' + digest,
                                        '依据: ' + self.w.say('target-' + job, '确认投递 ' + info['title'] + ' / ' + slot)])
 
     def m4_submit(self):

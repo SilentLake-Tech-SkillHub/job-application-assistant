@@ -2,7 +2,7 @@
 name: job-application-assistant
 description: "Run a user-confirmed campus application batch starting from a confirmed role list (or named existing roles): pre-application JD and eligibility recheck, form preparation, review, authorized submission, receipt verification and tracker readback. Use when the user asks to prepare, review or submit campus applications; job discovery and information-only company research belong to the research workflow (e.g. campus-job-skills), not this Skill."
 metadata:
-  version: "1.18.1"
+  version: "1.19.0"
 ---
 
 # 岗位代投助手 / Job Application Assistant
@@ -100,3 +100,7 @@ Use the tracker specified by the workspace, without adding tracker columns or st
 Before closing a batch run `stage_gate.py … --stage closeout`: a batch cannot end while authorized Agent-doable work, unreconciled uncertain submissions or an unrecorded stop condition remain ([stage contract §11](references/stage-contract.md#11-批次能否结束收尾检查)). At closeout show every role’s company/title/direct URL/BU or 未披露/cities/employment/direction/JD basis and screening reason plus actual fill/save/submit states and evidence; login-only progress is not a prepared form. Report coverage and outcome separately: companies checked by batch-specific bucket, roles verified, forms prepared, submissions with receipts, uncertain results, blocked sites, remaining numeric targets where configured, and progress against nonnumeric stopping conditions. Report official account quotas separately. State exactly which evidence supports a completion claim. Read the relevant reference at the point of use; this entrypoint does not import other project Skills or private configuration into a public copy.
 
 当字段显示已填但仍报必填、值在联动后消失或邻近字段错位时，必须加载[字段绑定恢复策略](references/field-binding-recovery.md)，先核对字段身份，再按实际操作通道恢复；显示、页面校验、草稿保存与提交回执分别记录。
+
+## 数据建设闭环
+
+执行[数据建设与固定脚本](references/storage-workflow.md)：初始化研究检查，逐项采集并写入；使用增量脚本同步原表、八张共享明细、整本业务 JSON 与批次 HTML/JSON。独立记录可为空的志愿，不能拿处理次序代替。缺项保持待查并输出清单，未完成研究或不同步不可交接。偏好确认 Skill 只传递范围和用户决定，具体写入由搜索主 Skill 执行。

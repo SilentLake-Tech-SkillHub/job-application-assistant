@@ -20,6 +20,7 @@ from pathlib import Path
 
 from batch_check import Batch
 from submit_pass import issue_submit_pass
+from evidence_layout import find,parse,value
 from company_handoff import check as check_company_handoff
 
 
@@ -32,7 +33,13 @@ def run(workbook, batch_id, stage, url=None, root=None):
         errors += batch.consistency_errors()
     if stage in ('prepare', 'review', 'submit'):
         errors += batch.role_gate(url, stage)
-        errors += check_company_handoff(workbook, batch_id, url)
+        target = None
+        if stage == 'submit':
+            rows = batch.book.role_by_url(url)
+            if len(rows) == 1:
+                files = find(batch.role_dir(rows[0]['公司'],url),'目标确认')
+                if files:target = value(parse(files[0])[0],'意向')
+        errors += check_company_handoff(workbook, batch_id, url, target=target)
     result = {'阶段': stage, '岗位链接': url, '允许': not errors, '错误': list(dict.fromkeys(errors)),
               '检查时间': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')}
     if stage == 'closeout':

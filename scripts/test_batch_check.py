@@ -52,6 +52,22 @@ class Base(unittest.TestCase):
         self.w.role_submitted(company, url)
 
 
+class PreferenceGateTests(Base):
+    def test_changed_intent_must_match_company_confirmation(self):
+        import company_handoff as h
+        self.ready();self.w.role_prepared(A,U1);folder=self.w.role_approved(A,U1)
+        self.assertTrue(gate(self.w.book,'b1','submit',U1)['允许'])
+        c=h.read(self.w.book,'b1')[0];c['version']='v99'
+        c['preferences'][0].update(status='selected',mode='ordered',group_id='regular',rank=2,label='产品',bu='合成事业群',cities='北京')
+        next(r for r in c['rules'] if r['dimension']=='preference')['preference_mode']='ordered'
+        h.write(self.w.book,'b1',{'companies':[c]})
+        h.confirm(self.w.book,'b1',A,self.w.say('new-pref','synthetic confirmation'),h.sha(h.paths(self.w.book,'b1')/'公司核对.html'))
+        result=gate(self.w.book,'b1','submit',U1)
+        self.assertFalse(result['允许']);self.assertIn('目标确认的志愿与公司方案不一致',result['错误'])
+        p=folder/'目标确认.md';p.write_text(p.read_text(encoding='utf-8').replace('意向: 无','意向: regular/2/产品/合成事业群/北京'),encoding='utf-8')
+        self.assertTrue(gate(self.w.book,'b1','submit',U1)['允许'])
+
+
 class Issue25LabelTests(Base):
     """#25: the tracker labels are the state. Scanned ⇒ tagged; receipt ⇔ 已提交."""
 
