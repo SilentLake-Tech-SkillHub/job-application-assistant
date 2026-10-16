@@ -1,7 +1,7 @@
-import {accountMatches,resolveAccount} from '../login/contracts.mjs';
+import {accountMatches,resolveAccount,assertScope} from '../login/contracts.mjs';
 export class RoleFlow{
  constructor({queues,login,templates,browser}){Object.assign(this,{queues,login,templates,browser});}
- async context(args){const {q,t}=await this.queues.task(args),c=await this.login.company(t.companyId),template=await this.templates(t.companyId);if(!template)throw Error('ROLE_COMPANY_TEMPLATE_REQUIRED');const target=t.applyUrl||t.url,u=new URL(target),plans=template.pages.filter(p=>u.pathname.startsWith(p.pathPrefix));if(plans.length!==1)throw Error('ROLE_ENTRY_RECIPE_REQUIRED');const plan=plans[0];if(plan.roleTitle!==t.title)throw Error('CONFIRMED_ROLE_TITLE_TEMPLATE_MISMATCH');return {q,t,c,template,plan,target};}
+ async context(args){const {q,t}=await this.queues.task(args),c=await this.login.company(t.companyId),template=await this.templates(t.companyId);if(!template)throw Error('ROLE_COMPANY_TEMPLATE_REQUIRED');const target=t.applyUrl||t.url;assertScope(c,t.url);assertScope(c,target);const u=new URL(target),plans=template.pages.filter(p=>u.pathname.startsWith(p.pathPrefix));if(plans.length!==1)throw Error('ROLE_ENTRY_RECIPE_REQUIRED');const plan=plans[0];if(plan.roleTitle!==t.title)throw Error('CONFIRMED_ROLE_TITLE_TEMPLATE_MISMATCH');return {q,t,c,template,plan,target};}
  async snapshot(x,pageId){return this.browser.request('roleSnapshot',{pageId,roleSelector:x.plan.roleSelector,accountSelector:x.c.account.selector,loginRoot:x.c.fields.root});}
  async open(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{
   let prior;try{prior=await this.queues.read(x.t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
