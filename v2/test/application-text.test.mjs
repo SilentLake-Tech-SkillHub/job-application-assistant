@@ -1,0 +1,3 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {applicationTextIssues,assertApplicationText} from '../shared/application-text.mjs';
+test('source notes are rejected even when expected JSON and page would match',()=>{for(const value of ['简历注明获奖','据简历记载获得奖项','待用户确认'])assert.throws(()=>assertApplicationText({description:value}),/INTERNAL_REVIEW_NOTE_IN_APPLICATION_TEXT/);});
+test('legitimate résumé product descriptions and factual awards remain allowed',()=>{assert.doesNotThrow(()=>assertApplicationText({project:'开发简历制作与核验工具，分模块检查内容。',award:'2023年度创新项目优秀奖。'}));assert.deepEqual(applicationTextIssues({project:'面向用户设计产品，用户确认需求后迭代。'}),[]);});

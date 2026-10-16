@@ -1,10 +1,10 @@
 # V2 登录 MCP：运行、公司适配与验证
 
-本版本位于独立分支和 `v2/`，原版文件保持不变。首次范围为影石手机号登录；抖音登录交用户，图形验证码统一交给用户操作，REA 仅内部维护可选。无 OCR，无申请提交。
+本版本位于独立分支和 `v2/`，原版文件保持不变。当前适配为影石手机号登录及三个已核实岗位；抖音登录交用户，图形验证码统一交给用户操作，REA 仅内部维护可选。无 OCR，无申请提交。
 
 ## 安装和启动
 
-在本目录运行 `npm ci`。登录服务为 `node scripts/start.mjs login`，申请服务为 `node scripts/start.mjs application`。两个启动器共用 V2 broker；首次仅启动本地服务；`login_open` 启动 MCP 自己管理的独立 Chrome，使用用户私有目录中的独立浏览器资料。不接入日常 Chrome，不读取其 DevToolsActivePort，不要求开启远程调试或接受连接弹窗。两个 MCP 复用同一浏览器进程；断开后不自动重启。原版 broker 不覆盖、不替换。仅内部维护显式设置 `RECRUITING_BROWSER_MODE=cdp` 时才接入已有 Chrome；这种模式可能出现浏览器调试连接授权。
+在本目录运行 `npm ci`。登录服务为 `node scripts/start.mjs login`，申请服务为 `node scripts/start.mjs application`。两个启动器共用 V2 broker。普通调用要求已有明确选定的broker；缺少时返回BROWSER_SESSION_SELECTION_REQUIRED。只有明确初始化新会话时设置RECRUITING_BROWSER_INITIALIZE=1，禁止为排查窗口而自动创建实例；`login_open` 启动 MCP 自己管理的独立 Chrome，使用用户私有目录中的独立浏览器资料。不接入日常 Chrome，不读取其 DevToolsActivePort，不要求开启远程调试或接受连接弹窗。两个 MCP 复用同一浏览器进程；断开后不自动重启。原版 broker 不覆盖、不替换。仅内部维护显式设置 `RECRUITING_BROWSER_MODE=cdp` 时才接入已有 Chrome；这种模式可能出现浏览器调试连接授权。
 
 可选 `RECRUITING_BROWSER_PROFILE_DIR` 指定独立浏览器资料目录，默认用户 JSON 同目录下 `.browser-profile/`，严禁指向日常 Chrome 资料目录。共同设置 `RECRUITING_PROFILE_JSON` 指向用户私有 JSON；登录服务另设 `RECRUITING_LOGIN_PRIVATE_DIR`，申请服务另设 `RECRUITING_PRIVATE_DIR`。私有目录不位于此代码包内。`RECRUITING_LOGIN_COMPANY_DIR` 可选，默认 `companies/`，每公司一份 `<companyId>.login.json`。依赖缺失或 broker 不可用时明确报错，不自动改旧版配置。
 
@@ -28,6 +28,6 @@
 
 运行 `npm test`。单元测试覆盖状态和失败门禁；SDK 集成测试证明真正 stdio 协议接线，不等于真实短信成功。真实影石证据保存在用户私有工作区，分别记录发码、用户交接、登录读回、连接次数和耗时。
 
-本次只是 V2 登录首版。文本简历的通用结构化导入、完整申请条款引擎、宿主 Hook 安装以及其他公司适配不在本阶段完成声明中。区号仅实现已捕获的中国大陆路径，其他区号需新增真实选项与账号规范，不猜测。账号掩码只能核实公开可见前后缀，不能唯一证明完整账号身份；不读取 Cookie 或隐藏用户数据。
+本版支持已建库同账号多个岗位并发准备。文本简历的通用结构化导入、完整申请条款引擎、宿主 Hook 安装以及其他公司适配不在本阶段完成声明中。区号仅实现已捕获的中国大陆路径，其他区号需新增真实选项与账号规范，不猜测。账号掩码只能核实公开可见前后缀，不能唯一证明完整账号身份；不读取 Cookie 或隐藏用户数据。
 
 当前V2运行时在macOS完成真实网站验收，Node运行测试为POSIX环境；Windows尚未适配。旧仓库的Windows CI和V2公开资产检查不代表V2登录/填写运行时已支持Windows。

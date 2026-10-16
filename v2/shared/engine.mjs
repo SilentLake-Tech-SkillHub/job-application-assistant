@@ -82,6 +82,7 @@ export function compare(actual, expected) {
 
 export class Engine {
   constructor({store,companies,browser,onInventory,refreshCompanies,resolveTask,leaseRoot=defaultLeaseRoot()}) { Object.assign(this,{store,companies,browser,onInventory,refreshCompanies,resolveTask,leaseRoot}); this.locks = new Set(); }
+  companyForTask(task){const c=this.companies.find(c=>c.id===task.companyId);return c?{...c,templateId:c.roleTemplates?.[task.roleId]||c.templateId}:null;}
   async acquireCompanies(companies){
     const origins=[...new Set(companies.map(c=>new URL(c.origin).origin))].sort(),releases=[];
     try{
@@ -97,7 +98,7 @@ export class Engine {
   async probeCompany(task,authorization){
     if(!authorization?.probe||!authorization.evidence?.trim())throw Error('CONDITION_PROBE_AUTHORIZATION_REQUIRED');
     return this.withCompanyLease(task.companyId,async()=>{
-      const company=this.companies.find(c=>c.id===task.companyId);
+      const company=this.companyForTask(task);
       if(!company?.templateId)throw Error('COMPANY_NOT_COVERED');
       if(new URL(task.pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
       const template=validateTemplate(await this.store.get('templates',company.templateId));
@@ -119,7 +120,7 @@ export class Engine {
     });
   }
   async preparePlan(task){
-    const company=this.companies.find(c=>c.id===task.companyId);
+    const company=this.companyForTask(task);
     if(!company?.templateId)throw Error('COMPANY_NOT_COVERED');
     if(new URL(task.pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
     const template=validateTemplate(await this.store.get('templates',company.templateId));
@@ -144,18 +145,19 @@ export class Engine {
       } catch { return {companyId:id,status:'invalid_or_missing_template'}; }
     }));
   }
-  async prepare({tasks,concurrency=3,authorization}) {
+  async prepare({tasks,concurrency=3,authorization,parallelRoles=false}) {
     if (!Array.isArray(tasks)||!tasks.length||tasks.length>20) throw Error('INVALID_BATCH_SIZE');
     if (!Number.isInteger(concurrency)||concurrency<1||concurrency>5) throw Error('INVALID_CONCURRENCY');
     if (!authorization?.prepare || !authorization?.evidence) throw Error('PREPARATION_AUTHORIZATION_REQUIRED');
+    if(parallelRoles&&tasks.some(t=>!t.roleQueueArgs||!t.roleId))throw Error('ROLE_BOUND_BATCH_REQUIRED');
     const keys=tasks.map(t=>t.companyId);
-    if (new Set(keys).size!==keys.length || keys.some(k=>this.locks.has(k))) throw Error('COMPANY_ALREADY_RUNNING');
+    if ((!parallelRoles&&new Set(keys).size!==keys.length) || keys.some(k=>this.locks.has(k))) throw Error('COMPANY_ALREADY_RUNNING');
     const urls=tasks.map(t=>t.pageUrl);
     if (new Set(urls).size!==urls.length) throw Error('DUPLICATE_PAGE');
     const jobs=[];
     // Resolve every plan before any page is changed.
     for (const task of tasks) {
-      const company=this.companies.find(c=>c.id===task.companyId);
+      const company=this.companyForTask(task);
       if (!company?.templateId) throw Error(`COMPANY_NOT_COVERED:${task.companyId}`);
       if (new URL(task.pageUrl).origin!==company.origin) throw Error('COMPANY_ORIGIN_MISMATCH');
       const template=validateTemplate(await this.store.get('templates',company.templateId));
@@ -173,7 +175,7 @@ export class Engine {
     // Registration uses the same origin lease. Recheck after acquiring it so an
     // asset changed during local preflight cannot enter the browser unnoticed.
     for(const job of jobs){
-      const current=this.companies.find(c=>c.id===job.company.id);
+      const current=this.companyForTask(job.task);
       if(!current?.templateId||current.templateId!==job.template.id||hash(await this.store.get('templates',current.templateId))!==job.task.templateHash)throw Error('TEMPLATE_VERSION_CHANGED');
       if(this.resolveTask){
         const fresh=await this.resolveTask(job.task,job.template);
@@ -181,13 +183,13 @@ export class Engine {
         job.task=fresh;
       }
     }
-    run={id:randomUUID(),startedAt:new Date().toISOString(),status:'running',results:[],batchPrepareCalls:1,modelRoundTrips:'not_measured'};
+    run={id:randomUUID(),startedAt:new Date().toISOString(),status:'running',results:[],batchPrepareCalls:1,parallelRoles,requestedConcurrency:concurrency,modelRoundTrips:'not_measured'};
     keys.forEach(k=>this.locks.add(k));
       await this.store.put('runs',run.id,run);
       const results=new Array(jobs.length);
       // A shared ATS origin is one account scope, even when catalog company IDs
       // differ. Keep that scope serial; distinct origins retain concurrency.
-      const groups=[...new Set(jobs.map(j=>j.company.origin))].map(origin=>jobs.map((job,index)=>({job,index})).filter(({job})=>job.company.origin===origin));
+      const groups=parallelRoles?jobs.map((job,index)=>[{job,index}]):[...new Set(jobs.map(j=>j.company.origin))].map(origin=>jobs.map((job,index)=>({job,index})).filter(({job})=>job.company.origin===origin));
       let cursor=0;
       const workers=await Promise.allSettled(Array.from({length:Math.min(concurrency,groups.length)},async()=>{
         while(cursor<groups.length){for(const {job,index}of groups[cursor++])results[index]=await this.runCompany(job,authorization);}
@@ -216,7 +218,7 @@ export class Engine {
     return this.withCompanyLease(task.companyId,()=>this.verifyCurrentLocked(task));
   }
   async verifyCurrentLocked(task) {
-    const company=this.companies.find(c=>c.id===task.companyId);
+    const company=this.companyForTask(task);
     if(!company?.templateId)throw Error('COMPANY_NOT_COVERED');
     if(new URL(task.pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
     const template=validateTemplate(await this.store.get('templates',company.templateId));
@@ -237,7 +239,7 @@ export class Engine {
   }
   async runCompany({task,company,template,prepared},authorization) {
     const started=performance.now();
-    const result={companyId:company.id,templateHash:hash(template),planId:prepared.id,planHash:prepared.planHash,profileHash:task.profileHash,status:'needs_attention',fields:[],pageChecks:[],submission:'not_performed',save:'not_verified'};
+    const result={companyId:company.id,roleId:task.roleId||null,pageUrl:task.pageUrl,startedAt:new Date().toISOString(),templateHash:hash(template),planId:prepared.id,planHash:prepared.planHash,profileHash:task.profileHash,status:'needs_attention',fields:[],pageChecks:[],submission:'not_performed',save:'not_verified'};
     let activePage,activePlan;
     try {
       const page=await this.browser.existingPage(task.pageUrl);
@@ -298,7 +300,7 @@ export class Engine {
         result.failureExitInventory={registered:true,count:inventory.length};
       }catch{result.failureExitInventory={registered:false,reason:'FAILURE_EXIT_CAPTURE_OR_MAPPING_INCOMPLETE'};}
     }
-    result.elapsedMs=Math.round(performance.now()-started);
+    result.elapsedMs=Math.round(performance.now()-started);result.finishedAt=new Date().toISOString();
     return result;
   }
 }

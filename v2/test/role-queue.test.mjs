@@ -19,3 +19,5 @@ test('first navigation is role URL, login redirect preserves task and resume res
  wrongTitle=true;await assert.rejects(flow.resume(args),/LOGIN_RETURN_ROLE_VERIFICATION_FAILED/);
  closed=true;await assert.rejects(flow.resume(args),/ROLE_BROWSER_PAGE_LOST/);
 }));
+
+test('explicit parallel roles skip only same-company predecessor; default still serial',()=>fixture(async({input,queues})=>{input.execution={mode:'parallel_roles',authorizationRef:'synthetic explicit parallel authorization'};const q=await queues.import({companyPlan:input});assert.equal((await queues.task({...q,taskId:q.tasks[1].taskId})).t.roleId,'B');delete input.execution.authorizationRef;await assert.rejects(queues.import({companyPlan:input}),/PARALLEL_ROLE_AUTHORIZATION_REQUIRED/);}));

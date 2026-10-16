@@ -1,7 +1,7 @@
 import {accountMatches,resolveAccount,assertScope} from '../login/contracts.mjs';
 export class RoleFlow{
  constructor({queues,login,templates,browser}){Object.assign(this,{queues,login,templates,browser});}
- async context(args){const {q,t}=await this.queues.task(args),c=await this.login.company(t.companyId),template=await this.templates(t.companyId);if(!template)throw Error('ROLE_COMPANY_TEMPLATE_REQUIRED');const target=t.applyUrl||t.url;assertScope(c,t.url);assertScope(c,target);const u=new URL(target),plans=template.pages.filter(p=>u.pathname.startsWith(p.pathPrefix));if(plans.length!==1)throw Error('ROLE_ENTRY_RECIPE_REQUIRED');const plan=plans[0];if(plan.roleTitle!==t.title)throw Error('CONFIRMED_ROLE_TITLE_TEMPLATE_MISMATCH');return {q,t,c,template,plan,target};}
+ async context(args){const {q,t}=await this.queues.task(args),c=await this.login.company(t.companyId),template=await this.templates(t.companyId,t.roleId);if(!template)throw Error('ROLE_COMPANY_TEMPLATE_REQUIRED');const target=t.applyUrl||t.url;assertScope(c,t.url);assertScope(c,target);const u=new URL(target),plans=template.pages.filter(p=>u.pathname.startsWith(p.pathPrefix));if(plans.length!==1)throw Error('ROLE_ENTRY_RECIPE_REQUIRED');const plan=plans[0];if(plan.roleTitle!==t.title)throw Error('CONFIRMED_ROLE_TITLE_TEMPLATE_MISMATCH');return {q,t,c,template,plan,target};}
  async snapshot(x,pageId){return this.browser.request('roleSnapshot',{pageId,roleSelector:x.plan.roleSelector,accountSelector:x.c.account.selector,loginRoot:x.c.fields.root});}
  async open(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{
   let prior;try{prior=await this.queues.read(x.t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
@@ -26,5 +26,11 @@ export class RoleFlow{
   return {status:'needs_login',taskId:state.taskId,pageId:state.pageId,originalRoleUrl:state.originalRoleUrl,returnUrl:state.returnUrl,loginPlan:plan,submission:'not_performed'};
  }
  async resume(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{const state=await this.queues.read(x.t.taskId);if(state.queueId!==x.q.id||state.returnUrl!==x.target||state.expectedTitle!==x.t.title)throw Error('ROLE_TASK_STATE_CHANGED');return this.assess(x,state);});}
+ async enter(args){const {q,t}=await this.queues.task(args),c=await this.login.company(t.companyId);return this.login.locked(c,async()=>{
+  const opened=await this.browser.request('openPage',{pageUrl:t.url,readySelectors:[c.account.selector,c.fields.root]});
+  const snapshot=await this.browser.request('roleSnapshot',{pageId:opened.pageId,accountSelector:c.account.selector,loginRoot:c.fields.root});
+  if(snapshot.loginFormPresent||!accountMatches(snapshot.account,resolveAccount(await this.login.profile(),c).phone))throw Error('SHARED_LOGIN_SESSION_REQUIRED');
+  return this.browser.request('roleEnterApplication',{pageId:opened.pageId,expectedTitle:t.title,accountSelector:c.account.selector,expectedAccount:snapshot.account,roleSelector:'.resumeEditForm-headerText'});
+ });}
  async screenshot(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{const state=await this.queues.read(x.t.taskId),s=await this.snapshot(x,state.pageId);if(new URL(s.pageUrl).origin!==x.c.origin)throw Error('ROLE_SCREENSHOT_SCOPE_CHANGED');return this.browser.request('screenshot',{pageId:state.pageId});});}
 }

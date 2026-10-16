@@ -32,3 +32,13 @@
 在本包目录运行 `node scripts/run-confirmed-roles.mjs <公司方案JSON路径>`。设置 `RECRUITING_PROFILE_JSON`、`RECRUITING_LOGIN_PRIVATE_DIR`、`RECRUITING_PRIVATE_DIR`（已有申请模板）、`RECRUITING_RUN_EVIDENCE_DIR` 和 `RECRUITING_RUN_AUTHORIZATION_FILE`（已有本轮用户授权文件）；可选 `RECRUITING_ROLE_QUEUE_DIR`、`RECRUITING_BROWSER_SOCKET`、`RECRUITING_BROWSER_PROFILE_DIR`。
 
 脚本通过正式 stdio MCP 协议接收JSON、打开岗位、准备登录并按授权请求一次短信；到人工步骤暂停。用户在原页面完成后向该进程输入 `resume`，脚本只读确认并恢复原岗位，继续填写及独立核验，保存计时和截图，停在用户校验。`close`只关闭MCP客户端，浏览器/broker保留。人工未完成时不重复发码；错误明确返回，不自动重启浏览器。它不实现Excel处理或最终提交。
+
+## 同账号多岗位并发
+
+上游确认 JSON 可用 `execution={mode:'parallel_roles',authorizationRef:'明确并发授权引用'}` 启用同公司岗位并发；角色次序仅作枚举，跨公司边界仍按确认次序。登录保持账号级独占，一岗登录后其他岗位刷新并核对账号复用；填写用 `roles_prepare_batch`，一次账号租约内按独立 pageId/URL 并发执行。所有计划先编译；任何任务失败后等待其他工作者结束再释放锁。不得用多个 companyId 伪造同公司的并发。
+
+`role_enter_application` 只允许从核实的详情页进入申请表，核对岗位标题、同账号和真实返回 URL；在表单页不会点击提交按钮。表单字段仍须各岗位完整建库。运行前已有 broker 时固定本轮实例，连接断开或窗口不明确时返回恢复问题，不能通过另开浏览器试错。
+
+用户视角计时使用 `RECRUITING_RUN_STARTED_AT` 传入本轮开始时间戳，直到最终结束时间戳，不扣模型思考、修复、人工等待。没有传入时只能声明进程耗时。表单与JSON一致仅证明执行一致性，正式文本仍先对照来源审核；来源备注与待核说明放元数据。
+
+首次显式创建MCP浏览器时设置 `RECRUITING_BROWSER_INITIALIZE=1`；普通执行不设置，已有broker缺失即返回会话选择问题，不自动开第二实例。已连接broker可被两MCP客户端复用，客户端重启不重启浏览器。

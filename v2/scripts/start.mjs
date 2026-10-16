@@ -13,12 +13,13 @@ const release=await acquireLease(leasePath(defaultLeaseRoot(),'v2-browser-start:
 try{
  let status=await health();
  if(!status){
+ if(process.env.RECRUITING_BROWSER_INITIALIZE!=='1')throw Error('BROWSER_SESSION_SELECTION_REQUIRED');
  const profileDir=process.env.RECRUITING_BROWSER_PROFILE_DIR||(process.env.RECRUITING_PROFILE_JSON?path.join(path.dirname(process.env.RECRUITING_PROFILE_JSON),'.browser-profile'):null);
  if(browserMode==='managed'&&!profileDir)throw Error('PRIVATE_AUTOMATION_PROFILE_REQUIRED');
  const child=spawn(process.execPath,[fileURLToPath(new URL('../shared/browser-host.mjs',import.meta.url)),socket],{detached:true,stdio:'ignore',env:{PATH:process.env.PATH,HOME:process.env.HOME,RECRUITING_BROWSER_MODE:browserMode,...(profileDir?{RECRUITING_BROWSER_PROFILE_DIR:profileDir}:{}),...(process.env.RECRUITING_CDP_URL?{RECRUITING_CDP_URL:process.env.RECRUITING_CDP_URL}:{})}});child.unref();for(let i=0;i<30&&!status;i++){await new Promise(r=>setTimeout(r,100));status=await health();}}
  if(!status)throw Error('V2_BROWSER_HOST_UNAVAILABLE');
  // Older hosts are left untouched; never kill or replace them to upgrade.
- if(status.protocolVersion!==3)throw Error('V2_BROWSER_PROTOCOL_REQUIRED_USE_SEPARATE_SOCKET');
+ if(status.protocolVersion!==4)throw Error('V2_BROWSER_PROTOCOL_REQUIRED_USE_SEPARATE_SOCKET');
  if(status.mode!==browserMode)throw Error('BROWSER_MODE_MISMATCH_USE_SEPARATE_SOCKET');
 }finally{await release();}
 await import(mode==='login'?'../login/server.mjs':'../application/server.mjs');

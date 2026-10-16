@@ -16,7 +16,7 @@ try{
   await unlink(socketPath);
 }catch(error){if(error.code!=='ENOENT')throw error;}
 const browser=new BrowserAdapter(process.env.RECRUITING_BROWSER_MODE==='cdp'?(process.env.RECRUITING_CDP_URL||'chrome-default'):'managed-chrome',{profileDir:process.env.RECRUITING_BROWSER_PROFILE_DIR});
-const status=()=>({pid:process.pid,protocolVersion:3,...browser.status()});
+const status=()=>({pid:process.pid,protocolVersion:4,...browser.status()});
 const methods=new Set(['assertLocation','wait','inventory','observe','act','ensureGroups','verificationInspect']);
 const code=error=>/^[A-Z_]+$/.test(error.message)?error.message:'BROWSER_HOST_OPERATION_FAILED';
 const server=http.createServer(async(req,res)=>{
@@ -30,6 +30,7 @@ const server=http.createServer(async(req,res)=>{
     else if(method==='tabs')data=await browser.tabs();
     else if(method==='openPage')data=await browser.openPage(args.pageUrl,args);
     else if(method==='pageIdentity')data=await browser.pageIdentity(args.pageId);
+    else if(method==='roleEnterApplication')data=await browser.enterApplication(args);
     else if(method==='roleSnapshot')data=await browser.roleSnapshot(args);
     else if(method==='screenshot')data=await browser.screenshot(args.pageId);
     else{

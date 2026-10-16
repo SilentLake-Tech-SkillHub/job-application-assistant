@@ -22,7 +22,7 @@ async function boundRole(args){
   const {q,t}=await queues.task(args),state=await queues.read(t.taskId);
   if(state.queueId!==q.id||!['ready_to_fill','ready_for_user_review'].includes(state.status)||state.returnUrl!==(t.applyUrl||t.url)||state.expectedTitle!==t.title)throw Error('ROLE_NOT_READY_FOR_FILL');
   const c=catalog.companies.find(c=>c.id===t.companyId);if(!c?.templateId)throw Error('COMPANY_NOT_COVERED');
-  const template=await store.get('templates',c.templateId),plan=template.pages.find(p=>new URL(state.returnUrl).pathname.startsWith(p.pathPrefix));
+  const template=await store.get('templates',c.roleTemplates?.[t.roleId]||c.templateId),plan=template.pages.find(p=>new URL(state.returnUrl).pathname.startsWith(p.pathPrefix));
   if(!plan||plan.roleTitle!==t.title)throw Error('CONFIRMED_ROLE_TITLE_TEMPLATE_MISMATCH');
   const login=JSON.parse(await readFile(path.join(root,'companies',t.companyId+'.login.json'),'utf8'));
   const snapshot=await browser.request('roleSnapshot',{pageId:state.pageId,roleSelector:plan.roleSelector,accountSelector:login.account.selector,loginRoot:login.fields.root});
@@ -33,7 +33,9 @@ const defaultBindings=Object.fromEntries(catalog.companies.map(c=>[c.id,c.templa
 async function refreshBindings(){
   let bindings={};try{bindings=await store.get('templates','company-bindings');}catch(error){if(error.code!=='ENOENT')throw error;}
   if(!bindings||Array.isArray(bindings)||typeof bindings!=='object'||Object.values(bindings).some(v=>v!==null&&(typeof v!=='string'||!/^[a-z0-9][a-z0-9_-]{0,79}$/.test(v))))throw Error('INVALID_COMPANY_BINDINGS');
-  for(const c of catalog.companies)c.templateId=bindings[c.id]??defaultBindings[c.id];
+  let roleBindings={};try{roleBindings=await store.get('templates','role-bindings');}catch(error){if(error.code!=='ENOENT')throw error;}
+  for(const [companyId,map]of Object.entries(roleBindings)){if(!catalog.companies.some(c=>c.id===companyId)||!map||typeof map!=='object'||Array.isArray(map)||Object.values(map).some(v=>typeof v!=='string'||!/^[a-z0-9][a-z0-9_-]{0,79}$/.test(v)))throw Error('INVALID_ROLE_BINDINGS');}
+  for(const c of catalog.companies){c.templateId=bindings[c.id]??defaultBindings[c.id];c.roleTemplates=roleBindings[c.id]||{};}
 }
 const engine=new Engine({store,companies:catalog.companies,browser,refreshCompanies:refreshBindings,resolveTask:async(task,template)=>{
   if(task.roleQueueArgs)await boundRole(task.roleQueueArgs);
@@ -52,7 +54,7 @@ const queueTask={queueId:z.string().uuid(),queueHash:z.string().length(64),taskI
 server.registerTool('role_prepare',{description:'从冻结岗位队列取目标；核对登录后已返回原岗位，离线编译全部字段后填写并独立核验。仅返回异常与计数，不提交。',inputSchema:{...queueTask,authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1),sensitiveFields:z.boolean().default(false),uploads:z.boolean().default(false)})}},wrap(async args=>{
   const {t,state,template}=await boundRole(args),profile=await loadProfile(profileFile);
   assertQuestionsMapped(profile,t.companyId,state.returnUrl);
-  const task={companyId:t.companyId,pageUrl:state.returnUrl,templateHash:hash(template),...resolveProfile(profile,template,{},t.companyId),roleQueueArgs:{queueId:args.queueId,queueHash:args.queueHash,taskId:args.taskId}};
+  const task={companyId:t.companyId,roleId:t.roleId,pageUrl:state.returnUrl,templateHash:hash(template),...resolveProfile(profile,template,{},t.companyId),roleQueueArgs:{queueId:args.queueId,queueHash:args.queueHash,taskId:args.taskId}};
   const plan=await engine.preparePlan(task);
   if(!plan.allKnown)throw Error('ROLE_PROFILE_PREPARATION_REQUIRED');
   const fill=await engine.prepare({tasks:[{...task,planId:plan.planId,planHash:plan.planHash}],concurrency:1,authorization:args.authorization});
@@ -62,9 +64,43 @@ server.registerTool('role_prepare',{description:'从冻结岗位队列取目标�
   await queues.put(t.taskId,state);
   return {status:state.status,taskId:t.taskId,companyId:t.companyId,roleTitle:t.title,pageUrl:state.returnUrl,fillRunId:fill.id,verifyRunId:verification.id,counts:verification.counts,fillElapsedMs:fill.elapsedMs,initialReadbackStatus:fill.status,exceptions:verification.checks.filter(x=>!['match','confirmed_omission'].includes(x.status)).map(({id,label,status,reason})=>({id,label,status,reason})),save:verification.save,submission:'not_performed'};
 }));
+server.registerTool('roles_prepare_batch',{description:'按已确认并发模式，在共享账号独占批次内并发准备独立岗位页；全部计划先编译、逐岗位核验，不登录、不提交。',inputSchema:{queueId:z.string().uuid(),queueHash:z.string().length(64),taskIds:z.array(z.string().uuid()).min(1).max(5),concurrency:z.number().int().min(1).max(5).default(3),authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1),sensitiveFields:z.boolean().default(false),uploads:z.boolean().default(false)})}},wrap(async args=>{
+  if(new Set(args.taskIds).size!==args.taskIds.length)throw Error('DUPLICATE_ROLE_TASK');
+  const q=await queues.get(args);if(q.executionMode!=='parallel_roles')throw Error('PARALLEL_ROLE_AUTHORIZATION_REQUIRED');
+  const tasks=[],bound=[];
+  for(const taskId of args.taskIds){const a={queueId:args.queueId,queueHash:args.queueHash,taskId};const b=await boundRole(a),profile=await loadProfile(profileFile);assertQuestionsMapped(profile,b.t.companyId,b.state.returnUrl);
+    const task={companyId:b.t.companyId,roleId:b.t.roleId,pageUrl:b.state.returnUrl,templateHash:hash(b.template),...resolveProfile(profile,b.template,{},b.t.companyId),roleQueueArgs:a};
+    const plan=await engine.preparePlan(task);if(!plan.allKnown)throw Error('ROLE_PROFILE_PREPARATION_REQUIRED');tasks.push({...task,planId:plan.planId,planHash:plan.planHash});bound.push(b);
+  }
+  if(new Set(bound.map(b=>b.state.pageId)).size!==bound.length)throw Error('DUPLICATE_ROLE_PAGE');
+  const run=await engine.prepare({tasks,concurrency:args.concurrency,authorization:args.authorization,parallelRoles:true});
+  const results=[];
+  // The account lease is reacquired for each independent verification after all writers settle.
+  for(const [i,b]of bound.entries()){const task=tasks[i],fill=run.results[i];let verification;
+    if(!fill.errorCode)verification=await engine.verifyCurrent({...task,...resolveProfile(await loadProfile(profileFile),b.template,{},b.t.companyId)});
+    const status=verification?.status==='verified'?'ready_for_user_review':'needs_attention';Object.assign(b.state,{status,fillRunId:run.id,verifyRunId:verification?.id||null,verifiedAt:verification?.readAt||null});await queues.put(b.t.taskId,b.state);
+    results.push({taskId:b.t.taskId,roleId:b.t.roleId,roleTitle:b.t.title,pageUrl:b.state.returnUrl,status,startedAt:fill.startedAt,finishedAt:fill.finishedAt,fillElapsedMs:fill.elapsedMs,initialReadbackStatus:fill.status,counts:verification?.counts||{},error:fill.errorCode||verification?.mappingError||null,exceptions:verification?.checks.filter(x=>!['match','confirmed_omission'].includes(x.status)).map(({id,label,status,reason})=>({id,label,status,reason}))||[],verifyRunId:verification?.id||null,save:verification?.save||'not_verified',submission:'not_performed'});
+  }
+  return {status:results.every(r=>r.status==='ready_for_user_review')?'ready_for_user_review':'needs_attention',batchRunId:run.id,fillElapsedMs:run.elapsedMs,requestedConcurrency:args.concurrency,results,submission:'not_performed'};
+}));
+server.registerTool('roles_patch_text',{description:'按已冻结岗位和当前私有JSON，仅修正指定普通文本字段；全部计划先编译，旧值有用户改动则阻断，逐岗全表只读复核，不上传不提交。',inputSchema:{queueId:z.string().uuid(),queueHash:z.string().length(64),taskIds:z.array(z.string().uuid()).min(1).max(5),fieldIds:z.array(z.string()).min(1).max(20),expectedPrevious:z.string(),authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1),sensitiveFields:z.boolean().default(false),uploads:z.boolean().default(false)})}},wrap(async args=>{
+ if(new Set(args.taskIds).size!==args.taskIds.length)throw Error('DUPLICATE_ROLE_TASK');
+ const jobs=[];for(const taskId of args.taskIds){const b=await boundRole({...args,taskId}),task={companyId:b.t.companyId,roleId:b.t.roleId,pageUrl:b.state.returnUrl,templateHash:hash(b.template),...resolveProfile(await loadProfile(profileFile),b.template,{},b.t.companyId)};
+  const compiled=await engine.preparePlan(task);if(!compiled.allKnown)throw Error('ROLE_PROFILE_PREPARATION_REQUIRED');const saved=await store.get('plans',compiled.planId),fields=saved.pages.flatMap(p=>p.fields).filter(f=>args.fieldIds.includes(f.id));
+  if(fields.length!==args.fieldIds.length||fields.some(f=>f.kind!=='text'||f.disposition!=='fill'||f.actions.some(a=>a.method!=='fill')))throw Error('TEXT_PATCH_SCOPE_INVALID');if(fields.some(f=>f.sensitive&&!args.authorization.sensitiveFields))throw Error('SENSITIVE_FIELD_AUTHORIZATION_REQUIRED');jobs.push({b,task,fields});
+ }
+ const release=await engine.acquireCompanies(jobs.map(j=>catalog.companies.find(c=>c.id===j.b.t.companyId)));
+ try{
+  // Read every target before any write, preserving user edits and current role identity.
+  for(const j of jobs){await boundRole({...args,taskId:j.b.t.taskId});j.page=await browser.existingPage(j.task.pageUrl);const o=await j.page.observe({...j.b.template.pages[0],fields:j.fields});if(j.fields.some(f=>o.fields[f.id]?.value!==args.expectedPrevious))throw Error('TEXT_PATCH_PREVIOUS_VALUE_CHANGED');}
+  const workers=await Promise.allSettled(jobs.map(async j=>{for(const f of j.fields)for(const a of f.actions)await j.page.act(a,f.value,{});return j.b.t.taskId;}));
+  const results=[];for(const [i,j]of jobs.entries()){const v=await engine.verifyCurrentLocked(j.task);Object.assign(j.b.state,{status:v.status==='verified'?'ready_for_user_review':'needs_attention',verifyRunId:v.id,verifiedAt:v.readAt});await queues.put(j.b.t.taskId,j.b.state);results.push({taskId:j.b.t.taskId,roleTitle:j.b.t.title,status:j.b.state.status,patchedFieldIds:j.fields.map(f=>f.id),workerStatus:workers[i].status,counts:v.counts,verifyRunId:v.id,exceptions:v.checks.filter(x=>!['match','confirmed_omission'].includes(x.status)).map(({id,status,reason})=>({id,status,reason})),save:v.save,submission:'not_performed'});}
+  return {status:results.every(r=>r.status==='ready_for_user_review')?'ready_for_user_review':'needs_attention',results,submission:'not_performed'};
+ }finally{await release();}
+}));
 server.registerTool('role_verify',{description:'只读核验冻结队列中的当前岗位和全部字段，保存独立报告，不改写表单。',inputSchema:queueTask,annotations:{readOnlyHint:true}},wrap(async args=>{
   const {t,state,template}=await boundRole(args),resolved=resolveProfile(await loadProfile(profileFile),template,{},t.companyId);
-  const r=await engine.verifyCurrent({companyId:t.companyId,pageUrl:state.returnUrl,templateHash:hash(template),...resolved});
+  const r=await engine.verifyCurrent({companyId:t.companyId,roleId:t.roleId,pageUrl:state.returnUrl,templateHash:hash(template),...resolved});
   state.status=r.status==='verified'?'ready_for_user_review':'needs_attention';state.verifyRunId=r.id;state.verifiedAt=r.readAt;await queues.put(t.taskId,state);
   return {status:r.status,verifyRunId:r.id,counts:r.counts,readAt:r.readAt,save:r.save,submission:r.submission};
 }));
@@ -81,8 +117,9 @@ server.registerTool('probe_conditions',{description:'仅内部建库维护：按
 server.registerTool('capture_controls',{description:'建库阶段读取控件，并强制把未映射的新问题持久化到个人JSON；含选填项，禁止遗漏。不读取验证码或Cookie。',inputSchema:{companyId:z.string(),pageUrl:z.string().url()}},wrap(async ({companyId,pageUrl})=>engine.withCompanyLease(companyId,async()=>{
   const c=catalog.companies.find(c=>c.id===companyId);if(!c||new URL(pageUrl).origin!==c.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
   if(!profileFile)throw Error('PROFILE_REQUIRED_FOR_NEW_QUESTIONS');
-  const template=c.templateId?await store.get('templates',c.templateId):null;
-  const plan=template?.pages.find(p=>new URL(pageUrl).pathname.startsWith(p.pathPrefix));
+  const candidates=await Promise.all([...new Set([c.templateId,...Object.values(c.roleTemplates||{})].filter(Boolean))].map(id=>store.get('templates',id)));
+  const matches=candidates.filter(t=>t.pages.some(p=>new URL(pageUrl).pathname.startsWith(p.pathPrefix)));if(matches.length>1)throw Error('AMBIGUOUS_ROLE_TEMPLATE');
+  const template=matches[0]||null,plan=template?.pages.find(p=>new URL(pageUrl).pathname.startsWith(p.pathPrefix));
   const p=await browser.existingPage(pageUrl), controls=await p.inventory(plan), observedAt=new Date().toISOString();
   const registration=await updateProfile(profileFile,profile=>registerPlannedQuestions(profile,{companyId,pageUrl,fields:controls,observedAt},plan));
   return {companyId,pageUrl,observedAt,controls,registration,coverageLimit:'当前渲染文档；未展开选项、多步骤、iframe与shadow root另行建库'};

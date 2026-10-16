@@ -69,7 +69,7 @@ export class BrowserAdapter {
   async pageIdentity(id){const page=await this.trackedPage(id);return {pageId:id,pageUrl:page.url()};}
   async roleSnapshot({pageId,roleSelector,accountSelector,loginRoot}){
     const page=await this.trackedPage(pageId);
-    return page.evaluate(({roleSelector,accountSelector,loginRoot})=>{const read=s=>{const ns=document.querySelectorAll(s);return ns.length===1?ns[0].innerText?.trim()||null:null;};return {pageUrl:location.href,roleTitle:read(roleSelector),account:read(accountSelector),loginFormPresent:!!document.querySelector(loginRoot),readAt:new Date().toISOString()};},{roleSelector,accountSelector,loginRoot});
+    return page.evaluate(({roleSelector,accountSelector,loginRoot})=>{const read=s=>{if(!s)return null;const ns=document.querySelectorAll(s);return ns.length===1?ns[0].innerText?.trim()||null:null;};return {pageUrl:location.href,roleTitle:read(roleSelector),account:read(accountSelector),loginFormPresent:!!document.querySelector(loginRoot),readAt:new Date().toISOString()};},{roleSelector,accountSelector,loginRoot});
   }
   async screenshot(pageId){const page=await this.trackedPage(pageId);const dir=path.join(path.dirname(this.profileDir),'screenshots');await mkdir(dir,{recursive:true,mode:0o700});const file=path.join(dir,randomUUID()+'.png');await page.screenshot({path:file,fullPage:true,mask:[page.locator('input[data-test="validCodeInput"],input[type="password"]')]});await chmod(file,0o600);return {path:file};}
   async openPage(url,{pageId,readySelectors=[]}={}){
@@ -84,6 +84,24 @@ export class BrowserAdapter {
     if(readySelectors.length)await page.waitForFunction(ss=>ss.some(s=>[...document.querySelectorAll(s)].some(n=>n.getClientRects().length)),readySelectors,{timeout:30000});
     let id=[...this.pageIds].find(([,p])=>p===page)?.[0];if(!id){id=randomUUID();this.pageIds.set(id,page);}
     return {pageId:id,pageUrl:page.url(),reused};
+  }
+  async enterApplication({pageId,expectedTitle,accountSelector,expectedAccount,roleSelector}){
+    const page=await this.trackedPage(pageId),before=new URL(page.url());
+    const detail=/^\/campus\/(?:m\/)?position\/\d+\/detail$/.test(before.pathname),form=/^\/campus\/resume\/\d+\/apply$/.test(before.pathname);
+    if(!detail&&!form)throw Error('APPLICATION_ENTRY_PATH_REQUIRED');
+    const account=await page.locator(accountSelector).innerText();
+    if(!expectedAccount||account.trim()!==expectedAccount)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');
+    if(detail){
+      const title=await page.title();if(!title.startsWith(expectedTitle+' - '))throw Error('APPLICATION_ENTRY_ROLE_CHANGED');
+      const button=page.getByRole('button',{name:'投递',exact:true});await button.waitFor({state:'visible',timeout:15000});if(await button.count()!==1)throw Error('APPLICATION_ENTRY_BUTTON_CHANGED');
+      // This named action exists only on a verified job-detail URL, never a résumé form.
+      await button.click({timeout:10000});
+      await page.waitForURL(url=>url.origin===before.origin&&/^\/campus\/resume\/\d+\/apply$/.test(url.pathname),{timeout:30000});
+    }
+    await page.locator(roleSelector).waitFor({state:'visible',timeout:30000});
+    if((await page.locator(roleSelector).innerText()).trim()!==expectedTitle)throw Error('APPLICATION_ENTRY_RESULT_ROLE_CHANGED');
+    if((await page.locator(accountSelector).innerText()).trim()!==expectedAccount)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');
+    return {pageId,pageUrl:page.url(),roleTitle:expectedTitle,entryClicked:detail,accountMatched:true,submission:'not_performed'};
   }
   async existingPage(url){
     const browser=await this.connect();

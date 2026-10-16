@@ -1,3 +1,4 @@
+import {assertApplicationText} from './application-text.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {compileExpected} from './observation.mjs';
@@ -38,7 +39,7 @@ async function validateFile(ref,files){
 // All fields (including inactive branches and unanswered optional fields) retain
 // their position, source, type, action, constraints and readback specification.
 export async function compileExecutionPlan(template,task){
-  assertContentPolicy(task.values,task.contentPolicy);
+  assertContentPolicy(task.values,task.contentPolicy);assertApplicationText(task.values);
   const pages=[],counts={fill:0,observe:0,needs_user:0,omitted:0,user_only:0,inactive:0};
   const checkedFiles=new Set();
   for(const page of template.pages){

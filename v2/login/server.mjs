@@ -17,8 +17,8 @@ const engine=new LoginEngine({companyRoot:process.env.RECRUITING_LOGIN_COMPANY_D
 const catalog=JSON.parse(await readFile(path.join(root,'catalog/companies.json'),'utf8')).companies;
 const queues=queueFromEnv(catalog);engine.roleQueues=queues;
 const appStore=new Store(process.env.RECRUITING_PRIVATE_DIR||path.join(path.dirname(process.env.RECRUITING_PROFILE_JSON),'application'));
-const flow=new RoleFlow({queues,login:engine,browser:browser.broker,templates:async companyId=>{const bindings=await appStore.get('templates','company-bindings');return appStore.get('templates',bindings[companyId]);}});
-const server=new McpServer({name:'recruiting-login-v2',version:'2.0.0-alpha.2'});
+const flow=new RoleFlow({queues,login:engine,browser:browser.broker,templates:async (companyId,roleId)=>{const bindings=await appStore.get('templates','company-bindings');let roles={};try{roles=await appStore.get('templates','role-bindings');}catch(e){if(e.code!=='ENOENT')throw e;}return appStore.get('templates',roles[companyId]?.[roleId]||bindings[companyId]);}});
+const server=new McpServer({name:'recruiting-login-v2',version:'2.0.0-alpha.3'});
 const output=v=>({content:[{type:'text',text:JSON.stringify(v)}]});
 const wrap=fn=>async args=>{try{return output(await fn(args));}catch(e){return {isError:true,...output({error:safeCode(e)})};}};
 const location={companyId:z.string(),pageUrl:z.string().url()};
@@ -28,6 +28,7 @@ const queueTask={queueId:z.string().uuid(),queueHash:z.string().length(64),taskI
 server.registerTool('role_queue_import',{description:'消费上游已确认的公司方案JSON（文件或对象），读取用户次序和直达链接并冻结队列；不处理Excel。',inputSchema:{rolesFile:z.string().optional(),companyPlan:z.record(z.unknown()).optional(),companyOrder:z.array(z.string()).optional()}},wrap(a=>queues.import(a)));
 server.registerTool('role_open',{description:'按冻结队列顺序直接打开岗位；需要登录时返回绑定原岗位的登录计划，不从公司首页选岗。',inputSchema:queueTask},wrap(a=>flow.open(a)));
 server.registerTool('role_resume',{description:'用户完成登录后，返回原岗位原标签并核对账号、岗位标题和完整URL；不填写或提交。',inputSchema:queueTask},wrap(a=>flow.resume(a)));
+server.registerTool('role_enter_application',{description:'在冻结队列的岗位详情页点击真实投递入口并核对返回的申请页；要求已有同账号登录，不发码、不提交简历。',inputSchema:queueTask},wrap(a=>flow.enter(a)));
 server.registerTool('role_screenshot',{description:'保存本次岗位标签的截图供用户核对，遮盖验证码及密码输入框。',inputSchema:queueTask,annotations:{readOnlyHint:true}},wrap(a=>flow.screenshot(a)));
 server.registerTool('login_open',{description:'在 MCP 管理的独立 Chrome 中打开公司配置指定的登录页；不连接日常 Chrome，不发码或提交。',inputSchema:{companyId:z.string()}},wrap(a=>engine.open(a)));
 server.registerTool('login_browser_status',{description:'只读共享浏览器连接状态，不连接或重启 Chrome。',annotations:{readOnlyHint:true}},wrap(()=>browser.status()));
