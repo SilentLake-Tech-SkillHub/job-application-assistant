@@ -1,6 +1,13 @@
 # job-application-assistant 岗位代投助手
 
-**当前版本：v1.19.0 · 2026-10-16**
+**当前版本：v1.19.1 · 2026-10-17**
+
+## 更新日志：v1.19.1 · 公司／BU 用户志愿顺序
+
+- 新增独立“用户志愿”共享表及 user_priorities，公司不分 BU 时统一排序，分 BU 时逐 BU 保存用户确认顺序。
+- 官网有序／平行／无志愿机制与用户自身顺序分别记录；已选岗位缺用户确认顺序，或确认依据被修改时阻止交接。
+- Excel、整本业务 JSON、批次 JSON 与 HTML 同步包含新维度；旧记录保留并补核分组，不能从推荐次序推断用户决定。
+- 验证覆盖公司内重复序号、跨 BU 第一志愿、平行机制独立排序及依据篡改。[Issue #40](https://github.com/SilentLake-Tech-SkillHub/job-application-assistant/issues/40)。
 
 ## 更新日志：v1.19.0 · 完整数据与志愿交接
 

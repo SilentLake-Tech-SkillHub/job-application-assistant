@@ -2,7 +2,7 @@
 name: job-application-assistant
 description: "Run a user-confirmed campus application batch starting from a confirmed role list (or named existing roles): pre-application JD and eligibility recheck, form preparation, review, authorized submission, receipt verification and tracker readback. Use when the user asks to prepare, review or submit campus applications; job discovery and information-only company research belong to the research workflow (e.g. campus-job-skills), not this Skill."
 metadata:
-  version: "1.19.0"
+  version: "1.19.1"
 ---
 
 # 岗位代投助手 / Job Application Assistant
@@ -14,6 +14,8 @@ This Skill starts from a **confirmed role list** handed over by the research wor
 读取[公司机会核对与搜索交接](references/company-review-handoff.md)。接收搜索端已查齐计划、完整岗位目录、三档候选、推荐、轮次/公司/BU规则、冷冻期和内推码的公司方案。HTML由用户核对，最终选择写入Excel并同步JSON；Prepare/Review/Submit门禁检查同版本、确认依据及确切岗位。一般选岗授权只允许提出建议，不能跳过HTML确认或替换已选目标。继承已有次序/特殊计划决定，不重复询问；只补当前材料、授权和账号读回。
 
 首次接收旧批次如缺公司方案，保留旧回执和已投状态，补齐该公司缺口并核对，不自动重搜整批。账号复核、岗位变化和提交回执更新Excel后同步导出JSON；不同步不能进入下一申请动作。此研究确认不替代最终表单审核与提交目标确认。
+
+已选岗位还必须具有用户确认的公司内或 BU 内志愿顺序：继承 `user_priorities` 及分组来源、确认依据和 Hash；官网平行志愿或无志愿机制不免除用户自身排序。缺记录或依据变化时返回搜索端补齐，不能照抄推荐顺序。
 
 ## Browser default and retained company tabs
 
