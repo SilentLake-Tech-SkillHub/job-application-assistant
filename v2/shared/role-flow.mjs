@@ -14,6 +14,7 @@ export class RoleFlow{
   if(s.account&&!accountMatches(s.account,account.phone))throw Error('LOGIN_ACCOUNT_MISMATCH');
   if(accountMatches(s.account,account.phone)&&!s.loginFormPresent){
    if(s.pageUrl!==state.returnUrl){await this.browser.request('openPage',{pageId:state.pageId,pageUrl:state.returnUrl,readySelectors:[x.plan.readySelector,x.c.fields.root]});}
+   await this.browser.request('wait',{pageUrl:state.returnUrl,selector:x.plan.readySelector});
    const restored=await this.snapshot(x,state.pageId);
    if(restored.pageUrl!==state.returnUrl||restored.roleTitle!==state.expectedTitle||restored.loginFormPresent||!accountMatches(restored.account,account.phone))throw Error('LOGIN_RETURN_ROLE_VERIFICATION_FAILED');
    state.status='ready_to_fill';state.restoredAt=restored.readAt;state.accountMatched=true;await this.queues.put(x.t.taskId,state);
