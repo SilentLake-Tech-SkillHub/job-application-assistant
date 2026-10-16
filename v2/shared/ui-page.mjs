@@ -1,4 +1,5 @@
 import {captureWecruitSchema} from './ats-schema.mjs';
+import {sharedRecordKey} from './shared-record.mjs';
 import {antDOM} from './ant-reference.mjs';
 import {performAntDay} from './ant-date.mjs';
 import {stat,readFile} from 'node:fs/promises';
@@ -73,7 +74,13 @@ export function inventoryDOM() {
 }
 
 export class PageAdapter {
-  constructor(page){this.page=page;}
+  constructor(page,{listOpenPageUrls}={}){Object.assign(this,{page,listOpenPageUrls});}
+  async assertSingleEditor(){
+    const key=sharedRecordKey(this.page.url());if(!key)return;
+    const urls=this.listOpenPageUrls?await this.listOpenPageUrls():this.page.context().pages().filter(p=>p!==this.page&&!p.isClosed()).map(p=>p.url());
+    const peers=urls.filter(url=>url!==this.page.url()&&/^https?:/.test(url)&&sharedRecordKey(url)===key);
+    if(peers.length)throw Error('SHARED_RESUME_HAS_OTHER_OPEN_EDITORS');
+  }
   async assertLocation(origin,prefix){const u=new URL(this.page.url());if(u.origin!==origin||!u.pathname.startsWith(prefix))throw Error('PAGE_IDENTITY_CHANGED');}
   async resolveSelector(selector){if(!selector?.startsWith('antq:'))return selector;const actual=await this.page.evaluate(antDOM,{operation:'resolve',reference:selector});return actual||':not(*)';}
   async resolveSpec(spec){
@@ -85,6 +92,7 @@ export class PageAdapter {
   async inventory(plan){if(plan?.provider==='ant')return this.page.evaluate(antDOM);const raw=await this.page.evaluate(plan?.provider==='feishu'?inventoryFeishuDOM:inventoryDOM);return plan?.provider==='feishu'&&!plan.rawKeys?canonicalizeInventory(raw).fields:raw;}
   async observe(plan){if(plan.provider==='ant')plan=await this.resolveSpec(plan);const result=await this.page.evaluate(observeDOM,plan.provider==='feishu'&&!plan.selectorsResolved?await this.page.evaluate(remapFeishuSpecDOM,plan):plan);if(plan.roleIdentity){const u=new URL(result.pageUrl);result.roleIdentity={parameter:plan.roleIdentity.parameter,value:u.searchParams.get(plan.roleIdentity.parameter)};}return result;}
   async ensureGroups(groups){
+    if(groups?.length)await this.assertSingleEditor();
     for(const group of groups||[]){
       const groupSelector=()=>this.resolveSelector(group.selector);
       let count=await this.page.locator(await groupSelector()).count();
@@ -102,6 +110,7 @@ export class PageAdapter {
   }
   async act(action,value,files){
     if(action.method==='capture_wecruit_schema')return captureWecruitSchema(this.page,action);
+    if(!['wait','ant_dropdown_inspect','ud_dropdown_inspect'].includes(action.method))await this.assertSingleEditor();
     if(action.method==='ant_day')return performAntDay(this,action,value);
     if(action.provider==='feishu'&&!action.selectorsResolved)action=await this.page.evaluate(remapFeishuSpecDOM,action);
     action=await this.resolveSpec(action);
