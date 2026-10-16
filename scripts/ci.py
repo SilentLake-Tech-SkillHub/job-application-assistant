@@ -21,7 +21,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 ENV = dict(os.environ, PYTHONIOENCODING='utf-8', PYTHONDONTWRITEBYTECODE='1')
 
-UNIT = ['test_company_handoff.py', 'test_batch_check.py', 'test_fill_plan.py', 'test_profile_vault.py', 'test_docs_consistency.py', 'test_tracker_readback.py', 'test_hooks.py', 'test_rea_bridge.py', 'test_token_metrics.py', 'test_full_chain_benchmark.py', 'test_form_preparation.py', 'test_isolated_form_benchmark.py', 'test_rea_reuse.py', 'test_browser_session.py']
+UNIT = ['test_ci.py', 'test_company_handoff.py', 'test_batch_check.py', 'test_fill_plan.py', 'test_profile_vault.py', 'test_docs_consistency.py', 'test_tracker_readback.py', 'test_hooks.py', 'test_rea_bridge.py', 'test_token_metrics.py', 'test_full_chain_benchmark.py', 'test_form_preparation.py', 'test_isolated_form_benchmark.py', 'test_rea_reuse.py', 'test_browser_session.py']
 
 
 def node_env():
@@ -61,6 +61,10 @@ def stages(skip_browser):
 
 
 def main():
+    # Windows redirected streams can default to cp1252; retain readable failure evidence.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='backslashreplace')
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--skip-browser', action='store_true')
     parser.add_argument('--only', choices=['static', 'unit', 'smoke', 'browser', 'stress'])
@@ -82,7 +86,8 @@ def main():
                 name = 'py_compile'
             elif command[1:2] == ['--check']:
                 name = 'node --check'
-            summary.append({'stage': stage, 'check': name, 'passed': passed, 'seconds': round(time.perf_counter() - start, 2)})
+            summary.append({'stage': stage, 'check': name, 'passed': passed, 'seconds': round(time.perf_counter() - start, 2), 'returncode': result.returncode,
+                            'stdout': result.stdout, 'stderr': result.stderr})
             print(('PASS ' if passed else 'FAIL ') + stage + ' · ' + name, flush=True)
             if not passed:
                 print((result.stdout + result.stderr)[-4000:], flush=True)
