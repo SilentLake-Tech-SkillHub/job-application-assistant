@@ -1,3 +1,6 @@
+// Query-addressed editors can share a pathname while belonging to different jobs
+// or form schemas. Retain only observed non-secret identity parameters.
+export function formLocation(pageUrl){const u=new URL(pageUrl),keys=['pid','postId','tid','qTid','recruitType','jobId','positionId','formId'],q=new URLSearchParams();for(const key of keys)if(u.searchParams.has(key))q.set(key,u.searchParams.get(key));return u.pathname+(q.size?'?'+q:'');}
 import { readFile, writeFile, rename, mkdir, realpath, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -5,6 +8,7 @@ import { hash } from './engine.mjs';
 import { resolveContentPolicy } from './content-policy.mjs';
 import {acquireLease,leasePath,defaultLeaseRoot} from './leases.mjs';
 import {validDate,ingestFactValue} from './value-contract.mjs';
+import {assertDefinitionMapped} from './definition-coverage.mjs';
 
 const forbidden = /(?:^|\.)(?:password|otp|cookie|accessToken|idNumber|passportNumber|bankAccount)(?:\.|$)/i;
 export function validateProfile(profile) {
@@ -42,7 +46,7 @@ export async function updateProfile(file,mutate){
 // Unknown questions are persisted even when optional, unanswered or semantically ambiguous.
 export function registerObservedQuestions(profile,{companyId,pageUrl,fields,observedAt,coverageRequired=false}){
   profile.companyForms??={}; profile.fieldRegistry??={};
-  const pageKey=hash({companyId,pageUrl:new URL(pageUrl).pathname}).slice(0,20);
+  const pageKey=hash({companyId,pageUrl:formLocation(pageUrl)}).slice(0,20);
   const old=profile.companyForms[pageKey];
   const questions=fields.filter(f=>!['button','submit','reset','hidden'].includes(f.type));
   const mappings=Object.fromEntries(Object.entries(old?.mappings||{}).map(([key,m])=>[key,{...m,active:false}])); const added=[];
@@ -65,7 +69,7 @@ export function registerObservedQuestions(profile,{companyId,pageUrl,fields,obse
 }
 
 export function assertQuestionsMapped(profile,companyId,pageUrl){
-  const pageKey=hash({companyId,pageUrl:new URL(pageUrl).pathname}).slice(0,20);
+  const pageKey=hash({companyId,pageUrl:formLocation(pageUrl)}).slice(0,20);
   const form=profile.companyForms?.[pageKey];
   if(!form)throw Error('FORM_QUESTIONS_NOT_REGISTERED');
   if(Object.values(form.mappings).some(m=>(m.active!==false||m.coverageRequired)&&m.status!=='mapped'&&m.status!=='user_only'))throw Error('NEW_QUESTIONS_REQUIRE_PROFILE_MAPPING');
@@ -95,8 +99,8 @@ export function registerPlannedQuestions(profile,args,plan) {
 export function registerTemplateContract(profile,{companyId,template,templateHash}){
   profile.companyForms??={};profile.fieldRegistry??={};
   for(const page of template.pages){
-    const pageUrl=new URL(page.pathPrefix,template.evidence.sourceUrl).href;
-    const pageKey=hash({companyId,pageUrl:new URL(pageUrl).pathname}).slice(0,20);
+    const sourceUrl=new URL(template.evidence.sourceUrl),pageUrl=sourceUrl.pathname.startsWith(page.pathPrefix)?sourceUrl.href:new URL(page.pathPrefix,sourceUrl).href;
+    const pageKey=hash({companyId,pageUrl:formLocation(pageUrl)}).slice(0,20);
     const prior=profile.companyForms[pageKey]||{companyId,pageUrl,mappings:{}};
     const fields=page.fields.map((f,index)=>({index,id:f.id,source:f.source,label:f.label,required:!!f.required,kind:f.kind,control:f.control,precision:f.precision||null,read:f.read,actions:f.actions||[],readonly:!!f.readonly,userOnly:!!f.userOnly,when:f.when||null,ongoingSource:f.ongoingSource||null,compose:f.compose||null,enumMap:f.enumMap||null,inventorySelectors:f.inventorySelectors||[f.read.selector],prepareBeforeGroups:!!f.prepareBeforeGroups}));
     prior.executionContract={templateId:template.id,templateVersion:template.version,templateHash,sections:page.sections,groups:page.groups||[],fields,evidence:template.evidence};
@@ -114,6 +118,7 @@ export function registerTemplateContract(profile,{companyId,template,templateHas
 }
 export function resolveProfile(profile, template, decisions={}, companyId) {
   validateProfile(profile);
+  assertDefinitionMapped(profile,companyId,template);
   const values={},missing=[],sources={},omissions={...decisions.omissions};
   const factValue=key=>{
     const f=profile.facts[key];
@@ -181,7 +186,7 @@ export function recordProfileAnswers(profile,{answers,evidence,recordedAt=new Da
 
 export function mapProfileQuestions(profile,{companyId,pageUrl,mappings,evidence}) {
   if(!evidence?.trim()||!Array.isArray(mappings)||!mappings.length)throw Error('MAPPING_EVIDENCE_REQUIRED');
-  const pageKey=hash({companyId,pageUrl:new URL(pageUrl).pathname}).slice(0,20),form=profile.companyForms?.[pageKey];
+  const pageKey=hash({companyId,pageUrl:formLocation(pageUrl)}).slice(0,20),form=profile.companyForms?.[pageKey];
   if(!form)throw Error('FORM_QUESTIONS_NOT_REGISTERED');
   for(const mapping of mappings){
     const prior=form.mappings[mapping.questionId];

@@ -1,3 +1,4 @@
+import {installBrokerDiagnostics} from './broker-diagnostics.mjs';
 // One private local socket owns one Chrome connection across MCP client restarts.
 // Managed Chrome by default; no REA, daily-profile attachment or automatic reconnect.
 import http from 'node:http';
@@ -15,8 +16,9 @@ try{
   if(alive){console.log(JSON.stringify({status:'existing_host_reused'}));process.exit(0);}
   await unlink(socketPath);
 }catch(error){if(error.code!=='ENOENT')throw error;}
+const diagnostics=installBrokerDiagnostics(path.join(path.dirname(socketPath),'broker-events.jsonl'));
 const browser=new BrowserAdapter(process.env.RECRUITING_BROWSER_MODE==='cdp'?(process.env.RECRUITING_CDP_URL||'chrome-default'):'managed-chrome',{profileDir:process.env.RECRUITING_BROWSER_PROFILE_DIR});
-const status=()=>({pid:process.pid,protocolVersion:4,...browser.status()});
+const status=()=>({pid:process.pid,brokerPid:process.pid,protocolVersion:4,...browser.status(),runtimeHealth:diagnostics.isDegraded()?'degraded_read_only':'healthy'});
 const methods=new Set(['assertLocation','wait','inventory','observe','act','ensureGroups','verificationInspect']);
 const code=error=>/^[A-Z_]+$/.test(error.message)?error.message:'BROWSER_HOST_OPERATION_FAILED';
 const server=http.createServer(async(req,res)=>{
@@ -26,6 +28,7 @@ const server=http.createServer(async(req,res)=>{
   try{
     const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>8*1024*1024)throw Error('REQUEST_TOO_LARGE');chunks.push(chunk);}
     const {method,args={}}=JSON.parse(Buffer.concat(chunks));let data;
+    if(diagnostics.isDegraded()&&!['status','tabs','pageIdentity','roleSnapshot','existingPage','inventory','observe','screenshot','assertLocation'].includes(method))throw Error('BROKER_DEGRADED_WRITES_BLOCKED');
     if(method==='status')data=status();
     else if(method==='tabs')data=await browser.tabs();
     else if(method==='openPage')data=await browser.openPage(args.pageUrl,args);
@@ -46,7 +49,7 @@ const server=http.createServer(async(req,res)=>{
       if(method==='verificationInspect')data=await inspectVerification(page);
     }
     res.end(JSON.stringify({data:data??null}));
-  }catch(error){res.end(JSON.stringify({error:code(error)}));}
+  }catch(error){diagnostics.record('operation_error',error);res.end(JSON.stringify({error:code(error)}));}
 });
 await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(socketPath,resolve);});await chmod(socketPath,0o600);
 console.log(JSON.stringify({status:'browser_host_ready',pid:process.pid,connectionAttempts:0,automaticRetries:0}));

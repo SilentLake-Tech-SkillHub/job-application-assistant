@@ -1,3 +1,5 @@
+import {captureWecruitSchema} from './ats-schema.mjs';
+import {antDOM} from './ant-reference.mjs';
 import {performAntDay} from './ant-date.mjs';
 import {stat,readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
@@ -73,29 +75,61 @@ export function inventoryDOM() {
 export class PageAdapter {
   constructor(page){this.page=page;}
   async assertLocation(origin,prefix){const u=new URL(this.page.url());if(u.origin!==origin||!u.pathname.startsWith(prefix))throw Error('PAGE_IDENTITY_CHANGED');}
-  async wait(selector){await this.page.locator(selector).waitFor({state:'visible',timeout:10000});}
-  async inventory(plan){const raw=await this.page.evaluate(plan?.provider==='feishu'?inventoryFeishuDOM:inventoryDOM);return plan?.provider==='feishu'&&!plan.rawKeys?canonicalizeInventory(raw).fields:raw;}
-  async observe(plan){return this.page.evaluate(observeDOM,plan.provider==='feishu'&&!plan.selectorsResolved?await this.page.evaluate(remapFeishuSpecDOM,plan):plan);}
+  async resolveSelector(selector){if(!selector?.startsWith('antq:'))return selector;const actual=await this.page.evaluate(antDOM,{operation:'resolve',reference:selector});return actual||':not(*)';}
+  async resolveSpec(spec){
+    const refs=new Set();const collect=v=>{if(typeof v==='string'&&v.startsWith('antq:'))refs.add(v);else if(Array.isArray(v))v.forEach(collect);else if(v&&typeof v==='object')Object.values(v).forEach(collect);};collect(spec);if(!refs.size)return spec;
+    const keys=[...refs],values=await this.page.evaluate(antDOM,{operation:'resolve',references:keys}),mapping=new Map(keys.map((k,i)=>[k,values[i]||':not(*)']));
+    const walk=v=>typeof v==='string'?mapping.get(v)||v:Array.isArray(v)?v.map(walk):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,walk(x)])):v;return walk(spec);
+  }
+  async wait(selector){selector=await this.resolveSelector(selector);await this.page.locator(selector).waitFor({state:'visible',timeout:10000});}
+  async inventory(plan){if(plan?.provider==='ant')return this.page.evaluate(antDOM);const raw=await this.page.evaluate(plan?.provider==='feishu'?inventoryFeishuDOM:inventoryDOM);return plan?.provider==='feishu'&&!plan.rawKeys?canonicalizeInventory(raw).fields:raw;}
+  async observe(plan){if(plan.provider==='ant')plan=await this.resolveSpec(plan);const result=await this.page.evaluate(observeDOM,plan.provider==='feishu'&&!plan.selectorsResolved?await this.page.evaluate(remapFeishuSpecDOM,plan):plan);if(plan.roleIdentity){const u=new URL(result.pageUrl);result.roleIdentity={parameter:plan.roleIdentity.parameter,value:u.searchParams.get(plan.roleIdentity.parameter)};}return result;}
   async ensureGroups(groups){
     for(const group of groups||[]){
-      let count=await this.page.locator(group.selector).count();
+      const groupSelector=()=>this.resolveSelector(group.selector);
+      let count=await this.page.locator(await groupSelector()).count();
       if(count>group.count)throw Error('EXCESS_REPEAT_ENTRIES_REQUIRE_REVIEW');
       while(count<group.count){
-        const add=this.page.locator(group.addSelector).filter({hasText:/^添加$/});
-        if(await add.count()!==1||(await add.innerText()).trim()!=='添加')throw Error('REPEAT_ADD_CONTROL_CHANGED');
+        const addLabel=group.addLabel||'添加';
+        const add=this.page.locator(await this.resolveSelector(group.addSelector)).filter({hasText:new RegExp('^'+addLabel+'$')});
+        if(await add.count()!==1||(await add.innerText()).trim()!==addLabel)throw Error('REPEAT_ADD_CONTROL_CHANGED');
         await add.click({timeout:10000});
-        const next=await this.page.locator(group.selector).count();
+        const next=await this.page.locator(await groupSelector()).count();
         if(next!==count+1)throw Error('REPEAT_ADD_DID_NOT_CREATE_ONE_ENTRY');
         count=next;
       }
     }
   }
   async act(action,value,files){
+    if(action.method==='capture_wecruit_schema')return captureWecruitSchema(this.page,action);
     if(action.method==='ant_day')return performAntDay(this,action,value);
     if(action.provider==='feishu'&&!action.selectorsResolved)action=await this.page.evaluate(remapFeishuSpecDOM,action);
+    action=await this.resolveSpec(action);
     const l=this.page.locator(action.selector);
     if(await l.count()!==1)throw Error('AMBIGUOUS_ACTION_TARGET');
     const meta=await l.evaluate(n=>({tag:n.tagName,type:n.type||n.getAttribute('type'),role:n.getAttribute('role'),label:n.getAttribute('aria-label')||n.textContent?.trim(),readonly:n.readOnly}));
+    if(['ant_dropdown','ant_dropdown_inspect'].includes(action.method)){
+      if(meta.role!=='combobox')throw Error('ANT_COMBOBOX_REQUIRED');
+      const initial=(await l.innerText()).trim();await l.click({timeout:10000});
+      const search=this.page.locator('.ant-select-open input.ant-select-search__field');
+      const searchable=await search.count()===1;
+      const query=action.query;
+      if(query&&searchable)await search.fill(query,{timeout:10000});
+      const choices=this.page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) [role="option"]');
+      if(action.method==='ant_dropdown_inspect'){
+        let values=[];try{await choices.first().waitFor({state:'visible',timeout:1500});values=(await choices.allTextContents()).map(v=>v.trim());}catch{}
+        await this.page.locator('form.ant-form .ant-form-item-label').first().click({timeout:10000});
+        try{await this.page.locator('.ant-select-dropdown:visible').first().waitFor({state:'hidden',timeout:2000});}catch{}
+        const menuStillVisible=!!(await this.page.locator('.ant-select-dropdown:visible').count()),selectionChanged=(await l.innerText()).trim()!==initial;
+        const restored=!menuStillVisible&&!selectionChanged;
+        return {options:values,searchable,restored,restorationDiagnostics:{menuStillVisible,selectionChanged},scope:query?'exact_search_results':searchable?'current_search_results':'visible_menu',status:values.length?'captured':'needs_query_or_parent'};
+      }
+      if(!action.options?.includes(String(value)))throw Error('UNSUPPORTED_CHOICE_NO_FALLBACK');
+      if(searchable)await search.fill(String(value),{timeout:10000});
+      const optionText=action.optionTextMap?.[value]||String(value);
+      const option=choices.filter({hasText:new RegExp('^'+optionText.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$')});
+      await option.waitFor({state:'visible',timeout:5000});if(await option.count()!==1)throw Error('CHOICE_NOT_UNIQUE_OR_NOT_PRESENT');await option.click({timeout:10000});await l.press('Tab');return;
+    }
     if(['ud_dropdown','ud_dropdown_inspect'].includes(action.method)){
       if(meta.role!=='combobox'||!action.labelSelector)throw Error('UD_CHOICE_CONTRACT_REQUIRED');
       const dismiss=()=>this.page.locator('p').filter({hasText:/^基本信息$/}).click({timeout:10000});

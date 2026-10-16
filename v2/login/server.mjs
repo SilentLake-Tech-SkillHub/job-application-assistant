@@ -19,7 +19,7 @@ const engine=new LoginEngine({companyRoot:process.env.RECRUITING_LOGIN_COMPANY_D
 const catalog=JSON.parse(await readFile(path.join(root,'catalog/companies.json'),'utf8')).companies;
 const queues=queueFromEnv(catalog);engine.roleQueues=queues;
 const appStore=new Store(process.env.RECRUITING_PRIVATE_DIR||path.join(path.dirname(process.env.RECRUITING_PROFILE_JSON),'application'));
-const flow=new RoleFlow({queues,login:engine,browser:browser.broker,templates:async (companyId,roleId)=>{const bindings=await appStore.get('templates','company-bindings');let roles={};try{roles=await appStore.get('templates','role-bindings');}catch(e){if(e.code!=='ENOENT')throw e;}return appStore.get('templates',roles[companyId]?.[roleId]||bindings[companyId]);}});
+const flow=new RoleFlow({queues,login:engine,browser:browser.broker,templates:async (companyId,roleId)=>{const bindings=await appStore.get('templates','company-bindings');let roles={};try{roles=await appStore.get('templates','role-bindings');}catch(e){if(e.code!=='ENOENT')throw e;}const templateId=roles[companyId]?.[roleId]||bindings[companyId];return templateId?appStore.get('templates',templateId):null;}});
 const packageInfo=JSON.parse(await readFile(path.join(root,'package.json'),'utf8'));
 const server=new McpServer({name:'recruiting-login-v2',version:packageInfo.version});
 const output=v=>({content:[{type:'text',text:JSON.stringify(v)}]});
@@ -28,7 +28,7 @@ const location={companyId:z.string(),pageUrl:z.string().url()};
 const plan={planId:z.string().uuid(),planHash:z.string().length(64)};
 const authorization=z.object({login:z.literal(true),evidence:z.string().min(1)});
 const queueTask={queueId:z.string().uuid(),queueHash:z.string().length(64),taskId:z.string().uuid()};
-server.registerTool('runtime_info',{description:'只读当前登录MCP实际版本，不连接或重启浏览器。',annotations:{readOnlyHint:true}},wrap(()=>({version:packageInfo.version,capabilities:['role_queue_import','role_open','role_resume','role_enter_application','human_verification'],browserAccess:false})));
+server.registerTool('runtime_info',{description:'只读当前登录MCP实际版本，不连接或重启浏览器。',annotations:{readOnlyHint:true}},wrap(()=>({version:packageInfo.version,capabilities:['role_queue_import','role_open','role_resume','role_enter_application','human_verification','user_operated_session_identity'],browserAccess:false})));
 server.registerTool('role_queue_import',{description:'消费上游已确认的公司方案JSON（文件或对象），读取用户次序和直达链接并冻结队列；不处理Excel。',inputSchema:{rolesFile:z.string().optional(),companyPlan:z.record(z.unknown()).optional(),companyOrder:z.array(z.string()).optional()}},wrap(a=>queues.import(a)));
 server.registerTool('role_open',{description:'按冻结队列顺序直接打开岗位；需要登录时返回绑定原岗位的登录计划，不从公司首页选岗。',inputSchema:queueTask},wrap(a=>flow.open(a)));
 server.registerTool('role_resume',{description:'用户完成登录后，返回原岗位原标签并核对账号、岗位标题和完整URL；不填写或提交。',inputSchema:queueTask},wrap(a=>flow.resume(a)));

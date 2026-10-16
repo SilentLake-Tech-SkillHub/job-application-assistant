@@ -1,7 +1,7 @@
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {validateCompany,assertScope,resolveAccount,accountMatches,hash,PrivateStore,safeCode} from './contracts.mjs';
+import {validateCompany,assertScope,resolveAccount,accountMatches,matchesAccount,hash,PrivateStore,safeCode} from './contracts.mjs';
 import {acquireLease,leasePath,defaultLeaseRoot} from '../shared/leases.mjs';
 import {beforeLoginStep,canHandoff} from '../hooks/login-gate.mjs';
 import {updateProfile} from '../shared/profile.mjs';
@@ -15,7 +15,7 @@ export class LoginEngine{
   async planState(c,p){const url=p.taskContext?(await this.browser.broker.request('pageIdentity',{pageId:p.taskContext.pageId})).pageUrl:p.pageUrl;return this.state(c,url);}
   async open({companyId}){const c=await this.company(companyId);return this.locked(c,async()=>{const result=await this.browser.open(c.origin+c.loginPath);await this.browser.ready(c,result.pageUrl);return {...result,companyId,ready:true,applicationSubmission:'not_performed'};});}
   async locked(c,fn){const release=await acquireLease(leasePath(this.leaseRoot,'recruiting-origin:'+c.origin),{busyCode:'COMPANY_ALREADY_RUNNING'});try{return await fn();}finally{await release();}}
-  async state(c,preferred){const url=await this.browser.locate(c,preferred);assertScope(c,url);const o=await this.browser.observe(c,url),account=resolveAccount(await this.profile(),c);return {...o,accountMatched:accountMatches(o.account,account.phone),accountMismatch:!!o.account&&!accountMatches(o.account,account.phone),unknownPopup:o.dialogs>0&&o.popupTitle!==c.popups[0].title};}
+  async state(c,preferred){const url=await this.browser.locate(c,preferred);assertScope(c,url);const o=await this.browser.observe(c,url),account=resolveAccount(await this.profile(),c);return {...o,accountMatched:matchesAccount(o.account,account),accountMismatch:!!o.account&&!matchesAccount(o.account,account),unknownPopup:o.dialogs>0&&o.popupTitle!==c.popups?.[0]?.title};}
   publicState(o){return {pageUrl:o.url,readAt:o.readAt,status:o.accountMismatch?'account_mismatch':o.accountMatched&&!o.form?'authenticated':o.challenges?'needs_user_verification':o.unknownPopup?'unknown_popup':o.form?'logged_out':'unknown',accountMatched:o.accountMatched,loginFormAbsent:!o.form,popup:o.dialogs?{title:o.popupTitle,known:!o.unknownPopup}:null,applicationSubmission:'not_performed'};}
   async inspect({companyId,pageUrl}){const c=await this.company(companyId);assertScope(c,pageUrl);return this.locked(c,async()=>{const o=await this.state(c,pageUrl);return this.publicState(o);});}
   async capture({companyId,pageUrl,evidence}){
@@ -28,7 +28,7 @@ export class LoginEngine{
   }
   async compile({companyId,pageUrl,taskContext}){
     const c=await this.company(companyId);assertScope(c,pageUrl);const a=resolveAccount(await this.profile(),c);
-    const plan={id:randomUUID(),companyId,pageUrl,assetHash:hash(c),accountFingerprint:a.fingerprint,createdAt:now(),steps:['check_current_session','inspect_and_dismiss_known_popups','select_actual_country_option','fill_phone_from_private_profile','require_privacy_acceptance','request_sms_once','handoff_verification_if_present','consume_ephemeral_user_otp','click_login_only','verify_account_and_absent_login_form'],applicationSubmission:'forbidden'};
+    const plan={id:randomUUID(),companyId,pageUrl,assetHash:hash(c),accountFingerprint:a.fingerprint,createdAt:now(),steps:c.loginMethod==='user_operated'?['check_current_session','user_login_handoff_if_required','verify_exact_account_at_session_page']:['check_current_session','inspect_and_dismiss_known_popups','select_actual_country_option','fill_phone_from_private_profile','require_privacy_acceptance','request_sms_once','handoff_verification_if_present','consume_ephemeral_user_otp','click_login_only','verify_account_and_absent_login_form'],applicationSubmission:'forbidden'};
     if(taskContext)plan.taskContext=taskContext;
     plan.planHash=hash(plan);await this.store.put('plans',plan.id,plan);return {planId:plan.id,planHash:plan.planHash,companyId,assetHash:plan.assetHash,stepCount:plan.steps.length,browserAccess:false};
   }
@@ -42,6 +42,7 @@ export class LoginEngine{
   async prepare(args){const {p,c}=await this.plan(args);return this.locked(c,async()=>{
     let o=await this.planState(c,p);beforeLoginStep({step:'prepare',state:o,authorization:args.authorization});
     if(o.accountMatched&&!o.form)return this.record(c,'prepare',{...this.publicState(o),reusedSession:true,smsSent:false});
+    if(c.loginMethod==='user_operated')return this.record(c,'prepare',{status:'needs_user_login',method:'user_operated',pageUrl:o.url,automaticLogin:false,smsSent:false,handoff:{operator:'user',nextTool:'role_resume'}});
     if(!o.form)throw Error('LOGIN_FORM_NOT_PRESENT');
     o=await this.dismiss(c,o);const a=resolveAccount(await this.profile(),c),f=c.fields;
     if(o.country!==c.account.countryCode)await this.browser.act(c,o.url,{method:'dropdown',selector:f.country,options:[f.countryOptionLabel]},f.countryOptionLabel);

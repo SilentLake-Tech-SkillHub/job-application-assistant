@@ -1,3 +1,4 @@
+import {matchesRole} from './role-identity.mjs';
 import { contentViolations } from './content-policy.mjs';
 /** Pure deterministic verification. Inputs: compiled expected values + CURRENT DOM observations.
  * Unknown/missing observations never become success. No model grading or fuzzy matching.
@@ -10,10 +11,10 @@ export function verifyForm(expected, observed, {now=Date.now(),maxAgeMs=60000}={
   if(!observed?.readAt || observed.source!=='live_dom')return {status:'unverified',checks:[{id:'observation',status:'unverified',reason:'LIVE_DOM_READ_REQUIRED'}]};
   const age=now-Date.parse(observed.readAt);
   if(!Number.isFinite(age)||age< -5000||age>maxAgeMs)return {status:'unverified',checks:[{id:'observation',status:'unverified',reason:'STALE_OR_INVALID_OBSERVATION'}]};
-  if(!expected.fields?.length||!expected.roleTitle||!observed.roleTitle||!Array.isArray(observed.inventoryIds))return {status:'unverified',checks:[{id:'coverage',status:'unverified',reason:'INCOMPLETE_VERIFICATION_INPUT'}]};
+  if(!expected.fields?.length||!expected.roleTitle||(!observed.roleTitle&&!observed.roleIdentity)||!Array.isArray(observed.inventoryIds))return {status:'unverified',checks:[{id:'coverage',status:'unverified',reason:'INCOMPLETE_VERIFICATION_INPUT'}]};
   if(new Set(expected.fields.map(f=>f.id)).size!==expected.fields.length)return {status:'unverified',checks:[{id:'coverage',status:'unverified',reason:'DUPLICATE_EXPECTED_FIELD'}]};
   if(expected.pageUrl!==observed.pageUrl)return {status:'blocked',checks:[{id:'page',status:'mismatch',reason:'PAGE_IDENTITY_CHANGED'}]};
-  if(expected.roleTitle!==observed.roleTitle)return {status:'blocked',checks:[{id:'role',status:'mismatch',reason:'ROLE_IDENTITY_CHANGED'}]};
+  if(!matchesRole(expected,observed))return {status:'blocked',checks:[{id:'role',status:'mismatch',reason:'ROLE_IDENTITY_CHANGED'}]};
   for(const source of contentViolations(Object.values(observed.fields||{}).map(f=>f.value),expected.contentPolicy))
     checks.push({id:'content_policy',source,status:'mismatch',reason:'EXCLUDED_CONTENT_RELOCATED'});
   if(expected.sections){

@@ -5,7 +5,7 @@ export class LoginBrowser{
   constructor(socket,{broker}={}){if(!socket)throw Error('SHARED_BROWSER_SOCKET_REQUIRED');this.broker=broker||new BrokerBrowserAdapter(socket,{requestTimeoutMs:45000});}
   status(){return this.broker.status();}
   open(url){return this.broker.request('openPage',{pageUrl:url});}
-  async ready(c,url){const page=await this.broker.existingPage(url);await page.wait(c.fields.root+','+c.account.selector);}
+  async ready(c,url){const page=await this.broker.existingPage(url);await page.wait([c.fields?.root,c.account.selector,c.entry?.formReadySelector].filter(Boolean).join(','));}
   async locate(c,preferred){
     const tabs=(await this.broker.tabs()).filter(t=>{try{const u=new URL(t.url);return u.origin===c.origin&&c.allowedPaths.some(p=>u.pathname.startsWith(p));}catch{return false;}});
     const exact=tabs.filter(t=>t.url===preferred);
@@ -13,6 +13,10 @@ export class LoginBrowser{
     if(tabs.length!==1)throw Error(tabs.length?'LOGIN_PAGE_AMBIGUOUS':'LOGIN_PAGE_NOT_OPEN');return tabs[0].url;
   }
   async observe(c,url){
+    if(c.loginMethod==='user_operated'){
+      const page=await this.broker.existingPage(c.account.pageUrl),raw=await page.observe({fields:[{id:'account',read:{selector:c.account.selector,kind:'text'}}]});
+      return {url,identityPageUrl:raw.pageUrl,readAt:raw.readAt,account:raw.fields.account.present?raw.fields.account.value:null,form:!raw.fields.account.present,userOperated:true,dialogs:0,challenges:0,errors:0};
+    }
     const f=c.fields,p=c.popups[0];
     const fields=[['account',c.account.selector,'text'],['form',f.root,'text',true],['country',f.countrySelected,'text'],['phone',f.phone,'value'],['otp',f.otp,'value',true],['send',f.send,'text'],['sendDisabled',f.send,'attribute'],['submit',f.submit,'text'],['consent',f.consent,'checked'],['popupTitle',p.titleSelector,'text'],['popupBody',p.bodySelector,'text'],['registrationNotice',f.automaticRegistrationNotice,'text']].map(([id,selector,kind,userOnly])=>({id,userOnly,read:{selector,kind,...(id==='sendDisabled'?{attribute:'disabled'}:{}),...(id==='consent'?{presenceSelector:f.consentPresence}:{})}}));
     const page=await this.broker.existingPage(url),raw=await page.observe({fields,groups:[{id:'dialogs',selector:'[role="dialog"]'},{id:'challenges',selector:c.challenge.selectors.join(',')},{id:'errors',selector:f.errors}]});

@@ -17,7 +17,7 @@ export function ingestFactValue(value,precision) {
 
 export function validateControlContract(f) {
   const c=f.control;
-  const types={text:['text','string','string',['fill']],searchable_text:['text','string','string',['fill']],readonly_text:['text','string','string',[]],dropdown:['choice','string','string',['dropdown','select','ud_dropdown']],radio:['choice','string','string',['radio']],year_picker:['date','string','string',['feishu_year','ud_date']],month_picker:['date','string','string',['feishu_month','ud_date']],day_picker:['date','string','string',['ant_day']],checkbox:['boolean','boolean','boolean',['check']],file_upload:['file','string','string[]',['upload']]};
+  const types={text:['text','string','string',['fill']],searchable_text:['text','string','string',['fill']],readonly_text:['text','string','string',[]],dropdown:['choice','string','string',['dropdown','select','ud_dropdown','ant_dropdown']],radio:['choice','string','string',['radio']],year_picker:['date','string','string',['feishu_year','ud_date']],month_picker:['date','string','string',['feishu_month','ud_date']],day_picker:['date','string','string',['ant_day']],checkbox:['boolean','boolean','boolean',['check']],file_upload:['file','string','string[]',['upload']]};
   const t=types[c?.type];
   if(!t||f.kind!==t[0]||c.valueType!==t[1]||c.readbackType!==t[2])throw Error('CONTROL_TYPE_CONTRACT_REQUIRED');
   if(f.readonly!==true&&!f.userOnly&&!(f.actions||[]).length)throw Error('CONTROL_ACTION_REQUIRED');
@@ -28,6 +28,9 @@ export function validateControlContract(f) {
   if(f.kind==='choice'){
     if(!Array.isArray(c.options)||!c.options.length||c.options.some(v=>typeof v!=='string')||new Set(c.options).size!==c.options.length)throw Error('CONTROL_OPTIONS_REQUIRED');
     for(const a of f.actions||[])if(JSON.stringify(a.options)!==JSON.stringify(c.options))throw Error('CONTROL_OPTIONS_ACTION_MISMATCH');
+    for(const a of f.actions||[])if(a.optionTextMap){
+      if(a.method!=='ant_dropdown'||!Array.isArray(a.observedOptionTexts)||Object.entries(a.optionTextMap).some(([value,text])=>!c.options.includes(value)||typeof text!=='string'||!a.observedOptionTexts.includes(text)))throw Error('CHOICE_ALIAS_REQUIRES_CAPTURED_OPTION_TEXT');
+    }
     if(f.enumMap&&Object.values(f.enumMap).some(v=>!c.options.includes(v)))throw Error('ENUM_MAPPING_OUTSIDE_CAPTURED_OPTIONS');
   }
   return c;

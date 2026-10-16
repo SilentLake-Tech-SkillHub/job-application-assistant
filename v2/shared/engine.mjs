@@ -1,3 +1,5 @@
+import {matchesRole} from './role-identity.mjs';
+import {assertIndependentDrafts} from './shared-record.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename, realpath } from 'node:fs/promises';
 import path from 'node:path';
@@ -14,7 +16,7 @@ import {FormRouter} from './form-route.mjs';
 export const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const idOK = value => typeof value === 'string' && /^[a-z0-9][a-z0-9_-]{0,79}$/.test(value);
 const blocked = /提交|投递|撤回|删除|同意|签名|验证码|密码|身份证|银行卡|submit|apply now|withdraw|delete|consent|signature|password|otp|captcha/i;
-const methods = new Set(['fill','select','check','click','upload','wait','dropdown','radio','feishu_month','feishu_year','ud_dropdown','ud_date','ant_day']);
+const methods = new Set(['fill','select','check','click','upload','wait','dropdown','radio','feishu_month','feishu_year','ud_dropdown','ud_date','ant_day','ant_dropdown']);
 export function validateTemplate(t) {
   if (!idOK(t.id) || !Number.isInteger(t.version) || t.version < 1) throw Error('INVALID_TEMPLATE_ID_OR_VERSION');
   if (!Array.isArray(t.pages) || !t.pages.length) throw Error('EMPTY_TEMPLATE');
@@ -22,10 +24,10 @@ export function validateTemplate(t) {
   const fields = new Set();
   for (const p of t.pages) {
     if (!p.pathPrefix?.startsWith('/') || !p.readySelector || !Array.isArray(p.fields) || !p.fields.length) throw Error('INVALID_PAGE');
-    if(!p.roleTitle || !p.roleSelector)throw Error('ROLE_IDENTITY_REQUIRED');
+    if(!p.roleTitle || (!p.roleSelector&&!p.roleIdentity?.parameter))throw Error('ROLE_IDENTITY_REQUIRED');
     if(!p.sections?.length||!p.sectionDiscovery?.selector||!p.sectionDiscovery?.titleSelector)throw Error('SECTION_COVERAGE_PLAN_REQUIRED');
     for(const g of p.groups||[])if(!idOK(g.id)||!g.selector||!Number.isInteger(g.count)||g.count<0)throw Error('INVALID_REPEAT_GROUP');
-    if(p.provider&&!['feishu'].includes(p.provider))throw Error('UNKNOWN_PROVIDER');
+    if(p.provider&&!['feishu','ant'].includes(p.provider))throw Error('UNKNOWN_PROVIDER');
     for (const f of p.fields) {
       if (!idOK(f.id) || fields.has(f.id)) throw Error('DUPLICATE_OR_INVALID_FIELD');
       fields.add(f.id);
@@ -44,7 +46,7 @@ export function validateTemplate(t) {
         if (a.method === 'click' && !a.label) throw Error('CLICK_NEEDS_OBSERVED_LABEL');
         if(a.method==='ant_day'&&(!a.openSelector||!a.openLabel||blocked.test(a.openLabel)))throw Error('ANT_DAY_CAPTURE_CONTRACT_REQUIRED');
         if (Object.hasOwn(a, 'value') || Object.hasOwn(a, 'code')) throw Error('VALUES_AND_CODE_DO_NOT_BELONG_IN_TEMPLATE');
-        if(['dropdown','radio','ud_dropdown'].includes(a.method)&&(!Array.isArray(a.options)||!a.options.length))throw Error('CAPTURED_OPTIONS_REQUIRED');
+        if(['dropdown','radio','ud_dropdown','ant_dropdown'].includes(a.method)&&(!Array.isArray(a.options)||!a.options.length))throw Error('CAPTURED_OPTIONS_REQUIRED');
       }
       validateControlContract(f);
     }
@@ -163,6 +165,9 @@ export class Engine {
     if ((!parallelRoles&&new Set(keys).size!==keys.length) || keys.some(k=>this.locks.has(k))) throw Error('COMPANY_ALREADY_RUNNING');
     const urls=tasks.map(t=>t.pageUrl);
     if (new Set(urls).size!==urls.length) throw Error('DUPLICATE_PAGE');
+    // Refuse before plan lookup, leases or browser access. Serializing stale
+    // tabs alone is insufficient: their autosave can overwrite the same record.
+    assertIndependentDrafts(tasks);
     const jobs=[];
     // Resolve every plan before any page is changed.
     for (const task of tasks) {
@@ -270,7 +275,7 @@ export class Engine {
         if(missing.length)throw Error('UNMAPPED_FORM_FIELDS');
         if(controlContractChanges(plan,live).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
         const initial=await page.observe(plan);
-        if(initial.pageUrl!==task.pageUrl||initial.roleTitle!==plan.roleTitle)throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
+        if(initial.pageUrl!==task.pageUrl||!matchesRole(plan,initial))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
         const unavailable=frozenFields.filter(f=>!['inactive','omitted','user_only'].includes(f.disposition)&&!initial.fields[f.id]?.present);
         if(unavailable.length)throw Error('PLANNED_FIELDS_MISSING_BEFORE_WRITE');
         // Upload first because parsing may replace the form; then create the planned records.

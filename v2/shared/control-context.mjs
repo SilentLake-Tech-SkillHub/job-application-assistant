@@ -1,6 +1,7 @@
 // Read rendered question wrappers through the existing browser broker; no hidden state.
 export async function enrichControlContext(page,controls){
  if(!controls.length)return [];
+ if(controls.every(c=>c.locatorStrategy==='semantic_question'))return controls;
  const roots=['.ud-formily-item','.ant-form-item'];const fields=[];
  for(const [i,c] of controls.entries())for(const [j,root]of roots.entries()){
   const wrapper=`${root}:has(:is(${c.selector})):not(:has(${root} :is(${c.selector})))`;

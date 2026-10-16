@@ -26,6 +26,7 @@ export function observeDOM(spec) {
         // A file input / FileList can never prove the server rendered an upload.
         o.uploadState=n.tagName!=='INPUT' && names.length && r.uploadedSelector && visible(one(r.uploadedSelector))?'site_rendered_uploaded':'unverified';
       }
+      if(r.normalize==='ant_choice'&&n.closest('.ant-select')?.querySelector('.ant-select-selection__placeholder'))o.value=null;
       if(r.normalize==='phone_cn')o.value=String(o.value??'').replace(/^\+86\s*/,'').replace(/[^0-9]/g,'');
       if(f.kind==='choice'||f.kind==='date'){
         o.selected=n.tagName==='SELECT'?!!n.selectedOptions.length&&n.selectedOptions[0].value!=='':
@@ -45,7 +46,7 @@ export function observeDOM(spec) {
 }
 
 export function compileExpected(plan,task) {
-  return {pageUrl:task.pageUrl,roleTitle:plan.roleTitle,contentPolicy:task.contentPolicy,groups:plan.groups||[],sections:plan.sections,fields:plan.fields.filter(f=>!f.when||task.values?.[f.when.source]===f.when.equals).map(f=>{
+  return {pageUrl:task.pageUrl,roleTitle:plan.roleTitle,...(plan.roleIdentity?{roleIdentity:plan.roleIdentity}:{}),contentPolicy:task.contentPolicy,groups:plan.groups||[],sections:plan.sections,fields:plan.fields.filter(f=>!f.when||task.values?.[f.when.source]===f.when.equals).map(f=>{
     let value=task.values?.[f.source];
     if(f.enumMap && value!==undefined)value=f.enumMap[value];
     if(f.ongoingSource&&task.values?.[f.ongoingSource]===true)value='至今';

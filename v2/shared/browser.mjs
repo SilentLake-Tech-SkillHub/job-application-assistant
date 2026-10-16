@@ -1,3 +1,4 @@
+import {screenshotMaskDOM} from './screenshot-mask.mjs';
 import { chromium } from 'playwright-core';
 import { stat, readFile, mkdir, chmod } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -43,14 +44,14 @@ export class BrowserAdapter {
     })();
     try{return await this.connecting;}catch(error){this.state='failed';throw error;}finally{this.connecting=null;}
   }
-  status(){return {state:this.state,mode:this.endpoint==='managed-chrome'?'managed':'cdp',connectionAttempts:this.connectionAttempts,automaticRetries:0};}
+  status(){return {state:this.state,mode:this.endpoint==='managed-chrome'?'managed':'cdp',connectionAttempts:this.connectionAttempts,automaticRetries:0,driverRevision:'2026-10-17.4'};}
   async trackedPage(id){const page=this.pageIds.get(id);if(!page||page.isClosed())throw Error('ROLE_BROWSER_PAGE_LOST');return page;}
   async pageIdentity(id){const page=await this.trackedPage(id);return {pageId:id,pageUrl:page.url()};}
-  async roleSnapshot({pageId,roleSelector,accountSelector,loginRoot}){
+  async roleSnapshot({pageId,roleSelector,accountSelector,loginRoot,roleIdentity}){
     const page=await this.trackedPage(pageId);
-    return page.evaluate(({roleSelector,accountSelector,loginRoot})=>{const read=s=>{if(!s)return null;const ns=document.querySelectorAll(s);return ns.length===1?ns[0].innerText?.trim()||null:null;};return {pageUrl:location.href,roleTitle:read(roleSelector),account:read(accountSelector),loginFormPresent:!!document.querySelector(loginRoot),readAt:new Date().toISOString()};},{roleSelector,accountSelector,loginRoot});
+    return page.evaluate(({roleSelector,accountSelector,loginRoot,roleIdentity})=>{const read=s=>{if(!s)return null;const ns=document.querySelectorAll(s);return ns.length===1?ns[0].innerText?.trim()||null:null;};return {pageUrl:location.href,roleTitle:read(roleSelector),...(roleIdentity?{roleIdentity:{parameter:roleIdentity.parameter,value:new URL(location.href).searchParams.get(roleIdentity.parameter)}}:{}),account:read(accountSelector),loginFormPresent:loginRoot?!!document.querySelector(loginRoot):false,readAt:new Date().toISOString()};},{roleSelector,accountSelector,loginRoot,roleIdentity});
   }
-  async screenshot(pageId){const page=await this.trackedPage(pageId);const dir=path.join(path.dirname(this.profileDir),'screenshots');await mkdir(dir,{recursive:true,mode:0o700});const file=path.join(dir,randomUUID()+'.png');await page.screenshot({path:file,fullPage:true,mask:[page.locator('input[data-test="validCodeInput"],input[type="password"]')]});await chmod(file,0o600);return {path:file};}
+  async screenshot(pageId){const page=await this.trackedPage(pageId);const dir=path.join(path.dirname(this.profileDir),'screenshots');await mkdir(dir,{recursive:true,mode:0o700});const file=path.join(dir,randomUUID()+'.png');const masks=await page.evaluate(screenshotMaskDOM);await page.screenshot({path:file,fullPage:true,mask:masks.map(selector=>page.locator(selector))});await chmod(file,0o600);return {path:file,sensitiveFieldsMasked:masks.length};}
   async openPage(url,{pageId,readySelectors=[]}={}){
     if(new URL(url).protocol!=='https:')throw Error('HTTPS_BROWSER_PAGE_REQUIRED');
     const b=await this.connect(),context=b.contexts()[0];
@@ -64,8 +65,31 @@ export class BrowserAdapter {
     let id=[...this.pageIds].find(([,p])=>p===page)?.[0];if(!id){id=randomUUID();this.pageIds.set(id,page);}
     return {pageId:id,pageUrl:page.url(),reused};
   }
-  async enterApplication({pageId,expectedTitle,accountSelector,expectedAccount,roleSelector}){
+  async enterApplication({pageId,expectedTitle,accountSelector,expectedAccount,roleSelector,entry,expectedRoleId,sessionAccountPageUrl}){
     const page=await this.trackedPage(pageId),before=new URL(page.url());
+    if(entry?.kind==='resume_modal'){
+      if(!expectedRoleId||entry.entryLabel!=='立即投递'||entry.editLabel!=='编辑'||!sessionAccountPageUrl||new URL(sessionAccountPageUrl).origin!==before.origin)throw Error('RESUME_ENTRY_CONTRACT_REQUIRED');
+      const accountPage=await this.existingPage(sessionAccountPageUrl);
+      const readAccount=async()=>(await accountPage.page.locator(accountSelector).innerText()).trim();
+      if(await readAccount()!==expectedAccount)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');
+      let target=page,clicked=false;
+      if(before.pathname===entry.detailPath){
+        if(before.searchParams.get(entry.detailIdParameter)!==expectedRoleId||!(await page.getByText(expectedTitle,{exact:true}).count()))throw Error('APPLICATION_ENTRY_ROLE_CHANGED');
+        if(await page.getByText(entry.editLabel,{exact:true}).count()!==1||!await page.getByText(entry.editLabel,{exact:true}).isVisible()){
+          const buttons=page.getByText(entry.entryLabel,{exact:true});
+          if(await buttons.count()!==entry.entryCount)throw Error('APPLICATION_ENTRY_BUTTON_CHANGED');
+          await buttons.nth(entry.entryIndex).click({timeout:10000});clicked=true;
+        }
+        const edit=page.getByText(entry.editLabel,{exact:true});await edit.waitFor({state:'visible',timeout:15000});if(await edit.count()!==1)throw Error('RESUME_EDIT_ENTRY_NOT_UNIQUE');
+        await edit.click({timeout:10000});const deadline=Date.now()+30000;
+        do{const context=(await this.connect()).contexts()[0];const matches=context.pages().filter(p=>{const u=new URL(p.url());return u.origin===before.origin&&u.pathname===entry.formPath&&u.searchParams.get(entry.formIdParameter)===expectedRoleId;});if(matches.length>1)throw Error('AMBIGUOUS_ROLE_FORM');if(matches.length===1){target=matches[0];break;}await new Promise(r=>setTimeout(r,50));}while(Date.now()<deadline);
+      }
+      const after=new URL(target.url());
+      if(after.origin!==before.origin||after.pathname!==entry.formPath||after.searchParams.get(entry.formIdParameter)!==expectedRoleId)throw Error('APPLICATION_ENTRY_RESULT_ROLE_CHANGED');
+      await target.locator(entry.formReadySelector).waitFor({state:'visible',timeout:15000});if(await readAccount()!==expectedAccount)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');
+      let id=[...this.pageIds].find(([,p])=>p===target)?.[0];if(!id){id=randomUUID();this.pageIds.set(id,target);}
+      return {pageId:id,pageUrl:after.href,roleIdentity:{parameter:entry.formIdParameter,value:after.searchParams.get(entry.formIdParameter)},roleTitle:null,entryClicked:clicked,accountMatched:true,submission:'not_performed'};
+    }
     const detailMatch=before.pathname.match(/^\/(campus|campushirecn)\/(?:m\/)?position\/(\d+)\/detail$/);
     const formMatch=before.pathname.match(/^\/(campus|campushirecn)\/resume\/(\d+)\/apply$/);
     const detail=!!detailMatch,form=!!formMatch,identity=detailMatch||formMatch;
@@ -86,10 +110,11 @@ export class BrowserAdapter {
     return {pageId,pageUrl:page.url(),roleTitle:expectedTitle,entryClicked:detail,accountMatched:true,submission:'not_performed'};
   }
   async existingPage(url){
+    if(!this.connection&&this.state==='new')throw Error('EXISTING_BROWSER_SESSION_REQUIRED');
     const browser=await this.connect();
     const pages=browser.contexts().flatMap(c=>c.pages()).filter(p=>p.url()===url);
     if(pages.length!==1)throw Error(pages.length?'AMBIGUOUS_PAGE':'EXISTING_PAGE_NOT_FOUND');
     return new PageAdapter(pages[0]);
   }
-  async tabs(){const b=await this.connect();return Promise.all(b.contexts().flatMap(c=>c.pages()).map(async p=>({url:p.url(),title:await p.title()})));}
+  async tabs(){if(!this.connection&&this.state==='new')return [];const b=await this.connect();return Promise.all(b.contexts().flatMap(c=>c.pages()).map(async p=>({url:p.url(),title:await p.title()})));}
 }
