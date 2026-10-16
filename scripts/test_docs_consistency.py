@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Rule-text regression tests: each review conflict stays resolved in exactly one place."""
 import re
+import json
 import unittest
 from pathlib import Path
 
@@ -185,8 +186,10 @@ class StructureTexts(unittest.TestCase):
         for needle in ('page-check', '15 分钟', 'privacy-info-fill', '--workbook', '逐字输入'):
             self.assertIn(needle, fill)
 
-    def test_versions_bumped(self):
-        self.assertTrue('version: "1.19.0"' in read('SKILL.md'))
+    def test_package_and_skill_versions_agree(self):
+        version = re.search(r'^  version: "([0-9]+\.[0-9]+\.[0-9]+)"$', read('SKILL.md'), re.M)
+        self.assertIsNotNone(version, 'Skill metadata must contain a semantic version')
+        self.assertEqual(version.group(1), json.loads(read('package.json'))['version'])
 
 
 if __name__ == '__main__':
