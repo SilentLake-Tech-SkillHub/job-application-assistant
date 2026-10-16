@@ -2,7 +2,7 @@
 name: job-application-assistant
 description: "Run a user-confirmed campus application batch starting from a confirmed role list (or named existing roles): pre-application JD and eligibility recheck, form preparation, review, authorized submission, receipt verification and tracker readback. Use when the user asks to prepare, review or submit campus applications; job discovery and information-only company research belong to the research workflow (e.g. campus-job-skills), not this Skill."
 metadata:
-  version: "1.18.0"
+  version: "1.18.1"
 ---
 
 # 岗位代投助手 / Job Application Assistant
