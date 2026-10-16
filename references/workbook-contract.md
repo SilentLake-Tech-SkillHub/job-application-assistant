@@ -4,7 +4,7 @@
 
 ## 表结构与标签：以 campus-job-skills 为准
 
-表结构、列序和标签值由 [campus-job-skills](https://github.com/SilentLake-Tech-SkillHub/campus-job-skills) 的 `【校招岗位收集与投递】campus-job-application/references/workbook-schema.md` 定义，盘点与汇报规则见同目录的 `research-progress.md`。本 Skill 不另写一套；本次共同授权的公司核对、计划明细、岗位目录、投递规则、内推信息五张共享明细表按公司交接契约维护，其他列、工作表或状态值不擅自新增；表结构变更须经用户批准，并在两个 Skill 里一起改。
+表结构、列序和标签值由 [campus-job-skills](https://github.com/SilentLake-Tech-SkillHub/campus-job-skills) 的 `【校招岗位收集与投递】campus-job-application/references/workbook-schema.md` 定义，盘点与汇报规则见同目录的 `research-progress.md`。本 Skill 不另写一套；本次共同授权的公司核对、计划明细、岗位目录、投递规则、内推信息、志愿明细、研究检查、条件明细、用户志愿九张共享明细表按公司交接契约维护，其他列、工作表或状态值不擅自新增；表结构变更须经用户批准，并在两个 Skill 里一起改。
 
 投递流程用到的三处标签：
 
