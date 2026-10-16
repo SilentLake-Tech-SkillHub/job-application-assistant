@@ -33,7 +33,7 @@ jobs:
         run: npm --prefix v2 test
       - name: V2 public configuration tests
         run: |
-          python v2/test/public_assets_test.py
+          python -m unittest discover -s v2/test -p "*_test.py"
       - name: Run CI (static, unit, smoke, browser full flow, stress)
         env:
           JOB_APPLICATION_TEST_NO_SANDBOX: "1"
