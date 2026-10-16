@@ -20,6 +20,7 @@ from pathlib import Path
 
 from batch_check import Batch
 from submit_pass import issue_submit_pass
+from company_handoff import check as check_company_handoff
 
 
 def run(workbook, batch_id, stage, url=None, root=None):
@@ -31,6 +32,7 @@ def run(workbook, batch_id, stage, url=None, root=None):
         errors += batch.consistency_errors()
     if stage in ('prepare', 'review', 'submit'):
         errors += batch.role_gate(url, stage)
+        errors += check_company_handoff(workbook, batch_id, url)
     result = {'阶段': stage, '岗位链接': url, '允许': not errors, '错误': list(dict.fromkeys(errors)),
               '检查时间': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')}
     if stage == 'closeout':

@@ -36,6 +36,7 @@ class LargeTrackerTest(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         names = [('合成压测%04d' % i, '桶%d' % (i % 3)) for i in range(COMPANIES)]
         cls.w = w = Workspace(cls.tmp.name, companies=names, targets='桶0=%d, 桶1=%d, 桶2=无' % (COMPANIES // 3, COMPANIES // 3))
+        w.review_enabled = False  # Bulk legacy-state fixtures; handoff exercised for the target below.
         wb = load_workbook(w.book)
         ws, plans = wb['中国大陆'], wb['校招计划']
         statuses = ['已有相关岗位记录', '无用户要求岗位', '无法访问校招页面', '无当年校招计划']
@@ -85,6 +86,7 @@ class LargeTrackerTest(unittest.TestCase):
         self.assertLess(elapsed, 60 * SCALE, '%.1fs' % elapsed)
         start = time.perf_counter()
         company, url, _ = next(u for u in self.urls if u[2] == 1)
+        self.w.review_enabled = True
         self.w.role_ready(company, url)
         result = gate(self.w.book, 'b1', 'prepare', url)
         self.assertTrue(result['允许'], result['错误'][:3])

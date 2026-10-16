@@ -2,7 +2,7 @@
 name: application-parallel-execution
 description: Coordinate user-approved parallel application preparation and role-version-approved submissions across independent recruiting account scopes. Use after an application batch chooses multiple AI; preserve exclusive ownership, approval evidence, receipts and serial tracker merging.
 metadata:
-  version: "1.2.0"
+  version: "1.1.0"
 ---
 
 # 多 Agent 平行准备与投递
@@ -50,3 +50,7 @@ The coordinator confirms old-owner stop, records the new owner and a new assignm
 An owner hands back its company and role evidence folders and any receipts to book, never a workbook copy. The coordinator accepts only work from the current `分工版本` and owner, books labels serially in the live tracker and reads back company, role, JD and status with `tracker_readback.py`. Keep unmerged receipts durable and prevent retries while merge is pending.
 
 Report assigned/checked/eligible companies, prepared forms, reviewed and approved versions, verified receipts, uncertain attempts, tracker-readback successes, blocked scopes and remaining quota separately. Do not claim a role submitted or a quota completed based on files, clicks or agent agreement.
+
+## 公司方案交接
+
+分派前读取[公司方案契约](../../references/company-review-handoff.md)，仅准备用户已确认且Excel/JSON一致的岗位。参与者不得用推荐替换最终选择；协调者每次刷新Excel后同步所有受影响批次导出，真实账号变化导致方案变化时更新HTML重新确认。

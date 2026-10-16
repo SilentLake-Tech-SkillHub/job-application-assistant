@@ -133,7 +133,7 @@ class StructureTexts(unittest.TestCase):
         for label in ('已有相关岗位记录', '无当年校招计划', '无用户要求岗位', '无法访问校招页面', '尚未推进', '待投递', '已提交'):
             self.assertTrue(label in contract, label)
         skill = read('SKILL.md')
-        self.assertTrue('盘点状态' in skill and 'there is no JSON ledger' in skill)
+        self.assertTrue('盘点状态' in skill and 'never an independently edited state ledger' in skill)
         for path, text in all_md().items():
             for stale in ('private batch record', 'batch ledger', 'validate_batch.py', 'preference_contract.py', '<batch.json>', 'batch.json'):
                 self.assertFalse(stale in text, (path, stale))
@@ -186,7 +186,7 @@ class StructureTexts(unittest.TestCase):
             self.assertIn(needle, fill)
 
     def test_versions_bumped(self):
-        self.assertTrue('version: "1.17.0"' in read('SKILL.md'))
+        self.assertTrue('version: "1.18.0"' in read('SKILL.md'))
 
 
 if __name__ == '__main__':

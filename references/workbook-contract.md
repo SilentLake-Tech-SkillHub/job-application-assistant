@@ -1,10 +1,10 @@
 # 岗位追踪表：唯一的状态记录
 
-岗位追踪表（Excel）是投递流程**唯一的状态记录**。没有 JSON 台账：公司扫没扫过、结论是什么、岗位投没投，都写在表里；过程证据（确认原话、截图、读回、审核包、回执）放在 [`投递证据/`](daily-batch.md)。
+岗位追踪表（Excel）是投递流程**唯一的状态记录**。公司交接 JSON 只从 Excel 同版本导出，不独立写状态：公司扫没扫过、结论是什么、岗位投没投，都写在表里；过程证据（确认原话、截图、读回、审核包、回执）放在 [`投递证据/`](daily-batch.md)。
 
 ## 表结构与标签：以 campus-job-skills 为准
 
-表结构、列序和标签值由 [campus-job-skills](https://github.com/SilentLake-Tech-SkillHub/campus-job-skills) 的 `【校招岗位收集与投递】campus-job-application/references/workbook-schema.md` 定义，盘点与汇报规则见同目录的 `research-progress.md`。本 Skill 不另写一套，也不新增列、工作表或状态值；表结构变更须经用户批准，并在两个 Skill 里一起改。
+表结构、列序和标签值由 [campus-job-skills](https://github.com/SilentLake-Tech-SkillHub/campus-job-skills) 的 `【校招岗位收集与投递】campus-job-application/references/workbook-schema.md` 定义，盘点与汇报规则见同目录的 `research-progress.md`。本 Skill 不另写一套；本次共同授权的公司核对、计划明细、岗位目录、投递规则、内推信息五张共享明细表按公司交接契约维护，其他列、工作表或状态值不擅自新增；表结构变更须经用户批准，并在两个 Skill 里一起改。
 
 投递流程用到的三处标签：
 
@@ -92,3 +92,7 @@
 这些检查只看结构，不能证明网站真的保存或收到了申请。
 
 偏好、城市排序和逐岗证据的规则见[偏好证据契约](preference-contract.md)；默认岗位次序与公司动作前确认见[同一契约](preference-contract.md#默认次序与公司动作前确认)。
+
+## 公司方案导出与刷新
+
+[公司核对交接](company-review-handoff.md)规定的 `岗位交接/<批次>/公司方案.json` 与 `填写方案.json` 用途不同：前者从 Excel 导出计划/目录/规则/内推/最终选择及现有表记录，供交接校验；后者只是表单填写缓存。`tracker_readback.py` 成功后自动重导已建立的所有批次公司方案；其他Excel编辑路径确认读回后也必须重新导出前者，每次规则刷新、选岗改变、回执入账或其他工作簿变化后都同步。JSON缺失或陈旧不改变Excel事实，但阻断下一Prepare/Review/Submit。禁止从旧JSON回写覆盖主表或伪造确认。

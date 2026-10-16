@@ -78,6 +78,7 @@ class FullFlow(unittest.TestCase):
             cls.out.mkdir(parents=True, exist_ok=True)
             shutil.copytree(cls.w.root / '投递证据', cls.out / '投递证据', dirs_exist_ok=True)
             shutil.copy(cls.w.book, cls.out / cls.w.book.name)
+            shutil.copytree(cls.w.root / '岗位交接', cls.out / '岗位交接', dirs_exist_ok=True)
             (cls.out / 'flow-log.json').write_text(json.dumps(cls.log, ensure_ascii=False, indent=2), encoding='utf-8')
         cls.tmp.cleanup()
 
@@ -182,6 +183,10 @@ class FullFlow(unittest.TestCase):
         # Company order not confirmed yet: forms stay closed.
         self.gate('prepare', self.urls['101']['url'], allowed=False)
         self.note(a_dir, '次序确认.md', ['决定: 不变', '依据: ' + w.say('order', '合成公司两个岗位次序不变')])
+        w.confirm_company_review(A, limit=2)
+        self.page.goto((w.root / '岗位交接' / 'e2e' / '公司核对.html').as_uri())
+        self.assertIn('合成公司', self.page.locator('body').inner_text())
+        self.shot(a_dir, '公司HTML核对.png')
 
     def m2_prepare(self):
         self.login_profile()
@@ -193,10 +198,14 @@ class FullFlow(unittest.TestCase):
 
     def login_profile(self):
         """The user logs in once in the Playwright profile; the executor reuses that login."""
-        ctx = self.pw.chromium.launch_persistent_context(str(self.profile), headless=True, executable_path=os.environ.get('CHROME_EXECUTABLE') or None)
+        from browser_session import connect
+        browser, ctx, _ = connect(self.pw, self.profile, headless=True,
+                                  executable_path=os.environ.get('CHROME_EXECUTABLE') or None)
+        self.profile_browser = browser
         page = ctx.new_page(); page.goto(self.base + '/login')
         page.get_by_role('button', name='登录').click(); page.wait_for_url(self.base + '/center')
-        ctx.close()
+        # Keep the dedicated synthetic session alive, as the current executor does.
+
 
     def executor(self, plan_path, *extra):
         before = sha(self.w.book)

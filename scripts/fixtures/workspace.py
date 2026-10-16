@@ -88,6 +88,9 @@ class Workspace:
         wb = load_workbook(self.book)
         fn(wb)
         wb.save(self.book)
+        from company_handoff import paths, export
+        if (paths(self.book, self.batch) / '公司方案.json').exists():
+            export(self.book, self.batch)
 
     def tag(self, company, status, note=None):
         def fn(wb):
@@ -165,7 +168,26 @@ class Workspace:
         folder.mkdir(parents=True, exist_ok=True)
         (folder / '岗位包.md').write_text('公司: ' + company + '\n直链: ' + url + '\n', encoding='utf-8')
         (folder / '资格核对.md').write_text('结论: ' + conclusion + '\n', encoding='utf-8')
+        if getattr(self, 'review_enabled', True) is False:
+            return folder
+        self.confirm_company_review(company)
         return folder
+
+    def confirm_company_review(self, company, limit=None):
+        # Synthetic explicit HTML confirmation for gate integration tests only.
+        from test_company_handoff import sample_company
+        from company_handoff import write, confirm, paths, sha, read
+        company_data = sample_company(self.book, company, company)
+        if limit is not None:
+            next(r for r in company_data['rules'] if r['dimension'] == 'company')['limit'] = limit
+        try:
+            prior = [c for c in read(self.book, self.batch) if c['company_key'] == company]
+        except ValueError:
+            prior = []
+        company_data['version'] = 'v' + str(int(prior[0]['version'][1:]) + 1) if prior else 'v1'
+        write(self.book, self.batch, {'companies': [company_data]})
+        evidence = self.say('company-review-' + company, 'synthetic: 已核对公司完整HTML及最终选择')
+        confirm(self.book, self.batch, company, evidence, sha(paths(self.book, self.batch) / '公司核对.html'))
 
     def role_prepared(self, company, url, answer='synthetic answer'):
         folder = self.role_ready(company, url)
