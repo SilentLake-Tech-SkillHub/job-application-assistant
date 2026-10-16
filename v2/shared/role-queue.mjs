@@ -41,6 +41,7 @@ export class RoleQueue{
     const status=r.applicationStatus||c.existing_data?.find(x=>x.values?.['岗位链接']===r.url)?.values?.['投递状态'];
     if(['已提交','submitted','receipt_verified'].includes(status)){protectedRoles.push({companyId,roleId,reason:'already_submitted'});continue;}
     if(!['待投递','not_submitted'].includes(status))throw Error('ROLE_APPLICATION_STATE_UNRESOLVED');
+    if(['submission_uncertain','application_blocked','user_skipped'].includes(r.applicationOutcome?.event)){protectedRoles.push({companyId,roleId,reason:'outcome_requires_resolution'});continue;}
     tasks.push({taskId:randomUUID(),companyId,roleId,title:r.title,url:u.href,applyUrl,order:tasks.length+1,companyOrder:sequence?sequence.indexOf(c.companyId||c.company_key)+1:c.order||1,roleOrder:r.order});
    }
   }

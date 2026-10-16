@@ -2,7 +2,7 @@
 
 ## 职责边界
 
-上游提供已确认的公司方案 JSON。新版 Skill/MCP 直接调用它，不负责 Excel→JSON、Excel读取/写入/同步或Excel校验；没有这类运行依赖。没有特殊的测试专用输入分支。`readCompanyPlan` 是独立输入适配接口，现支持本机 JSON 文件和直接 JSON 对象，后续可替换为上游服务适配器。
+上游提供已确认的公司方案 JSON。入口直接消费它，不负责选岗阶段的 Excel→JSON 转换；投递结果收尾由 MCP 内部按固定事件同步 Excel 和 JSON，详见 application-outcome.md。没有特殊的测试专用输入分支。`readCompanyPlan` 是独立输入适配接口，现支持本机 JSON 文件和直接 JSON 对象，后续可替换为上游服务适配器。
 
 `role_queue_import` 参数二选一：`{rolesFile}` 或 `{companyPlan}`。可用 `companyOrder` 传入本批已经确认的公司顺序。只验证上游JSON自身的确认标记/引用、版本、最终选岗、次序、URL范围和已投状态，然后保存冻结执行快照。它不会自行确认方案，不把 Agent 推荐当用户选择。
 

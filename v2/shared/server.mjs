@@ -9,6 +9,8 @@ import { BrowserAdapter } from './browser.mjs';
 import { BrokerBrowserAdapter } from './browser-rpc.mjs';
 import { loadProfile, updateProfile, registerObservedQuestions, registerPlannedQuestions, registerTemplateContract, assertQuestionsMapped, resolveProfile, profileStatus, recordProfileAnswers, mapProfileQuestions } from './profile.mjs';
 import {queueFromEnv} from './queue-config.mjs';
+import {outcomeSchema} from './application-outcome.mjs';
+import {closeApplication} from './application-closeout.mjs';
 import {accountMatches,resolveAccount} from '../login/contracts.mjs';
 
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -50,6 +52,7 @@ const engine=new Engine({store,companies:catalog.companies,browser,refreshCompan
 const server=new McpServer({name:'recruiting-form-batch',version:'0.1.0'});
 const output=data=>({content:[{type:'text',text:JSON.stringify(data)}]});
 const wrap=(fn,refresh=true)=>async args=>{try{if(refresh)await refreshBindings();return output(await fn(args));}catch(e){return {isError:true,...output({error:/^[A-Z_]+(?::[a-z0-9_-]+)?$/.test(e.message)?e.message:'OPERATION_FAILED'})};}};
+server.registerTool('application_closeout',{description:'固定事件收尾：校验证据并更新业务标签，自动同步Excel与JSON并读回。同步失败保留结果，同事件重试只恢复同步，不提交网站。',inputSchema:{rolesFile:z.string().min(1),expectedHash:z.string().regex(/^[a-f0-9]{64}$/),outcome:outcomeSchema}},wrap(args=>closeApplication(args,{configFile:process.env.RECRUITING_TRACKER_CONFIG||(profileFile?path.join(path.dirname(profileFile),'tracker-config.private.json'):null)}),false));
 const queueTask={queueId:z.string().uuid(),queueHash:z.string().length(64),taskId:z.string().uuid()};
 server.registerTool('role_prepare',{description:'从冻结岗位队列取目标；核对登录后已返回原岗位，离线编译全部字段后填写并独立核验。仅返回异常与计数，不提交。',inputSchema:{...queueTask,authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1),sensitiveFields:z.boolean().default(false),uploads:z.boolean().default(false)})}},wrap(async args=>{
   const {t,state,template}=await boundRole(args),profile=await loadProfile(profileFile);
