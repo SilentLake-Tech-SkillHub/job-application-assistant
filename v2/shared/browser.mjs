@@ -20,12 +20,12 @@ export class BrowserAdapter {
     // Share the in-flight connection too: concurrent company jobs must never create parallel prompts.
     this.connecting=(async()=>{
       let endpoint=this.endpoint;
-      if(endpoint==='managed-chrome'){
+      if(endpoint==='managed-chrome'||endpoint==='managed-iab'){
         const forbidden=path.join(homedir(),'Library/Application Support/Google/Chrome');
         if(!this.profileDir||!path.isAbsolute(this.profileDir)||path.resolve(this.profileDir)===forbidden||path.resolve(this.profileDir).startsWith(forbidden+path.sep))throw Error('PRIVATE_AUTOMATION_PROFILE_REQUIRED');
         await mkdir(this.profileDir,{recursive:true,mode:0o700});await chmod(this.profileDir,0o700);
         this.state='connecting';this.connectionAttempts++;
-        const context=await this.launcher(this.profileDir,{channel:'chrome',headless:false,viewport:null});
+        const context=await this.launcher(this.profileDir,{...(endpoint==='managed-chrome'?{channel:'chrome'}:{}),headless:false,viewport:null});
         this.connection={contexts:()=>[context],on:(event,fn)=>{if(event==='disconnected')context.on('close',fn);}};
         this.state='connected';context.on('close',()=>{this.state='disconnected';this.connection=null;});
         return this.connection;
@@ -44,7 +44,7 @@ export class BrowserAdapter {
     })();
     try{return await this.connecting;}catch(error){this.state='failed';throw error;}finally{this.connecting=null;}
   }
-  status(){return {state:this.state,mode:this.endpoint==='managed-chrome'?'managed':'cdp',connectionAttempts:this.connectionAttempts,automaticRetries:0,driverRevision:'2026-10-17.4'};}
+  status(){return {state:this.state,mode:this.endpoint==='managed-chrome'?'managed':this.endpoint==='managed-iab'?'iab':'cdp',connectionAttempts:this.connectionAttempts,automaticRetries:0,driverRevision:'2026-10-17.4'};}
   async trackedPage(id){const page=this.pageIds.get(id);if(!page||page.isClosed())throw Error('ROLE_BROWSER_PAGE_LOST');return page;}
   async pageIdentity(id){const page=await this.trackedPage(id);return {pageId:id,pageUrl:page.url()};}
   async roleSnapshot({pageId,roleSelector,accountSelector,loginRoot,roleIdentity}){

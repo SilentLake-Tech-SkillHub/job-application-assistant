@@ -29,7 +29,7 @@ const plan={planId:z.string().uuid(),planHash:z.string().length(64)};
 const authorization=z.object({login:z.literal(true),evidence:z.string().min(1)});
 const queueTask={queueId:z.string().uuid(),queueHash:z.string().length(64),taskId:z.string().uuid()};
 server.registerTool('runtime_info',{description:'只读当前登录MCP实际版本，不连接或重启浏览器。',annotations:{readOnlyHint:true}},wrap(()=>({version:packageInfo.version,capabilities:['role_queue_import','role_open','role_resume','role_enter_application','human_verification','user_operated_session_identity'],browserAccess:false})));
-server.registerTool('role_queue_import',{description:'消费上游已确认的公司方案JSON（文件或对象），读取用户次序和直达链接并冻结队列；不处理Excel。',inputSchema:{rolesFile:z.string().optional(),companyPlan:z.record(z.unknown()).optional(),companyOrder:z.array(z.string()).optional()}},wrap(a=>queues.import(a)));
+server.registerTool('role_queue_import',{description:'消费上游已确认的公司方案JSON（文件或对象），读取用户次序和直达链接并冻结队列；不处理Excel。',inputSchema:{rolesFile:z.string().optional(),companyPlan:z.record(z.unknown()).optional(),companyOrder:z.array(z.string()).optional(),parallelRoles:z.boolean().optional(),authorizationRef:z.string().optional()}},wrap(a=>queues.import(a)));
 server.registerTool('role_open',{description:'按冻结队列顺序直接打开岗位；需要登录时返回绑定原岗位的登录计划，不从公司首页选岗。',inputSchema:queueTask},wrap(a=>flow.open(a)));
 server.registerTool('role_resume',{description:'用户完成登录后，返回原岗位原标签并核对账号、岗位标题和完整URL；不填写或提交。',inputSchema:queueTask},wrap(a=>flow.resume(a)));
 server.registerTool('role_enter_application',{description:'在冻结队列的岗位详情页点击真实投递入口并核对返回的申请页；要求已有同账号登录，不发码、不提交简历。',inputSchema:queueTask},wrap(a=>flow.enter(a)));
@@ -44,7 +44,7 @@ server.registerTool('login_accept_privacy',{description:'仅在用户明确接�
 server.registerTool('login_request_sms',{description:'通过真实按钮请求短信，限制重发次数与冷却时间；返回用户验证码或图形验证交接。绝不存验证码。',inputSchema:{...plan,authorization,acceptanceId:z.string().uuid()}},wrap(a=>engine.send(a)));
 server.registerTool('login_verify_otp',{description:'仅使用用户本次提供的临时短信码，真实填写并点击登录，核对账号及登录页消失；不落盘验证码。',inputSchema:{...plan,authorization,challengeId:z.string().uuid(),code:z.string().regex(/^\d{4,8}$/)}},wrap(a=>engine.verify(a)));
 server.registerTool('login_resume_verification',{description:'用户手动完成图形验证码后只读核验；验证码仍在则继续交接，消失后核实短信倒计时。不拖动、不重发短信。',inputSchema:{...plan,challengeId:z.string().uuid()},annotations:{readOnlyHint:true}},wrap(a=>engine.resumeVerification(a)));
-server.registerTool('login_batch_prepare',{description:'一次调用准备多个公司的登录；同账号 origin 串行，集中返回需用户参与的步骤。不会批量请求短信。',inputSchema:{tasks:z.array(z.object(plan)).min(1).max(20),authorization}},wrap(a=>engine.batch(a)));
+server.registerTool('login_batch_prepare',{description:'一次调用准备多个公司的登录；同账号 origin 串行，集中返回需用户参与的步骤。不会批量请求短信。',inputSchema:{tasks:z.array(z.object(plan)).min(1).max(20),concurrency:z.number().int().min(1).max(5).default(3),authorization}},wrap(a=>engine.batch(a)));
 server.registerTool('login_run_status',{description:'读取私有登录结果，不返回手机号或验证码。',inputSchema:{runId:z.string().uuid()},annotations:{readOnlyHint:true}},wrap(a=>engine.store.get('runs',a.runId)));
 const verificationScope=async a=>{const c=await engine.company(a.companyId);if(new URL(a.pageUrl).origin!==c.origin)throw Error('LOGIN_PAGE_SCOPE_MISMATCH');return engine.locked(c,()=>browser.broker.request(a.method,a));};
 server.registerTool('login_verification_inspect',{description:'只读当前影石验证码 iframe 的可见说明和控件几何，不读取隐藏答案、不操作挑战。需要 V2 broker。',inputSchema:location,annotations:{readOnlyHint:true}},wrap(a=>verificationScope({...a,method:'verificationInspect'})));

@@ -46,11 +46,13 @@ export class RoleQueue{
     tasks.push({taskId:randomUUID(),companyId,roleId,title:r.title,url:u.href,applyUrl,order:tasks.length+1,companyOrder:sequence?sequence.indexOf(c.companyId||c.company_key)+1:c.order||1,roleOrder:r.order});
    }
   }
-  const upstreamMode=input.execution?.mode||'sequential';if(!['sequential','parallel_roles'].includes(upstreamMode))throw Error('INVALID_EXECUTION_MODE');
-  if(upstreamMode==='parallel_roles'&&!input.execution?.authorizationRef)throw Error('PARALLEL_ROLE_AUTHORIZATION_REQUIRED');
+  const upstreamMode=input.execution?.mode||(args.parallelRoles?'parallel_roles':'sequential');if(!['sequential','parallel_roles'].includes(upstreamMode))throw Error('INVALID_EXECUTION_MODE');
+  const parallelAuth=input.execution?.authorizationRef||args.authorizationRef||args.batchPolicy?.authorizationRef;
+  if(upstreamMode==='parallel_roles'&&!parallelAuth)throw Error('PARALLEL_ROLE_AUTHORIZATION_REQUIRED');
   if(args.batchPolicy&&(!args.batchPolicy.authorizationRef||args.batchPolicy.mode!=='parallel_companies'))throw Error('COMPANY_BATCH_POLICY_REQUIRED');
   const executionMode=args.batchPolicy?'parallel_companies':upstreamMode;
-  const queue={executionMode,parallelRoles:upstreamMode==='parallel_roles',batchPolicy:args.batchPolicy||null,id:randomUUID(),createdAt:new Date().toISOString(),inputKind:legacy?'confirmed-company-plan-v1':'confirmed-company-plan',batchId:input.batchId||input.batch_id,version:input.version||1,source,inputHash:digest(input),input,tasks,protectedRoles,submission:'forbidden'};
+  const parallelRoles=upstreamMode==='parallel_roles'||Boolean(args.batchPolicy?.parallelRoles);
+  const queue={executionMode,parallelRoles,batchPolicy:args.batchPolicy||null,id:randomUUID(),createdAt:new Date().toISOString(),inputKind:legacy?'confirmed-company-plan-v1':'confirmed-company-plan',batchId:input.batchId||input.batch_id,version:input.version||1,source,inputHash:digest(input),input,tasks,protectedRoles,submission:'forbidden'};
   queue.queueHash=digest(queue);await this.put(queue.id,queue);return this.public(queue);
  }
  public(q){return {queueId:q.id,queueHash:q.queueHash,inputKind:q.inputKind,executionMode:q.executionMode,parallelRoles:q.parallelRoles,tasks:q.tasks,protectedRoles:q.protectedRoles,browserAccess:false,submission:'forbidden'};}

@@ -14,7 +14,7 @@ export class LoginEngine{
   async profile(){return JSON.parse(await readFile(this.profileFile,'utf8'));}
   async planState(c,p){const url=p.taskContext?(await this.browser.broker.request('pageIdentity',{pageId:p.taskContext.pageId})).pageUrl:p.pageUrl;return this.state(c,url);}
   async open({companyId}){const c=await this.company(companyId);return this.locked(c,async()=>{const result=await this.browser.open(c.origin+c.loginPath);await this.browser.ready(c,result.pageUrl);return {...result,companyId,ready:true,applicationSubmission:'not_performed'};});}
-  async locked(c,fn){const release=await acquireLease(leasePath(this.leaseRoot,'recruiting-origin:'+c.origin),{busyCode:'COMPANY_ALREADY_RUNNING'});try{return await fn();}finally{await release();}}
+  async locked(c,fn,{waitMs=0}={}){const release=await acquireLease(leasePath(this.leaseRoot,'recruiting-origin:'+c.origin),{waitMs,busyCode:'COMPANY_ALREADY_RUNNING'});try{return await fn();}finally{await release();}}
   async state(c,preferred){const url=await this.browser.locate(c,preferred);assertScope(c,url);const o=await this.browser.observe(c,url),account=resolveAccount(await this.profile(),c);return {...o,accountMatched:matchesAccount(o.account,account),accountMismatch:!!o.account&&!matchesAccount(o.account,account),unknownPopup:o.dialogs>0&&o.popupTitle!==c.popups?.[0]?.title};}
   publicState(o){return {pageUrl:o.url,readAt:o.readAt,status:o.accountMismatch?'account_mismatch':o.accountMatched&&!o.form?'authenticated':o.challenges?'needs_user_verification':o.unknownPopup?'unknown_popup':o.form?'logged_out':'unknown',accountMatched:o.accountMatched,loginFormAbsent:!o.form,popup:o.dialogs?{title:o.popupTitle,known:!o.unknownPopup}:null,applicationSubmission:'not_performed'};}
   async inspect({companyId,pageUrl}){const c=await this.company(companyId);assertScope(c,pageUrl);return this.locked(c,async()=>{const o=await this.state(c,pageUrl);return this.publicState(o);});}
@@ -127,5 +127,22 @@ export class LoginEngine{
     const result=this.publicState(o);if(result.status==='logged_out')result.status=o.errors?'otp_rejected':'login_unverified';ch.status=result.status;await this.store.put('challenges',c.companyId,ch);
     return this.record(c,'verify',{...result,readyForApplication:canHandoff(result),otpStored:false});
   });}
-  async batch({tasks,authorization}){if(!tasks?.length||tasks.length>20)throw Error('INVALID_LOGIN_BATCH');const results=[];for(const t of tasks){try{results.push(await this.prepare({...t,authorization}));}catch(e){results.push({planId:t.planId,status:'needs_attention',errorCode:safeCode(e)});}}return {results,applicationSubmission:'not_performed'};}
+  async batch({tasks,concurrency=3,authorization}){
+    if(!tasks?.length||tasks.length>20)throw Error('INVALID_LOGIN_BATCH');
+    const results=new Array(tasks.length),groups=new Map();
+    for(const [index,t]of tasks.entries()){
+      let key=`idx:${index}`;
+      try{const p=await this.store.get('plans',t.planId),c=await this.company(p.companyId);key=c.origin;}catch{}
+      if(!groups.has(key))groups.set(key,[]);groups.get(key).push({t,index});
+    }
+    const queues=[...groups.values()];let cursor=0;
+    await Promise.all(Array.from({length:Math.min(concurrency,queues.length)},async()=>{
+      while(cursor<queues.length){
+        for(const {t,index}of queues[cursor++]){
+          try{results[index]=await this.prepare({...t,authorization});}catch(e){results[index]={planId:t.planId,status:'needs_attention',errorCode:safeCode(e)};}
+        }
+      }
+    }));
+    return {results,applicationSubmission:'not_performed'};
+  }
 }

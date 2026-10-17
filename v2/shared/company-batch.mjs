@@ -5,14 +5,14 @@ const active=new Set(['dispatched','running','waiting_for_user']);
 // MCP acquires companies and splits channels. Dispatch is never browser success.
 export class CompanyBatch{
  constructor({store,queues,catalog,clock=()=>Date.now(),leaseRoot=defaultLeaseRoot()}){Object.assign(this,{store,queues,catalog,clock,leaseRoot});}
- async create({rolesFile,companyPlan,companyOrder,authorizationRef,companiesPerChannel=10}){
+ async create({rolesFile,companyPlan,companyOrder,authorizationRef,companiesPerChannel=10,parallelRoles=false}){
   if(!authorizationRef?.trim())throw Error('BATCH_AUTHORIZATION_REQUIRED');
   if(!Number.isInteger(companiesPerChannel)||companiesPerChannel<1||companiesPerChannel>10)throw Error('INVALID_COMPANY_CHANNEL_CAPACITY');
-  const queue=await this.queues.import({rolesFile,companyPlan,companyOrder,batchPolicy:{mode:'parallel_companies',authorizationRef,companiesPerChannel,channels:['chrome','iab']}}),companies=[];
+  const queue=await this.queues.import({rolesFile,companyPlan,companyOrder,batchPolicy:{mode:'parallel_companies',authorizationRef,companiesPerChannel,channels:['chrome','iab'],parallelRoles:!!parallelRoles}}),companies=[];
   for(const task of queue.tasks){let c=companies.find(x=>x.companyId===task.companyId);if(!c){const entry=this.catalog.find(x=>x.id===task.companyId);c={companyId:task.companyId,loginScope:entry.loginScope||entry.origin,tasks:[],status:'pending',channel:null};companies.push(c);}c.tasks.push(task);}
-  const body={schemaVersion:1,id:randomUUID(),queueId:queue.queueId,queueHash:queue.queueHash,authorizationRef,companiesPerChannel,channels:['chrome','iab'],companies,createdAt:new Date(this.clock()).toISOString(),submission:'forbidden'};
+  const body={schemaVersion:1,id:randomUUID(),queueId:queue.queueId,queueHash:queue.queueHash,authorizationRef,companiesPerChannel,parallelRoles:queue.parallelRoles,channels:['chrome','iab'],companies,createdAt:new Date(this.clock()).toISOString(),submission:'forbidden'};
   const batchHash=digest(body);await this.store.put('runs',body.id,{...body,batchHash,revision:0});
-  return {batchId:body.id,batchHash,queue,companies:companies.map(({tasks,...c})=>({...c,roleCount:tasks.length})),companiesPerChannel,submission:'forbidden'};
+  return {batchId:body.id,batchHash,queue,companies:companies.map(({tasks,...c})=>({...c,roleCount:tasks.length})),companiesPerChannel,parallelRoles:queue.parallelRoles,submission:'forbidden'};
  }
  async get({batchId,batchHash}){const b=await this.store.get('runs',batchId);if(b.batchHash!==batchHash)throw Error('BATCH_HASH_MISMATCH');await this.queues.get({queueId:b.queueId,queueHash:b.queueHash});return b;}
  async locked(args,fn){const release=await acquireLease(leasePath(this.leaseRoot,'company-dispatch:'+this.store.root),{waitMs:30000,busyCode:'COMPANY_BATCH_BUSY'});try{return await fn(await this.get(args));}finally{await release();}}

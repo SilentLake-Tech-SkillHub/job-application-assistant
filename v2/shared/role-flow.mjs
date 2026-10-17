@@ -25,7 +25,7 @@ export class RoleFlow{
   const opened=await this.browser.request('openPage',{pageUrl:x.t.url,...(prior?.pageId?{pageId:prior.pageId}:{}),readySelectors:[x.c.fields?.root,x.c.account.selector,x.plan.readySelector].filter(Boolean)});
   const state={queueId:x.q.id,taskId:x.t.taskId,pageId:opened.pageId,originalRoleUrl:x.t.url,returnUrl:x.target,expectedTitle:x.t.title,status:'opened',openedAt:new Date().toISOString()};await this.queues.put(x.t.taskId,state);
   return this.assess(x,state);
- });}
+ },{waitMs:x.q.parallelRoles||x.q.executionMode==='parallel_roles'?30000:0});}
  async assess(x,state){const s=await this.snapshot(x,state.pageId),account=resolveAccount(await this.login.profile(),x.c);
   if(s.account&&!matchesAccount(s.account,account))throw Error('LOGIN_ACCOUNT_MISMATCH');
   if(matchesAccount(s.account,account)&&!s.loginFormPresent){
@@ -46,7 +46,7 @@ export class RoleFlow{
   state.status='needs_login';state.loginPlan=plan;await this.queues.put(x.t.taskId,state);
   return {status:'needs_login',taskId:state.taskId,pageId:state.pageId,originalRoleUrl:state.originalRoleUrl,returnUrl:state.returnUrl,loginPlan:plan,submission:'not_performed'};
  }
- async resume(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{const state=await this.queues.read(x.t.taskId);if(state.queueId!==x.q.id||state.returnUrl!==x.target||state.expectedTitle!==x.t.title)throw Error('ROLE_TASK_STATE_CHANGED');return this.assess(x,state);});}
+ async resume(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{const state=await this.queues.read(x.t.taskId);if(state.queueId!==x.q.id||state.returnUrl!==x.target||state.expectedTitle!==x.t.title)throw Error('ROLE_TASK_STATE_CHANGED');return this.assess(x,state);},{waitMs:x.q.parallelRoles||x.q.executionMode==='parallel_roles'?30000:0});}
  async enter(args){const {q,t}=await this.queues.task(args),c=await this.login.company(t.companyId);return this.login.locked(c,async()=>{
   let prior;try{prior=await this.queues.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
   if(prior?.queueId&&prior.queueId!==q.id)throw Error('ROLE_TASK_STATE_CHANGED');
@@ -63,6 +63,6 @@ export class RoleFlow{
   if(new URL(result.pageUrl).origin!==c.origin||(c.entry?.kind==='resume_modal'?result.roleIdentity?.value!==t.roleId:result.roleTitle!==t.title)||result.accountMatched!==true)throw Error('APPLICATION_ENTRY_RESULT_CHANGED');
   await this.queues.put(t.taskId,{...prior,queueId:q.id,taskId:t.taskId,pageId:result.pageId||opened.pageId,originalRoleUrl:t.url,applicationUrl:result.pageUrl,returnUrl:result.pageUrl,expectedTitle:t.title,status:'ready_to_fill',accountMatched:true,entryVerifiedAt:new Date().toISOString()});
   return {...result,status:'ready_to_fill',taskId:t.taskId,applicationUrl:result.pageUrl,submission:'not_performed'};
- });}
- async screenshot(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{const state=await this.queues.read(x.t.taskId),s=await this.snapshot(x,state.pageId);if(new URL(s.pageUrl).origin!==x.c.origin)throw Error('ROLE_SCREENSHOT_SCOPE_CHANGED');return this.browser.request('screenshot',{pageId:state.pageId});});}
+ },{waitMs:q.parallelRoles||q.executionMode==='parallel_roles'?30000:0});}
+ async screenshot(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{const state=await this.queues.read(x.t.taskId),s=await this.snapshot(x,state.pageId);if(new URL(s.pageUrl).origin!==x.c.origin)throw Error('ROLE_SCREENSHOT_SCOPE_CHANGED');return this.browser.request('screenshot',{pageId:state.pageId});},{waitMs:x.q.parallelRoles||x.q.executionMode==='parallel_roles'?30000:0});}
 }

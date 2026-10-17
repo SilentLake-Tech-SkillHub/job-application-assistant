@@ -116,7 +116,7 @@ export class PageAdapter {
     action=await this.resolveSpec(action);
     const l=this.page.locator(action.selector);
     if(await l.count()!==1)throw Error('AMBIGUOUS_ACTION_TARGET');
-    const meta=await l.evaluate(n=>({tag:n.tagName,type:n.type||n.getAttribute('type'),role:n.getAttribute('role'),label:n.getAttribute('aria-label')||n.textContent?.trim(),readonly:n.readOnly}));
+    const meta=await l.evaluate(n=>({tag:n.tagName,type:n.type||n.getAttribute('type'),role:n.getAttribute('role'),label:n.getAttribute('aria-label')||n.querySelector(':scope > .ant-form-item-label')?.innerText?.replace(/[＊*\s:：]+$/gu,'').trim()||n.textContent?.trim(),readonly:n.readOnly}));
     if(['ant_dropdown','ant_dropdown_inspect'].includes(action.method)){
       if(meta.role!=='combobox')throw Error('ANT_COMBOBOX_REQUIRED');
       const initial=(await l.innerText()).trim();await l.click({timeout:10000});
@@ -168,7 +168,7 @@ export class PageAdapter {
     }
     if(action.method==='fill'){
       if(meta.readonly||['date','month','password','file','radio','checkbox'].includes(meta.type))throw Error('CONTROL_REQUIRES_SPECIFIC_ACTION');
-      await l.fill(String(value),{timeout:10000});await l.press('Tab');return;
+      await l.fill(String(value),{timeout:10000});if(action.selector==='.ant-calendar-input')await l.press('Enter');await l.press('Tab');return;
     }
     if(action.method==='select'){if(meta.tag!=='SELECT')throw Error('NATIVE_SELECT_REQUIRED');await l.selectOption({label:String(value)});return;}
     if(action.method==='dropdown'){
