@@ -7,7 +7,7 @@ export class LoginBrowser{
   open(url){return this.broker.request('openPage',{pageUrl:url});}
   async ready(c,url){const page=await this.broker.existingPage(url);await page.wait([c.fields?.root,c.account.selector,c.entry?.formReadySelector].filter(Boolean).join(','));}
   async locate(c,preferred){
-    const tabs=(await this.broker.tabs()).filter(t=>{try{const u=new URL(t.url);return u.origin===c.origin&&c.allowedPaths.some(p=>u.pathname.startsWith(p));}catch{return false;}});
+    const tabs=(await this.broker.request('tabs',{pageUrl:preferred||c.origin})).filter(t=>{try{const u=new URL(t.url);return u.origin===c.origin&&c.allowedPaths.some(p=>u.pathname.startsWith(p));}catch{return false;}});
     const exact=tabs.filter(t=>t.url===preferred);
     if(exact.length===1)return exact[0].url;
     if(tabs.length!==1)throw Error(tabs.length?'LOGIN_PAGE_AMBIGUOUS':'LOGIN_PAGE_NOT_OPEN');return tabs[0].url;

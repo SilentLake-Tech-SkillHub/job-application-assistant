@@ -17,7 +17,7 @@ export class RoleQueue{
  async read(id){return JSON.parse(await readFile(this.file(id),'utf8'));}
  async import(args){
   const {input,source}=await this.inputAdapter(args);let tasks=[],protectedRoles=[];
-  const legacy=input.schema_version===1,native=input.schemaVersion===1;
+  const legacy=(input.schema_version===1||input.schema_version===2),native=input.schemaVersion===1;
   if((!legacy&&!native)||!Array.isArray(input.companies)||!(input.batchId||input.batch_id))throw Error('INVALID_COMPANY_PLAN_JSON');
   if(native&&(!input.version||input.confirmation?.status!=='confirmed'||!input.confirmation.reference))throw Error('COMPANY_PLAN_CONFIRMATION_REQUIRED');
   const selected=input.companies.filter(c=>Array.isArray(c.roles)&&c.roles.some(r=>r.selected===true));
@@ -28,7 +28,8 @@ export class RoleQueue{
   selected.sort((a,b)=>sequence?sequence.indexOf(a.companyId||a.company_key)-sequence.indexOf(b.companyId||b.company_key):(a.order||1)-(b.order||1));
   const identities=new Set(),urls=new Set();
   for(const c of selected){
-   if(legacy&&(!c.version||!c.confirmed_at||!c.confirmation_ref||!c.confirmed_digest))throw Error('COMPANY_PLAN_CONFIRMATION_REQUIRED');
+   const legacyConfirmed=(c.confirmed_at&&c.confirmation_ref&&c.confirmed_digest)||(c.review_mode==='frozen'&&c.reviewed_at&&c.review_evidence_ref&&c.review_evidence_sha256&&c.review_html_sha256&&c.review_business_sha256);
+   if(legacy&&(!c.version||!legacyConfirmed))throw Error('COMPANY_PLAN_CONFIRMATION_REQUIRED');
    const roles=c.roles.filter(r=>r.selected===true),orders=new Set();
    for(const r of roles){if(!Number.isInteger(r.order)||r.order<1||orders.has(r.order))throw Error('INVALID_CONFIRMED_ROLE_ORDER');orders.add(r.order);}
    for(const r of roles.sort((a,b)=>a.order-b.order)){

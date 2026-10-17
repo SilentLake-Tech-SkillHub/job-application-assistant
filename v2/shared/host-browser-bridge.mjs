@@ -2,7 +2,7 @@ import http from 'node:http';import {mkdir,chmod,lstat} from 'node:fs/promises';
 import {PageAdapter} from './ui-page.mjs';
 // Runs INSIDE the trusted host SDK session, with an explicitly provided browser
 // object. It never launches a browser, attaches CDP, or discovers credentials.
-export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,mode='iab',onError=()=>{}}){
+export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,mode='iab',onError=()=>{},deferBrowserCalls=false}){
  if(mode!=='iab'||!socketPath?.startsWith('/')||Buffer.byteLength(socketPath)>100||!allowedOrigins?.length)throw Error('INVALID_HOST_BRIDGE_CONFIGURATION');
  await mkdir(path.dirname(socketPath),{recursive:true,mode:0o700});
  try{await lstat(socketPath);throw Error('HOST_BRIDGE_SOCKET_ALREADY_EXISTS');}catch(e){if(e.code!=='ENOENT')throw e;}
@@ -23,6 +23,26 @@ export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,
   }
   if(method==='roleEnterApplication'){
    const tab=await get(args.pageId),before=scope(await tab.url());
+   const entry=args.entry;
+   if(entry?.kind==='resume_modal'){
+    if(!args.expectedRoleId||entry.entryLabel!=='立即投递'||entry.editLabel!=='编辑'||!args.sessionAccountPageUrl)throw Error('RESUME_ENTRY_CONTRACT_REQUIRED');
+    scope(args.sessionAccountPageUrl);
+    const readAccount=async()=>{const candidates=(await tabs()).filter(t=>t.url===args.sessionAccountPageUrl);if(candidates.length!==1)throw Error('SESSION_IDENTITY_PAGE_NOT_UNIQUE');return (await (await get(candidates[0].id)).playwright.locator(args.accountSelector).innerText()).trim();};
+    if(await readAccount()!==args.expectedAccount)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');
+    let target=tab,clicked=false;
+    if(before.pathname===entry.detailPath){
+     if(before.searchParams.get(entry.detailIdParameter)!==args.expectedRoleId||(await tab.playwright.locator(entry.detailRoleSelector).innerText()).trim()!==args.expectedTitle)throw Error('APPLICATION_ENTRY_ROLE_CHANGED');
+     const button=tab.playwright.locator(entry.entrySelector);if(await button.count()!==1||(await button.innerText()).trim()!==entry.entryLabel)throw Error('APPLICATION_ENTRY_BUTTON_CHANGED');
+     await button.click({timeoutMs:10000});clicked=true;
+     const edit=tab.playwright.getByRole('dialog').getByText(entry.editLabel,{exact:true});await edit.waitFor({state:'visible',timeoutMs:15000});if(await edit.count()!==1)throw Error('RESUME_EDIT_ENTRY_NOT_UNIQUE');await edit.click({timeoutMs:10000});
+     const deadline=Date.now()+15000;let found;
+     do{const matches=(await tabs()).filter(t=>{const u=new URL(t.url);return u.pathname===entry.formPath&&u.searchParams.get(entry.formIdParameter)===args.expectedRoleId;});if(matches.length>1)throw Error('AMBIGUOUS_ROLE_FORM');if(matches.length===1){found=matches[0];break;}await new Promise(r=>setTimeout(r,50));}while(Date.now()<deadline);
+     if(!found)throw Error('ROLE_FORM_NOT_OPEN');target=await get(found.id);
+    }
+    const after=scope(await target.url());if(after.origin!==before.origin||after.pathname!==entry.formPath||after.searchParams.get(entry.formIdParameter)!==args.expectedRoleId)throw Error('APPLICATION_ENTRY_RESULT_ROLE_CHANGED');
+    await target.playwright.locator(entry.formReadySelector).waitFor({state:'visible',timeoutMs:15000});if(await readAccount()!==args.expectedAccount)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');
+    await target.markHandoff();await tab.markHandoff();return {pageId:target.id,pageUrl:after.href,roleIdentity:{parameter:entry.formIdParameter,value:args.expectedRoleId},roleTitle:null,entryClicked:clicked,accountMatched:true,submission:'not_performed'};
+   }
    const match=before.pathname.match(/^\/(campus|campushirecn)\/(position|resume)\/(\d+)\/(detail|apply)$/);
    if(!match||!args.expectedTitle||!args.expectedAccount)throw Error('APPLICATION_ENTRY_PATH_REQUIRED');
    const expectedPath='/'+match[1]+'/resume/'+match[3]+'/apply';
@@ -52,8 +72,14 @@ export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,
   if(args.action?.method==='upload')throw Error('HOST_FILE_CHOOSER_ADAPTER_REQUIRED');
   return p.act(args.action,args.value,args.files);
  };
- const server=http.createServer(async(req,res)=>{res.setHeader('content-type','application/json');if(req.url==='/health'){res.end(JSON.stringify({mode:'iab',protocolVersion:4,state:'connected'}));return;}if(req.method!=='POST'||req.url!=='/rpc'){res.writeHead(404).end('{}');return;}try{const chunks=[];let size=0;for await(const c of req){size+=c.length;if(size>8*1024*1024)throw Error('REQUEST_TOO_LARGE');chunks.push(c);}const {method,args={}}=JSON.parse(Buffer.concat(chunks));res.end(JSON.stringify({data:await dispatch(method,args)??null}));}catch(e){onError(e);res.end(JSON.stringify({error:/^[A-Z_]+$/.test(e.message)?e.message:'HOST_BROWSER_OPERATION_FAILED'}));}});
- await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(socketPath,resolve);});await chmod(socketPath,0o600);return {socketPath,server,mode:'iab'};
+ const pending=[];
+ // Some hosts require browser calls to originate inside the currently active
+ // tool invocation. Queue RPC work and let that invocation explicitly pump it;
+ // an HTTP callback retaining a previous invocation is not a durable executor.
+ const execute=(method,args)=>deferBrowserCalls&&method!=='status'?new Promise((resolve,reject)=>pending.push({method,args,resolve,reject})):dispatch(method,args);
+ const pump=async()=>{const job=pending.shift();if(!job)return false;try{job.resolve(await dispatch(job.method,job.args));}catch(e){job.reject(e);}return true;};
+ const server=http.createServer(async(req,res)=>{res.setHeader('content-type','application/json');if(req.url==='/health'){res.end(JSON.stringify({mode:'iab',protocolVersion:4,state:'connected'}));return;}if(req.method!=='POST'||req.url!=='/rpc'){res.writeHead(404).end('{}');return;}try{const chunks=[];let size=0;for await(const c of req){size+=c.length;if(size>8*1024*1024)throw Error('REQUEST_TOO_LARGE');chunks.push(c);}const {method,args={}}=JSON.parse(Buffer.concat(chunks));res.end(JSON.stringify({data:await execute(method,args)??null}));}catch(e){onError(e);res.end(JSON.stringify({error:/^[A-Z_]+$/.test(e.message)?e.message:'HOST_BROWSER_OPERATION_FAILED'}));}});
+ await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(socketPath,resolve);});await chmod(socketPath,0o600);return {socketPath,server,mode:'iab',pump,pendingCount:()=>pending.length};
 }
 export async function withHostBrowserBridge(options,run){
  const bridge=await startHostBrowserBridge(options);

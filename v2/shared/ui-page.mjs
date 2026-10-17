@@ -134,7 +134,7 @@ export class PageAdapter {
         return {options:values,searchable,restored,restorationDiagnostics:{menuStillVisible,selectionChanged},scope:query?'exact_search_results':searchable?'current_search_results':'visible_menu',status:values.length?'captured':'needs_query_or_parent'};
       }
       if(!action.options?.includes(String(value)))throw Error('UNSUPPORTED_CHOICE_NO_FALLBACK');
-      if(searchable)await search.fill(String(value),{timeout:10000});
+      if(searchable && !query)await search.fill(String(value),{timeout:10000});
       const optionText=action.optionTextMap?.[value]||String(value);
       const option=choices.filter({hasText:new RegExp('^'+optionText.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$')});
       await option.waitFor({state:'visible',timeout:5000});if(await option.count()!==1)throw Error('CHOICE_NOT_UNIQUE_OR_NOT_PRESENT');await option.click({timeout:10000});await l.press('Tab');return;

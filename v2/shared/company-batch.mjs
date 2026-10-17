@@ -17,6 +17,25 @@ export class CompanyBatch{
  async get({batchId,batchHash}){const b=await this.store.get('runs',batchId);if(b.batchHash!==batchHash)throw Error('BATCH_HASH_MISMATCH');await this.queues.get({queueId:b.queueId,queueHash:b.queueHash});return b;}
  async locked(args,fn){const release=await acquireLease(leasePath(this.leaseRoot,'company-dispatch:'+this.store.root),{waitMs:30000,busyCode:'COMPANY_BATCH_BUSY'});try{return await fn(await this.get(args));}finally{await release();}}
  async owners(){try{return await this.store.get('runs','company-channel-owners');}catch(e){if(e.code!=='ENOENT')throw e;return {};}}
+ async restrictChannels(args){return this.locked(args,async b=>{
+  const channels=args.channels;if(!args.authorizationRef?.trim()||!Array.isArray(channels)||!channels.length||new Set(channels).size!==channels.length||channels.some(ch=>!b.channels.includes(ch)))throw Error('INVALID_CHANNEL_RESTRICTION');
+  if(b.closedAt)throw Error('BATCH_ALREADY_CLOSED');
+  const counts=Object.fromEntries(channels.map(ch=>[ch,b.companies.filter(c=>c.channel===ch&&active.has(c.status)).length])),owners=await this.owners();
+  let bindings;try{bindings=await this.store.get('runs','browser-channel-bindings');}catch(e){if(e.code!=='ENOENT')throw e;bindings={};}
+  const moved=[];
+  for(const c of b.companies.filter(c=>c.channel&&!channels.includes(c.channel))){
+   const channel=channels.find(ch=>counts[ch]<b.companiesPerChannel);if(!channel)throw Error('CHANNEL_RESTRICTION_CAPACITY_EXCEEDED');
+   const previousChannel=c.channel;
+   for(const t of c.tasks){let state;try{state=await this.queues.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
+    if(state){const {pageId,applicationUrl,returnUrl,...rest}=state;await this.queues.put(t.taskId,{...rest,status:'channel_changed_require_role_open',returnUrl:t.url,previousBrowserBinding:{channel:previousChannel,pageId,applicationUrl,returnUrl},channelChangeAuthorization:args.authorizationRef});}
+    bindings[new URL(t.url).origin]={channel,batchId:b.id,companyId:c.companyId};
+   }
+   Object.assign(c,{previousChannel,channel,status:'dispatched',leaseToken:randomUUID(),leaseExpiresAt:new Date(this.clock()+30*60*1000).toISOString(),reason:'user_restricted_browser_channels'});counts[channel]++;owners[c.loginScope]={batchId:b.id,channel};moved.push({companyId:c.companyId,previousChannel,channel,leaseToken:c.leaseToken});
+  }
+  b.channels=channels;b.channelRestriction={authorizationRef:args.authorizationRef,at:new Date(this.clock()).toISOString()};b.revision++;
+  await this.store.put('runs','browser-channel-bindings',bindings);await this.store.put('runs','company-channel-owners',owners);await this.store.put('runs',b.id,b);
+  return {batchId:b.id,channels,moved,browsersClosed:false,browserRestarted:false,submission:'not_performed'};
+ });}
  async closePreparation(args){return this.locked(args,async b=>{
   if(!args.authorizationRef?.trim()||!args.reason?.trim()||b.submission!=='forbidden')throw Error('PREPARATION_CLOSE_AUTHORIZATION_REQUIRED');
   const owners=await this.owners();

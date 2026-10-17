@@ -1,4 +1,5 @@
 import {performAntDay} from './ant-date.mjs';
+import {performUdChoice} from './ud-choice-rpc.mjs';
 import {sharedRecordKey} from './shared-record.mjs';
 import http from 'node:http';
 import {canonicalizeInventory,remapSpec} from './feishu-selectors.mjs';
@@ -35,6 +36,6 @@ class BrokerPage {
     return this.call('observe',{plan});
   }
   async assertSingleEditor(){const key=sharedRecordKey(this.pageUrl);if(!key)return;const tabs=await this.browser.tabs();if(tabs.some(t=>t.url!==this.pageUrl&&sharedRecordKey(t.url)===key))throw Error('SHARED_RESUME_HAS_OTHER_OPEN_EDITORS');}
-  async act(action,value,files){if(!['capture_wecruit_schema','wait','ant_dropdown_inspect','ud_dropdown_inspect'].includes(action.method))await this.assertSingleEditor();if(action.method==='ant_day')return performAntDay(this,action,value);return this.call('act',{action:action.provider==='feishu'?{...remapSpec(action,this.rowKeys||{}),selectorsResolved:true}:action,value,files});}
+  async act(action,value,files){if(!['capture_wecruit_schema','wait','ant_dropdown_inspect','ud_dropdown_inspect'].includes(action.method))await this.assertSingleEditor();if(action.method==='ant_day')return performAntDay(this,action,value);if(['ud_dropdown','ud_dropdown_inspect'].includes(action.method))return performUdChoice(this,action,value);return this.call('act',{action:action.provider==='feishu'?{...remapSpec(action,this.rowKeys||{}),selectorsResolved:true}:action,value,files});}
   async ensureGroups(groups){if(groups?.length)await this.assertSingleEditor();return this.call('ensureGroups',{groups});}
 }

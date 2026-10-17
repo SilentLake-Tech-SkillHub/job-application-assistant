@@ -276,7 +276,8 @@ export class Engine {
         if(controlContractChanges(plan,live).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
         const initial=await page.observe(plan);
         if(initial.pageUrl!==task.pageUrl||!matchesRole(plan,initial))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
-        const unavailable=frozenFields.filter(f=>!['inactive','omitted','user_only'].includes(f.disposition)&&!initial.fields[f.id]?.present);
+        const canActivate=f=>{if(!f.when||!template.coverage?.proof)return false;const parent=frozenFields.find(p=>p.source===f.when.source);return parent?.disposition==='fill'&&parent.value===f.when.equals&&parent.control?.options?.includes(parent.value)&&initial.fields[parent.id]?.present===true&&initial.fields[parent.id]?.selected===true&&frozenFields.indexOf(parent)<frozenFields.indexOf(f);};
+        const unavailable=frozenFields.filter(f=>!['inactive','omitted','user_only'].includes(f.disposition)&&!initial.fields[f.id]?.present&&!canActivate(f));
         if(unavailable.length)throw Error('PLANNED_FIELDS_MISSING_BEFORE_WRITE');
         // Upload first because parsing may replace the form; then create the planned records.
         const uploads=frozenFields.filter(f=>f.kind==='file'&&f.disposition==='fill');
@@ -293,6 +294,7 @@ export class Engine {
         if(controlContractChanges(plan,expanded).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
         for(const f of frozenFields){
           if(f.disposition!=='fill'||uploads.includes(f)||f.prepareBeforeGroups)continue;
+          if(f.when&&!initial.fields[f.id]?.present)await page.wait(f.read.presenceSelector||f.read.selector);
           const current=initial.fields[f.id];
           if(current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'&&(!['choice','date'].includes(f.kind)||current.selected===true)){
             (result.skippedMatchingFields??=[]).push(f.id);continue;
