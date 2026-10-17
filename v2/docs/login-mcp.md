@@ -1,10 +1,10 @@
 # V2 登录 MCP：运行、公司适配与验证
 
-本版本位于独立分支和 `v2/`，原版文件保持不变。当前适配为影石手机号登录及三个已核实岗位；抖音登录交用户，图形验证码统一交给用户操作，REA 仅内部维护可选。无 OCR，无申请提交。
+工作区只保留本包作为申请组件源码，部署入口指向同一目录。当前适配为影石手机号登录及三个已核实岗位；抖音登录交用户，图形验证码统一交给用户操作，REA 仅内部维护可选。无 OCR，无申请提交。
 
 ## 安装和启动
 
-在本目录运行 `npm ci`。登录服务为 `node scripts/start.mjs login`，申请服务为 `node scripts/start.mjs application`。两个启动器共用 V2 broker。普通调用要求已有明确选定的broker；缺少时返回BROWSER_SESSION_SELECTION_REQUIRED。只有明确初始化新会话时设置RECRUITING_BROWSER_INITIALIZE=1，禁止为排查窗口而自动创建实例；`login_open` 启动 MCP 自己管理的独立 Chrome，使用用户私有目录中的独立浏览器资料。不接入日常 Chrome，不读取其 DevToolsActivePort，不要求开启远程调试或接受连接弹窗。两个 MCP 复用同一浏览器进程；断开后不自动重启。原版 broker 不覆盖、不替换。仅内部维护显式设置 `RECRUITING_BROWSER_MODE=cdp` 时才接入已有 Chrome；这种模式可能出现浏览器调试连接授权。
+在本目录运行 `npm ci`。登录服务为 `node scripts/start.mjs login`，申请服务为 `node scripts/start.mjs application`。两个启动器共用 V2 broker。普通调用要求已有明确选定的broker；缺少时返回BROWSER_SESSION_SELECTION_REQUIRED。只有明确初始化新会话时设置RECRUITING_BROWSER_INITIALIZE=1，禁止为排查窗口而自动创建实例；`login_open` 启动 MCP 自己管理的独立 Chrome，使用用户私有目录中的独立浏览器资料。不接入日常 Chrome，不读取其 DevToolsActivePort，不要求开启远程调试或接受连接弹窗。两个 MCP 复用同一浏览器进程；断开后不自动重启。已有浏览器进程及未保存页面须保留；源码清理不代表可以关闭它们。仅内部维护显式设置 `RECRUITING_BROWSER_MODE=cdp` 时才接入已有 Chrome；这种模式可能出现浏览器调试连接授权。
 
 可选 `RECRUITING_BROWSER_PROFILE_DIR` 指定独立浏览器资料目录，默认用户 JSON 同目录下 `.browser-profile/`，严禁指向日常 Chrome 资料目录。共同设置 `RECRUITING_PROFILE_JSON` 指向用户私有 JSON；登录服务另设 `RECRUITING_LOGIN_PRIVATE_DIR`，申请服务另设 `RECRUITING_PRIVATE_DIR`。私有目录不位于此代码包内。`RECRUITING_LOGIN_COMPANY_DIR` 可选，默认 `companies/`，每公司一份 `<companyId>.login.json`。依赖缺失或 broker 不可用时明确报错，不自动改旧版配置。
 
