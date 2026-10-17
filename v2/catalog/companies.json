@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "companies": [
+    {
+      "id": "bilibili",
+      "name": "哔哩哔哩",
+      "origin": "https://jobs.bilibili.com",
+      "channel": "campus",
+      "templateId": null
+    },
+    {
+      "id": "huawei",
+      "name": "华为",
+      "origin": "https://career.huawei.com",
+      "channel": "campus",
+      "templateId": null
+    },
+    {
+      "id": "insta360",
+      "name": "影石",
+      "origin": "https://arashivision.jobs.feishu.cn",
+      "channel": "campus",
+      "templateId": null
+    },
+    {
+      "id": "honor",
+      "name": "荣耀",
+      "origin": "https://career.honor.com",
+      "channel": "campus",
+      "templateId": null
+    },
+    {
+      "id": "anker",
+      "name": "安克",
+      "origin": "https://anker-in.jobs.feishu.cn",
+      "channel": "campus",
+      "templateId": null
+    },
+    {
+      "id": "sailvan",
+      "name": "赛维",
+      "origin": "https://sc.hotjob.cn",
+      "channel": "campus",
+      "templateId": null
+    },
+    {
+      "id": "geely",
+      "name": "吉利",
+      "origin": "https://campus.geely.com",
+      "channel": "campus",
+      "templateId": null
+    },
+    {
+      "id": "netease",
+      "name": "网易",
+      "origin": "https://campus.163.com",
+      "channel": "campus",
+      "templateId": null
+    }
+  ]
+}

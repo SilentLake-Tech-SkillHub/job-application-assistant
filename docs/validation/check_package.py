@@ -71,8 +71,15 @@ with tempfile.TemporaryDirectory() as temp:
         result = subprocess.run([sys.executable, str(p), '--help'], cwd=temp, capture_output=True, text=True,
                                 encoding='utf-8', env=dict(os.environ, PYTHONIOENCODING='utf-8'))
         assert result.returncode == 0 and not result.stderr, (p, result.stdout, result.stderr)
-assert all('reports' in p.relative_to(root).parts or p.relative_to(root).as_posix() in ('package.json', 'package-lock.json')
-           for p in package_files('*.json')), 'no private JSON state in the package; root dependency manifests are allowed'
+# V2 ships typed public configuration assets. Validate their structure before
+# extending the original exact allowlist; private profile/run JSON remains denied.
+allowed_json = {'package.json', 'package-lock.json'}
+if (root / 'v2' / 'scripts' / 'check_public_assets.py').is_file():
+    import runpy
+    checker = runpy.run_path(str(root / 'v2' / 'scripts' / 'check_public_assets.py'))
+    allowed_json.update('v2/' + name for name in checker['public_json_files'](root / 'v2'))
+assert all('reports' in p.relative_to(root).parts or p.relative_to(root).as_posix() in allowed_json
+           for p in package_files('*.json')), 'no private JSON state in the package; only validated public assets are allowed'
 print(json.dumps({'passed': True, 'skill_entrypoints': len(skills), 'local_links': links, 'anchors_checked': anchored,
                   'python_sources': len(scripts), 'validators_loaded': len(validators),
                   'scope': 'complete copied package; static metadata/references and CLI loading, no platform registration or live ATS'}, ensure_ascii=False))

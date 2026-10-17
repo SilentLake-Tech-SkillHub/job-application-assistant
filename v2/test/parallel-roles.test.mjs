@@ -1,0 +1,14 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,rm} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
+import {Engine,Store,hash} from '../shared/engine.mjs';import {acquireLease,leasePath} from '../shared/leases.mjs';
+const template=id=>({id,version:1,coverage:{allConditionalBranchesVerified:true,allControlsMapped:true,allDriversSupported:true},evidence:{sourceUrl:'https://example.com/form',observedAt:'synthetic'},pages:[{pathPrefix:'/form/',readySelector:'#form',roleTitle:id,roleSelector:'h1',sections:[{title:'Basics'}],sectionDiscovery:{selector:'section',titleSelector:'h2'},groups:[],fields:[{id:'name',source:'name',label:'Name',kind:'text',required:true,control:{type:'text',valueType:'string',readbackType:'string'},read:{selector:'#name',kind:'value'},actions:[{method:'fill',selector:'#name'}]}]}]});
+test('same account workers overlap inside one lease, and failures settle before release',async()=>{
+ const dir=await mkdtemp(path.join(os.tmpdir(),'parallel-roles-')),store=new Store(path.join(dir,'store')),leaseRoot=path.join(dir,'leases');let active=0,maximum=0,completed=0;
+ const company={id:'sample',origin:'https://example.com',templateId:'base',roleTemplates:{a:'role-a',b:'role-b',c:'role-c'}};
+ const engine=new Engine({store,companies:[company],browser:{},leaseRoot});const authorization={prepare:true,evidence:'synthetic same account parallel preparation'};
+ try{
+ const tasks=[];for(const id of ['a','b','c']){const t=template('role-'+id);await store.put('templates',t.id,t);let task={companyId:'sample',roleId:id,pageUrl:'https://example.com/form/'+id,templateHash:hash(t),values:{name:'Synthetic'},roleQueueArgs:{queueId:'synthetic',taskId:id}};const plan=await engine.preparePlan(task);tasks.push({...task,planId:plan.planId,planHash:plan.planHash});}
+ engine.runCompany=async({task})=>{active++;maximum=Math.max(maximum,active);await assert.rejects(acquireLease(leasePath(leaseRoot,'recruiting-origin:'+company.origin)),/RESOURCE_ALREADY_RUNNING/);await new Promise(r=>setTimeout(r,15));active--;completed++;if(task.roleId==='b')throw Error('synthetic unexpected worker failure');return {companyId:'sample',status:'verified',fields:[],pageChecks:[],startedAt:new Date().toISOString(),finishedAt:new Date().toISOString(),submission:'not_performed'};};
+ const r=await engine.prepare({tasks,concurrency:3,authorization,parallelRoles:true});assert.equal(maximum,3);assert.equal(completed,3);assert.equal(active,0);assert.equal(r.workerErrors,1);assert.equal(r.results.length,3);assert.equal(r.results[1].errorCode,'BATCH_WORKER_INTERRUPTED');const release=await acquireLease(leasePath(leaseRoot,'recruiting-origin:'+company.origin));await release();
+ await assert.rejects(engine.prepare({tasks,concurrency:3,authorization}),/COMPANY_ALREADY_RUNNING/);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});

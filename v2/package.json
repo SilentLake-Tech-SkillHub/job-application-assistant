@@ -1,0 +1,30 @@
+{
+  "name": "job-application-suite-v2",
+  "version": "2.0.0-alpha.7",
+  "private": true,
+  "type": "module",
+  "files": [
+    "shared/",
+    "login/",
+    "application/",
+    "companies/",
+    "hooks/",
+    "scripts/",
+    "docs/",
+    "SKILL.md",
+    "agents/",
+    "catalog/"
+  ],
+  "scripts": {
+    "start:login": "node scripts/start.mjs login",
+    "start:application": "node scripts/start.mjs application",
+    "test": "node --test test/*.test.mjs",
+    "run:roles": "node scripts/run-confirmed-roles.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@playwright/mcp": "0.0.83",
+    "playwright-core": "1.64.1",
+    "zod": "^3.25.0"
+  }
+}
