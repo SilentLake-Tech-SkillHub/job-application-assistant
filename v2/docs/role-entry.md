@@ -1,18 +1,16 @@
-# 公司方案 JSON 消费接口
+# 投递批次消费接口
 
 ## 职责边界
 
-上游提供已确认的公司方案 JSON。入口直接消费它，不负责选岗阶段的 Excel→JSON 转换；投递结果收尾由 MCP 按固定事件原子更新当前公司方案 JSON，不写 Excel 或其他账本，详见 application-outcome.md。没有特殊的测试专用输入分支。`readCompanyPlan` 是独立输入适配接口，现支持本机 JSON 文件和直接 JSON 对象，后续可替换为上游服务适配器。
+唯一输入是工作区 `岗位交接/投递批次.json`：由搜索端 `company_store.py forward` 生成、用户在正向评审页确认（`forward-confirm` 登记原话与内容摘要）后才可读取。目录 `RECRUITING_HANDOFF_DIR` 指定，默认 `<工作区>/岗位交接`。旧的公司方案 JSON 文件或对象输入一律拒绝（`HANDOFF_BATCH_REQUIRED`）。本组件不做选岗、不转换 Excel；投递结果回传见 application-outcome.md。
 
-`role_queue_import` 参数二选一：`{rolesFile}` 或 `{companyPlan}`。可用 `companyOrder` 传入本批已经确认的公司顺序。只验证上游JSON自身的确认标记/引用、版本、最终选岗、次序、URL范围和已投状态，然后保存冻结执行快照。它不会自行确认方案，不把 Agent 推荐当用户选择。
+公司目录同样来自工作区：`岗位交接/公司/<地区>/<公司>/公司.json`（companyId、官网域名）及同目录 `登录[@域名].json`、`表单定义[@域名].json`。一家公司有多个站点时，每个站点是一个目录项：主站点用公司.json 的 companyId，其它站点用该站点登录配置里的 companyId，没有登录配置的站点用 `<companyId>--<域名>`。组件包内不携带公司目录或公司资产，也不写死任何域名。
 
-## JSON 契约
+`role_queue_import` 不需要参数（`companyOrder` 可选）。它核对批次状态为已交接/进行中、确认摘要与内容一致，按批次里的公司次序与岗位顺序冻结执行快照（志愿顺序只在志愿分组内排：分组内多个岗位须有用户给定的不重复正整数顺序，否则 `INVALID_CONFIRMED_ROLE_ORDER`；执行按分组、志愿依次排开，每个岗位带 `preference:{group,rank,bu}`）；任务归属到岗位链接所在站点的目录项。冻结的是用户确认的内容摘要：批次文件因阶段推进被覆盖写（状态、时间）不影响快照，内容被改动则快照失效（`ROLE_INPUT_CHANGED`）。
 
-原生格式：`schemaVersion=1`、`batchId`、`version`、`confirmation={status:'confirmed',reference:'上游确认记录引用'}`、`companies`。公司包含 `companyId,order,roles`；角色包含 `id,title,url,selected,order,applicationStatus`，`applyUrl`可选且必须是上游已核实链接。同公司按岗位 `order`；多公司按明确的公司 `order` 或 `companyOrder`，不得按数组位置猜次序。`roleId`可代替`id`；本地键必须注明，不能冒充官网岗位ID。
+## 状态
 
-兼容旧公司方案 JSON：`schema_version=1,batch_id,companies`，消费每公司的 `version/confirmed_at/confirmation_ref/confirmed_digest` 作为上游确认声明；不重新检查或转换工作簿。公司身份可由已建库的唯一官网origin映射；读取 `selected/order/url` 和已提供的 `applicationStatus` 或 `existing_data` 中的投递状态。上游对其确认和同步真实性负责。
-
-只准备 `待投递/not_submitted`；`已提交/submitted/receipt_verified` 保护并跳过；不确定状态、重复次序、重复岗位或不匹配公司URL阻断。输入文件变化后冻结快照失效；对象输入保留收到的版本和内容Hash，不能凭本地快照推断远端方案一直未变，新版方案应重新传入。
+只准备主表状态为 `岗位待投递` 的岗位（批次只收这一种）；`岗位已投递/岗位推进中/岗位offer/岗位终止` 保护并跳过。不确定状态、重复次序、重复岗位或岗位链接不属于该公司已知站点时阻断。
 
 ## 执行顺序
 
@@ -29,15 +27,19 @@
 
 ## 一条脚本运行
 
-在本包目录运行 `node scripts/run-confirmed-roles.mjs <公司方案JSON路径>`。设置 `RECRUITING_PROFILE_JSON`、`RECRUITING_LOGIN_PRIVATE_DIR`、`RECRUITING_PRIVATE_DIR`（已有申请模板）、`RECRUITING_RUN_EVIDENCE_DIR` 和 `RECRUITING_RUN_AUTHORIZATION_FILE`（已有本轮用户授权文件）；可选 `RECRUITING_ROLE_QUEUE_DIR`、`RECRUITING_BROWSER_SOCKET`、`RECRUITING_BROWSER_PROFILE_DIR`。
+在本包目录运行 `node scripts/run-confirmed-roles.mjs`。设置 `RECRUITING_HANDOFF_DIR`、`RECRUITING_PROFILE_JSON`、`RECRUITING_LOGIN_PRIVATE_DIR`、`RECRUITING_PRIVATE_DIR`（已有申请模板）、`RECRUITING_RUN_EVIDENCE_DIR` 和 `RECRUITING_RUN_AUTHORIZATION_FILE`（已有本轮用户授权文件）；可选 `RECRUITING_ROLE_QUEUE_DIR`、`RECRUITING_BROWSER_SOCKET`、`RECRUITING_BROWSER_PROFILE_DIR`。
 
-脚本通过正式 stdio MCP 协议接收JSON、打开岗位、准备登录并按授权请求一次短信；到人工步骤暂停。用户在原页面完成后向该进程输入 `resume`，脚本只读确认并恢复原岗位，继续填写及独立核验，保存计时和截图，停在用户校验。`close`只关闭MCP客户端，浏览器/broker保留。人工未完成时不重复发码；错误明确返回，不自动重启浏览器。它不实现Excel处理或最终提交。
+脚本通过正式 stdio MCP 协议读取已确认的投递批次、打开岗位、准备登录并按授权请求一次短信；到人工步骤暂停。用户在原页面完成后向该进程输入 `resume`，脚本只读确认并恢复原岗位，继续填写及独立核验，保存计时和截图，停在用户校验。`close`只关闭MCP客户端，浏览器/broker保留。人工未完成时不重复发码；错误明确返回，不自动重启浏览器。它不实现Excel处理或最终提交。
 
 ## 同账号多岗位并发
 
 上游确认 JSON 可用 `execution={mode:'parallel_roles',authorizationRef:'明确并发授权引用'}` 启用同公司岗位并发；角色次序仅作枚举，跨公司边界仍按确认次序。登录保持账号级独占，一岗登录后其他岗位刷新并核对账号复用；填写用 `roles_prepare_batch`，一次账号租约内按独立 pageId/URL 并发执行。所有计划先编译；任何任务失败后等待其他工作者结束再释放锁。不得用多个 companyId 伪造同公司的并发。
 
+`role_enter_application` 进入申请页并核对后，把真实申请页链接按官方岗位ID写回 `岗位交接/公司/<地区>/<公司>/公司.json` 的 `投递链接`（只写同站点、与岗位页不同的链接，覆盖写）；搜索端 refresh 保留它，下批正向批次带上作为 `applyUrl`。该公司已有覆盖申请页的表单模板时直接打开申请页；还没有时仍从岗位页进入，进入后先建库。`form_assets_status` 按批次列出登录配置、已封存模板和申请页链接的缺口。
+
 `role_enter_application` 只允许从核实的详情页进入申请表，核对岗位标题、同账号和真实返回 URL；在表单页不会点击提交按钮。表单字段仍须各岗位完整建库。运行前已有 broker 时固定本轮实例，连接断开或窗口不明确时返回恢复问题，不能通过另开浏览器试错。
+
+本人操作登录配置可以用 `account.pageUrl` 声明同源的独立身份页。通用详情→申请表入口在进入前后都重新定位唯一的身份页，并精确核对已声明的账号字段；身份页缺失、重复、跨源或账号变化都会阻断。岗位标题与返回路径仍在原岗位标签校验。身份页里的姓名不能代替用户指定登录账号的核实；用户指出账号不对时，原账号核验及应聘记录结论失效，待本人重新登录后再核对。
 
 用户视角计时使用 `RECRUITING_RUN_STARTED_AT` 传入本轮开始时间戳，直到最终结束时间戳，不扣模型思考、修复、人工等待。没有传入时只能声明进程耗时。表单与JSON一致仅证明执行一致性，正式文本仍先对照来源审核；来源备注与待核说明放元数据。
 

@@ -35,6 +35,22 @@ test('observed application entry is persisted and reuses its original tab withou
  await new RoleFlow({queues,login,browser}).enter(args);assert.equal(calls.filter(x=>x.method==='openPage').at(-1).pageUrl,apply);
 }));
 
+test('entered application page is handed to the write-back hook; a stored applyUrl without a covering form still enters from the role page',()=>fixture(async({input,queues})=>{
+ const apply='https://example.com/campus/resume/123/apply';
+ input.companies[0].roles=input.companies[0].roles.filter(r=>r.roleId==='A');input.companies[0].roles[0].applyUrl=apply;
+ const q=await queues.import({companyPlan:input}),task=q.tasks[0],args={...q,taskId:task.taskId};
+ const c={companyId:'sample',origin:'https://example.com',allowedPaths:['/campus/'],fields:{root:'.login'},account:{selector:'.account',source:'phone',countryCode:'+86'}};
+ const login={company:async()=>c,locked:async(c,fn)=>fn(),profile:async()=>({facts:{phone:{status:'known',value:'13800001234',sourceIds:['synthetic']}}})};
+ let url;const opened=[];const browser={request:async(method,a)=>{if(method==='openPage'){url=a.pageUrl;opened.push(url);return {pageId:'tab',pageUrl:url};}if(method==='roleEnterApplication')return {pageId:'tab',pageUrl:apply,roleTitle:'Role A',accountMatched:true};return {pageUrl:url,account:'1380****234',loginFormPresent:false};}};
+ const recorded=[];const flow=new RoleFlow({queues,login,browser,templates:async()=>{throw Object.assign(Error('missing'),{code:'ENOENT'});},onApplicationEntered:async a=>{recorded.push(a);return {status:'recorded'};}});
+ const r=await flow.open(args);assert.equal(r.status,'authenticated_at_role');assert.equal(opened[0],'https://example.com/campus/role/A');
+ const e=await flow.enter(args);assert.equal(e.applicationUrlRecord,'recorded');
+ assert.deepEqual(recorded,[{companyId:'sample',roleId:'A',roleUrl:'https://example.com/campus/role/A',applicationUrl:apply}]);
+ const failing=new RoleFlow({queues,login,browser,onApplicationEntered:async()=>{throw Error('UNKNOWN_COMPANY');}});
+ await queues.put(task.taskId,{queueId:q.queueId,status:'authenticated_at_role'});
+ assert.equal((await failing.enter(args)).applicationUrlRecord,'write_failed:UNKNOWN_COMPANY');
+}));
+
 test('a new company form is not a prerequisite for opening its confirmed role',()=>fixture(async({input,queues})=>{
  input.companies[0].roles=input.companies[0].roles.filter(r=>r.roleId==='A');const q=await queues.import({companyPlan:input}),args={...q,taskId:q.tasks[0].taskId};
  const c={companyId:'sample',origin:'https://example.com',allowedPaths:['/campus/'],fields:{root:'.login'},account:{selector:'.account',source:'phone',countryCode:'+86'}};

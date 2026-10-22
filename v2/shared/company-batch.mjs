@@ -36,14 +36,22 @@ export class CompanyBatch{
   await this.store.put('runs','browser-channel-bindings',bindings);await this.store.put('runs','company-channel-owners',owners);await this.store.put('runs',b.id,b);
   return {batchId:b.id,channels,moved,browsersClosed:false,browserRestarted:false,submission:'not_performed'};
  });}
- async closePreparation(args){return this.locked(args,async b=>{
-  if(!args.authorizationRef?.trim()||!args.reason?.trim()||b.submission!=='forbidden')throw Error('PREPARATION_CLOSE_AUTHORIZATION_REQUIRED');
-  const owners=await this.owners();
-  for(const c of b.companies){if(owners[c.loginScope]?.batchId===b.id)delete owners[c.loginScope];if(c.status!=='ready_for_user_review')Object.assign(c,{previousStatus:c.status,status:'closed_preparation',reason:args.reason});}
-  b.closedAt=new Date(this.clock()).toISOString();b.closeAuthorizationRef=args.authorizationRef;b.revision++;
-  await this.store.put('runs','company-channel-owners',owners);await this.store.put('runs',b.id,b);
-  return {batchId:b.id,status:'closed_preparation',pagesClosed:false,browserRestarted:false,submission:'not_performed'};
- });}
+ async closePreparation(args){
+  // An explicitly superseded preparation may need closure after its source
+  // plan changes. Preserve normal freshness checks for status/take/resume;
+  // closure only releases scheduling leases and does not touch pages or forms.
+  const release=await acquireLease(leasePath(this.leaseRoot,'company-dispatch:'+this.store.root),{waitMs:30000,busyCode:'COMPANY_BATCH_BUSY'});
+  try{
+   const b=await this.store.get('runs',args.batchId);
+   if(b.batchHash!==args.batchHash)throw Error('BATCH_HASH_MISMATCH');
+   if(!args.authorizationRef?.trim()||!args.reason?.trim()||b.submission!=='forbidden')throw Error('PREPARATION_CLOSE_AUTHORIZATION_REQUIRED');
+   const owners=await this.owners();
+   for(const c of b.companies){if(owners[c.loginScope]?.batchId===b.id)delete owners[c.loginScope];if(c.status!=='ready_for_user_review')Object.assign(c,{previousStatus:c.status,status:'closed_preparation',reason:args.reason});}
+   b.closedAt=new Date(this.clock()).toISOString();b.closeAuthorizationRef=args.authorizationRef;b.revision++;
+   await this.store.put('runs','company-channel-owners',owners);await this.store.put('runs',b.id,b);
+   return {batchId:b.id,status:'closed_preparation',pagesClosed:false,browserRestarted:false,submission:'not_performed'};
+  }finally{await release();}
+ }
  async take(args){return this.locked(args,async b=>{
   const now=this.clock();for(const c of b.companies)if(active.has(c.status)&&Date.parse(c.leaseExpiresAt)<=now){c.status='blocked';c.reason='lease_expired_requires_explicit_recovery';}
   const owners=await this.owners(),assignments=[],counts=Object.fromEntries(b.channels.map(ch=>[ch,b.companies.filter(c=>c.channel===ch&&active.has(c.status)).length]));

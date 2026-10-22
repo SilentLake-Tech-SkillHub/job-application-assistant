@@ -1,20 +1,24 @@
 import {matchesRole} from './role-identity.mjs';
+import {resolveEntry,matchEntryPath} from './entry-recipe.mjs';
 import {accountMatches,matchesAccount,resolveAccount,assertScope} from '../login/contracts.mjs';
 export class RoleFlow{
- constructor({queues,login,templates,browser}){Object.assign(this,{queues,login,templates,browser});}
+ // onApplicationEntered：进入申请页并核对后回调，用于把申请页链接写回公司文件夹（见 form-assets.mjs）。
+ constructor({queues,login,templates,browser,onApplicationEntered=null}){Object.assign(this,{queues,login,templates,browser,onApplicationEntered});}
  async context(args){
-  const {q,t}=await this.queues.task(args),c=await this.login.company(t.companyId);let template;
+  const {q,t}=await this.queues.task(args),c=await this.login.company(t.companyId),entry=resolveEntry(c);let template;
   try{template=await this.templates(t.companyId,t.roleId);}catch(e){if(e.code!=='ENOENT')throw e;}
   let prior;try{prior=await this.queues.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
   const stored=prior?.queueId===q.id&&prior?.expectedTitle===t.title&&prior?.originalRoleUrl===t.url?prior.applicationUrl:null;
-  const target=stored||t.applyUrl||t.url;assertScope(c,t.url);assertScope(c,target);
+  let target=stored||t.applyUrl||t.url;assertScope(c,t.url);assertScope(c,target);
   const plans=template?.pages.filter(p=>new URL(target).pathname.startsWith(p.pathPrefix))||[];
   if(plans.length>1)throw Error('ROLE_ENTRY_RECIPE_REQUIRED');
   let plan=plans[0];
-  if(!plan&&!t.applyUrl)plan={entryOnly:true,readySelector:c.entry?.detailReadySelector||c.account.selector,roleSelector:c.entry?.roleSelector||template?.pages[0]?.roleSelector};
+  // 已存申请页链接但还没有覆盖该页的表单模板：仍从岗位页进入，进入后先建库。
+  if(!plan&&t.applyUrl&&!stored)target=t.url;
+  if(!plan&&target===t.url||!plan&&!t.applyUrl)plan={entryOnly:true,readySelector:entry?.detailReadySelector||c.account.selector,roleSelector:entry?.roleSelector||template?.pages[0]?.roleSelector};
   if(!plan)throw Error('ROLE_ENTRY_RECIPE_REQUIRED');
   if(!plan.entryOnly&&plan.roleTitle!==t.title)throw Error('CONFIRMED_ROLE_TITLE_TEMPLATE_MISMATCH');
-  return {q,t,c,template,plan,target};
+  return {q,t,c,entry,template,plan,target};
  }
  async snapshot(x,pageId){const raw=await this.browser.request('roleSnapshot',{pageId,roleSelector:x.plan.roleSelector,roleIdentity:x.plan.roleIdentity,accountSelector:x.c.account.selector,loginRoot:x.c.fields?.root});
   if(x.c.loginMethod==='user_operated'){const session=await this.login.state(x.c,raw.pageUrl);raw.account=session.account;raw.loginFormPresent=session.form;}return raw;}
@@ -47,22 +51,22 @@ export class RoleFlow{
   return {status:'needs_login',taskId:state.taskId,pageId:state.pageId,originalRoleUrl:state.originalRoleUrl,returnUrl:state.returnUrl,loginPlan:plan,submission:'not_performed'};
  }
  async resume(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{const state=await this.queues.read(x.t.taskId);if(state.queueId!==x.q.id||state.returnUrl!==x.target||state.expectedTitle!==x.t.title)throw Error('ROLE_TASK_STATE_CHANGED');return this.assess(x,state);},{waitMs:x.q.parallelRoles||x.q.executionMode==='parallel_roles'?30000:0});}
- async enter(args){const {q,t}=await this.queues.task(args),c=await this.login.company(t.companyId);return this.login.locked(c,async()=>{
+ async enter(args){const {q,t}=await this.queues.task(args),c=await this.login.company(t.companyId),entry=resolveEntry(c);return this.login.locked(c,async()=>{
   let prior;try{prior=await this.queues.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
   if(prior?.queueId&&prior.queueId!==q.id)throw Error('ROLE_TASK_STATE_CHANGED');
   let observedForm;
   if(!prior?.applicationUrl){
-   const role=new URL(t.url).pathname.match(/^\/(campus|campushirecn)\/(?:m\/)?position\/(\d+)\/detail$/);
-   if(c.entry?.kind==='resume_modal'){const tabs=await this.browser.request('tabs',{pageUrl:t.url}),matches=tabs.filter(p=>{const u=new URL(p.url);return u.origin===c.origin&&u.pathname===c.entry.formPath&&u.searchParams.get(c.entry.formIdParameter)===t.roleId;});if(matches.length>1)throw Error('AMBIGUOUS_ROLE_FORM');observedForm=matches[0]?.url;}
-   if(role){const tabs=await this.browser.request('tabs',{pageUrl:t.url});const matches=(tabs||[]).filter(p=>{const u=new URL(p.url);return u.origin===c.origin&&u.pathname==='/'+role[1]+'/resume/'+role[2]+'/apply';});if(matches.length>1)throw Error('AMBIGUOUS_ROLE_FORM');observedForm=matches[0]?.url;}
+   if(entry?.kind==='resume_modal'){const tabs=await this.browser.request('tabs',{pageUrl:t.url}),matches=tabs.filter(p=>{const u=new URL(p.url);return u.origin===c.origin&&u.pathname===entry.formPath&&u.searchParams.get(entry.formIdParameter)===t.roleId;});if(matches.length>1)throw Error('AMBIGUOUS_ROLE_FORM');observedForm=matches[0]?.url;}
+   if(entry?.kind==='detail_to_form'){const role=matchEntryPath(entry,new URL(t.url).pathname);if(role.detail){const tabs=await this.browser.request('tabs',{pageUrl:t.url});const matches=(tabs||[]).filter(p=>{const u=new URL(p.url);return u.origin===c.origin&&u.pathname===role.expectedApplyPath;});if(matches.length>1)throw Error('AMBIGUOUS_ROLE_FORM');observedForm=matches[0]?.url;}}
   }
-  const opened=await this.browser.request('openPage',{pageUrl:prior?.applicationUrl||observedForm||t.url,...(!observedForm&&prior?.pageId?{pageId:prior.pageId}:{}),readySelectors:[c.account.selector,c.fields?.root,c.entry?.detailReadySelector,c.entry?.formReadySelector].filter(Boolean)});
+  const opened=await this.browser.request('openPage',{pageUrl:prior?.applicationUrl||observedForm||t.url,...(!observedForm&&prior?.pageId?{pageId:prior.pageId}:{}),readySelectors:[c.account.selector,c.fields?.root,entry?.detailReadySelector,entry?.formReadySelector].filter(Boolean)});
   const snapshot=await this.browser.request('roleSnapshot',{pageId:opened.pageId,accountSelector:c.account.selector,loginRoot:c.fields?.root});if(c.loginMethod==='user_operated'){const session=await this.login.state(c,snapshot.pageUrl);snapshot.account=session.account;snapshot.loginFormPresent=session.form;}
   if(snapshot.loginFormPresent||!matchesAccount(snapshot.account,resolveAccount(await this.login.profile(),c)))throw Error('SHARED_LOGIN_SESSION_REQUIRED');
-  const result=await this.browser.request('roleEnterApplication',{pageId:opened.pageId,expectedTitle:t.title,accountSelector:c.account.selector,expectedAccount:snapshot.account,roleSelector:'.resumeEditForm-headerText',entry:c.entry,expectedRoleId:t.roleId,sessionAccountPageUrl:c.account.pageUrl});
-  if(new URL(result.pageUrl).origin!==c.origin||(c.entry?.kind==='resume_modal'?result.roleIdentity?.value!==t.roleId:result.roleTitle!==t.title)||result.accountMatched!==true)throw Error('APPLICATION_ENTRY_RESULT_CHANGED');
+  const result=await this.browser.request('roleEnterApplication',{pageId:opened.pageId,expectedTitle:t.title,accountSelector:c.account.selector,expectedAccount:snapshot.account,roleSelector:entry?.roleSelector,entry,expectedRoleId:t.roleId,sessionAccountPageUrl:c.account.pageUrl});
+  if(new URL(result.pageUrl).origin!==c.origin||(entry?.kind==='resume_modal'?result.roleIdentity?.value!==t.roleId:result.roleTitle!==t.title)||result.accountMatched!==true)throw Error('APPLICATION_ENTRY_RESULT_CHANGED');
   await this.queues.put(t.taskId,{...prior,queueId:q.id,taskId:t.taskId,pageId:result.pageId||opened.pageId,originalRoleUrl:t.url,applicationUrl:result.pageUrl,returnUrl:result.pageUrl,expectedTitle:t.title,status:'ready_to_fill',accountMatched:true,entryVerifiedAt:new Date().toISOString()});
-  return {...result,status:'ready_to_fill',taskId:t.taskId,applicationUrl:result.pageUrl,submission:'not_performed'};
+  let applicationUrlRecord=null;if(this.onApplicationEntered){try{applicationUrlRecord=await this.onApplicationEntered({companyId:t.companyId,roleId:t.roleId,roleUrl:t.url,applicationUrl:result.pageUrl});}catch(e){applicationUrlRecord={status:'write_failed:'+(/^[A-Z_]+$/.test(e.message)?e.message:'UNKNOWN')};}}
+  return {...result,status:'ready_to_fill',taskId:t.taskId,applicationUrl:result.pageUrl,...(applicationUrlRecord?{applicationUrlRecord:applicationUrlRecord.status}:{}),submission:'not_performed'};
  },{waitMs:q.parallelRoles||q.executionMode==='parallel_roles'?30000:0});}
  async screenshot(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{const state=await this.queues.read(x.t.taskId),s=await this.snapshot(x,state.pageId);if(new URL(s.pageUrl).origin!==x.c.origin)throw Error('ROLE_SCREENSHOT_SCOPE_CHANGED');return this.browser.request('screenshot',{pageId:state.pageId});},{waitMs:x.q.parallelRoles||x.q.executionMode==='parallel_roles'?30000:0});}
 }

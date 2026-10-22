@@ -13,7 +13,10 @@ import tempfile
 
 
 def current_conversation():
-    ids = {os.environ.get(k) for k in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID')} - {None, ''}
+    # Codex exposes CODEX_THREAD_ID/CODEX_SESSION_ID; DeepSeek Harness exposes
+    # DSH_SESSION_ID, which equals the hook payload's session_id. Accept exactly
+    # one host-provided identity and reject conflicting values.
+    ids = {os.environ.get(k) for k in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'DSH_SESSION_ID')} - {None, ''}
     if len(ids) != 1:
         raise ValueError('CURRENT_CONVERSATION_CONTEXT_REQUIRED')
     return ids.pop()

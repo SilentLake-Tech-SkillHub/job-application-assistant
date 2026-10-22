@@ -2,7 +2,7 @@
 
 Hook 可以由宿主在用户或项目配置中发现，但工作流的启用范围必须是对话，不能是 cwd、工作区或公司。未注册的对话在读取流程、核对 Hash 或回执前立即返回，不注入申请规则、不拦截读取 Skill、状态登记或其他工具。
 
-启用由当前 SKILL 的宿主执行器调用 `hooks/conversation_scope.py enable`。脚本仅读取宿主提供的 `CODEX_THREAD_ID` / `CODEX_SESSION_ID`，不接受模型指定另一个对话 ID；缺失或冲突时拒绝注册。参数为私有 scope 文件、用户已确认指令文件及授权依据。私有目录路径由安装端传入，产品代码不写死用户路径或对话 ID。
+启用由当前 SKILL 的宿主执行器调用 `hooks/conversation_scope.py enable`。脚本仅读取宿主提供的 `CODEX_THREAD_ID` / `CODEX_SESSION_ID` / `DSH_SESSION_ID`，不接受模型指定另一个对话 ID；缺失或冲突时拒绝注册。`DSH_SESSION_ID` 与 DSH Hook payload 的 `session_id` 同源，因此加载回执可按同一对话匹配。参数为私有 scope 文件、用户已确认指令文件及授权依据。私有目录路径由安装端传入，产品代码不写死用户路径或对话 ID。
 
 ```sh
 python3 hooks/conversation_scope.py enable --scope-file <private-scope.json> --policy-file <accepted-policy.md> --authorization-ref <user-request-reference>

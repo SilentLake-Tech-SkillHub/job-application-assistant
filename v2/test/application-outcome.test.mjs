@@ -1,22 +1,69 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,writeFile,readFile,rm} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {createHash,randomUUID} from 'node:crypto';import {recordApplicationOutcome} from '../shared/application-outcome.mjs';import {RoleQueue} from '../shared/role-queue.mjs';
-const sha=b=>createHash('sha256').update(b).digest('hex');
-async function fixture(fn){const dir=await mkdtemp(path.join(os.tmpdir(),'outcome-'));try{
- const file=path.join(dir,'plan.json'),art=path.join(dir,'receipt.txt'),ef=path.join(dir,'evidence.json');await writeFile(art,'synthetic official receipt');
- const identity={batchId:'batch',companyId:'sample',roleId:'role',roleUrl:'https://example.com/role/1',roleTitle:'Role'};
- const plan={schemaVersion:1,version:1,batchId:'batch',confirmation:{status:'confirmed',reference:'synthetic'},companies:[{companyId:'sample',order:1,roles:[{id:'role',title:'Role',url:identity.roleUrl,selected:true,order:1,applicationStatus:'待投递'}]}]};
- const ev={schemaVersion:1,event:'submission_confirmed',...identity,observedAt:new Date().toISOString(),sourceUrl:'https://example.com/application',result:'official_receipt_confirmed',reviewer:'synthetic test',artifacts:[{file:art,sha256:sha(await readFile(art))}]};
- const event={schemaVersion:1,eventId:randomUUID(),event:'submission_confirmed',...identity,evidence:{file:ef,sha256:''}};
- const save=async()=>{await writeFile(file,JSON.stringify(plan));await writeFile(ef,JSON.stringify(ev));event.evidence.sha256=sha(await readFile(ef));return {rolesFile:file,expectedHash:sha(await readFile(file)),outcome:structuredClone(event)};};await fn({dir,file,art,ef,plan,ev,event,save});
- }finally{await rm(dir,{recursive:true,force:true});}}
-test('receipt derives Chinese business label, repeat idempotent, import protects submission',()=>fixture(async({file,save,dir})=>{const a=await save(),r=await recordApplicationOutcome(a);assert.equal(r.applicationStatus,'已提交');const b=await readFile(file);assert.equal((await recordApplicationOutcome(a)).status,'already_recorded');assert.deepEqual(await readFile(file),b);assert.equal(JSON.parse(b).companies[0].roles[0].applicationOutcome.receiptStatus,'receipt_verified');const q=await new RoleQueue({root:path.join(dir,'queue'),catalog:[{id:'sample',origin:'https://example.com'}]}).import({rolesFile:file});assert.equal(q.tasks.length,0);}));
-test('free target status and unknown event reject before write',()=>fixture(async({file,save})=>{const a=await save(),b=await readFile(file);await assert.rejects(recordApplicationOutcome({...a,outcome:{...a.outcome,applicationStatus:'已提交'}}));await assert.rejects(recordApplicationOutcome({...a,outcome:{...a.outcome,event:'prepared'}}));assert.deepEqual(await readFile(file),b);}));
-test('wrong role, clicked-only result and altered artifacts reject',()=>fixture(async({ev,save,art})=>{ev.roleId='other';await assert.rejects(recordApplicationOutcome(await save()),/IDENTITY_MISMATCH/);ev.roleId='role';ev.result='clicked_submit';await assert.rejects(recordApplicationOutcome(await save()),/RECEIPT_REQUIRED/);ev.result='official_receipt_confirmed';const a=await save();await writeFile(art,'changed');await assert.rejects(recordApplicationOutcome(a),/HASH_MISMATCH/);}));
-test('changed input and concurrent lock reject',()=>fixture(async({file,save})=>{const a=await save();await writeFile(file,'{}');await assert.rejects(recordApplicationOutcome(a),/INPUT_CHANGED/);const b=await save();await writeFile(file+'.outcome.lock','locked');await assert.rejects(recordApplicationOutcome(b),/WRITE_LOCKED/);}));
-test('submitted cannot downgrade and event ID cannot be reused with changed content',()=>fixture(async({plan,ev,event,save})=>{const a=await save();await recordApplicationOutcome(a);await assert.rejects(recordApplicationOutcome({...a,outcome:{...a.outcome,event:'user_skipped'}}),/EVENT_ID_CONFLICT/);plan.companies[0].roles[0].applicationStatus='已提交';event.eventId=randomUUID();event.event=ev.event='submission_uncertain';ev.result='uncertain';await assert.rejects(recordApplicationOutcome(await save()),/DOWNGRADE_FORBIDDEN/);}));
-test('legacy leakage repair requires receipt and uncertain stays pending but blocked from rerun',()=>fixture(async({file,plan,event,ev,save,dir})=>{plan.companies[0].roles[0].applicationStatus='receipt_verified';await recordApplicationOutcome(await save());assert.equal(JSON.parse(await readFile(file)).companies[0].roles[0].applicationStatus,'已提交');plan.companies[0].roles[0].applicationStatus='待投递';event.eventId=randomUUID();event.event=ev.event='submission_uncertain';ev.result='network result unknown';assert.equal((await recordApplicationOutcome(await save())).applicationStatus,'待投递');const q=await new RoleQueue({root:path.join(dir,'queue'),catalog:[{id:'sample',origin:'https://example.com'}]}).import({rolesFile:file});assert.equal(q.tasks.length,0);assert.equal(q.protectedRoles[0].reason,'outcome_requires_resolution');}));
-
+import test from 'node:test';import assert from 'node:assert/strict';
+import {mkdtemp,writeFile,readFile,readdir,mkdir,open} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {createHash,randomUUID} from 'node:crypto';
+import {recordApplicationOutcome} from '../shared/application-outcome.mjs';
 import {closeApplication} from '../shared/application-closeout.mjs';
+import {contentSha,CompanyDirectory} from '../shared/company-directory.mjs';
+import {handoffInput} from '../shared/queue-config.mjs';
+import {RoleQueue} from '../shared/role-queue.mjs';
+const sha=b=>createHash('sha256').update(b).digest('hex');
+const role={'岗位ID':'A','岗位名称':'Role A','岗位链接':'https://example.com/campus/position/1'};
 
-test('an idempotent replay refuses manually changed business state',()=>fixture(async({file,save})=>{const a=await save();await recordApplicationOutcome(a);const d=JSON.parse(await readFile(file));d.companies[0].roles[0].applicationStatus='待投递';await writeFile(file,JSON.stringify(d));await assert.rejects(recordApplicationOutcome(a),/RECORDED_STATE_CHANGED/);}));
+async function fixture(fn){
+ const dir=await mkdtemp(path.join(os.tmpdir(),'outcome-')),firm=path.join(dir,'公司','中国大陆','样例');await mkdir(firm,{recursive:true});
+ await writeFile(path.join(firm,'公司.json'),JSON.stringify({schemaVersion:2,companyId:'sample','公司':'样例','地区':'中国大陆',origins:['https://example.com'],roles:[]}));
+ const batch={schemaVersion:2,batchId:'B1',state:'已交接',updatedAt:'t',masterDataSha256:'m',companies:[{companyId:'sample','公司':'样例','地区':'中国大陆','公司文件':'x',stage:'待建档','岗位':[role]}],excluded:[],confirmation:null};
+ batch.confirmation={userQuote:'确认交接',confirmedAt:'t',contentSha256:contentSha(batch)};
+ const batchFile=path.join(dir,'投递批次.json');await writeFile(batchFile,JSON.stringify(batch));
+ const art=path.join(dir,'receipt.png');await writeFile(art,'synthetic receipt image');
+ const ev={schemaVersion:1,event:'submission_confirmed',batchId:'B1',companyId:'sample',roleId:'A',roleUrl:role['岗位链接'],roleTitle:role['岗位名称'],observedAt:new Date().toISOString(),sourceUrl:'https://example.com/campus/delivered',result:'official_receipt_confirmed',reviewer:'user',artifacts:[{file:art,sha256:sha(await readFile(art))}]};
+ const evFile=path.join(dir,'evidence.json');
+ const event=async(over={},evOver={})=>{const e={...ev,...evOver};await writeFile(evFile,JSON.stringify(e));return {schemaVersion:1,eventId:randomUUID(),event:e.event,batchId:'B1',companyId:'sample',roleId:'A',roleUrl:role['岗位链接'],roleTitle:role['岗位名称'],evidence:{file:evFile,sha256:sha(await readFile(evFile))},...over};};
+ await fn({dir,batchFile,event,art});
+}
+const outcomes=async dir=>JSON.parse(await readFile(path.join(dir,'投递回传.json'),'utf8')).roles;
 
-test('closeout needs no tracker configuration and replay is idempotent',()=>fixture(async({file,save})=>{const a=await save();const first=await closeApplication(a);assert.equal(first.status,'closed');assert.equal(first.websiteAction,'none');assert.equal(first.applicationStatus,'已提交');const bytes=await readFile(file);const second=await closeApplication(a);assert.equal(second.status,'closed');assert.deepEqual(await readFile(file),bytes);assert.equal(JSON.parse(bytes).applicationOutcomeEvents.length,1);assert.equal('sync' in second,false);}));
+test('receipt is written once per role to the handoff outcome file; replay idempotent; no backups or history',()=>fixture(async({dir,batchFile,event})=>{
+ const before=await readFile(batchFile,'utf8'),outcome=await event();
+ const r=await recordApplicationOutcome({outcome,handoffDir:dir});assert.equal(r.status,'recorded');assert.equal(r.businessStatus,'unchanged_until_user_review');
+ assert.equal((await recordApplicationOutcome({outcome,handoffDir:dir})).status,'already_recorded');
+ assert.deepEqual(Object.keys(await outcomes(dir)),['sample|A']);
+ assert.equal(await readFile(batchFile,'utf8'),before);
+ assert.deepEqual((await readdir(dir)).filter(f=>/backup|before|\.lock|\.tmp/.test(f)),[]);
+}));
+
+test('newer result replaces the older one for the same role; submitted cannot downgrade; event ID cannot be reused',()=>fixture(async({dir,event})=>{
+ await recordApplicationOutcome({outcome:await event({event:'submission_uncertain'},{event:'submission_uncertain',result:'clicked_without_receipt'}),handoffDir:dir});
+ const confirmed=await event();await recordApplicationOutcome({outcome:confirmed,handoffDir:dir});
+ const roles=await outcomes(dir);assert.equal(Object.keys(roles).length,1);assert.equal(roles['sample|A'].event,'submission_confirmed');
+ await assert.rejects(recordApplicationOutcome({outcome:await event({event:'user_skipped'},{event:'user_skipped',result:'user_skipped'}),handoffDir:dir}),/OUTCOME_SUBMITTED_DOWNGRADE_FORBIDDEN/);
+ await assert.rejects(recordApplicationOutcome({outcome:{...confirmed,evidence:{...confirmed.evidence,sha256:'0'.repeat(64)}},handoffDir:dir}),/OUTCOME_EVENT_ID_CONFLICT/);
+}));
+
+test('unknown event, wrong role, clicked-only receipt, unproven closure and altered artifacts reject',()=>fixture(async({dir,event,art})=>{
+ await assert.rejects(recordApplicationOutcome({outcome:{...(await event()),event:'submitted'},handoffDir:dir}));
+ await assert.rejects(recordApplicationOutcome({outcome:await event({roleId:'B'}),handoffDir:dir}),/OUTCOME_ROLE_IDENTITY_MISMATCH/);
+ await assert.rejects(recordApplicationOutcome({outcome:await event({},{result:'clicked'}),handoffDir:dir}),/OUTCOME_RECEIPT_REQUIRED/);
+ await assert.rejects(recordApplicationOutcome({outcome:await event({event:'role_closed'},{event:'role_closed',result:'page_missing'}),handoffDir:dir}),/OUTCOME_ROLE_CLOSED_EVIDENCE_REQUIRED/);
+ const o=await event();await writeFile(art,'changed');await assert.rejects(recordApplicationOutcome({outcome:o,handoffDir:dir}),/OUTCOME_EVIDENCE_HASH_MISMATCH/);
+}));
+
+test('unconfirmed or edited batch and concurrent writers reject',()=>fixture(async({dir,batchFile,event})=>{
+ const b=JSON.parse(await readFile(batchFile,'utf8'));
+ await writeFile(batchFile,JSON.stringify({...b,companies:[{...b.companies[0],'岗位':[{...role,'岗位名称':'Role A edited'}]}]}));
+ await assert.rejects(recordApplicationOutcome({outcome:await event(),handoffDir:dir}),/HANDOFF_NOT_CONFIRMED/);
+ await writeFile(batchFile,JSON.stringify(b));
+ const h=await open(path.join(dir,'投递回传.json.lock'),'wx');
+ await assert.rejects(recordApplicationOutcome({outcome:await event(),handoffDir:dir}),/OUTCOME_WRITE_LOCKED/);await h.close();
+}));
+
+test('recorded outcomes protect roles from rerun until the user reviews them',()=>fixture(async({dir,event})=>{
+ const catalog=await new CompanyDirectory({handoffDir:dir}).load(),queues=new RoleQueue({root:path.join(dir,'q'),catalog,inputAdapter:handoffInput(dir)});
+ await recordApplicationOutcome({outcome:await event({event:'submission_uncertain'},{event:'submission_uncertain',result:'clicked_without_receipt'}),handoffDir:dir});
+ let q=await queues.import({});assert.deepEqual(q.protectedRoles.map(p=>p.reason),['outcome_requires_resolution']);
+ await recordApplicationOutcome({outcome:await event(),handoffDir:dir});
+ q=await queues.import({});assert.deepEqual(q.protectedRoles.map(p=>p.reason),['already_submitted']);assert.equal(q.tasks.length,0);
+}));
+
+test('closeout needs no tracker configuration and never touches the website',()=>fixture(async({dir,event})=>{
+ const r=await closeApplication({outcome:await event(),handoffDir:dir});assert.equal(r.status,'closed');assert.equal(r.websiteAction,'none');
+}));

@@ -3,9 +3,9 @@ import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import {createInterface} from 'node:readline';
 import path from 'node:path';import {fileURLToPath} from 'node:url';
-const root=path.dirname(path.dirname(fileURLToPath(import.meta.url))),rolesFile=process.argv[2];
+const root=path.dirname(path.dirname(fileURLToPath(import.meta.url))),handoffDir=process.env.RECRUITING_HANDOFF_DIR;
 const evidenceDir=process.env.RECRUITING_RUN_EVIDENCE_DIR,authorizationFile=process.env.RECRUITING_RUN_AUTHORIZATION_FILE;
-if(!rolesFile||!evidenceDir||!authorizationFile)throw Error('ROLE_INPUT_EVIDENCE_AND_AUTHORIZATION_REQUIRED');
+if(!handoffDir||!evidenceDir||!authorizationFile)throw Error('ROLE_INPUT_EVIDENCE_AND_AUTHORIZATION_REQUIRED');
 const evidence=await readFile(authorizationFile,'utf8');if(!evidence.trim())throw Error('RUN_AUTHORIZATION_REQUIRED');
 await mkdir(evidenceDir,{recursive:true,mode:0o700});
 const started=process.env.RECRUITING_RUN_STARTED_AT?Date.parse(process.env.RECRUITING_RUN_STARTED_AT):performance.timeOrigin;if(!Number.isFinite(started)||started>Date.now())throw Error('INVALID_RUN_START_TIMESTAMP');const timing={startedAt:new Date(started).toISOString(),source:process.env.RECRUITING_RUN_STARTED_AT?'user_turn_start_timestamp':'node_process_time_origin',timingRule:'end_timestamp_minus_start_timestamp_includes_all_time_no_deductions',stage:'initializing',calls:[],waitingIntervals:[],submission:'not_performed'};
@@ -51,7 +51,7 @@ async function next(){
  timing.stage='ready_for_user_review';timing.completedAt=new Date().toISOString();timing.elapsedMs=Math.round(Date.parse(timing.completedAt)-started);timing.humanWaitingMs=timing.waitingIntervals.reduce((n,x)=>n+Date.parse(x.finishedAt)-Date.parse(x.startedAt),0);timing.elapsedExcludingWaitingMs=timing.elapsedMs-timing.humanWaitingMs;await persist();console.log(JSON.stringify({event:'ready_for_user_review',elapsedMs:timing.elapsedMs,humanWaitingMs:timing.humanWaitingMs,elapsedExcludingWaitingMs:timing.elapsedExcludingWaitingMs,tasks:timing.completedTasks,submission:'not_performed'}));
 }
 async function safe(fn){try{await fn();}catch(e){timing.stage='needs_attention';timing.error=/^[A-Z_]+$/.test(e.message)?e.message:'RUN_FAILED';await persist();console.log(JSON.stringify({event:'needs_attention',error:timing.error}));}}
-await safe(async()=>{queue=await call('login','role_queue_import',{rolesFile});timing.queueId=queue.queueId;timing.queueHash=queue.queueHash;if(!queue.tasks.length){timing.stage='all_roles_protected';await persist();console.log(JSON.stringify({event:'all_roles_protected',protectedRoles:queue.protectedRoles}));return;}await next();});
+await safe(async()=>{queue=await call('login','role_queue_import',{});timing.queueId=queue.queueId;timing.queueHash=queue.queueHash;if(!queue.tasks.length){timing.stage='all_roles_protected';await persist();console.log(JSON.stringify({event:'all_roles_protected',protectedRoles:queue.protectedRoles}));return;}await next();});
 if(process.stdin.isTTY)process.stdin.setRawMode(true);
 for await(const line of createInterface({input:process.stdin,terminal:false})){
  if(line.trim()==='close')break;

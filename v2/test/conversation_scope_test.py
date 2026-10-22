@@ -21,7 +21,9 @@ class ConversationScopeTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def run_scope(self, session, operation='enable', extra_env=None):
-        env = {**os.environ, 'CODEX_THREAD_ID': session, 'CODEX_SESSION_ID': session, **(extra_env or {})}
+        base = {k: v for k, v in os.environ.items()
+                if k not in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'DSH_SESSION_ID')}
+        env = {**base, 'CODEX_THREAD_ID': session, 'CODEX_SESSION_ID': session, **(extra_env or {})}
         return subprocess.run([sys.executable, str(SCRIPT), operation, '--scope-file', str(self.scope),
                                '--policy-file', str(self.policy), '--authorization-ref', 'synthetic user request'],
                               env=env, capture_output=True, text=True)
@@ -47,6 +49,12 @@ class ConversationScopeTest(unittest.TestCase):
             r = self.run_scope('ignored', extra_env=env)
             self.assertEqual(r.returncode, 2)
             self.assertFalse(self.scope.exists())
+
+    def test_dsh_session_identity_enables_only_that_conversation(self):
+        r = self.run_scope('', extra_env={'CODEX_THREAD_ID': '', 'CODEX_SESSION_ID': '',
+                                          'DSH_SESSION_ID': 'dsh-conversation'})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(self.scope.read_text())['session_ids'], ['dsh-conversation'])
 
 
 if __name__ == '__main__':

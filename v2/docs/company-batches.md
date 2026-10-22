@@ -1,6 +1,6 @@
 # 双通道公司批次
 
-新批次从 `company_batch_create({rolesFile|companyPlan,authorizationRef})` 开始。此接口在 MCP 内消费已确认 JSON、取出未提交公司及岗位并冻结次序，不转换 Excel。再调用 `company_batch_take({batchId,batchHash})` 原子领取、切分任务。默认 `companiesPerChannel=10`，Chrome 与 IAB 各至多十家公司；不是每家公司十个岗位或每个窗口十页。实际页面上限另行管理。
+新批次从 `company_batch_create({authorizationRef})` 开始，读取用户正向评审确认后的 `岗位交接/投递批次.json`（见 role-entry.md）。此接口在 MCP 内消费已确认 JSON、取出未提交公司及岗位并冻结次序，不转换 Excel。再调用 `company_batch_take({batchId,batchHash})` 原子领取、切分任务。默认 `companiesPerChannel=10`，Chrome 与 IAB 各至多十家公司；不是每家公司十个岗位或每个窗口十页。实际页面上限另行管理。
 
 同公司全部岗位属于一个公司任务；目录中已核实的 `loginScope`（否则为公司 origin）固定在同一通道。平台共享登录必须有资产依据，不能仅因为同为飞书域名就合并账号。保持公司与岗位的用户次序，不把分配通道的枚举次序改写为志愿顺序。公司间独立推进；同账号登录只做一次，再复核各岗位页身份。
 

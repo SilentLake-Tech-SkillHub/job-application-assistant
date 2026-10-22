@@ -7,13 +7,13 @@ import {accountMatches,validateCompany} from '../login/contracts.mjs';
 import {acquireLease,leasePath,defaultLeaseRoot} from '../shared/leases.mjs';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
-const root=path.dirname(path.dirname(fileURLToPath(import.meta.url))),company=JSON.parse(await readFile(path.join(root,'companies/insta360.login.json'),'utf8'));
+const root=path.dirname(path.dirname(fileURLToPath(import.meta.url))),company=JSON.parse(await readFile(path.join(root,'test/fixtures/insta360.login.json'),'utf8'));
 const phone='13800001234',auth={login:true,evidence:'synthetic_user_authorization'};
 async function fixture(fn){const dir=await mkdtemp(path.join(os.tmpdir(),'login-v2-')),profileFile=path.join(dir,'profile.json');
  await writeFile(profileFile,JSON.stringify({schemaVersion:1,entities:{},sources:{synthetic:{}},facts:{'contact.phone.cn':{status:'known',value:phone,sourceIds:['synthetic']}}}));
  const o={url:company.origin+company.loginPath,readAt:new Date().toISOString(),account:null,form:true,country:'+65',phone:'',otpPresent:true,sendLabel:'获取验证码',sendDisabled:false,submitLabel:'登录',consent:false,dialogs:0,challenges:0,errors:0,popupTitle:null,popupBody:null},actions=[];
  const browser={locate:async()=>o.url,observe:async()=>({...o}),inventory:async()=>[{type:'text',placeholder:'手机号码',selector:'input'}],act:async(c,url,a,value)=>{actions.push({method:a.method,selector:a.selector});if(a.method==='dropdown')o.country='+86';if(a.selector===c.fields.phone)o.phone=value;if(a.selector===c.consent.openSelector){o.dialogs=1;o.popupTitle='隐私声明';o.popupBody='生效日期：2024年2月5日\n测试声明';}if(a.selector===c.popups[0].closeSelector){o.dialogs=0;o.popupTitle=null;o.popupBody=null;}if(a.selector===c.fields.consent)o.consent=value;if(a.selector===c.fields.send){o.sendLabel='59 秒后重试';o.sendDisabled=true;}if(a.selector===c.fields.submit){o.account='1380****234';o.form=false;o.errors=0;o.url=c.origin+'/campus/position/list';}}};
- const engine=new LoginEngine({companyRoot:path.join(root,'companies'),privateRoot:path.join(dir,'runtime'),profileFile,browser,leaseRoot:path.join(dir,'leases')});
+ const engine=new LoginEngine({companyRoot:path.join(root,'test/fixtures'),privateRoot:path.join(dir,'runtime'),profileFile,browser,leaseRoot:path.join(dir,'leases')});
  try{await fn({dir,profileFile,engine,o,actions});}finally{await rm(dir,{recursive:true,force:true});}
 }
 test('account masks require both visible ends, no substring match',()=>{assert.ok(accountMatches('1380****234',phone));assert.equal(accountMatches('1380****999',phone),false);assert.equal(accountMatches('logged in',phone),false);});

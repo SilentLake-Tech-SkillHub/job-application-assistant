@@ -6,6 +6,7 @@ import { createHash,randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 import {PageAdapter} from './ui-page.mjs';
+import {READY_TIMEOUT_MS,matchEntryPath} from './entry-recipe.mjs';
 export {PageAdapter,inventoryDOM} from './ui-page.mjs';
 
 export class BrowserAdapter {
@@ -61,7 +62,7 @@ export class BrowserAdapter {
     const page=matches[0]||blank||await context.newPage(),reused=page.url()===url;
     if(!reused)await page.goto(url,{waitUntil:'domcontentloaded',timeout:30000});
     await page.bringToFront();
-    if(readySelectors.length)await page.waitForFunction(ss=>ss.some(s=>[...document.querySelectorAll(s)].some(n=>n.getClientRects().length)),readySelectors,{timeout:30000});
+    if(readySelectors.length){try{await page.waitForFunction(ss=>ss.some(s=>[...document.querySelectorAll(s)].some(n=>n.getClientRects().length)),readySelectors,{timeout:READY_TIMEOUT_MS});}catch{throw Error('PAGE_NOT_READY');}}
     let id=[...this.pageIds].find(([,p])=>p===page)?.[0];if(!id){id=randomUUID();this.pageIds.set(id,page);}
     return {pageId:id,pageUrl:page.url(),reused};
   }
@@ -90,23 +91,25 @@ export class BrowserAdapter {
       let id=[...this.pageIds].find(([,p])=>p===target)?.[0];if(!id){id=randomUUID();this.pageIds.set(id,target);}
       return {pageId:id,pageUrl:after.href,roleIdentity:{parameter:entry.formIdParameter,value:after.searchParams.get(entry.formIdParameter)},roleTitle:null,entryClicked:clicked,accountMatched:true,submission:'not_performed'};
     }
-    const detailMatch=before.pathname.match(/^\/(campus|campushirecn)\/(?:m\/)?position\/(\d+)\/detail$/);
-    const formMatch=before.pathname.match(/^\/(campus|campushirecn)\/resume\/(\d+)\/apply$/);
-    const detail=!!detailMatch,form=!!formMatch,identity=detailMatch||formMatch;
-    const expectedApplyPath=identity?'/'+identity[1]+'/resume/'+identity[2]+'/apply':null;
+    // 通用分支只执行 JSON 配方；没有已核实配方的站点直接阻断，绝不按按钮文字猜测点击。
+    const {detail,form,expectedApplyPath}=matchEntryPath(entry,before.pathname);
     if(!detail&&!form)throw Error('APPLICATION_ENTRY_PATH_REQUIRED');
-    const account=await page.locator(accountSelector).innerText();
-    if(!expectedAccount||account.trim()!==expectedAccount)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');
+    if(!expectedTitle||!expectedAccount||!accountSelector||!roleSelector)throw Error('APPLICATION_ENTRY_IDENTITY_REQUIRED');
+    if(sessionAccountPageUrl&&new URL(sessionAccountPageUrl).origin!==before.origin)throw Error('APPLICATION_ENTRY_ACCOUNT_SCOPE_CHANGED');
+    // Some user-operated sites expose the verified identity on a separate résumé page.
+    // Resolve it again before and after entry so a closed, replaced or duplicate page fails.
+    const readAccount=async()=>{const identityPage=sessionAccountPageUrl?(await this.existingPage(sessionAccountPageUrl)).page:page;const l=identityPage.locator(accountSelector);if(await l.count()!==1)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');return (await l.innerText()).trim();};
+    if(await readAccount()!==expectedAccount)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');
     if(detail){
-      const title=await page.title();if(!title.startsWith(expectedTitle+' - '))throw Error('APPLICATION_ENTRY_ROLE_CHANGED');
-      const button=page.getByRole('button',{name:'投递',exact:true});await button.waitFor({state:'visible',timeout:15000});if(await button.count()!==1)throw Error('APPLICATION_ENTRY_BUTTON_CHANGED');
-      // This named action exists only on a verified job-detail URL, never a résumé form.
+      const title=await page.title();if(!title.startsWith(expectedTitle+entry.detailTitleSeparator))throw Error('APPLICATION_ENTRY_ROLE_CHANGED');
+      const button=page.getByRole(entry.entryButton.role,{name:entry.entryButton.name,exact:true});await button.waitFor({state:'visible',timeout:READY_TIMEOUT_MS});if(await button.count()!==1)throw Error('APPLICATION_ENTRY_BUTTON_CHANGED');
+      // 该按钮只在已核实的岗位详情页存在并被点击；申请表页（form）永远不点击任何按钮。
       await button.click({timeout:10000});
-      await page.waitForURL(url=>url.origin===before.origin&&url.pathname===expectedApplyPath,{timeout:30000});
-    }
-    await page.locator(roleSelector).waitFor({state:'visible',timeout:30000});
+      await page.waitForURL(url=>url.origin===before.origin&&url.pathname===expectedApplyPath,{timeout:READY_TIMEOUT_MS});
+    }else if(before.pathname!==expectedApplyPath)throw Error('APPLICATION_ENTRY_PATH_REQUIRED');
+    try{await page.locator(roleSelector).waitFor({state:'visible',timeout:READY_TIMEOUT_MS});}catch{throw Error('PAGE_NOT_READY');}
     if((await page.locator(roleSelector).innerText()).trim()!==expectedTitle)throw Error('APPLICATION_ENTRY_RESULT_ROLE_CHANGED');
-    if((await page.locator(accountSelector).innerText()).trim()!==expectedAccount)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');
+    if(await readAccount()!==expectedAccount)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');
     return {pageId,pageUrl:page.url(),roleTitle:expectedTitle,entryClicked:detail,accountMatched:true,submission:'not_performed'};
   }
   async existingPage(url){

@@ -1,3 +1,4 @@
+import {templateMethods} from './control-registry.mjs';
 import {matchesRole} from './role-identity.mjs';
 import {assertIndependentDrafts} from './shared-record.mjs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -16,7 +17,7 @@ import {FormRouter} from './form-route.mjs';
 export const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const idOK = value => typeof value === 'string' && /^[a-z0-9][a-z0-9_-]{0,79}$/.test(value);
 const blocked = /提交|投递|撤回|删除|同意|签名|验证码|密码|身份证|银行卡|submit|apply now|withdraw|delete|consent|signature|password|otp|captcha/i;
-const methods = new Set(['fill','select','check','click','upload','wait','dropdown','radio','feishu_month','feishu_year','ud_dropdown','ud_date','ant_day','ant_dropdown']);
+const methods = templateMethods();
 export function validateTemplate(t) {
   if (!idOK(t.id) || !Number.isInteger(t.version) || t.version < 1) throw Error('INVALID_TEMPLATE_ID_OR_VERSION');
   if (!Array.isArray(t.pages) || !t.pages.length) throw Error('EMPTY_TEMPLATE');

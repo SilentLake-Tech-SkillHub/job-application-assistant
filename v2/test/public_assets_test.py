@@ -12,7 +12,7 @@ class PublicAssetsTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         source = Path(__file__).resolve().parents[1]
-        for name in ('package.json', 'package-lock.json', 'catalog/companies.json', 'companies/insta360.login.json'):
+        for name in ('package.json', 'package-lock.json', 'catalog/entry-recipes.json', 'test/fixtures/insta360.login.json'):
             dest = self.root / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source / name, dest)
@@ -25,12 +25,25 @@ class PublicAssetsTest(unittest.TestCase):
         with self.assertRaises(AssertionError):
             public_json_files(self.root)
     def test_personal_answer_hidden_in_asset_is_rejected(self):
-        p = self.root / 'companies/insta360.login.json'
+        p = self.root / 'test/fixtures/insta360.login.json'
         c = json.loads(p.read_text(encoding='utf-8'))
         c['account']['phone'] = '13800001234'
         p.write_text(json.dumps(c), encoding='utf-8')
         with self.assertRaises(AssertionError):
             public_json_files(self.root)
+    def test_company_catalog_in_package_is_rejected(self):
+        (self.root / 'catalog/companies.json').write_text('{"schemaVersion":1,"companies":[]}', encoding='utf-8')
+        with self.assertRaises(AssertionError):
+            public_json_files(self.root)
+
+    def test_hardcoded_domain_in_entry_recipe_is_rejected(self):
+        p = self.root / 'catalog/entry-recipes.json'
+        d = json.loads(p.read_text(encoding='utf-8'))
+        d['recipes']['feishu_campus_detail_to_form']['host'] = 'https://example.jobs.feishu.cn'
+        p.write_text(json.dumps(d), encoding='utf-8')
+        with self.assertRaises(AssertionError):
+            public_json_files(self.root)
+
     def test_manifest_mismatch_is_rejected(self):
         p = self.root / 'package-lock.json'
         d = json.loads(p.read_text(encoding='utf-8'))

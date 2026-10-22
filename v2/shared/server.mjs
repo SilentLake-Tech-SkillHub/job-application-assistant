@@ -1,3 +1,4 @@
+import {controlCapabilities} from './control-registry.mjs';
 import {normalizeWecruitDefinition,registerDefinitionQuestions} from './wecruit-definition.mjs';
 import {assertDefinitionMapped,matchesPageIdentity} from './definition-coverage.mjs';
 import {matchesRole} from './role-identity.mjs';
@@ -22,11 +23,16 @@ import {RoutedBrowserAdapter} from './routed-browser.mjs';
 import {sealFormTemplate,unsealedTemplate} from './form-seal.mjs';
 import {rebindTemplate} from './template-rebind.mjs';
 import {closeApplication} from './application-closeout.mjs';
+import {assertSubmissionPrepared,formAssetStatus} from './form-assets.mjs';
+import {readBatchFile} from './form-assets.mjs';
 import {accountMatches,matchesAccount,resolveAccount} from '../login/contracts.mjs';
 import {retireLegacyQuestionMappings} from './profile-migration.mjs';
+import {CompanyDirectory} from './company-directory.mjs';
 
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const catalog=JSON.parse(await readFile(path.join(root,'catalog/companies.json'),'utf8'));
+// 公司目录只来自工作区 岗位交接/公司/（见 company-directory.mjs），组件包内不带公司目录。
+const directory=new CompanyDirectory();
+const catalog={companies:await directory.load()};
 const store=new Store(process.env.RECRUITING_PRIVATE_DIR||path.join(root,'.private'));
 const browser=process.env.RECRUITING_BROWSER_SOCKET?new RoutedBrowserAdapter({chromeSocket:process.env.RECRUITING_BROWSER_SOCKET,iabSocket:process.env.RECRUITING_IAB_SOCKET,store}):new BrowserAdapter(process.env.RECRUITING_CDP_URL);
 const profileFile=process.env.RECRUITING_PROFILE_JSON;
@@ -39,7 +45,7 @@ async function boundRole(args){
   const c=catalog.companies.find(c=>c.id===t.companyId),templateId=c?.roleTemplates?.[t.roleId]||c?.templateId;if(!templateId)throw Error('COMPANY_NOT_COVERED');
   const template=await store.get('templates',templateId),plan=template.pages.find(p=>new URL(state.returnUrl).pathname.startsWith(p.pathPrefix));
   if(!plan||plan.roleTitle!==t.title)throw Error('CONFIRMED_ROLE_TITLE_TEMPLATE_MISMATCH');
-  const login=JSON.parse(await readFile(path.join(process.env.RECRUITING_LOGIN_COMPANY_DIR||path.join(root,'companies'),t.companyId+'.login.json'),'utf8'));
+  const login=JSON.parse(await readFile(directory.loginFile(t.companyId),'utf8'));
   const snapshot=await browser.request('roleSnapshot',{pageId:state.pageId,roleSelector:plan.roleSelector,accountSelector:login.account.selector,loginRoot:login.fields?.root,roleIdentity:plan.roleIdentity});
   if(login.loginMethod==='user_operated'){const accountPage=await browser.existingPage(login.account.pageUrl),account=await accountPage.observe({fields:[{id:'account',read:{selector:login.account.selector,kind:'text'}}]});snapshot.account=account.fields.account?.value;snapshot.loginFormPresent=!account.fields.account?.present;}
   if(snapshot.pageUrl!==state.returnUrl||!matchesRole(plan,snapshot)||snapshot.loginFormPresent||!matchesAccount(snapshot.account,resolveAccount(await loadProfile(profileFile),login)))throw Error('ROLE_OR_ACCOUNT_CHANGED_BEFORE_FILL');
@@ -69,12 +75,13 @@ const server=new McpServer({name:'recruiting-form-batch',version:packageInfo.ver
 const materials=new MaterialImport({store,browser,profileFile,companies:catalog.companies,withCompanyLease:(companyId,fn)=>engine.withCompanyLease(companyId,fn)});
 const output=data=>({content:[{type:'text',text:JSON.stringify(data)}]});
 const wrap=(fn,refresh=true)=>async args=>{try{if(refresh)await refreshBindings();return output(await fn(args));}catch(e){return {isError:true,...output({error:/^[A-Z_]+(?::[a-z0-9_-]+)?$/.test(e.message)?e.message:e.code==='ENOENT'?'PRIVATE_ASSET_NOT_FOUND':'OPERATION_FAILED'})};}};
-server.registerTool('application_closeout',{description:'固定事件收尾：校验证据并原子更新当前公司方案JSON；同事件幂等，不同步外部账本、不提交网站。',inputSchema:{rolesFile:z.string().min(1),expectedHash:z.string().regex(/^[a-f0-9]{64}$/),outcome:outcomeSchema}},wrap(args=>closeApplication(args),false));
+server.registerTool('application_closeout',{description:'固定事件收尾：校验官网证据后把本岗位最新结果覆盖写入 岗位交接/投递回传.json（每岗位一条，不留历史和备份）；同事件幂等。记录“已投递”前，本岗位必须在本批队列中由 MCP 按已封存的公司表单模板填写并核验通过，手工填写的岗位拒绝记录。不改主表状态：由搜索端反向评审、用户确认后才写入。不提交网站。',inputSchema:{outcome:outcomeSchema}},wrap(async args=>{await refreshBindings();return closeApplication({...args,assertPrepared:outcome=>assertSubmissionPrepared({queues,store,catalog:catalog.companies,outcome})});},false));
+server.registerTool('form_assets_status',{description:'只读：按当前投递批次（或指定公司）列出每家公司的登录配置、表单模板是否封存、各岗位申请页链接是否已存；缺口须先按建库路线补齐，不得手工填表代替。',inputSchema:{companyIds:z.array(z.string()).min(1).max(50).optional()},annotations:{readOnlyHint:true}},wrap(async({companyIds})=>{await refreshBindings();const batch=await readBatchFile(directory.handoffDir);return formAssetStatus({directory,catalog:catalog.companies,store,batch,companyIds});}));
 const queueTask={queueId:z.string().uuid(),queueHash:z.string().length(64),taskId:z.string().uuid()};
-server.registerTool('runtime_info',{description:'只读返回当前实际运行版本与能力，识别旧安装端；不连接浏览器。',annotations:{readOnlyHint:true}},wrap(()=>({version:packageInfo.version,compilerVersion:3,capabilities:['company_batch','form_route','workflow_next','role_bindings','frozen_plan','independent_readback','fixed_closeout','official_form_definition','semantic_question_locators'],browserAccess:false}),false));
+server.registerTool('runtime_info',{description:'只读返回当前实际运行版本与能力，识别旧安装端；不连接浏览器。',annotations:{readOnlyHint:true}},wrap(()=>({version:packageInfo.version,compilerVersion:3,controlCapabilities:controlCapabilities(),capabilities:['company_batch','form_route','workflow_next','role_bindings','frozen_plan','independent_readback','fixed_closeout','official_form_definition','semantic_question_locators'],browserAccess:false}),false));
 server.registerTool('workflow_next',{description:'确定性调用路由：先判断公司资产，复用则离线映射与编译；缺失或失效才返回增量建库接口。只返回下一调用及真实阻塞，不替模型宣称完成。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),roleId:z.string().optional()},annotations:{readOnlyHint:true}},wrap(async task=>{
  const route=await engine.formRoute(task);
- if(route.route==='acquire'){let hasDefinitionRecipe=false;try{await readFile(path.join(process.env.RECRUITING_LOGIN_COMPANY_DIR||path.join(root,'companies'),task.companyId+'.definition.json'),'utf8');hasDefinitionRecipe=true;}catch(e){if(e.code!=='ENOENT')throw e;}return {...route,definitionFirst:hasDefinitionRecipe,nextTools:[...(hasDefinitionRecipe?['capture_form_definition']:[]),'capture_controls','capture_choice_options','template_register','probe_conditions','template_finalize','prepare_plan'],submission:'not_performed'};}
+ if(route.route==='acquire'){let hasDefinitionRecipe=false;try{hasDefinitionRecipe=!!directory.definitionFile(task.companyId);}catch(e){if(e.message!=='UNKNOWN_COMPANY')throw e;}return {...route,definitionFirst:hasDefinitionRecipe,nextTools:[...(hasDefinitionRecipe?['capture_form_definition']:[]),'capture_controls','capture_choice_options','template_register','probe_conditions','template_finalize','prepare_plan'],submission:'not_performed'};}
  const profile=await loadProfile(profileFile),company=engine.companyForTask(task),template=await store.get('templates',company.templateId);
  try{assertQuestionsMapped(profile,task.companyId,task.pageUrl);}catch{return {...route,nextStage:'local_mapping',nextTools:['profile_status','profile_map_questions'],submission:'not_performed'};}
  const plan=await engine.preparePlan({...task,templateHash:hash(template),...resolveProfile(profile,template,{},task.companyId)});
@@ -82,10 +89,12 @@ server.registerTool('workflow_next',{description:'确定性调用路由：先判
 }));
 server.registerTool('form_route',{description:'先做本地IF判断：公司已有覆盖当前页面的可用表单则复用并转资料预检；没有、未完成或路径不匹配才进入增量建库。不打开网页、不重新采集已有表单、不填写。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),roleId:z.string().optional()},annotations:{readOnlyHint:true}},wrap(a=>engine.formRoute(a)));
 server.registerTool('capture_repeat_slots',{description:'内部建库：按已观察的重复栏目容器和添加按钮准备指定数量空白条目，不填写个人数据、不上传或提交；随后须重新采集全部字段。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),groupSelector:z.string(),addSelector:z.string(),addLabel:z.string().optional(),count:z.number().int().min(1).max(20),authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1)})}},wrap(a=>engine.withCompanyLease(a.companyId,async()=>{const p=await browser.existingPage(a.pageUrl);await p.ensureGroups([{id:'construction-slots',selector:a.groupSelector,addSelector:a.addSelector,addLabel:a.addLabel,count:a.count}]);return {status:'slots_created_require_recapture',count:a.count,submission:'not_performed'};})),false);
-server.registerTool('capture_choice_options',{description:'内部建库：仅对已采集的 UD 下拉逐个打开读取真实选项并关闭，不更改原选择；保存私有选项资产。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),captureId:z.string(),searchQueries:z.record(z.string()).optional()}},wrap(args=>engine.withCompanyLease(args.companyId,async()=>{
+server.registerTool('capture_choice_options',{description:'内部建库：仅对已采集的 UD 下拉逐个打开读取真实选项并关闭，不更改原选择；保存私有选项资产。selectors可限定本次需补采的已捕获下拉，不改变完整问题登记。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),captureId:z.string(),selectors:z.array(z.string()).min(1).optional(),searchQueries:z.record(z.string()).optional()}},wrap(args=>engine.withCompanyLease(args.companyId,async()=>{
  const capture=await store.get('runs',args.captureId);if(capture.companyId!==args.companyId||capture.pageUrl!==args.pageUrl)throw Error('CHOICE_CAPTURE_SCOPE_MISMATCH');
  const page=await browser.existingPage(args.pageUrl),choices=[];
- for(const f of capture.controls.filter(f=>f.type==='search'&&f.contextProvider==='.ud-formily-item'||f.type==='combobox'&&f.contextProvider==='.ant-form-item')){
+ const candidates=capture.controls.filter(f=>f.type==='search'&&f.contextProvider==='.ud-formily-item'||f.type==='combobox'&&f.contextProvider==='.ant-form-item');
+ if(args.selectors?.some(s=>!candidates.some(f=>f.selector===s)))throw Error('CHOICE_SELECTOR_NOT_CAPTURED');
+ for(const f of candidates.filter(f=>!args.selectors||args.selectors.includes(f.selector))){
   const root=f.questionSelector||`.ud-formily-item:has(:is(${f.selector})):not(:has(.ud-formily-item :is(${f.selector})))`;
   const result=f.disabled?{options:[],status:'disabled_by_parent',restored:true}:await page.act({query:args.searchQueries?.[f.selector],method:f.contextProvider==='.ant-form-item'?'ant_dropdown_inspect':'ud_dropdown_inspect',selector:f.selector,labelSelector:f.contextProvider==='.ant-form-item'?f.labelSelector:root+' > .ud-formily-item-label'},null,{});
   choices.push({selector:f.selector,label:f.label,fieldKey:f.fieldKey,group:f.group,repeatIndex:f.repeatIndex,...result});
@@ -98,7 +107,7 @@ server.registerTool('material_import_prepare',{description:'首次建库：对�
 server.registerTool('material_import_run',{description:'执行已冻结的简历导入，真实上传前核对控件、简历容器和文件Hash；尝试先落账，不自动重试。结果仍须重新采集并核验网站解析。',inputSchema:{planId:z.string().uuid(),planHash:z.string().length(64),authorization:z.object({uploads:z.literal(true),evidence:z.string().min(1)})}},wrap(a=>materials.run(a),false));
 const batchRef={batchId:z.string().uuid(),batchHash:z.string().length(64)};
 server.registerTool('company_batch_restrict_channels',{description:'按用户明确要求收窄本批浏览器通道；保留页面和事实，移除迁移岗位的旧页面绑定，要求在新通道重新核实原岗位与账号。',inputSchema:{...batchRef,channels:z.array(z.enum(['chrome','iab'])).min(1).max(2),authorizationRef:z.string().min(1)}},wrap(a=>companyBatches.restrictChannels(a),false));
-server.registerTool('company_batch_create',{description:'离线从已确认岗位JSON取公司，保存双浏览器批次；默认 Chrome/IAB 各10家公司，同公司多岗位只占一个公司名额。不转换Excel、不打开网页。',inputSchema:{rolesFile:z.string().optional(),companyPlan:z.record(z.unknown()).optional(),companyOrder:z.array(z.string()).optional(),authorizationRef:z.string().min(1),companiesPerChannel:z.number().int().min(1).max(10).default(10),parallelRoles:z.boolean().default(false)}},wrap(a=>{if(!companyBatches)throw Error('PRIVATE_PROFILE_REQUIRED');return companyBatches.create(a);},false));
+server.registerTool('company_batch_create',{description:'离线从用户正向评审确认后的 岗位交接/投递批次.json 取公司，保存双浏览器批次（不接受旧公司方案文件）；默认 Chrome/IAB 各10家公司，同公司多岗位只占一个公司名额。不转换Excel、不打开网页。',inputSchema:{rolesFile:z.string().optional(),companyPlan:z.record(z.unknown()).optional(),companyOrder:z.array(z.string()).optional(),authorizationRef:z.string().min(1),companiesPerChannel:z.number().int().min(1).max(10).default(10),parallelRoles:z.boolean().default(false)}},wrap(async a=>{if(!companyBatches)throw Error('PRIVATE_PROFILE_REQUIRED');const created=await companyBatches.create(a);await refreshBindings();const assets=await formAssetStatus({directory,catalog:catalog.companies,store,batch:await readBatchFile(directory.handoffDir)});return {...created,formAssets:{ready:assets.ready,incomplete:assets.incomplete,rule:'缺表单模板的公司先按建库路线 capture→template_register→probe_conditions→template_finalize 补齐，再 prepare；不得手工填表代替'}};},false));
 server.registerTool('company_batch_take',{description:'原子领取并切分公司到 Chrome/IAB，默认每通道最多10家；保留公司/平台登录范围亲和性与已确认岗位顺序。返回宿主实际执行任务，不把派发当成功。',inputSchema:batchRef},wrap(a=>{if(!companyBatches)throw Error('PRIVATE_PROFILE_REQUIRED');return companyBatches.take(a);},false));
 server.registerTool('company_batch_record',{description:'按公司租约收回实际运行状态；可独立等待用户，准备完成必须提供所有岗位的真实填写核验运行证据。',inputSchema:{...batchRef,companyId:z.string(),channel:z.enum(['chrome','iab']),leaseToken:z.string().uuid(),status:z.enum(['running','waiting_for_user','ready_for_user_review','blocked']),reason:z.string().optional(),runIds:z.array(z.string()).optional()}},wrap(a=>{if(!companyBatches)throw Error('PRIVATE_PROFILE_REQUIRED');return companyBatches.record(a);},false));
 server.registerTool('company_batch_status',{description:'只读双通道公司批次的等待、阻塞及核验结果，不返回租约令牌。',inputSchema:batchRef,annotations:{readOnlyHint:true}},wrap(a=>{if(!companyBatches)throw Error('PRIVATE_PROFILE_REQUIRED');return companyBatches.status(a);},false));
@@ -183,7 +192,7 @@ server.registerTool('browser_open',{description:'在共用的 MCP Chrome 中打�
 server.registerTool('probe_conditions',{description:'仅内部建库维护：按已捕获的条件选项通过真实控件展开分支，强制登记新问题，恢复并核对原表单。不写个人事实、不上传、不提交；缺少探测授权或无法恢复原选择时拒绝。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),roleId:z.string().optional(),templateHash:z.string(),authorization:z.object({probe:z.literal(true),evidence:z.string().min(1)})}},wrap(({authorization,...task})=>engine.probeCompany(task,authorization)));
 server.registerTool('capture_form_definition',{description:'内部建库：按公司已核实的官网模板读取接口获取全部栏目、隐藏条件问题和选项字典，强制登记个人JSON；不读取候选人答案，不填写、不提交。',inputSchema:{companyId:z.string(),pageUrl:z.string().url()}},wrap(args=>engine.withCompanyLease(args.companyId,async()=>{
  const company=catalog.companies.find(c=>c.id===args.companyId);if(!company||new URL(args.pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
- const recipeFile=path.join(process.env.RECRUITING_LOGIN_COMPANY_DIR||path.join(root,'companies'),args.companyId+'.definition.json'),recipe=JSON.parse(await readFile(recipeFile,'utf8'));
+ const recipeFile=directory.definitionFile(args.companyId);if(!recipeFile)throw Error('FORM_DEFINITION_NOT_CONFIGURED');const recipe=JSON.parse(await readFile(recipeFile,'utf8'));
  if(recipe.companyId!==args.companyId||recipe.provider!=='wecruit'||!recipe.evidence?.sourceCodeHash)throw Error('VERIFIED_SCHEMA_RECIPE_REQUIRED');
  const page=await browser.existingPage(args.pageUrl),raw=await page.act({method:'capture_wecruit_schema',endpoint:recipe.endpoint},null,{});if(!raw.template)throw Error('SCHEMA_RESPONSE_NOT_TEMPLATE');
  const definition=normalizeWecruitDefinition(raw.template,raw.dictionary),id='definition-'+args.companyId+'-'+hash({pageUrl:args.pageUrl,definitionHash:definition.sourceDefinitionHash}).slice(0,16);

@@ -1,6 +1,7 @@
 import {readFile,writeFile,mkdir,rename} from 'node:fs/promises';
 import {createHash,randomUUID} from 'node:crypto';
 import path from 'node:path';
+import {assertHandoffUnchanged} from './company-directory.mjs';
 export const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const fileHash=async file=>createHash('sha256').update(await readFile(file)).digest('hex');
 // Upstream owns preparation and approval of the company plan. This adapter only
@@ -35,13 +36,16 @@ export class RoleQueue{
    for(const r of roles.sort((a,b)=>a.order-b.order)){
     const u=new URL(r.url);let companyId=c.companyId;
     if(!companyId){const match=this.catalog.filter(x=>x.origin===u.origin);if(match.length!==1)throw Error('ROLE_COMPANY_NOT_UNIQUE');companyId=match[0].id;}
-    const company=this.catalog.find(x=>x.id===companyId),roleId=String(r.roleId||r.id||'');
+    // 一家公司可有多个站点：按“公司 + 岗位链接的站点”取目录项，任务归属到该站点的目录项。
+    const company=this.catalog.find(x=>(x.companyId??x.id)===companyId&&x.origin===u.origin)||this.catalog.find(x=>x.id===companyId),roleId=String(r.roleId||r.id||'');
+    if(company)companyId=company.id;
     if(!roleId||!r.title||!company||u.protocol!=='https:'||u.origin!==company.origin||u.username||u.password||/\/(?:login|sign[-_]?in)\/?$/.test(u.pathname))throw Error('INVALID_CONFIRMED_ROLE_URL');
     const applyUrl=r.applyUrl||r.apply_url||null;if(applyUrl){const a=new URL(applyUrl);if(a.protocol!=='https:'||a.origin!==company.origin||a.username||a.password)throw Error('INVALID_ROLE_APPLICATION_URL');}
     const identity=companyId+':'+roleId;if(identities.has(identity)||urls.has(u.href))throw Error('DUPLICATE_CONFIRMED_ROLE');identities.add(identity);urls.add(u.href);
     const status=r.applicationStatus||c.existing_data?.find(x=>x.values?.['岗位链接']===r.url)?.values?.['投递状态'];
-    if(['已提交','submitted','receipt_verified'].includes(status)){protectedRoles.push({companyId,roleId,reason:'already_submitted'});continue;}
-    if(!['待投递','not_submitted'].includes(status))throw Error('ROLE_APPLICATION_STATE_UNRESOLVED');
+    if(['已提交','submitted','receipt_verified','岗位已投递','岗位推进中','岗位offer','岗位终止'].includes(status)){protectedRoles.push({companyId,roleId,reason:'already_submitted'});continue;}
+    if(status==='岗位失效/关闭'){protectedRoles.push({companyId,roleId,reason:'role_closed'});continue;}
+    if(!['待投递','not_submitted','岗位待投递'].includes(status))throw Error('ROLE_APPLICATION_STATE_UNRESOLVED');
     if(['submission_uncertain','application_blocked','user_skipped'].includes(r.applicationOutcome?.event)){protectedRoles.push({companyId,roleId,reason:'outcome_requires_resolution'});continue;}
     tasks.push({taskId:randomUUID(),companyId,roleId,title:r.title,url:u.href,applyUrl,order:tasks.length+1,companyOrder:sequence?sequence.indexOf(c.companyId||c.company_key)+1:c.order||1,roleOrder:r.order});
    }
@@ -52,10 +56,10 @@ export class RoleQueue{
   if(args.batchPolicy&&(!args.batchPolicy.authorizationRef||args.batchPolicy.mode!=='parallel_companies'))throw Error('COMPANY_BATCH_POLICY_REQUIRED');
   const executionMode=args.batchPolicy?'parallel_companies':upstreamMode;
   const parallelRoles=upstreamMode==='parallel_roles'||Boolean(args.batchPolicy?.parallelRoles);
-  const queue={executionMode,parallelRoles,batchPolicy:args.batchPolicy||null,id:randomUUID(),createdAt:new Date().toISOString(),inputKind:legacy?'confirmed-company-plan-v1':'confirmed-company-plan',batchId:input.batchId||input.batch_id,version:input.version||1,source,inputHash:digest(input),input,tasks,protectedRoles,submission:'forbidden'};
+  const queue={executionMode,parallelRoles,batchPolicy:args.batchPolicy||null,id:randomUUID(),createdAt:new Date().toISOString(),inputKind:source.kind==='handoff'?'confirmed-handoff-batch':legacy?'confirmed-company-plan-v1':'confirmed-company-plan',batchId:input.batchId||input.batch_id,version:input.version||1,source,inputHash:digest(input),input,tasks,protectedRoles,submission:'forbidden'};
   queue.queueHash=digest(queue);await this.put(queue.id,queue);return this.public(queue);
  }
  public(q){return {queueId:q.id,queueHash:q.queueHash,inputKind:q.inputKind,executionMode:q.executionMode,parallelRoles:q.parallelRoles,tasks:q.tasks,protectedRoles:q.protectedRoles,browserAccess:false,submission:'forbidden'};}
- async get({queueId,queueHash}){const q=await this.read(queueId),{queueHash:h,...payload}=q;if(h!==queueHash||digest(payload)!==h)throw Error('ROLE_QUEUE_HASH_MISMATCH');if(q.source.kind==='file'&&await fileHash(q.source.file)!==q.source.hash)throw Error('ROLE_INPUT_CHANGED');return q;}
+ async get({queueId,queueHash}){const q=await this.read(queueId),{queueHash:h,...payload}=q;if(h!==queueHash||digest(payload)!==h)throw Error('ROLE_QUEUE_HASH_MISMATCH');if(q.source.kind==='file'&&await fileHash(q.source.file)!==q.source.hash)throw Error('ROLE_INPUT_CHANGED');if(q.source.kind==='handoff')await assertHandoffUnchanged(q.source);return q;}
  async task(args){const q=await this.get(args),index=q.tasks.findIndex(t=>t.taskId===args.taskId);if(index<0)throw Error('ROLE_NOT_IN_CONFIRMED_QUEUE');const target=q.tasks[index];const predecessors=q.tasks.slice(0,index).filter(t=>q.executionMode==='parallel_companies'?t.companyId===target.companyId&&!q.parallelRoles:q.executionMode!=='parallel_roles'||t.companyId!==target.companyId);for(const t of predecessors){let state;try{state=await this.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}if(state?.status!=='ready_for_user_review')throw Error('CONFIRMED_ROLE_ORDER_BLOCKED');}return {q,t:target};}
 }

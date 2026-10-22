@@ -1,46 +1,50 @@
-// Business labels are derived here, never accepted from a model as a target value.
-import {readFile,writeFile,open,rename,unlink,realpath} from 'node:fs/promises';
+// 投递结果回传：只写工作区 岗位交接/投递回传.json，每个岗位只保留最新一条结果（覆盖写），不留事件历史、不另存备份。
+// 业务状态不在这里改：搜索端 company_store.py reverse 读取回传，生成“当前状态是X，更新状态是Y”，用户确认后才写主表。
+import {readFile,writeFile,open,rename,unlink} from 'node:fs/promises';
 import {createHash,randomUUID} from 'node:crypto';
+import path from 'node:path';
 import {z} from 'zod';
+import {handoffDirFromEnv,contentSha} from './company-directory.mjs';
 const sha=b=>createHash('sha256').update(b).digest('hex');
 const nonempty=z.string().min(1);
 const proof=z.object({file:nonempty,sha256:z.string().regex(/^[a-f0-9]{64}$/)}).strict();
-export const outcomeSchema=z.object({schemaVersion:z.literal(1),eventId:z.string().uuid(),event:z.enum(['submission_confirmed','submission_uncertain','application_blocked','user_skipped']),batchId:nonempty,companyId:nonempty,roleId:nonempty,roleUrl:z.string().url(),roleTitle:nonempty,evidence:proof}).strict();
+export const OUTCOME_EVENTS=['submission_confirmed','submission_uncertain','application_blocked','user_skipped','role_closed'];
+// 需要用户处理、在处理前禁止重跑的结果
+export const UNRESOLVED_EVENTS=['submission_uncertain','application_blocked'];
+export const outcomeSchema=z.object({schemaVersion:z.literal(1),eventId:z.string().uuid(),event:z.enum(OUTCOME_EVENTS),batchId:nonempty,companyId:nonempty,roleId:nonempty,roleUrl:z.string().url(),roleTitle:nonempty,evidence:proof}).strict();
 const evidenceSchema=z.object({schemaVersion:z.literal(1),event:outcomeSchema.shape.event,batchId:nonempty,companyId:nonempty,roleId:nonempty,roleUrl:z.string().url(),roleTitle:nonempty,observedAt:z.string().datetime({offset:true}),sourceUrl:z.string().url(),result:nonempty,reviewer:nonempty,artifacts:z.array(proof).min(1)}).strict();
-const label=s=>s==='not_submitted'?'待投递':s==='submitted'?'已提交':s;
 const readProof=async p=>{const b=await readFile(p.file);if(sha(b)!==p.sha256)throw Error('OUTCOME_EVIDENCE_HASH_MISMATCH');return b;};
-export async function recordApplicationOutcome({rolesFile,expectedHash,outcome}){
- const e=outcomeSchema.parse(outcome),file=await realpath(rolesFile),lock=file+'.outcome.lock';let handle;
+export const outcomeFile=dir=>path.join(dir,'投递回传.json');
+export async function readOutcomes(dir){
+ try{return JSON.parse(await readFile(outcomeFile(dir),'utf8'));}catch(e){if(e.code==='ENOENT')return {schemaVersion:1,roles:{}};throw e;}
+}
+export async function recordApplicationOutcome({outcome,handoffDir=handoffDirFromEnv()}){
+ const e=outcomeSchema.parse(outcome),dir=path.resolve(handoffDir),file=outcomeFile(dir),lock=file+'.lock';let handle,tmp;
  try{handle=await open(lock,'wx',0o600);}catch(error){if(error.code==='EEXIST')throw Error('OUTCOME_WRITE_LOCKED');throw error;}
- let tmp;
  try{
-  const bytes=await readFile(file),input=JSON.parse(bytes),prior=input.applicationOutcomeEvents||[],eventHash=sha(JSON.stringify(e));
-  const duplicate=prior.find(x=>x.eventId===e.eventId);
-  if(duplicate){if(duplicate.eventHash!==eventHash)throw Error('OUTCOME_EVENT_ID_CONFLICT');const roles=(input.companies||[]).filter(c=>c.companyId===e.companyId).flatMap(c=>c.roles||[]).filter(r=>(r.roleId||r.id)===e.roleId&&r.url===e.roleUrl&&r.title===e.roleTitle);if(roles.length!==1||roles[0].applicationStatus!==duplicate.applicationStatus)throw Error('OUTCOME_RECORDED_STATE_CHANGED');await readProof(e.evidence);return {status:'already_recorded',eventId:e.eventId,applicationStatus:duplicate.applicationStatus,planHash:sha(bytes)};}
-  if(sha(bytes)!==expectedHash)throw Error('OUTCOME_INPUT_CHANGED');
-  if(input.schemaVersion!==1||input.batchId!==e.batchId)throw Error('OUTCOME_BATCH_MISMATCH');
-  const matches=(input.companies||[]).filter(c=>c.companyId===e.companyId).flatMap(c=>c.roles||[]).filter(r=>(r.roleId||r.id)===e.roleId&&r.url===e.roleUrl&&r.title===e.roleTitle);
-  if(matches.length!==1||matches[0].selected!==true)throw Error('OUTCOME_ROLE_IDENTITY_MISMATCH');
-  const r=matches[0],before=r.applicationStatus,current=label(before);
-  // Legacy leakage can only be repaired with fresh, identity-bound receipt evidence.
-  if(!['待投递','已提交'].includes(current)&&!(before==='receipt_verified'&&e.event==='submission_confirmed'))throw Error('OUTCOME_BUSINESS_LABEL_INVALID');
+  const batch=JSON.parse(await readFile(path.join(dir,'投递批次.json'),'utf8'));
+  if(!['已交接','进行中'].includes(batch.state)||!batch.confirmation||batch.confirmation.contentSha256!==contentSha(batch))throw Error('HANDOFF_NOT_CONFIRMED');
+  if(batch.batchId!==e.batchId)throw Error('OUTCOME_BATCH_MISMATCH');
+  const matches=batch.companies.flatMap(c=>c['岗位'].map(r=>({companyId:c.companyId,...r}))).filter(r=>r['岗位ID']===e.roleId&&r['岗位链接']===e.roleUrl&&r['岗位名称']===e.roleTitle);
+  if(matches.length!==1)throw Error('OUTCOME_ROLE_IDENTITY_MISMATCH');
+  const companyId=matches[0].companyId,key=companyId+'|'+e.roleId,eventHash=sha(JSON.stringify(e));
+  const out=await readOutcomes(dir),prior=out.roles[key];
+  if(prior&&prior.eventId===e.eventId){
+   if(prior.eventHash!==eventHash)throw Error('OUTCOME_EVENT_ID_CONFLICT');
+   await readProof(e.evidence);return {status:'already_recorded',eventId:e.eventId,event:prior.event,businessStatus:'unchanged_until_user_review'};
+  }
+  if(prior?.event==='submission_confirmed'&&e.event!=='submission_confirmed')throw Error('OUTCOME_SUBMITTED_DOWNGRADE_FORBIDDEN');
   const evidence=evidenceSchema.parse(JSON.parse(await readProof(e.evidence)));
   for(const k of ['event','batchId','companyId','roleId','roleUrl','roleTitle'])if(evidence[k]!==e[k])throw Error('OUTCOME_EVIDENCE_IDENTITY_MISMATCH');
-  const roleOrigin=new URL(e.roleUrl).origin,source=new URL(evidence.sourceUrl);
-  if(source.origin!==roleOrigin||source.protocol!=='https:')throw Error('OUTCOME_EVIDENCE_ORIGIN_MISMATCH');
+  const source=new URL(evidence.sourceUrl);
+  if(source.origin!==new URL(e.roleUrl).origin||source.protocol!=='https:')throw Error('OUTCOME_EVIDENCE_ORIGIN_MISMATCH');
   if(Date.parse(evidence.observedAt)>Date.now()+60000)throw Error('OUTCOME_EVIDENCE_TIME_INVALID');
   for(const p of evidence.artifacts)await readProof(p);
   if(e.event==='submission_confirmed'&&evidence.result!=='official_receipt_confirmed')throw Error('OUTCOME_RECEIPT_REQUIRED');
-  if(e.event!=='submission_confirmed'&&current==='已提交')throw Error('OUTCOME_SUBMITTED_DOWNGRADE_FORBIDDEN');
-  const next=e.event==='submission_confirmed'?'已提交':'待投递',now=new Date().toISOString();
-  r.applicationStatus=next;
-  r.applicationOutcome={event:e.event,receiptStatus:e.event==='submission_confirmed'?'receipt_verified':'not_verified',note:evidence.result,evidence:e.evidence,recordedAt:now};
-  const entry={eventId:e.eventId,eventHash,event:e.event,companyId:e.companyId,roleId:e.roleId,previousApplicationStatus:before,applicationStatus:next,evidence:e.evidence,recordedAt:now};
-  input.applicationOutcomeEvents=[...prior,entry];input.version+=1;input.updatedAt=now;
-  const backup=file+'.before-outcome-'+e.eventId+'.json';try{await writeFile(backup,bytes,{flag:'wx',mode:0o600});}catch(error){if(error.code!=='EEXIST'||sha(await readFile(backup))!==sha(bytes))throw error;}
-  // Recheck immediately before atomic replacement. Cooperating writers share this lock.
-  if(sha(await readFile(file))!==expectedHash)throw Error('OUTCOME_INPUT_CHANGED');
-  tmp=file+'.'+randomUUID()+'.tmp';await writeFile(tmp,JSON.stringify(input,null,2)+'\n',{mode:0o600});await rename(tmp,file);tmp=null;
-  const saved=await readFile(file);return {status:'recorded',eventId:e.eventId,applicationStatus:next,receiptStatus:r.applicationOutcome.receiptStatus,planHash:sha(saved),backup};
- }finally{if(tmp)await unlink(tmp).catch(()=>{});await handle.close();await unlink(lock);}
+  if(e.event==='role_closed'&&evidence.result!=='official_role_closed')throw Error('OUTCOME_ROLE_CLOSED_EVIDENCE_REQUIRED');
+  out.roles[key]={eventId:e.eventId,eventHash,event:e.event,batchId:e.batchId,companyId,siteId:e.companyId,roleId:e.roleId,roleUrl:e.roleUrl,roleTitle:e.roleTitle,
+   result:evidence.result,observedAt:evidence.observedAt,evidence:e.evidence,recordedAt:new Date().toISOString()};
+  tmp=file+'.'+randomUUID()+'.tmp';await writeFile(tmp,JSON.stringify(out,null,2)+'\n',{mode:0o600});await rename(tmp,file);tmp=null;
+  return {status:'recorded',eventId:e.eventId,event:e.event,businessStatus:'unchanged_until_user_review',nextStep:'company_store.py reverse'};
+ }finally{if(tmp)await unlink(tmp).catch(()=>{});await handle.close();await unlink(lock).catch(()=>{});}
 }
