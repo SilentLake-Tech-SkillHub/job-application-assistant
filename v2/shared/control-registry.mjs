@@ -1,8 +1,8 @@
 // Public, data-only capability registry. Company assets contain mappings, not drivers.
 const freeze = value => { if(value && typeof value === 'object'){Object.values(value).forEach(freeze);Object.freeze(value);}return value; };
 export const CONTROL_TYPES = freeze({
- text:{kind:'text',valueType:'string',readbackType:'string',methods:['fill'],reads:['value','text']},
- searchable_text:{kind:'text',valueType:'string',readbackType:'string',methods:['fill'],reads:['value']},
+ text:{kind:'text',valueType:'string',readbackType:'string',methods:['fill'],inputModes:['fill','keyboard'],reads:['value','text']},
+ searchable_text:{kind:'text',valueType:'string',readbackType:'string',methods:['fill'],inputModes:['fill','keyboard'],reads:['value']},
  readonly_text:{kind:'text',valueType:'string',readbackType:'string',methods:[],reads:['value','text']},
  dropdown:{kind:'choice',valueType:'string',readbackType:'string',methods:['dropdown','select','ud_dropdown','ant_dropdown'],reads:['value','text']},
  radio:{kind:'choice',valueType:'string',readbackType:'string',methods:['radio'],reads:['radio']},

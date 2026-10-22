@@ -23,6 +23,7 @@ export function validateControlContract(f) {
   if(f.readonly!==true&&!f.userOnly&&!(f.actions||[]).length)throw Error('CONTROL_ACTION_REQUIRED');
   if((f.actions||[]).some(a=>!t.methods.includes(a.method)))throw Error('CONTROL_ACTION_TYPE_MISMATCH');
   if(!t.reads.includes(f.read.kind))throw Error('CONTROL_READBACK_TYPE_MISMATCH');
+  for(const a of f.actions||[])if(a.inputMode!==undefined&&(a.method!=='fill'||!t.inputModes?.includes(a.inputMode)))throw Error('INVALID_TEXT_INPUT_MODE');
   if(f.kind==='date'&&f.precision!==(c.type==='year_picker'?'year':c.type==='month_picker'?'month':'day'))throw Error('DATE_CONTROL_PRECISION_MISMATCH');
   if(f.kind==='choice'){
     if(!Array.isArray(c.options)||!c.options.length||c.options.some(v=>typeof v!=='string')||new Set(c.options).size!==c.options.length)throw Error('CONTROL_OPTIONS_REQUIRED');

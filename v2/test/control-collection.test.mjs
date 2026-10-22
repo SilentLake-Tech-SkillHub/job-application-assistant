@@ -119,3 +119,9 @@ test('async controlled inputs are polled until committed without repeating the m
  const l={count:async()=>1,evaluate:async f=>{reads++;if(writes&&reads>3)node.checked=true;return f(node);},setChecked:async()=>{writes++;}};
  const p=new PageAdapter({url:()=> 'https://fixture.test/form',locator:()=>l},{listOpenPageUrls:async()=>[]});await p.act({method:'check',selector:'#check'},true,{});assert.equal(writes,1);assert.equal(node.checked,true);
 });
+
+test('captured keyboard input mode sends real keystrokes and independently reads committed value',async()=>{
+ const node={tagName:'INPUT',type:'text',value:'old',readOnly:false,getAttribute:()=>null,querySelector:()=>null};let typed=0;
+ const l={count:async()=>1,evaluate:async f=>f(node),fill:async v=>{assert.equal(v,'');node.value='';},pressSequentially:async v=>{typed++;node.value=v;},press:async()=>{}};
+ const p=new PageAdapter({url:()=> 'https://fixture.test/form',locator:()=>l},{listOpenPageUrls:async()=>[]});await p.act({method:'fill',selector:'#text',inputMode:'keyboard'},'confirmed',{});assert.equal(node.value,'confirmed');assert.equal(typed,1);
+});

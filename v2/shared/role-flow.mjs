@@ -50,7 +50,16 @@ export class RoleFlow{
   state.status='needs_login';state.loginPlan=plan;await this.queues.put(x.t.taskId,state);
   return {status:'needs_login',taskId:state.taskId,pageId:state.pageId,originalRoleUrl:state.originalRoleUrl,returnUrl:state.returnUrl,loginPlan:plan,submission:'not_performed'};
  }
- async resume(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{const state=await this.queues.read(x.t.taskId);if(state.queueId!==x.q.id||state.returnUrl!==x.target||state.expectedTitle!==x.t.title)throw Error('ROLE_TASK_STATE_CHANGED');return this.assess(x,state);},{waitMs:x.q.parallelRoles||x.q.executionMode==='parallel_roles'?30000:0});}
+ async resume(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{const state=await this.queues.read(x.t.taskId);if(state.queueId!==x.q.id||state.returnUrl!==x.target||state.expectedTitle!==x.t.title)throw Error('ROLE_TASK_STATE_CHANGED');
+  // Rebind only a lost tab to the unique already-open original URL. No new tab,
+  // navigation, expected-value injection or account/role bypass is permitted.
+  const tabs=await this.browser.request('tabs',{pageUrl:state.returnUrl});
+  if(!tabs.some(p=>p.id===state.pageId)){
+   const candidates=tabs.filter(p=>p.url===state.returnUrl);
+   if(candidates.length!==1)throw Error('ROLE_EXISTING_PAGE_NOT_UNIQUE');
+   const candidate=candidates[0];state.pageId=candidate.browserChannel&&!candidate.id.startsWith(candidate.browserChannel+':')?candidate.browserChannel+':'+candidate.id:candidate.id;
+  }
+  return this.assess(x,state);},{waitMs:x.q.parallelRoles||x.q.executionMode==='parallel_roles'?30000:0});}
  async enter(args){const {q,t}=await this.queues.task(args),c=await this.login.company(t.companyId),entry=resolveEntry(c);return this.login.locked(c,async()=>{
   let prior;try{prior=await this.queues.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
   if(prior?.queueId&&prior.queueId!==q.id)throw Error('ROLE_TASK_STATE_CHANGED');

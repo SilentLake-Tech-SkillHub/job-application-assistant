@@ -87,7 +87,7 @@ export async function performControl(adapter,action,value,files={}){
     }
     if(action.method==='fill'){
       if(meta.readonly||['date','month','password','file','radio','checkbox'].includes(meta.type))throw Error('CONTROL_REQUIRES_SPECIFIC_ACTION');
-      await l.fill(String(value),{timeout:10000});if(action.selector==='.ant-calendar-input')await l.press('Enter');await l.press('Tab');await assertValue(l,String(value));return;
+      if(action.inputMode==='keyboard'){await l.fill('',{timeout:10000});await l.pressSequentially(String(value),{timeout:10000});}else await l.fill(String(value),{timeout:10000});if(action.selector==='.ant-calendar-input')await l.press('Enter');await l.press('Tab');await assertValue(l,String(value));return;
     }
     if(action.method==='select'){if(meta.tag!=='SELECT')throw Error('NATIVE_SELECT_REQUIRED');await l.selectOption({label:String(value)});await l.press('Tab');await waitCommit(()=>l.evaluate(n=>n.selectedOptions[0]?.textContent?.trim()),String(value));return;}
     if(action.method==='dropdown')return performChoice(adapter,action,value,'aria');
