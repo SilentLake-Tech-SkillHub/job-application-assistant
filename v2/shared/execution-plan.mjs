@@ -3,7 +3,8 @@ import {createHash,randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {compileExpected} from './observation.mjs';
 import {assertContentPolicy} from './content-policy.mjs';
-import {validateControlContract,validDate} from './value-contract.mjs';
+import {validateControlContract,validDate,projectDateValue} from './value-contract.mjs';
+import {templateConstructionIssues} from './field-policy.mjs';
 
 const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const json=v=>JSON.parse(JSON.stringify(v));
@@ -14,7 +15,7 @@ export function resolvedFieldValue(f,task) {
     value=f.enumMap[value];
   }
   if(f.ongoingSource&&task.values?.[f.ongoingSource]===true)value='至今';
-  return value;
+  return f.kind==='date'?projectDateValue(value,f.precision):value;
 }
 
 function inputSnapshot(template,task){
@@ -78,9 +79,9 @@ export async function compileExecutionPlan(template,task){
   }
   // Captured/mapped does not mean construction is complete. Preserve explicit
   // failures in the frozen plan so every entry path rejects them before I/O.
-  const constructionBlockers=[];
+  const constructionBlockers=[...new Set(templateConstructionIssues(template).map(x=>x.reason))];
   const globalPositional = selector => typeof selector==='string' && /^\s*(?:html\s*>\s*)?body\s*>/i.test(selector) && /:nth-(?:of-type|child)\(/.test(selector);
-  const unstableFields=template.pages.flatMap(p=>p.fields).filter(f=>[f.read?.selector,f.read?.selectedSelector,...(f.inventorySelectors||[]),...(f.actions||[]).flatMap(a=>[a.selector,a.labelSelector,a.openSelector])].some(globalPositional)).map(f=>f.id);
+  const unstableFields=template.pages.flatMap(p=>p.fields).filter(f=>!f.userOnly&&!f.readonly&&[f.read?.selector,f.read?.selectedSelector,...(f.inventorySelectors||[]),...(f.actions||[]).flatMap(a=>[a.selector,a.labelSelector,a.openSelector])].some(globalPositional)).map(f=>f.id);
   if(unstableFields.length)constructionBlockers.push('PAGE_GLOBAL_POSITIONAL_LOCATORS');
   if(template.pages.some(p=>p.fields.some(f=>f.prepareBeforeGroups)))constructionBlockers.push('PRE_GROUP_WRITES_REQUIRE_REBUILD');
   if(template.coverage?.allConditionalBranchesVerified!==true)constructionBlockers.push('CONDITIONAL_BRANCHES_NOT_VERIFIED');

@@ -2,6 +2,14 @@ import test from 'node:test';import assert from 'node:assert/strict';import {mat
 test('a titleless editor uses independently observed job ID, never a fabricated title',()=>{const p={roleTitle:'Role A',roleIdentity:{parameter:'pid',value:'a'}};assert.ok(matchesRole(p,{roleTitle:null,roleIdentity:{parameter:'pid',value:'a'}}));for(const actual of [{roleTitle:'Role A',roleIdentity:{parameter:'pid',value:'b'}},{roleTitle:null},{roleTitle:'Other',roleIdentity:{parameter:'pid',value:'a'}}])assert.equal(matchesRole(p,actual),false);});
 test('user-operated login requires an exact sourced display identity, not any logged-in account',()=>{const c={schemaVersion:1,version:1,companyId:'sample',origin:'https://example.com',loginPath:'/jobs',allowedPaths:['/'],loginMethod:'user_operated',account:{mask:'exact',selector:'.account',source:'account.display',pageUrl:'https://example.com/account'},success:{requiresAccountMatch:true,noApplicationSubmission:true},evidence:{sourceUrl:'https://example.com/account'}};validateCompany(c);const a=resolveAccount({facts:{'account.display':{status:'known',value:'User',sourceIds:['observed_session']}}},c);assert.equal(matchesAccount('User',a),true);assert.equal(matchesAccount('Other',a),false);});
 import {RoleFlow} from '../shared/role-flow.mjs';
+import {readRoleIdentity} from '../shared/role-identity.mjs';
+test('query and SPA fragment identities share actual URL extraction without expected-value substitution',()=>{
+ assert.equal(readRoleIdentity({parameter:'id',value:'wrong'},'https://a.test/form?id=actual').value,'actual');
+ assert.equal(readRoleIdentity({parameter:'id',source:'hashQuery'},'https://a.test/#/form?id=actual').value,'actual');
+ assert.equal(readRoleIdentity({parameter:'id',source:'hashPath',pattern:'^/jobs/(?<id>[^/]+)/apply$'},'https://a.test/#/jobs/actual/apply').value,'actual');
+ assert.equal(readRoleIdentity({parameter:'id'},'https://a.test/?id=a&id=b').value,null);
+ assert.throws(()=>readRoleIdentity({parameter:'id',source:'hashPath',pattern:'.*'},'https://a.test/#/jobs/a'),/PATTERN_REQUIRED/);
+});
 test('resuming an entered role preserves its actual application URL rather than reverting to its detail URL',async()=>{const t={taskId:'t',companyId:'c',title:'Role',url:'https://a.test/detail',applyUrl:null},q={id:'q'},state={queueId:'q',expectedTitle:'Role',originalRoleUrl:t.url,applicationUrl:'https://a.test/form?pid=1'};const f=new RoleFlow({queues:{task:async()=>({q,t}),read:async()=>state},login:{company:async()=>({origin:'https://a.test',allowedPaths:['/']})},templates:async()=>({pages:[{pathPrefix:'/form',roleTitle:'Role',roleIdentity:{parameter:'pid',value:'1'}}]})});const x=await f.context({});assert.equal(x.target,state.applicationUrl);assert.equal(x.plan.pathPrefix,'/form');});
 
 test('a lost tab resumes only the unique existing original URL and never opens a new page',async()=>{

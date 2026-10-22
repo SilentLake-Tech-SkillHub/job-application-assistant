@@ -23,7 +23,7 @@ export async function recordApplicationOutcome({outcome,handoffDir=handoffDirFro
  try{handle=await open(lock,'wx',0o600);}catch(error){if(error.code==='EEXIST')throw Error('OUTCOME_WRITE_LOCKED');throw error;}
  try{
   const batch=JSON.parse(await readFile(path.join(dir,'投递批次.json'),'utf8'));
-  if(!['已交接','进行中'].includes(batch.state)||!batch.confirmation||batch.confirmation.contentSha256!==contentSha(batch))throw Error('HANDOFF_NOT_CONFIRMED');
+  if(!['已交接','进行中','等待反向评审'].includes(batch.state)||!batch.confirmation||batch.confirmation.contentSha256!==contentSha(batch))throw Error('HANDOFF_NOT_CONFIRMED');
   if(batch.batchId!==e.batchId)throw Error('OUTCOME_BATCH_MISMATCH');
   const matches=batch.companies.flatMap(c=>c['岗位'].map(r=>({companyId:c.companyId,...r}))).filter(r=>r['岗位ID']===e.roleId&&r['岗位链接']===e.roleUrl&&r['岗位名称']===e.roleTitle);
   if(matches.length!==1)throw Error('OUTCOME_ROLE_IDENTITY_MISMATCH');

@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {validateControlContract} from './value-contract.mjs';
+import {templateConstructionIssues} from './field-policy.mjs';
 const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 // An imported model-authored asset cannot certify its own execution readiness.
 export function unsealedTemplate(template){
@@ -9,6 +10,7 @@ export function unsealedTemplate(template){
  t.validation={livePassed:false};return t;
 }
 export function sealFormTemplate(template,probe,{companyId,profileMapped,channel}){
+ if(templateConstructionIssues(template).length)throw Error('FORM_CONSTRUCTION_GAPS_REQUIRE_REPAIR');
  if(probe.operation!=='internal_condition_probe'||probe.companyId!==companyId||probe.templateHash!==digest(template)||probe.status!=='verified'||probe.restoration!=='verified'||!probe.branches?.length||probe.branches.some(b=>b.status!=='verified'||b.newQuestions!==0))throw Error('VERIFIED_CONDITION_PROOF_REQUIRED');
 
  const allFields=template.pages.flatMap(p=>p.fields),dependencies=[...new Set(allFields.map(f=>f.when?.source).filter(Boolean))];

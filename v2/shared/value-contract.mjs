@@ -35,3 +35,11 @@ export function validateControlContract(f) {
   }
   return c;
 }
+
+// Project a sourced complete date to a portal's explicitly captured precision.
+export function projectDateValue(value,precision){
+ if(typeof value!=='string'||value==='至今')return value;
+ if(validDate(value,'day'))return precision==='year'?value.slice(0,4):precision==='month'?value.slice(0,7):value;
+ if(validDate(value,'month')&&precision==='year')return value.slice(0,4);
+ return value;
+}

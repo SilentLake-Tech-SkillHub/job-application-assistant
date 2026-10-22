@@ -14,11 +14,11 @@ export class BrokerBrowserAdapter {
   }
   status(){return this.request('status');}
   tabs(){return this.request('tabs');}
-  async existingPage(pageUrl){await this.request('existingPage',{pageUrl});return new BrokerPage(this,pageUrl);}
+  async existingPage(pageUrl,{pageId,readOnly=false}={}){if(pageId&&!readOnly)throw Error('EXPLICIT_PAGE_REQUIRES_READ_ONLY');await this.request('existingPage',{pageUrl,...(pageId?{pageId,readOnly:true}:{})});return new BrokerPage(this,pageUrl,{pageId,readOnly});}
 }
 class BrokerPage {
-  constructor(browser,pageUrl){Object.assign(this,{browser,pageUrl});}
-  call(method,args={}){return this.browser.request(method,{pageUrl:this.pageUrl,...args});}
+  constructor(browser,pageUrl,{pageId,readOnly=false}={}){Object.assign(this,{browser,pageUrl,pageId,readOnly});}
+  call(method,args={}){if(this.readOnly&&!['inventory','observe','assertLocation','wait'].includes(method))throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');return this.browser.request(method,{pageUrl:this.pageUrl,...args,...(this.pageId?{pageId:this.pageId,readOnly:true}:{})});}
   assertLocation(origin,prefix){return this.call('assertLocation',{origin,prefix});}
   wait(selector){return this.call('wait',{selector});}
   async inventory(plan){
@@ -34,6 +34,6 @@ class BrokerPage {
     return this.call('observe',{plan});
   }
   async assertSingleEditor(){const key=sharedRecordKey(this.pageUrl);if(!key)return;const tabs=await this.browser.tabs();if(tabs.some(t=>t.url!==this.pageUrl&&sharedRecordKey(t.url)===key))throw Error('SHARED_RESUME_HAS_OTHER_OPEN_EDITORS');}
-  async act(action,value,files){if(!['capture_wecruit_schema','wait','ant_dropdown_inspect','ud_dropdown_inspect'].includes(action.method))await this.assertSingleEditor();return this.call('act',{action:action.provider==='feishu'?{...remapSpec(action,this.rowKeys||{}),selectorsResolved:true}:action,value,files});}
-  async ensureGroups(groups){if(groups?.length)await this.assertSingleEditor();return this.call('ensureGroups',{groups});}
+  async act(action,value,files){if(this.readOnly)throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');if(!['capture_wecruit_schema','wait','dropdown_inspect','ant_dropdown_inspect','ud_dropdown_inspect'].includes(action.method))await this.assertSingleEditor();return this.call('act',{action:action.provider==='feishu'?{...remapSpec(action,this.rowKeys||{}),selectorsResolved:true}:action,value,files});}
+  async ensureGroups(groups){if(this.readOnly)throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');if(groups?.length)await this.assertSingleEditor();return this.call('ensureGroups',{groups});}
 }

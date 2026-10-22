@@ -108,8 +108,8 @@ export function registerTemplateContract(profile,{companyId,template,templateHas
     for(const f of page.fields){
       const old=profile.fieldRegistry[f.source]||{};
       if(old.canonicalType&&old.canonicalType!==f.control.valueType)throw Error('CANONICAL_FIELD_TYPE_CONFLICT');
-      if(old.precision&&f.precision&&old.precision!==f.precision)throw Error('CANONICAL_FIELD_PRECISION_CONFLICT');
-      profile.fieldRegistry[f.source]={...old,semanticKey:f.source,label:old.label||f.label,canonicalType:f.control.valueType,...(f.precision?{precision:f.precision}:{})};
+      const canonicalPrecision=profile.facts[f.source]?.precision||old.precision||f.precision;
+      profile.fieldRegistry[f.source]={...old,semanticKey:f.source,label:old.label||f.label,canonicalType:f.control.valueType,...(canonicalPrecision?{precision:canonicalPrecision}:{})};
       profile.facts[f.source]??={value:null,status:'missing',sourceIds:[],reason:'新表单契约问题；待用户资料，禁止忽略'};
     }
   }
@@ -175,8 +175,8 @@ export function recordProfileAnswers(profile,{answers,evidence,recordedAt=new Da
   profile.sources[sourceId]={kind:'user_reply',evidence,recordedAt};
   for(const answer of answers){
     const previous=profile.facts[answer.factKey];
-    const next={...previous,value:answer.status==='known'?answer.value:null,status:answer.status,sourceIds:[sourceId],updatedAt:recordedAt,
-      history:[...(previous.history||[]),{value:previous.value,status:previous.status,sourceIds:previous.sourceIds,updatedAt:previous.updatedAt||null}]};
+    const next={...previous,value:answer.status==='known'?answer.value:null,status:answer.status,sourceIds:[sourceId],updatedAt:recordedAt};
+    delete next.history;
     if(answer.status==='not_applicable')next.omission={kind:answer.omissionKind,evidence:sourceId};else delete next.omission;
     profile.facts[answer.factKey]=next;
   }

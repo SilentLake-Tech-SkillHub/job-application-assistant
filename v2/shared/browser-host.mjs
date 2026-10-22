@@ -34,12 +34,14 @@ const server=http.createServer(async(req,res)=>{
     else if(method==='tabs')data=await browser.tabs();
     else if(method==='openPage')data=await browser.openPage(args.pageUrl,args);
     else if(method==='pageIdentity')data=await browser.pageIdentity(args.pageId);
+    else if(method==='reaInspect')data=await browser.reaInspect(args);
     else if(method==='roleEnterApplication')data=await browser.enterApplication(args);
     else if(method==='roleSnapshot')data=await browser.roleSnapshot(args);
     else if(method==='screenshot')data=await browser.screenshot(args.pageId);
     else{
       if(method!=='existingPage'&&!methods.has(method))throw Error('UNKNOWN_BROWSER_HOST_METHOD');
-      const page=await browser.existingPage(args.pageUrl);
+      if(args.pageId&&(!args.readOnly||!['existingPage','inventory','observe','assertLocation','wait'].includes(method)))throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');
+      const page=await browser.existingPage(args.pageUrl,{pageId:args.pageId,readOnly:args.readOnly});
       if(method==='existingPage')data={found:true};
       if(method==='assertLocation')data=await page.assertLocation(args.origin,args.prefix);
       if(method==='wait')data=await page.wait(args.selector);

@@ -1,3 +1,4 @@
+import {validateTransition} from './entry-transition.mjs';
 // 岗位入口配方：站点差异只来自 JSON（catalog/entry-recipes.json 与公司 login.json 的 entry），代码不写任何域名或站点名。
 import {readFileSync} from 'node:fs';
 const CATALOG=JSON.parse(readFileSync(new URL('../catalog/entry-recipes.json',import.meta.url),'utf8'));
@@ -10,6 +11,7 @@ export function resolveEntry(c){
   const e=c?.entry;
   if(!e)return null;
   if(e.kind==='resume_modal')return e;
+  if(e.kind==='declarative_transition'){validateTransition(e);return {...e,roleSelector:e.detail.roleSelector,detailReadySelector:e.detail.roleSelector||e.detail.readySelector};}
   if(typeof e.recipe!=='string')throw Error('ROLE_ENTRY_RECIPE_REQUIRED');
   const r=CATALOG.recipes[e.recipe];
   if(!r)throw Error('ROLE_ENTRY_RECIPE_UNKNOWN');

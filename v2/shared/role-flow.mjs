@@ -1,3 +1,4 @@
+import {transitionLocationMatches} from './entry-transition.mjs';
 import {matchesRole} from './role-identity.mjs';
 import {resolveEntry,matchEntryPath} from './entry-recipe.mjs';
 import {accountMatches,matchesAccount,resolveAccount,assertScope} from '../login/contracts.mjs';
@@ -26,7 +27,9 @@ export class RoleFlow{
  async open(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{
   let prior;try{prior=await this.queues.read(x.t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
   if(prior?.status==='ready_for_user_review')throw Error('ROLE_ALREADY_PREPARED_FOR_REVIEW');
-  const opened=await this.browser.request('openPage',{pageUrl:x.t.url,...(prior?.pageId?{pageId:prior.pageId}:{}),readySelectors:[x.c.fields?.root,x.c.account.selector,x.plan.readySelector].filter(Boolean)});
+  const readySelectors=[x.c.fields?.root,x.c.account.selector,x.plan.readySelector].filter(Boolean);
+  let opened;try{opened=await this.browser.request('openPage',{pageUrl:x.t.url,...(prior?.pageId?{pageId:prior.pageId}:{}),readySelectors});}
+  catch(e){if(!prior?.pageId||!['ROLE_BROWSER_PAGE_LOST','EXISTING_PAGE_NOT_FOUND','PAGE_NOT_READY'].includes(e.message))throw e;opened=await this.browser.request('openPage',{pageUrl:x.t.url,readySelectors});}
   const state={queueId:x.q.id,taskId:x.t.taskId,pageId:opened.pageId,originalRoleUrl:x.t.url,returnUrl:x.target,expectedTitle:x.t.title,status:'opened',openedAt:new Date().toISOString()};await this.queues.put(x.t.taskId,state);
   return this.assess(x,state);
  },{waitMs:x.q.parallelRoles||x.q.executionMode==='parallel_roles'?30000:0});}
@@ -65,6 +68,7 @@ export class RoleFlow{
   if(prior?.queueId&&prior.queueId!==q.id)throw Error('ROLE_TASK_STATE_CHANGED');
   let observedForm;
   if(!prior?.applicationUrl){
+   if(entry?.kind==='declarative_transition'){const tabs=await this.browser.request('tabs',{pageUrl:t.url}),matches=tabs.filter(p=>new URL(p.url).origin===c.origin&&transitionLocationMatches(entry.form.location,p.url,t.roleId));if(matches.length>1)throw Error('AMBIGUOUS_ROLE_FORM');observedForm=matches[0]?.url;}
    if(entry?.kind==='resume_modal'){const tabs=await this.browser.request('tabs',{pageUrl:t.url}),matches=tabs.filter(p=>{const u=new URL(p.url);return u.origin===c.origin&&u.pathname===entry.formPath&&u.searchParams.get(entry.formIdParameter)===t.roleId;});if(matches.length>1)throw Error('AMBIGUOUS_ROLE_FORM');observedForm=matches[0]?.url;}
    if(entry?.kind==='detail_to_form'){const role=matchEntryPath(entry,new URL(t.url).pathname);if(role.detail){const tabs=await this.browser.request('tabs',{pageUrl:t.url});const matches=(tabs||[]).filter(p=>{const u=new URL(p.url);return u.origin===c.origin&&u.pathname===role.expectedApplyPath;});if(matches.length>1)throw Error('AMBIGUOUS_ROLE_FORM');observedForm=matches[0]?.url;}}
   }
@@ -72,7 +76,9 @@ export class RoleFlow{
   const snapshot=await this.browser.request('roleSnapshot',{pageId:opened.pageId,accountSelector:c.account.selector,loginRoot:c.fields?.root});if(c.loginMethod==='user_operated'){const session=await this.login.state(c,snapshot.pageUrl);snapshot.account=session.account;snapshot.loginFormPresent=session.form;}
   if(snapshot.loginFormPresent||!matchesAccount(snapshot.account,resolveAccount(await this.login.profile(),c)))throw Error('SHARED_LOGIN_SESSION_REQUIRED');
   const result=await this.browser.request('roleEnterApplication',{pageId:opened.pageId,expectedTitle:t.title,accountSelector:c.account.selector,expectedAccount:snapshot.account,roleSelector:entry?.roleSelector,entry,expectedRoleId:t.roleId,sessionAccountPageUrl:c.account.pageUrl});
-  if(new URL(result.pageUrl).origin!==c.origin||(entry?.kind==='resume_modal'?result.roleIdentity?.value!==t.roleId:result.roleTitle!==t.title)||result.accountMatched!==true)throw Error('APPLICATION_ENTRY_RESULT_CHANGED');
+  const roleChanged=entry?.kind==='resume_modal'?result.roleIdentity?.value!==t.roleId:entry?.kind==='declarative_transition'?
+   (entry.form.roleIdentity&&(result.roleIdentity?.value!==t.roleId||result.roleIdentity?.parameter!==entry.form.roleIdentity.parameter)||entry.form.roleSelector&&result.roleTitle!==t.title):result.roleTitle!==t.title;
+  if(new URL(result.pageUrl).origin!==c.origin||roleChanged||result.accountMatched!==true)throw Error('APPLICATION_ENTRY_RESULT_CHANGED');
   await this.queues.put(t.taskId,{...prior,queueId:q.id,taskId:t.taskId,pageId:result.pageId||opened.pageId,originalRoleUrl:t.url,applicationUrl:result.pageUrl,returnUrl:result.pageUrl,expectedTitle:t.title,status:'ready_to_fill',accountMatched:true,entryVerifiedAt:new Date().toISOString()});
   let applicationUrlRecord=null;if(this.onApplicationEntered){try{applicationUrlRecord=await this.onApplicationEntered({companyId:t.companyId,roleId:t.roleId,roleUrl:t.url,applicationUrl:result.pageUrl});}catch(e){applicationUrlRecord={status:'write_failed:'+(/^[A-Z_]+$/.test(e.message)?e.message:'UNKNOWN')};}}
   return {...result,status:'ready_to_fill',taskId:t.taskId,applicationUrl:result.pageUrl,...(applicationUrlRecord?{applicationUrlRecord:applicationUrlRecord.status}:{}),submission:'not_performed'};

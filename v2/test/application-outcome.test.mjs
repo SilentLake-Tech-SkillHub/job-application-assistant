@@ -67,3 +67,11 @@ test('recorded outcomes protect roles from rerun until the user reviews them',()
 test('closeout needs no tracker configuration and never touches the website',()=>fixture(async({dir,event})=>{
  const r=await closeApplication({outcome:await event(),handoffDir:dir});assert.equal(r.status,'closed');assert.equal(r.websiteAction,'none');
 }));
+
+// A pending review is a workflow phase of this same confirmed batch, not permission to import a new batch.
+test('same confirmed batch accepts additional verified outcomes while reverse review is pending',()=>fixture(async({dir,batchFile,event})=>{
+ const b=JSON.parse(await readFile(batchFile,'utf8'));b.state='等待反向评审';await writeFile(batchFile,JSON.stringify(b));
+ assert.equal((await recordApplicationOutcome({outcome:await event(),handoffDir:dir})).status,'recorded');
+ b.companies[0]['岗位'][0]['岗位名称']='Changed';await writeFile(batchFile,JSON.stringify(b));
+ await assert.rejects(recordApplicationOutcome({outcome:await event(),handoffDir:dir}),/HANDOFF_NOT_CONFIRMED/);
+}));

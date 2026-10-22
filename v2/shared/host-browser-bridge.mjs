@@ -1,9 +1,11 @@
+import {readRoleIdentity} from './role-identity.mjs';
+import {executeTransition} from './entry-transition.mjs';
 import http from 'node:http';import {mkdir,chmod,lstat} from 'node:fs/promises';import path from 'node:path';
 import {READY_TIMEOUT_MS,matchEntryPath} from './entry-recipe.mjs';
 import {PageAdapter} from './ui-page.mjs';
 // Runs INSIDE the trusted host SDK session, with an explicitly provided browser
 // object. It never launches a browser, attaches CDP, or discovers credentials.
-export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,mode='iab',onError=()=>{},deferBrowserCalls=false,fileUpload,pageAdapter=PageAdapter}){
+export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,mode='iab',onError=()=>{},deferBrowserCalls=false,fileUpload,reaInspect,pageAdapter=PageAdapter}){
  if(mode!=='iab'||!socketPath?.startsWith('/')||Buffer.byteLength(socketPath)>100||!allowedOrigins?.length)throw Error('INVALID_HOST_BRIDGE_CONFIGURATION');
  await mkdir(path.dirname(socketPath),{recursive:true,mode:0o700});
  try{await lstat(socketPath);throw Error('HOST_BRIDGE_SOCKET_ALREADY_EXISTS');}catch(e){if(e.code!=='ENOENT')throw e;}
@@ -13,11 +15,18 @@ export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,
  const options=o=>{if(!o)return o;const {timeout,...rest}=o;return timeout===undefined?rest:{...rest,timeoutMs:timeout};};
  const locator=(l,context={})=>({count:()=>l.count(),first:()=>locator(l.first(),context),evaluate:(...a)=>l.evaluate(...a),innerText:o=>l.innerText(options(o)),allTextContents:o=>l.allTextContents(options(o)),waitFor:o=>l.waitFor(options(o)),click:o=>l.click(options(o)),fill:(v,o)=>l.fill(v,options(o)),pressSequentially:(v,o)=>l.pressSequentially(v,options(o)),press:(v,o)=>l.press(v,options(o)),setChecked:(v,o)=>l.setChecked(v,options(o)),check:o=>l.check(options(o)),selectOption:(v,o)=>l.selectOption(v,options(o)),filter:o=>locator(l.filter(o),context),getByRole:(...a)=>locator(l.getByRole(...a),context),locator:(...a)=>locator(l.locator(...a),context),setInputFiles:async paths=>{if(typeof fileUpload!=='function'||!context.tab||!context.selector)throw Error('HOST_FILE_CHOOSER_ADAPTER_REQUIRED');return fileUpload({tab:context.tab,selector:context.selector,paths});}});
  const get=async id=>{const t=(await tabs()).find(t=>t.id===id);if(!t)throw Error('ROLE_BROWSER_PAGE_LOST');const tab=await browser.tabs.get(id);tracked.set(id,tab);return tab;};
- const adapter=async url=>{const matches=(await tabs()).filter(t=>t.url===url);if(matches.length!==1)throw Error(matches.length?'AMBIGUOUS_PAGE':'EXISTING_PAGE_NOT_FOUND');const tab=await get(matches[0].id),current=await tab.url();scope(current);return new pageAdapter({url:()=>current,evaluate:(...a)=>tab.playwright.evaluate(...a),locator:(...a)=>locator(tab.playwright.locator(...a),{tab,selector:a[0]}),getByRole:(...a)=>locator(tab.playwright.getByRole(...a))},{listOpenPageUrls:async()=>(await tabs()).map(t=>t.url)});};
+ const adapter=async(url,{pageId,readOnly=false}={})=>{if(pageId&&!readOnly)throw Error('EXPLICIT_PAGE_REQUIRES_READ_ONLY');const matches=(await tabs()).filter(t=>pageId?t.id===pageId:t.url===url);if(matches.length!==1)throw Error(matches.length?'AMBIGUOUS_PAGE':'EXISTING_PAGE_NOT_FOUND');if(matches[0].url!==url)throw Error('EXPLICIT_PAGE_URL_MISMATCH');const tab=await get(matches[0].id),current=await tab.url();scope(current);if(current!==url)throw Error('EXPLICIT_PAGE_URL_MISMATCH');return new pageAdapter({url:()=>current,evaluate:(...a)=>tab.playwright.evaluate(...a),locator:(...a)=>locator(tab.playwright.locator(...a),{tab,selector:a[0]}),getByRole:(...a)=>locator(tab.playwright.getByRole(...a))},{listOpenPageUrls:async()=>(await tabs()).map(t=>t.url)});};
  const dispatch=async(method,args)=>{
   if(method==='status')return {state:'connected',mode:'iab',protocolVersion:4,connectionAttempts:1,automaticRetries:0,provider:'official_host_browser_sdk'};
   if(method==='tabs')return tabs();
   if(method==='pageIdentity'){const tab=await get(args.pageId);return {pageId:tab.id,pageUrl:await tab.url()};}
+  if(method==='reaInspect'){
+   if(!args.authorization?.acquire||!args.authorization.evidence?.trim())throw Error('REA_CONSTRUCTION_AUTHORIZATION_REQUIRED');
+   if(typeof reaInspect!=='function')throw Error('REA_HOST_CAPABILITY_REQUIRED');
+   const tab=await get(args.pageId),beforeUrl=await tab.url();if(beforeUrl!==args.pageUrl)throw Error('REA_PAGE_BINDING_CHANGED');
+   const result=await reaInspect({tab,pageUrl:beforeUrl});
+   return {...result,binding:{...result.binding,pageId:tab.id,beforeUrl,afterUrl:await tab.url()}};
+  }
   if(method==='openPage'){
    scope(args.pageUrl);const all=await tabs(),matches=args.pageId?all.filter(t=>t.id===args.pageId):all.filter(t=>t.url===args.pageUrl);if(matches.length>1)throw Error('AMBIGUOUS_PAGE');
    const tab=matches.length?await get(matches[0].id):await browser.tabs.new(),reused=await tab.url()===args.pageUrl;if(!reused)await tab.goto(args.pageUrl);tracked.set(tab.id,tab);await tab.markHandoff();return {pageId:tab.id,pageUrl:await tab.url(),reused};
@@ -25,6 +34,10 @@ export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,
   if(method==='roleEnterApplication'){
    const tab=await get(args.pageId),before=scope(await tab.url());
    const entry=args.entry;
+   if(entry?.kind==='declarative_transition')return executeTransition(args,{
+    getPage:async id=>{const t=await get(id);return {url:()=>t.url(),locator:(...a)=>locator(t.playwright.locator(...a)),getByRole:(...a)=>locator(t.playwright.getByRole(...a)),getByText:(...a)=>locator(t.playwright.getByText(...a))};},
+    listPages:tabs,pause:ms=>new Promise(r=>setTimeout(r,ms)),preserve:async id=>{await (await get(id)).markHandoff();}
+   });
    if(entry?.kind==='resume_modal'){
     if(!args.expectedRoleId||entry.entryLabel!=='立即投递'||entry.editLabel!=='编辑'||!args.sessionAccountPageUrl)throw Error('RESUME_ENTRY_CONTRACT_REQUIRED');
     scope(args.sessionAccountPageUrl);
@@ -67,10 +80,11 @@ export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,
    return {pageId:args.pageId,pageUrl:after.href,roleTitle:args.expectedTitle,entryClicked:detail,accountMatched:true,submission:'not_performed'};
   }
   if(method==='roleSnapshot'){
-   const tab=await get(args.pageId);return tab.playwright.evaluate(({roleSelector,accountSelector,loginRoot,roleIdentity})=>{const read=s=>{if(!s)return null;const ns=document.querySelectorAll(s);return ns.length===1?ns[0].innerText?.trim()||null:null;};return {pageUrl:location.href,...(roleIdentity?{roleIdentity:{parameter:roleIdentity.parameter,value:new URL(location.href).searchParams.get(roleIdentity.parameter)}}:{}),roleTitle:read(roleSelector),account:read(accountSelector),loginFormPresent:!!document.querySelector(loginRoot),readAt:new Date().toISOString()};},args);
+   const tab=await get(args.pageId);const result=await tab.playwright.evaluate(({roleSelector,accountSelector,loginRoot})=>{const read=s=>{if(!s)return null;const ns=document.querySelectorAll(s);return ns.length===1?ns[0].innerText?.trim()||null:null;};return {pageUrl:location.href,roleTitle:read(roleSelector),account:read(accountSelector),loginFormPresent:!!document.querySelector(loginRoot),readAt:new Date().toISOString()};},args);if(args.roleIdentity)result.roleIdentity=readRoleIdentity(args.roleIdentity,result.pageUrl);return result;
   }
   if(!['existingPage','inventory','observe','act','ensureGroups','assertLocation','wait'].includes(method))throw Error('UNSUPPORTED_HOST_BROWSER_METHOD');
-  scope(args.pageUrl);const p=await adapter(args.pageUrl);
+  if(args.pageId&&(!args.readOnly||!['existingPage','inventory','observe','assertLocation','wait'].includes(method)))throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');
+  scope(args.pageUrl);const p=await adapter(args.pageUrl,{pageId:args.pageId,readOnly:args.readOnly});
   if(method==='existingPage')return {found:true};
   if(method==='inventory')return p.inventory(args.plan);
   if(method==='observe')return p.observe(args.plan);

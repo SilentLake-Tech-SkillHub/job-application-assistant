@@ -1,3 +1,4 @@
+import {projectDateValue} from './value-contract.mjs';
 export {controlDOM as observeDOM} from './control-dom.mjs';
 
 export function compileExpected(plan,task) {
@@ -6,8 +7,9 @@ export function compileExpected(plan,task) {
     if(f.enumMap && value!==undefined)value=f.enumMap[value];
     if(f.ongoingSource&&task.values?.[f.ongoingSource]===true)value='至今';
     if(f.read.normalize==='phone_cn'&&value!==undefined)value=String(value).replace(/^\+86\s*/,'').replace(/[^0-9]/g,'');
+    if(f.kind==='date')value=projectDateValue(value,f.precision);
     if(f.kind==='file')value=task.files?.[value]?.displayNames;
-    return {id:f.id,label:f.label,kind:f.kind,value,required:!!f.required,sensitive:!!f.sensitive,userOnly:!!f.userOnly,precision:f.precision,allowOngoing:!!f.ongoingSource,omission:task.omissions?.[f.id]};
+    return {id:f.id,label:f.label,inventoryLabel:f.inventoryLabel,inventoryType:f.inventoryType,kind:f.kind,value,required:!!f.required,sensitive:!!f.sensitive,userOnly:!!f.userOnly,precision:f.precision,allowOngoing:!!f.ongoingSource,omission:task.omissions?.[f.id]};
   })};
 }
 

@@ -1,4 +1,6 @@
 import {templateMethods} from './control-registry.mjs';
+import {templateConstructionIssues} from './field-policy.mjs';
+import {continuationFor} from './workflow-continuation.mjs';
 import {matchesRole} from './role-identity.mjs';
 import {assertIndependentDrafts} from './shared-record.mjs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -19,6 +21,7 @@ const idOK = value => typeof value === 'string' && /^[a-z0-9][a-z0-9_-]{0,79}$/.
 const blocked = /提交|投递|撤回|删除|同意|签名|验证码|密码|身份证|银行卡|submit|apply now|withdraw|delete|consent|signature|password|otp|captcha/i;
 const methods = templateMethods();
 export function validateTemplate(t) {
+  if(templateConstructionIssues(t).length)throw Error('FORM_CONSTRUCTION_GAPS_REQUIRE_REPAIR');
   if (!idOK(t.id) || !Number.isInteger(t.version) || t.version < 1) throw Error('INVALID_TEMPLATE_ID_OR_VERSION');
   if (!Array.isArray(t.pages) || !t.pages.length) throw Error('EMPTY_TEMPLATE');
   if (!t.evidence?.sourceUrl || !t.evidence?.observedAt) throw Error('MISSING_CAPTURE_EVIDENCE');
@@ -330,6 +333,8 @@ export class Engine {
         result.failureExitInventory={registered:true,count:inventory.length};
       }catch{result.failureExitInventory={registered:false,reason:'FAILURE_EXIT_CAPTURE_OR_MAPPING_INCOMPLETE'};}
     }
+    result.continuation=continuationFor({error:result.errorCode,verification:result.errorCode?undefined:{status:result.status,checks:result.fields}});
+    result.summary=result.pageChecks.at(-1)?.verification?.summary||null;
     result.elapsedMs=Math.round(performance.now()-started);result.finishedAt=new Date().toISOString();
     return result;
   }

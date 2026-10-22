@@ -3,7 +3,7 @@
 export function inventoryFeishuDOM() {
   const visible=n=>!!n?.getClientRects().length&&getComputedStyle(n).visibility!=='hidden';
   const fields=[];
-  const add=(selector,label,type,required=false,extra={})=>fields.push({selector,label,type,required,...extra,
+  const add=(selector,label,type,required=false,extra={})=>fields.push({selector,label,type,required,contextProvider:'.atsx-form-item',...extra,
     userOnly:/验证码|密码|身份证|护照号|银行卡|captcha|password|otp/i.test(label)});
   for(const row of document.querySelectorAll('.atsx-form-item[data-cy]')){
     if(!visible(row))continue;
@@ -12,9 +12,13 @@ export function inventoryFeishuDOM() {
     if(row.querySelector('.atsx-date-picker-period-month')){
       for(const side of ['Begin','End'])add(`[data-cy=${JSON.stringify(key+'Input'+side)}]`,label, 'month',required,{part:side});
     }else if(row.querySelector('.atsx-date-picker'))add(selector,label,'year',required);
-    else add(selector,label,row.querySelector('[role="combobox"]')?(key.endsWith('.school')?'school_text':'choice'):row.querySelector('input,textarea')?'text':'readonly',required);
+    else {
+      const combo=row.querySelector('[role="combobox"]'),input=row.querySelector('input,textarea');
+      const type=combo?(key.endsWith('.school')?'school_text':'choice'):input?'text':'readonly';
+      add(selector,label,type,required,{questionSelector:selector,actionSelector:combo?selector+' [role="combobox"]':input?selector+' input, '+selector+' textarea':null,readSelector:combo&&row.querySelector('[data-cy="contentRender"]')?selector+' [data-cy="contentRender"]':input?selector+' input, '+selector+' textarea':selector,selectedSelector:row.querySelector('.atsx-select-selection-selected-value')?selector+' .atsx-select-selection-selected-value':null,role:combo?'combobox':null});
+    }
   }
-  if(document.querySelector('.referralCode-section .atsx-radio-group'))add('.referralCode-section .atsx-radio-group','推荐方式','radio_group',true);
+  if(document.querySelector('.referralCode-section .atsx-radio-group'))add('.referralCode-section .atsx-radio-group','推荐方式','radio_group',true,{options:[...document.querySelectorAll('.referralCode-section .atsx-radio-group label')].map(n=>n.textContent.trim())});
   for(const row of document.querySelectorAll('.referralCode-section .atsx-form-item:not([data-cy])')){
     const label=row.querySelector('label')?.textContent.trim();
     if(label==='意向城市')add('.referralCode-section .customResumeForm-fieldName-with-desc-item','意向城市','readonly',true);

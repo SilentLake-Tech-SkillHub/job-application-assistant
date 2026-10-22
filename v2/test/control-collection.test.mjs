@@ -53,7 +53,7 @@ function fixture(family='ud',duplicate=false){
  const single={waitFor:async()=>{},count:async()=>1,innerText:async()=>selected,evaluate:async f=>f(node),press:async key=>{if(key==='Escape')opened=false;},click:async()=>{opened=true;},locator:()=>({count:async()=>0}),filter(){return this;}};
  const option={...single,click:async()=>{selected='Other';opened=false;checks++;}};
  const options={...single,allTextContents:async()=>duplicate?['Other','Other']:['Other','Other extended'],first:()=>single,waitFor:async()=>{},filter:o=>{if(o.visible)return options;assert.ok(o.hasText.test('Other'));assert.equal(o.hasText.test('Other extended'),false);return option;}};
- const menu={count:async()=>opened?1:0,waitFor:async()=>{},filter(){return this;},locator:()=>options};
+ const menu={count:async()=>opened?1:0,waitFor:async()=>{},filter(){return this;},locator:()=>options,evaluate:async f=>f({querySelectorAll:()=>[],parentElement:null,clientHeight:100,scrollHeight:100})};
  const page={url:()=> 'https://fixture.test/form',locator:s=>s.endsWith(' > .ud-formily-item-label')?{...single,click:async()=>{opened=false;}}:s===('.ud__select__list')||s==='[role="listbox"]'?menu:s.includes('ant-select-open')?{count:async()=>0,filter(){return this;}}:single};
  return {page,state:()=>({opened,selected,checks})};
 }
@@ -124,4 +124,20 @@ test('captured keyboard input mode sends real keystrokes and independently reads
  const node={tagName:'INPUT',type:'text',value:'old',readOnly:false,getAttribute:()=>null,querySelector:()=>null};let typed=0;
  const l={count:async()=>1,evaluate:async f=>f(node),fill:async v=>{assert.equal(v,'');node.value='';},pressSequentially:async v=>{typed++;node.value=v;},press:async()=>{}};
  const p=new PageAdapter({url:()=> 'https://fixture.test/form',locator:()=>l},{listOpenPageUrls:async()=>[]});await p.act({method:'fill',selector:'#text',inputMode:'keyboard'},'confirmed',{});assert.equal(node.value,'confirmed');assert.equal(typed,1);
+});
+
+import {projectDateValue} from '../shared/value-contract.mjs';
+import {resolvedFieldValue} from '../shared/execution-plan.mjs';
+import {compileExpected} from '../shared/observation.mjs';
+test('sourced full dates project consistently to month and year without inventing precision',()=>{
+ assert.equal(projectDateValue('2026-08-01','month'),'2026-08');assert.equal(projectDateValue('2026-08-01','year'),'2026');assert.equal(projectDateValue('2026-08','day'),'2026-08');assert.equal(projectDateValue('至今','month'),'至今');
+ const f={id:'date',source:'start',kind:'date',precision:'month',read:{selector:'#date'}};const task={values:{start:'2026-08-01'}};assert.equal(resolvedFieldValue(f,task),'2026-08');assert.equal(compileExpected({fields:[f]},task).fields[0].value,'2026-08');
+});
+
+import {registerTemplateContract} from '../shared/profile.mjs';
+test('portal month registration preserves canonical day precision and keeps its own contract precision',()=>{
+ const p={schemaVersion:1,entities:{},sources:{s:{kind:'user_reply'}},facts:{start:{value:'2026-08-01',status:'known',sourceIds:['s'],precision:'day'}},fieldRegistry:{start:{canonicalType:'string',precision:'day'}}};
+ const f={id:'start',source:'start',label:'Start',kind:'date',precision:'month',control:{type:'month_picker',valueType:'string',readbackType:'string'},read:{selector:'#start',kind:'value'},actions:[]};
+ registerTemplateContract(p,{companyId:'sample',template:{id:'t',version:1,evidence:{sourceUrl:'https://example.com/form'},pages:[{pathPrefix:'/form',fields:[f]}]},templateHash:'hash'});
+ assert.equal(p.fieldRegistry.start.precision,'day');assert.equal(p.facts.start.value,'2026-08-01');assert.equal(Object.values(p.companyForms)[0].executionContract.fields[0].precision,'month');
 });

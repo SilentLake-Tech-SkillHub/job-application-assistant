@@ -43,7 +43,7 @@ export function antDOM({operation='inventory',reference,references}={}){
    const c=controls(q)[x.index];
    n=c?.type==='radio'?q.querySelector('label.ant-radio-wrapper-checked'):
     c?.readOnly&&/^\d{4}-\d{2}-\d{2}$/.test(c.value)?c:
-     c?.closest('.ant-select')?.querySelector('.ant-select-selection-selected-value');
+     c?.closest('.ant-select')?.querySelector('.ant-select-selection-selected-value,.ant-select-selection-item');
   }
   return n?physical(n):null;
  };
@@ -51,7 +51,7 @@ export function antDOM({operation='inventory',reference,references}={}){
  return all.filter(n=>question(n)).map(n=>{
   const q=question(n),cs=controls(q),i=cs.indexOf(n),qlabel=label(q),s=section(q),r=row(q);
   return {selector:ref(q,'control',i),questionSelector:ref(q),labelSelector:ref(q,'label'),selectedSelector:ref(q,'selected',i),rowSelector:ref(q,'row'),rowDeleteSelector:removal(q)?ref(q,'remove'):null,sectionSelector:encode({section:sectionTitle(s),part:'section'}),section:sectionTitle(s),repeatIndex:peers(q).indexOf(q),controlIndex:i,
-   locatorStrategy:'semantic_question',tag:n.tagName.toLowerCase(),type:n.type||n.getAttribute('role')||'custom_question',label:qlabel,placeholder:n.getAttribute('placeholder'),required:!!n.required||!!q.querySelector('.ant-form-item-required'),readonly:!!n.readOnly,multiple:!!n.closest('.ant-select')?.querySelector('.ant-select-selection--multiple'),disabled:!!n.disabled||n.getAttribute('aria-disabled')==='true'||!!n.closest('.ant-select-disabled'),accept:n.getAttribute('accept'),contextProvider:'.ant-form-item',userOnly:n.type==='password'||/证件号码|身份证|护照号|验证码|密码/.test(qlabel),rowQuestionCount:questions.filter(x=>r.contains(x)).length};
+   locatorStrategy:'semantic_question',tag:n.tagName.toLowerCase(),type:n.type||n.getAttribute('role')||'custom_question',renderer:n.closest('.ant-calendar-picker,.ant-picker')?'ant_date':n.closest('.ant-select')?'ant_select':null,label:qlabel,placeholder:n.getAttribute('placeholder'),required:!!n.required||!!q.querySelector('.ant-form-item-required'),readonly:!!n.readOnly,multiple:!!n.closest('.ant-select')?.querySelector('.ant-select-selection--multiple,.ant-select-selection-overflow'),disabled:!!n.disabled||n.getAttribute('aria-disabled')==='true'||!!n.closest('.ant-select-disabled'),accept:n.getAttribute('accept'),options:n.type==='radio'?[...q.querySelectorAll('label.ant-radio-wrapper')].map(x=>x.innerText.trim()):undefined,contextProvider:'.ant-form-item',userOnly:n.type==='password'||/证件号码|身份证|护照号|验证码|密码/.test(qlabel),rowQuestionCount:questions.filter(x=>r.contains(x)).length};
  });
 }
 export function antReference(reference,part){const x=JSON.parse(decodeURIComponent(reference.slice(5)));return 'antq:'+JSON.stringify({...x,part});}

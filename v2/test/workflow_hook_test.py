@@ -18,6 +18,19 @@ class WorkflowHookTest(unittest.TestCase):
  def test_receipt_from_another_turn_never_releases_mutation(self):
   self.invoke(hook_event_name='UserPromptSubmit');self.assertEqual(self.invoke(turn_id='other').returncode,2)
 
+ def test_agent_work_prompts_continuation_once_without_affecting_other_turns(self):
+  response={'continuation':{'state':'map','owner':'agent','requiresUser':False,'shouldContinue':True}}
+  self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__workflow_next',tool_response=response)
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop',session_id='other').stdout),{})
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop',turn_id='other').stdout),{})
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout)['decision'],'block')
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout),{})
+
+ def test_real_user_wait_and_review_allow_stop(self):
+  for state in ['user_input','review']:
+   self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__role_prepare',tool_response={'content':[{'type':'text','text':json.dumps({'continuation':{'state':state,'owner':'user','requiresUser':True}})}]})
+   self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout),{})
+
  def test_legacy_application_mutation_is_rejected_only_in_enabled_conversation(self):
   self.invoke(hook_event_name='UserPromptSubmit')
   r=self.invoke(tool_name='mcp__recruiting_form__batch_prepare');self.assertEqual(r.returncode,2);self.assertIn('V2_RUNTIME_REQUIRED',r.stderr)

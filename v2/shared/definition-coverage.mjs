@@ -1,5 +1,6 @@
 // Official metadata and a visible-control scan are independent evidence. A DOM
 // template cannot silently drop empty sections or never-expanded questions.
+import {readRoleIdentity} from './role-identity.mjs';
 export function assertDefinitionMapped(profile,companyId,template){
  const definition=profile.companyDefinitions?.[companyId];if(!definition)return;
  if(template.coverage?.officialDefinitionHash!==definition.definitionHash)throw Error('OFFICIAL_DEFINITION_VERSION_NOT_BOUND');
@@ -9,5 +10,5 @@ export function assertDefinitionMapped(profile,companyId,template){
 }
 export function matchesPageIdentity(page,pageUrl){
  const u=new URL(pageUrl);if(!u.pathname.startsWith(page.pathPrefix))return false;
- return !page.roleIdentity||u.searchParams.get(page.roleIdentity.parameter)===page.roleIdentity.value;
+ return !page.roleIdentity||readRoleIdentity(page.roleIdentity,pageUrl)?.value===page.roleIdentity.value;
 }

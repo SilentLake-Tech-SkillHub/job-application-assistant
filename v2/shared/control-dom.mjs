@@ -2,6 +2,14 @@
 export function controlDOM(spec){
  const visible=n=>!!n?.getClientRects().length&&getComputedStyle(n).visibility!=='hidden';
  const eligible=n=>visible(n)||!!n&&['checkbox','radio'].includes(n.type)&&visible(n.closest('label'));
+ // Phoenix question references are based on rendered section/label identity.
+ // Structural selectors are produced only for the current operation.
+ const phoenixRoots=()=>[...document.querySelectorAll('.form-item--phoenix')].filter(visible);
+ const phoenixLabel=n=>n.querySelector('.form-item__title .form-item__text')?.textContent?.trim()||'';
+ const phoenixSection=n=>{const body=n.closest('.form-part-body'),section=body?.parentElement;if(!section)return '';const heading=[...section.children].filter(c=>c!==body&&!c.contains(body)).map(c=>c.innerText?.trim()).find(Boolean);return heading?.split('\n')[0]?.trim()||'';};
+ const phoenixParts=n=>{const radio=n.querySelector('.phoenix-radio-group');if(radio)return [{node:radio,part:'radio',type:'radio',renderer:'phoenix_radio'}];const select=n.querySelector('.phoenix-select');if(select)return [{node:select,part:'select',type:'combobox',renderer:n.querySelector('[id$="field_date_time_picker"]')?'phoenix_date_picker':'phoenix_select'}];const fields=[...n.querySelectorAll('input,textarea,select')].filter(x=>x.type!=='hidden'&&(visible(x)||x.type==='file'||['radio','checkbox'].includes(x.type)));if(fields.length)return fields.map((node,index)=>({node,part:'native',index,type:node.closest('.phoenix-auto-complete-container')?'combobox':node.type||node.tagName.toLowerCase(),renderer:node.closest('.phoenix-auto-complete-container')?'phoenix_autocomplete':'phoenix_native'}));return [{node:n.querySelector('.form-item__control')||n,part:'custom',type:'custom_question',renderer:'phoenix_unknown'}];};
+ const phoenixResolve=reference=>{let r;try{r=JSON.parse(reference.slice(9));}catch{throw Error('PHOENIX_REFERENCE_INVALID');}const roots=phoenixRoots().filter(n=>phoenixLabel(n)===r.label&&phoenixSection(n)===r.section);if(!Number.isInteger(r.occurrence)||r.occurrence<0||r.occurrence>=roots.length)throw Error('PHOENIX_QUESTION_NOT_FOUND');const root=roots[r.occurrence],part=phoenixParts(root).filter(p=>p.part===r.part&&(p.index||0)===(r.controlIndex||0));if(part.length!==1)throw Error('PHOENIX_CONTROL_CHANGED');const node=part[0].node,parts=[];for(let p=node;p&&p!==document.body;p=p.parentElement){let i=1;for(let prev=p.previousElementSibling;prev;prev=prev.previousElementSibling)if(prev.tagName===p.tagName)i++;parts.unshift(p.tagName.toLowerCase()+':nth-of-type('+i+')');}return 'body > '+parts.join(' > ');};
+ if(spec?.operation==='resolvePhoenix')return (spec.references||[]).map(phoenixResolve);
  const one=s=>{const nodes=s?[...document.querySelectorAll(s)]:[],shown=nodes.filter(eligible);return shown.length===1?shown[0]:shown.length===0&&nodes.length===1?nodes[0]:null;};
  if(Array.isArray(spec?.fields)){
 
@@ -104,21 +112,28 @@ export function controlDOM(spec){
     }
     return diagnosticSelector(n);
   };
+  const phoenixFields=phoenixRoots().flatMap(root=>{
+    const label=phoenixLabel(root),section=phoenixSection(root),peers=phoenixRoots().filter(n=>phoenixLabel(n)===label&&phoenixSection(n)===section),occurrence=peers.indexOf(root);
+    return phoenixParts(root).map(p=>({selector:'phoenixq:'+JSON.stringify({section,label,occurrence,part:p.part,controlIndex:p.index||0}),locatorStrategy:'semantic_question',tag:p.node.tagName.toLowerCase(),type:p.type,label,required:!!root.querySelector('.form-item__title .form-item__required'),readonly:!!p.node.readOnly,disabled:!!p.node.disabled,accept:p.node.getAttribute('accept'),placeholder:p.node.getAttribute('placeholder'),contextProvider:'.form-item--phoenix',group:section||null,repeatIndex:occurrence,renderer:p.renderer,options:p.part==='radio'?[...p.node.querySelectorAll('.phoenix-radio__radio-text')].filter(visible).map(n=>n.textContent.trim()):undefined,constructionBlockers:p.renderer==='phoenix_native'?[]:[p.renderer==='phoenix_radio'?'PHOENIX_RADIO_DRIVER_REQUIRED':p.renderer==='phoenix_unknown'?'PHOENIX_CONTROL_UNSUPPORTED':'PHOENIX_OPTIONS_AND_DRIVER_REQUIRED'],userOnly:p.type==='password'||/证件号码|身份证|护照号|验证码|密码/.test(label)}));
+  });
   const controls=[...document.querySelectorAll('input,textarea,select,[role="combobox"],[role="checkbox"],[role="radio"]')]
     // Styled checkbox/radio inputs can have zero layout rectangles while their labels remain visible.
-    .filter(n=> (visible(n)||n.type==='file'||(['checkbox','radio'].includes(n.type)&&visible(n.closest('label')))) && n.type!=='hidden');
+    .filter(n=> !n.closest('.form-item--phoenix')&&(visible(n)||n.type==='file'||(['checkbox','radio'].includes(n.type)&&visible(n.closest('label')))) && n.type!=='hidden');
   // Some custom selectors and read-only answers contain no native/ARIA input.
   // Register their labeled question container so they cannot disappear from coverage.
   const containers=[...document.querySelectorAll('.atsx-form-item,[data-form-question],.ud-formily-item')]
     .filter(n=>visible(n)&&(n.querySelector('label')||n.querySelector(':scope > .ud-formily-item-label'))&&!controls.some(c=>n.contains(c)));
   return [...controls,...containers]
-    .map(n=>({selector:selector(n),locatorStrategy:selector(n).startsWith('body > ')?'structural_diagnostic':'anchored_unique',tag:n.tagName.toLowerCase(),type:n.type||n.getAttribute('role')||'custom_question',label:[...(n.labels||[])].map(l=>l.textContent.trim()).join(' ')||n.closest('.atsx-form-item,[data-form-question]')?.querySelector('label')?.textContent.trim()||n.getAttribute('aria-label')||'',placeholder:n.getAttribute('placeholder'),required:!!n.required||n.getAttribute('aria-required')==='true'||!!n.closest('.atsx-form-item')?.querySelector('.atsx-form-item-required'),readonly:!!n.readOnly,disabled:!!n.disabled,accept:n.getAttribute('accept')}))
+    .map(n=>({selector:selector(n),locatorStrategy:selector(n).startsWith('body > ')?'structural_diagnostic':'anchored_unique',tag:n.tagName.toLowerCase(),type:n.type||n.getAttribute('role')||'custom_question',label:[...(n.labels||[])].map(l=>l.textContent.trim()).join(' ')||n.closest('.atsx-form-item,[data-form-question]')?.querySelector('label')?.textContent.trim()||n.getAttribute('aria-label')||'',placeholder:n.getAttribute('placeholder'),required:!!n.required||n.getAttribute('aria-required')==='true'||!!n.closest('.atsx-form-item')?.querySelector('.atsx-form-item-required'),readonly:!!n.readOnly,disabled:!!n.disabled,accept:n.getAttribute('accept'),role:n.getAttribute('role'),options:n.tagName==='SELECT'?[...(n.options||[])].filter(o=>!o.disabled&&o.value!=='').map(o=>o.textContent.trim()):undefined}))
     .map(f=>({...f,userOnly:f.type==='password'||/otp|验证码|password|密码|token|captcha|身份证|护照号|银行卡/i.test(f.label+' '+f.selector)}))
     .map((f,i)=>{
       const n=[...controls,...containers][i],root=n.closest('.ud-formily-item');if(!root)return f;
       const label=root.querySelector(':scope > .ud-formily-item-label')?.innerText?.trim();
       const group=n.closest('[id^="formily-item-"][id$="_list"]'),row=n.closest('.register-form-group-wrapper');
-      return {...f,label:label?.replace(/[＊*\s]+$/gu,'')||f.label,required:f.required||!!label&&/[＊*]/u.test(label),readonly:f.readonly||f.type==='custom_question',contextProvider:'.ud-formily-item',questionSelector:selector(root),group:group?.id?.replace('formily-item-','')||null,groupSelector:group?selector(group):null,rowSelector:row?selector(row):null,repeatIndex:group&&row?[...group.querySelectorAll('.register-form-group-wrapper')].indexOf(row):null,fieldKey:root.id?.replace('formily-item-','')||null,controlIndex:[...root.querySelectorAll('input,textarea,select,[role="combobox"]')].indexOf(n)};
-    });
+      return {...f,label:label?.replace(/[＊*\s]+$/gu,'')||f.label,required:f.required||!!label&&/[＊*]/u.test(label),readonly:f.readonly||f.type==='custom_question',contextProvider:'.ud-formily-item',questionSelector:selector(root),labelSelector:selector(root)+' > .ud-formily-item-label',selectedSelector:root.querySelector('.ud__select__selector')?selector(root)+' .ud__select__selector':null,multiple:n.getAttribute('aria-multiselectable')==='true'||!!root.querySelector('.ud__select--multiple'),group:group?.id?.replace('formily-item-','')||null,groupSelector:group?selector(group):null,rowSelector:row?selector(row):null,repeatIndex:group&&row?[...group.querySelectorAll('.register-form-group-wrapper')].indexOf(row):null,fieldKey:root.id?.replace('formily-item-','')||null,controlIndex:[...root.querySelectorAll('input,textarea,select,[role="combobox"]')].indexOf(n)};
+    }).concat(phoenixFields);
 
 }
+
+// Normalize legacy URL-encoded transport in Node, never inside the DOM sandbox.
+export function normalizePhoenixReference(reference){if(!reference?.startsWith('phoenixq:'))return reference;const raw=reference.slice(9);let value;try{value=JSON.parse(raw);}catch{try{value=JSON.parse(decodeURIComponent(raw));}catch{throw Error('PHOENIX_REFERENCE_INVALID');}}return 'phoenixq:'+JSON.stringify(value);}

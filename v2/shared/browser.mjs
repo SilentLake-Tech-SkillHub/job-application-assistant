@@ -1,3 +1,6 @@
+import {executeTransition} from './entry-transition.mjs';
+import {inspectRea} from './rea-structure.mjs';
+import {readRoleIdentity} from './role-identity.mjs';
 import {screenshotMaskDOM} from './screenshot-mask.mjs';
 import { chromium } from 'playwright-core';
 import { stat, readFile, mkdir, chmod } from 'node:fs/promises';
@@ -26,7 +29,8 @@ export class BrowserAdapter {
         if(!this.profileDir||!path.isAbsolute(this.profileDir)||path.resolve(this.profileDir)===forbidden||path.resolve(this.profileDir).startsWith(forbidden+path.sep))throw Error('PRIVATE_AUTOMATION_PROFILE_REQUIRED');
         await mkdir(this.profileDir,{recursive:true,mode:0o700});await chmod(this.profileDir,0o700);
         this.state='connecting';this.connectionAttempts++;
-        const context=await this.launcher(this.profileDir,{...(endpoint==='managed-chrome'?{channel:'chrome'}:{}),headless:false,viewport:null});
+        const cdpPort=process.env.RECRUITING_BROWSER_CDP_PORT;
+        const context=await this.launcher(this.profileDir,{...(endpoint==='managed-chrome'?{channel:'chrome'}:{}),headless:false,viewport:null,...(cdpPort?{args:[`--remote-debugging-port=${cdpPort}`,'--remote-debugging-address=127.0.0.1']}:{})});
         this.connection={contexts:()=>[context],on:(event,fn)=>{if(event==='disconnected')context.on('close',fn);}};
         this.state='connected';context.on('close',()=>{this.state='disconnected';this.connection=null;});
         return this.connection;
@@ -48,9 +52,22 @@ export class BrowserAdapter {
   status(){return {state:this.state,mode:this.endpoint==='managed-chrome'?'managed':this.endpoint==='managed-iab'?'iab':'cdp',connectionAttempts:this.connectionAttempts,automaticRetries:0,driverRevision:'2026-10-17.4'};}
   async trackedPage(id){const page=this.pageIds.get(id);if(!page||page.isClosed())throw Error('ROLE_BROWSER_PAGE_LOST');return page;}
   async pageIdentity(id){const page=await this.trackedPage(id);return {pageId:id,pageUrl:page.url()};}
+  async reaInspect({pageId,pageUrl,authorization}){
+    if(!authorization?.acquire||!authorization.evidence?.trim())throw Error('REA_CONSTRUCTION_AUTHORIZATION_REQUIRED');
+    const page=await this.trackedPage(pageId),beforeUrl=page.url();
+    if(this.state!=='connected'||beforeUrl!==pageUrl)throw Error('REA_PAGE_BINDING_CHANGED');
+    const endpoint=process.env.RECRUITING_REA_ENDPOINT||(process.env.RECRUITING_BROWSER_CDP_PORT?`http://127.0.0.1:${process.env.RECRUITING_BROWSER_CDP_PORT}`:this.endpoint);
+    const cdp=await page.context().newCDPSession(page);
+    try{const {targetInfo}=await cdp.send('Target.getTargetInfo');
+      if(targetInfo.url!==pageUrl)throw Error('REA_PAGE_BINDING_CHANGED');
+      const evidence=await inspectRea({endpoint,targetId:targetInfo.targetId,pageUrl});
+      return {evidence,binding:{pageId,targetId:targetInfo.targetId,beforeUrl,afterUrl:page.url()}};
+    }finally{await cdp.detach();}
+  }
   async roleSnapshot({pageId,roleSelector,accountSelector,loginRoot,roleIdentity}){
     const page=await this.trackedPage(pageId);
-    return page.evaluate(({roleSelector,accountSelector,loginRoot,roleIdentity})=>{const read=s=>{if(!s)return null;const ns=document.querySelectorAll(s);return ns.length===1?ns[0].innerText?.trim()||null:null;};return {pageUrl:location.href,roleTitle:read(roleSelector),...(roleIdentity?{roleIdentity:{parameter:roleIdentity.parameter,value:new URL(location.href).searchParams.get(roleIdentity.parameter)}}:{}),account:read(accountSelector),loginFormPresent:loginRoot?!!document.querySelector(loginRoot):false,readAt:new Date().toISOString()};},{roleSelector,accountSelector,loginRoot,roleIdentity});
+    const read=async s=>{if(!s)return null;const l=page.locator(s);if(await l.count()!==1)return null;return ((await l.innerText())||'').trim()||null;};
+    return {pageUrl:page.url(),roleTitle:await read(roleSelector),...(roleIdentity?{roleIdentity:readRoleIdentity(roleIdentity,page.url())}:{}),account:await read(accountSelector),loginFormPresent:loginRoot?await page.locator(loginRoot).count()>0:false,readAt:new Date().toISOString()};
   }
   async screenshot(pageId){const page=await this.trackedPage(pageId);const dir=path.join(path.dirname(this.profileDir),'screenshots');await mkdir(dir,{recursive:true,mode:0o700});const file=path.join(dir,randomUUID()+'.png');const masks=await page.evaluate(screenshotMaskDOM);await page.screenshot({path:file,fullPage:true,mask:masks.map(selector=>page.locator(selector))});await chmod(file,0o600);return {path:file,sensitiveFieldsMasked:masks.length};}
   async openPage(url,{pageId,readySelectors=[]}={}){
@@ -68,6 +85,12 @@ export class BrowserAdapter {
   }
   async enterApplication({pageId,expectedTitle,accountSelector,expectedAccount,roleSelector,entry,expectedRoleId,sessionAccountPageUrl}){
     const page=await this.trackedPage(pageId),before=new URL(page.url());
+    if(entry?.kind==='declarative_transition'){
+      const identify=p=>{let id=[...this.pageIds].find(([,v])=>v===p)?.[0];if(!id){id=randomUUID();this.pageIds.set(id,p);}return id;};
+      return executeTransition({entry,pageId,expectedTitle,expectedRoleId,expectedAccount,accountSelector,sessionAccountPageUrl},{
+        getPage:id=>this.trackedPage(id),listPages:async()=>{const b=await this.connect();return b.contexts().flatMap(c=>c.pages()).filter(p=>!p.isClosed()).map(p=>({id:identify(p),url:p.url()}));},pause:ms=>new Promise(r=>setTimeout(r,ms))
+      });
+    }
     if(entry?.kind==='resume_modal'){
       if(!expectedRoleId||entry.entryLabel!=='立即投递'||entry.editLabel!=='编辑'||!sessionAccountPageUrl||new URL(sessionAccountPageUrl).origin!==before.origin)throw Error('RESUME_ENTRY_CONTRACT_REQUIRED');
       const accountPage=await this.existingPage(sessionAccountPageUrl);
@@ -112,8 +135,10 @@ export class BrowserAdapter {
     if(await readAccount()!==expectedAccount)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');
     return {pageId,pageUrl:page.url(),roleTitle:expectedTitle,entryClicked:detail,accountMatched:true,submission:'not_performed'};
   }
-  async existingPage(url){
+  async existingPage(url,{pageId,readOnly=false}={}){
+    if(pageId&&!readOnly)throw Error('EXPLICIT_PAGE_REQUIRES_READ_ONLY');
     if(!this.connection&&this.state==='new')throw Error('EXISTING_BROWSER_SESSION_REQUIRED');
+    if(pageId){const page=await this.trackedPage(pageId);if(page.url()!==url)throw Error('EXPLICIT_PAGE_URL_MISMATCH');return new PageAdapter(page);}
     const browser=await this.connect();
     const pages=browser.contexts().flatMap(c=>c.pages()).filter(p=>p.url()===url);
     if(pages.length!==1)throw Error(pages.length?'AMBIGUOUS_PAGE':'EXISTING_PAGE_NOT_FOUND');

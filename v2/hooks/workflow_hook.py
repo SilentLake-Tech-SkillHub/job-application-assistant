@@ -15,7 +15,8 @@ STATE = Path(os.environ['RECRUITING_WORKFLOW_STATE'])
 SCOPE = Path(os.environ['RECRUITING_WORKFLOW_SCOPE'])
 INJECT = {'UserPromptSubmit', 'SessionStart', 'SubagentStart'}
 ROUTE = Path(__file__).with_name('route.md')
-MUTATIONS = {'batch_prepare','role_prepare','roles_prepare_batch','roles_patch_text','material_import_run','login_prepare','login_request_sms','login_verify_otp','application_closeout'}
+MUTATIONS = {'batch_prepare','role_prepare','roles_prepare_batch','workflow_advance','roles_patch_text','material_import_run','login_prepare','login_request_sms','login_verify_otp','application_closeout'}
+CONTINUATION_TOOLS = {'workflow_next', 'workflow_advance', 'role_prepare', 'batch_prepare', 'role_verify', 'verify_current'}
 
 
 def emit(value):
@@ -34,6 +35,55 @@ def write_atomic(file, value):
     os.replace(tmp, file)
 
 
+def continuation_result(value):
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return None
+    if not isinstance(value, dict):
+        return None
+    if isinstance(value.get('content'), list):
+        for block in value['content']:
+            if block.get('type') == 'text':
+                found = continuation_result(block.get('text'))
+                if found:
+                    return found
+    candidates = [value.get('continuation')]
+    candidates += [r.get('continuation') for r in value.get('results', []) if isinstance(r, dict)]
+    continuations = [c for c in candidates if isinstance(c, dict)]
+    return next((c for c in continuations if c.get('owner') == 'agent'), continuations[0] if continuations else None)
+
+
+def handle_continuation(event):
+    session, turn = event.get('session_id'), event.get('turn_id')
+    if not session or not turn:
+        return {}
+    STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
+    file = STATE / ('continuation-' + key(session, turn) + '.json')
+    try:
+        old = json.loads(file.read_text(encoding='utf-8'))
+    except (FileNotFoundError, ValueError):
+        old = {}
+    if event['hook_event_name'] == 'PostToolUse':
+        if event.get('tool_name', '').split('__')[-1] not in CONTINUATION_TOOLS:
+            return {}
+        value = event.get('tool_response', event.get('tool_result', event.get('output')))
+        result = continuation_result(value)
+        if not result:
+            return {}
+        # Store only fixed routing metadata, never form values or website text.
+        route = {k: result.get(k) for k in ['state', 'owner', 'requiresUser', 'shouldContinue']}
+        fingerprint = hashlib.sha256(json.dumps(route, sort_keys=True).encode()).hexdigest()
+        write_atomic(file, {**route, 'fingerprint': fingerprint,
+                            'reminded': old.get('reminded', False) if old.get('fingerprint') == fingerprint else False})
+        return {}
+    if old.get('owner') == 'agent' and old.get('shouldContinue') and not old.get('reminded'):
+        write_atomic(file, {**old, 'reminded': True})
+        return {'decision': 'block', 'reason': '当前 MCP 返回的是 Agent 待处理的建库、映射或修复步骤，并非用户缺资料。请执行 continuation.nextTools 并推进其它可处理公司；若实际技术阻塞无法解除，明确报告具体阻塞，不要要求用户重复回复“继续”。'}
+    return {}
+
+
 def handle(event):
     started = time.perf_counter()
     # This workflow belongs to an explicitly enabled conversation, not every
@@ -49,8 +99,10 @@ def handle(event):
     if cwd != ROOT and ROOT not in cwd.parents:
         return {}
     name = event.get('hook_event_name')
-    if name not in INJECT | {'PreToolUse'}:
+    if name not in INJECT | {'PreToolUse', 'PostToolUse', 'Stop'}:
         return {}
+    if name in {'PostToolUse', 'Stop'}:
+        return handle_continuation(event)
     tool = event.get('tool_name', '')
     # Source repair, Skill reads and status reporting must remain possible even
     # when an enabled conversation has no same-turn application receipt.
