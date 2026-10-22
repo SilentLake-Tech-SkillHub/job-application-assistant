@@ -125,5 +125,5 @@ export async function performControl(adapter,action,value,files={}){
       return;
     }
     throw Error('UNKNOWN_ACTION');
-  
+
 }

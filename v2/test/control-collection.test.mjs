@@ -93,3 +93,14 @@ test('host role identity is read from actual query rather than the expected ID',
  const tab={id:'1',playwright:{evaluate:async(fn,args)=>vm.runInNewContext('('+fn.toString()+')(args)',{args,location:{href:url},URL,Date,document:{querySelectorAll:()=>[],querySelector:()=>null}})}};
  try{await withHostBrowserBridge({browser:{tabs:{list:async()=>[{id:'1',url}],get:async()=>tab}},socketPath:path.join(d,'b.sock'),allowedOrigins:['https://fixture.test']},async({socketPath})=>{const r=await new BrokerBrowserAdapter(socketPath).request('roleSnapshot',{pageId:'1',roleIdentity:{parameter:'jobId',value:'expected'}});assert.equal(r.roleIdentity.value,'actual');});}finally{await rm(d,{recursive:true,force:true});}
 });
+
+import {retireLegacyQuestionMappings} from '../shared/profile-migration.mjs';
+import {hash} from '../shared/engine.mjs';
+test('locator upgrades replace inactive mappings only after full live proof, without deleting facts',()=>{
+ const url='https://fixture.test/form',template={evidence:{sourceUrl:url},pages:[{fields:[{source:'hasNoExperience',inventorySelectors:['label.question input'],read:{selector:'label.question input'}}]}]};
+ const key=hash({companyId:'fixture',pageUrl:'/form'}).slice(0,20);
+ const profile={facts:{hasNoExperience:{value:false}},companyForms:{[key]:{mappings:{old:{factKey:'hasNoExperience',selector:'input[type="checkbox"]',active:false,coverageRequired:true,status:'mapped'},unknown:{factKey:'unknown',selector:'#unknown',active:false,coverageRequired:true,status:'mapped'}}}}};
+ const probe={operation:'internal_condition_probe',companyId:'fixture',templateHash:hash(template),status:'verified',restoration:'verified',branches:[{status:'verified',newQuestions:0,inventory:[{selector:'label.question input'}]}]};
+ assert.equal(retireLegacyQuestionMappings(profile,{companyId:'fixture',template,probe}).retired,1);assert.ok(!profile.companyForms[key].mappings.old);assert.ok(profile.companyForms[key].mappings.unknown);assert.equal(profile.facts.hasNoExperience.value,false);
+ assert.throws(()=>retireLegacyQuestionMappings(profile,{companyId:'fixture',template,probe:{...probe,restoration:'failed'}}),/PROOF_REQUIRED/);
+});
