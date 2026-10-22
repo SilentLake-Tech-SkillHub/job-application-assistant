@@ -17,7 +17,8 @@ export async function locateControl(page,action){
  }
  return l;
 }
-async function assertValue(l,value){if(await l.evaluate(n=>n.value)!==value)throw Error('CONTROL_COMMIT_NOT_VERIFIED');}
+async function waitCommit(read,expected){const end=Date.now()+2000;do{if(JSON.stringify(await read())===JSON.stringify(expected))return;if(Date.now()>=end)throw Error('CONTROL_COMMIT_NOT_VERIFIED');await new Promise(r=>setTimeout(r,20));}while(true);}
+async function assertValue(l,value){return waitCommit(()=>l.evaluate(n=>n.value),value);}
 async function performChoice(adapter,action,value,family){
  const page=adapter.page,l=await locateControl(page,action);
  if(await l.evaluate(n=>n.getAttribute('role'))!=='combobox')throw Error('CHOICE_COMBOBOX_REQUIRED');
@@ -88,11 +89,11 @@ export async function performControl(adapter,action,value,files={}){
       if(meta.readonly||['date','month','password','file','radio','checkbox'].includes(meta.type))throw Error('CONTROL_REQUIRES_SPECIFIC_ACTION');
       await l.fill(String(value),{timeout:10000});if(action.selector==='.ant-calendar-input')await l.press('Enter');await l.press('Tab');await assertValue(l,String(value));return;
     }
-    if(action.method==='select'){if(meta.tag!=='SELECT')throw Error('NATIVE_SELECT_REQUIRED');await l.selectOption({label:String(value)});await l.press('Tab');const actual=await l.evaluate(n=>n.selectedOptions[0]?.textContent?.trim());if(actual!==String(value))throw Error('CONTROL_COMMIT_NOT_VERIFIED');return;}
+    if(action.method==='select'){if(meta.tag!=='SELECT')throw Error('NATIVE_SELECT_REQUIRED');await l.selectOption({label:String(value)});await l.press('Tab');await waitCommit(()=>l.evaluate(n=>n.selectedOptions[0]?.textContent?.trim()),String(value));return;}
     if(action.method==='dropdown')return performChoice(adapter,action,value,'aria');
     if(action.method==='radio'){
       if(!action.options?.includes(String(value)))throw Error('UNSUPPORTED_CHOICE_NO_FALLBACK');
-      const choice=l.getByRole('radio',{name:String(value),exact:true});if(await choice.count()!==1)throw Error('CHOICE_NOT_UNIQUE_OR_NOT_PRESENT');await choice.check();if(!await choice.evaluate(n=>n.checked===true||n.getAttribute('aria-checked')==='true'))throw Error('CONTROL_COMMIT_NOT_VERIFIED');return;
+      const choice=l.getByRole('radio',{name:String(value),exact:true});if(await choice.count()!==1)throw Error('CHOICE_NOT_UNIQUE_OR_NOT_PRESENT');await choice.check();await waitCommit(()=>choice.evaluate(n=>n.checked===true||n.getAttribute('aria-checked')==='true'||n.querySelector('input')?.checked===true),true);return;
     }
     if(action.method==='feishu_month'){
       if(value!=='至今'&&!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(value)))throw Error('INVALID_MONTH_VALUE');
@@ -112,7 +113,7 @@ export async function performControl(adapter,action,value,files={}){
       await adapter.page.locator('.atsx-date-picker-panel-body-cell-content:visible').filter({hasText:new RegExp(`^${value}$`)}).click({timeout:10000});
       await l.press('Tab');return;
     }
-    if(action.method==='check'){if(typeof value!=='boolean')throw Error('BOOLEAN_REQUIRED');await l.setChecked(value);if(await l.evaluate(n=>typeof n.checked==='boolean'?n.checked:n.getAttribute('aria-checked')==='true')!==value)throw Error('CONTROL_COMMIT_NOT_VERIFIED');return;}
+    if(action.method==='check'){if(typeof value!=='boolean')throw Error('BOOLEAN_REQUIRED');await l.setChecked(value);await waitCommit(()=>l.evaluate(n=>typeof n.checked==='boolean'?n.checked:n.getAttribute('aria-checked')==='true'),value);return;}
     if(action.method==='upload'){
       const asset=files[value];
       if(!asset?.paths?.length||!asset.displayNames?.length||asset.paths.length!==asset.displayNames.length)throw Error('FILE_REFERENCE_MISSING');

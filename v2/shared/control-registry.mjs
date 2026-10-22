@@ -17,3 +17,13 @@ export const CONTROL_METHODS = freeze(Object.fromEntries([
 ].map(method=>[method,{method,inspection:method.endsWith('_inspect')||method==='wait'||method==='capture_wecruit_schema',templateAllowed:!method.endsWith('_inspect')&&method!=='capture_wecruit_schema'}])));
 export const templateMethods = () => new Set(Object.keys(CONTROL_METHODS).filter(k=>CONTROL_METHODS[k].templateAllowed));
 export const controlCapabilities = () => ({schemaVersion:1,revision:'shared-controls-1',types:CONTROL_TYPES,methods:CONTROL_METHODS,locatorPolicy:'question_scoped_unique',readbackPolicy:'live_dom_independent'});
+
+// Persist one spelling for semantic references, independent of URL transport.
+export function canonicalControlSpec(value){
+ if(typeof value==='string'&&value.startsWith('antq:')){
+  try{const raw=value.slice(5);return 'antq:'+JSON.stringify(JSON.parse(raw.startsWith('{')?raw:decodeURIComponent(raw)));}catch{throw Error('INVALID_SEMANTIC_CONTROL_REFERENCE');}
+ }
+ if(Array.isArray(value))return value.map(canonicalControlSpec);
+ if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,canonicalControlSpec(v)]));
+ return value;
+}

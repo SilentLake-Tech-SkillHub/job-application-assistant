@@ -1,4 +1,4 @@
-import {controlCapabilities} from './control-registry.mjs';
+import {controlCapabilities,canonicalControlSpec} from './control-registry.mjs';
 import {normalizeWecruitDefinition,registerDefinitionQuestions} from './wecruit-definition.mjs';
 import {assertDefinitionMapped,matchesPageIdentity} from './definition-coverage.mjs';
 import {matchesRole} from './role-identity.mjs';
@@ -213,7 +213,7 @@ server.registerTool('capture_controls',{description:'建库阶段批量读取控
   const structure=compareControlStructures(controls,previous?.controls||[]);
   const roleSelector=(plan||candidates[0]?.pages?.[0])?.roleSelector;
   const identity=roleSelector?await p.observe({fields:[],roleSelector}):null;
-  const result={companyId,pageUrl,roleTitle:identity?.roleTitle||null,observedAt,controls,registration,structure,captureId,coverageLimit:'当前渲染文档；未展开选项、多步骤、静态问题、iframe与shadow root另行核对'};
+  const result={companyId,pageUrl,provider:plan?.provider||provider||null,roleTitle:identity?.roleTitle||null,observedAt,controls,registration,structure,captureId,coverageLimit:'当前渲染文档；未展开选项、多步骤、静态问题、iframe与shadow root另行核对'};
   await store.put('runs',captureId,result);await store.put('runs',captureIndexId,{latestCaptureId:captureId,previousCaptureId:previous?.captureId||null});
   if(!compact)return result;
   const summarize=rows=>rows.map(({selectors,...row})=>row);
@@ -243,7 +243,7 @@ server.registerTool('template_rebind_role',{description:'建库阶段离线复�
 }));
 server.registerTool('template_register',{description:'持久化已采集并人工确定的操作方案；不把建库等同于实测通过。',inputSchema:{companyId:z.string(),roleId:z.string().optional(),template:z.record(z.unknown())}},wrap(async ({companyId,roleId,template})=>engine.withCompanyLease(companyId,async()=>{
   const c=catalog.companies.find(c=>c.id===companyId);if(!c)throw Error('UNKNOWN_COMPANY');
-  validateTemplate(template);if(new URL(template.evidence.sourceUrl).origin!==c.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
+  template=canonicalControlSpec(template);validateTemplate(template);if(new URL(template.evidence.sourceUrl).origin!==c.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
   const t=unsealedTemplate(template);
   if(!profileFile)throw Error('PROFILE_REQUIRED_FOR_NEW_QUESTIONS');
   await store.update('templates',t.id,async previous=>{

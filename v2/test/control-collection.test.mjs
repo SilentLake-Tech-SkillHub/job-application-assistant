@@ -104,3 +104,18 @@ test('locator upgrades replace inactive mappings only after full live proof, wit
  assert.equal(retireLegacyQuestionMappings(profile,{companyId:'fixture',template,probe}).retired,1);assert.ok(!profile.companyForms[key].mappings.old);assert.ok(profile.companyForms[key].mappings.unknown);assert.equal(profile.facts.hasNoExperience.value,false);
  assert.throws(()=>retireLegacyQuestionMappings(profile,{companyId:'fixture',template,probe:{...probe,restoration:'failed'}}),/PROOF_REQUIRED/);
 });
+
+import {canonicalControlSpec} from '../shared/control-registry.mjs';
+test('semantic controls use one reference regardless of raw or URL-encoded transport',()=>{
+ const raw='antq:'+JSON.stringify({section:'Basics',label:'Name',part:'control',occurrence:0,index:0});
+ const encoded='antq:'+encodeURIComponent(raw.slice(5));
+ assert.deepEqual(canonicalControlSpec({read:{selector:encoded},actions:[{selector:raw}]}),{read:{selector:raw},actions:[{selector:raw}]});
+ assert.equal(canonicalControlSpec('antq:'+JSON.stringify({label:'Top 10%'})),'antq:'+JSON.stringify({label:'Top 10%'}));
+ assert.throws(()=>canonicalControlSpec('antq:%invalid'),/INVALID_SEMANTIC/);
+});
+
+test('async controlled inputs are polled until committed without repeating the mutation',async()=>{
+ let node={tagName:'INPUT',type:'checkbox',checked:false,readOnly:false,getAttribute:()=>null,querySelector:()=>null},writes=0,reads=0;
+ const l={count:async()=>1,evaluate:async f=>{reads++;if(writes&&reads>3)node.checked=true;return f(node);},setChecked:async()=>{writes++;}};
+ const p=new PageAdapter({url:()=> 'https://fixture.test/form',locator:()=>l},{listOpenPageUrls:async()=>[]});await p.act({method:'check',selector:'#check'},true,{});assert.equal(writes,1);assert.equal(node.checked,true);
+});

@@ -24,7 +24,7 @@ export class MaterialImport{
    const p=await loadProfile(this.profileFile),capture=await this.store.get('runs',plan.captureId);if(hash(p.files[plan.ref])!==plan.assetHash||p.facts['materials.resume.zh.reference']?.value!==plan.ref||hash(capture.controls)!==plan.captureHash)throw Error('MATERIAL_INPUT_CHANGED');
    const previousId='material-'+planId;let previous;try{previous=await this.store.get('runs',previousId);}catch(e){if(e.code!=='ENOENT')throw e;}if(previous)throw Error('MATERIAL_ATTEMPT_ALREADY_RECORDED');
    const page=await this.browser.existingPage(plan.pageUrl);await page.assertLocation(new URL(plan.pageUrl).origin,new URL(plan.pageUrl).pathname);
-   const inventory=await page.inventory({});if(!inventory.some(c=>c.selector===plan.selector&&c.type==='file'))throw Error('MATERIAL_CONTROL_CHANGED');
+   const inventory=await page.inventory({...(capture.provider?{provider:capture.provider}:{})});if(!inventory.some(c=>c.selector===plan.selector&&c.type==='file'))throw Error('MATERIAL_CONTROL_CHANGED');
    const o=await page.observe({fields:[{id:'container',read:{selector:plan.containerSelector,kind:'text'}}],groups:[{id:'target',selector:plan.containerSelector+':has(:is('+plan.selector+'))'}]});
    if(o.groups.target!==1||!/上传文件简历|简历附件|上传简历|将你的简历|Resume/i.test(o.fields.container.value||''))throw Error('MATERIAL_RESUME_CONTAINER_REQUIRED');
    const result={id:previousId,companyId:plan.companyId,pageUrl:plan.pageUrl,startedAt:new Date().toISOString(),status:'upload_attempt_started',submission:'not_performed'};await this.store.put('runs',previousId,result);
