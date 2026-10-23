@@ -53,6 +53,18 @@ def executor_diagnostics(process, path, phase, stdout, stderr):
             'stdout': captured(stdout), 'stderr': captured(stderr)}
 
 
+def decode_executor_result(result):
+    """Keep failed synthetic-child diagnostics even when stdout is valid JSON."""
+    out = json.loads(result.stdout)
+    if not isinstance(out, dict):
+        raise ValueError('executor result must be a JSON object')
+    if result.returncode != 0:
+        stderr = result.stderr or ''
+        out['fixtureDiagnostics'] = {'returncode': result.returncode, 'stderr': stderr[-12000:],
+                                     'stderrTruncated': len(stderr) > 12000}
+    return result.returncode, out
+
+
 def wait_for_executor_progress(process, path, ready_path, stdout, stderr,
                                ready_timeout=20, progress_timeout=45, interval=0.05):
     """Bound startup and actual first-field checkpoint separately; never infer success."""
@@ -81,6 +93,94 @@ def wait_for_executor_progress(process, path, ready_path, stdout, stderr,
             raise AssertionError('executor progress timeout: ' +
                                  json.dumps(executor_diagnostics(process, path, phase, stdout, stderr), ensure_ascii=False))
         time.sleep(interval)
+
+
+@contextmanager
+def owned_process_exit_probe(pid):
+    """Observe the fixture's CDP-reported browser PID; never terminate a browser."""
+    if not isinstance(pid, int) or pid <= 0:
+        raise AssertionError('invalid owned browser process ID')
+    if os.name == 'nt':
+        import ctypes
+        from ctypes import wintypes
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel.WaitForSingleObject.restype = wintypes.DWORD
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel.CloseHandle.restype = wintypes.BOOL
+        handle = kernel.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE only.
+        if not handle:
+            if ctypes.get_last_error() == 87:  # PID already gone.
+                yield lambda: True
+                return
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            def exited():
+                result = kernel.WaitForSingleObject(handle, 0)
+                if result == 0:
+                    return True
+                if result == 258:  # WAIT_TIMEOUT: still alive.
+                    return False
+                raise ctypes.WinError(ctypes.get_last_error())
+            yield exited
+        finally:
+            kernel.CloseHandle(handle)
+    else:
+        def exited():
+            try:
+                waited, _ = os.waitpid(pid, os.WNOHANG)
+                if waited == pid:
+                    return True
+            except ChildProcessError:
+                pass  # The executor may have created this detached browser.
+            try:
+                os.kill(pid, 0)  # Existence check only, sends no signal.
+            except ProcessLookupError:
+                return True
+            return False
+        yield exited
+
+
+def wait_for_owned_browser_exit(pid, probe, timeout=15, interval=0.05,
+                                clock=time.monotonic, sleep=time.sleep):
+    started = clock()
+    while not probe():
+        if clock() - started >= timeout:
+            raise AssertionError('owned fixture browser exit timeout: ' + json.dumps(
+                {'phase': 'browser_exit', 'browserPid': pid, 'browserExited': False,
+                 'waitSeconds': clock() - started}, ensure_ascii=False))
+        sleep(max(0, min(interval, timeout - (clock() - started))))
+    return {'browserStarted': True, 'browserPid': pid, 'browserCloseAcknowledged': True,
+            'browserExited': True, 'exitWaitSeconds': clock() - started}
+
+
+def cleanup_owned_fixture(tmp, exit_evidence, timeout=5, interval=0.1,
+                          clock=time.monotonic, sleep=time.sleep):
+    if exit_evidence.get('browserExited') is not True or (
+            exit_evidence.get('browserStarted') is not False and
+            exit_evidence.get('browserCloseAcknowledged') is not True):
+        raise AssertionError('fixture cleanup refused before verified browser exit: ' +
+                             json.dumps(exit_evidence, ensure_ascii=False))
+    started, attempts = clock(), 0
+    while True:
+        attempts += 1
+        try:
+            tmp.cleanup()
+            if Path(tmp.name).exists():
+                raise AssertionError('fixture cleanup returned with its directory still present')
+            return {'cleanupAttempts': attempts, 'cleanupWaitSeconds': clock() - started}
+        except PermissionError as exc:
+            if getattr(exc, 'winerror', None) not in (5, 32):
+                raise
+            if clock() - started >= timeout:
+                raise AssertionError('owned fixture cleanup remained locked: ' + json.dumps(
+                    {'phase': 'temporary_profile_cleanup', **exit_evidence,
+                     'attempts': attempts, 'waitSeconds': clock() - started,
+                     'winerror': exc.winerror, 'lockedFile': Path(exc.filename).name if exc.filename else None},
+                    ensure_ascii=False)) from exc
+            sleep(max(0, min(interval, timeout - (clock() - started))))
 
 
 def plan_for(base, job='101'):
@@ -120,26 +220,48 @@ class Executor(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        endpoint = profile_endpoint(cls.profile)
-        if endpoint:
-            # This fixture owns the temporary browser; production never closes it.
-            with sync_playwright() as pw:
-                browser = pw.chromium.connect_over_cdp(endpoint)
-                browser.new_browser_cdp_session().send('Browser.close')
-            for _ in range(50):
-                if profile_endpoint(cls.profile) is None:
-                    break
-                time.sleep(0.1)
-        cls.server.shutdown()
-        cls.server.server_close()
-        cls.tmp.cleanup()
+        exit_evidence = {'phase': 'browser_close', 'browserStarted': cls.profile.exists(),
+                         'browserCloseAcknowledged': False, 'browserExited': False}
+        try:
+            # Both the profile and the endpoint come from this fixture's temp
+            # directory. No user browser, arbitrary PID or system-wide kill.
+            if not cls.profile.resolve().is_relative_to(cls.root.resolve()):
+                raise AssertionError('browser profile is outside the owned fixture')
+            endpoint = profile_endpoint(cls.profile)
+            if endpoint:
+                with sync_playwright() as pw:
+                    browser = pw.chromium.connect_over_cdp(endpoint)
+                    session = browser.new_browser_cdp_session()
+                    browsers = [p for p in session.send('SystemInfo.getProcessInfo')['processInfo']
+                                if p.get('type') == 'browser']
+                    if len(browsers) != 1:
+                        raise AssertionError('owned browser PID was not uniquely observed')
+                    pid = browsers[0]['id']
+                    exit_evidence['browserPid'] = pid
+                    # Acquire the Windows process handle before asking it to
+                    # exit. A closed CDP port alone does not release file locks.
+                    with owned_process_exit_probe(pid) as probe:
+                        session.send('Browser.close')
+                        exit_evidence['browserCloseAcknowledged'] = True
+                        exit_evidence.update(wait_for_owned_browser_exit(pid, probe))
+            elif cls.profile.exists():
+                raise AssertionError('owned profile exists but browser exit cannot be verified without its endpoint')
+            else:
+                exit_evidence.update(browserStarted=False, browserExited=True)
+        except Exception as exc:
+            raise AssertionError('owned browser teardown failed: ' +
+                                 json.dumps(exit_evidence, ensure_ascii=False) + '; ' + str(exc)) from exc
+        finally:
+            cls.server.shutdown()
+            cls.server.server_close()
+        cleanup_owned_fixture(cls.tmp, exit_evidence)
 
     def run_exec(self, plan_path, *extra):
         r = subprocess.run([sys.executable, str(HERE / 'playwright_fill.py'), '--plan', str(plan_path), '--headless',
                             '--profile-dir', str(self.profile), '--timeout', '4000', *extra],
                            capture_output=True, text=True, encoding='utf-8', env=ENV, timeout=60)
         try:
-            return r.returncode, json.loads(r.stdout)
+            return decode_executor_result(r)
         except ValueError:
             self.fail('executor output not JSON:\n' + r.stdout + r.stderr)
 
@@ -430,6 +552,140 @@ time.sleep(5)
             self.assertIsNone(process.poll())
             self.assertEqual(fill_plan.load(path)['字段'][0]['状态'], '已读回')
         self.exercise(code, check)
+
+
+class ExecutorOutputDiagnosticsTests(unittest.TestCase):
+    def test_failure_keeps_original_json_error_and_actual_child_stderr(self):
+        result = subprocess.CompletedProcess(['synthetic-executor'], 2,
+                                             json.dumps({'通过': False, '错误': ['TimeoutError']}),
+                                             'actual synthetic child traceback\n')
+        code, out = decode_executor_result(result)
+        self.assertEqual(code, 2)
+        self.assertEqual(out['错误'], ['TimeoutError'])
+        self.assertEqual(out['fixtureDiagnostics']['stderr'], result.stderr)
+        self.assertFalse(out['fixtureDiagnostics']['stderrTruncated'])
+
+    def test_success_is_unchanged_and_failure_output_is_bounded(self):
+        expected = {'通过': True}
+        code, out = decode_executor_result(subprocess.CompletedProcess([], 0, json.dumps(expected), 'warning'))
+        self.assertEqual((code, out), (0, expected))
+        _, out = decode_executor_result(subprocess.CompletedProcess([], 7, '{}', 'x' * 20000))
+        self.assertEqual(out['fixtureDiagnostics']['returncode'], 7)
+        self.assertEqual(len(out['fixtureDiagnostics']['stderr']), 12000)
+        self.assertTrue(out['fixtureDiagnostics']['stderrTruncated'])
+
+
+class FixtureTeardownTests(unittest.TestCase):
+    class Clock:
+        def __init__(self):
+            self.value = 0
+
+        def now(self):
+            return self.value
+
+        def sleep(self, duration):
+            self.value += duration
+
+    def test_browser_exit_wait_observes_real_exit_before_granting_cleanup(self):
+        clock = self.Clock()
+        result = wait_for_owned_browser_exit(123, lambda: clock.value >= 0.2,
+                                            clock=clock.now, sleep=clock.sleep)
+        self.assertTrue(result['browserExited'])
+        self.assertTrue(result['browserCloseAcknowledged'])
+        self.assertGreaterEqual(result['exitWaitSeconds'], 0.2)
+
+    def test_windows_process_handle_waits_for_exit_and_is_always_closed(self):
+        import ctypes
+        from ctypes import wintypes  # Load the portable type declarations before patching os.name.
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        calls, results = [], iter([258, 0])
+        kernel = SimpleNamespace(
+            OpenProcess=lambda access, inherit, pid: calls.append(('open', access, inherit, pid)) or 456,
+            WaitForSingleObject=lambda handle, wait: calls.append(('wait', handle, wait)) or next(results),
+            CloseHandle=lambda handle: calls.append(('close', handle)) or True)
+        with patch.object(os, 'name', 'nt'), patch.object(ctypes, 'WinDLL', return_value=kernel, create=True):
+            with owned_process_exit_probe(123) as probe:
+                self.assertFalse(probe())
+                self.assertTrue(probe())
+        self.assertEqual(calls, [('open', 0x00100000, False, 123), ('wait', 456, 0),
+                                 ('wait', 456, 0), ('close', 456)])
+
+    def test_windows_pid_already_gone_is_not_confused_with_a_live_process(self):
+        import ctypes
+        from ctypes import wintypes
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        kernel = SimpleNamespace(OpenProcess=lambda *args: 0,
+                                 WaitForSingleObject=lambda *args: self.fail('no handle exists'),
+                                 CloseHandle=lambda *args: self.fail('no handle to close'))
+        with patch.object(os, 'name', 'nt'), patch.object(ctypes, 'WinDLL', return_value=kernel, create=True), \
+                patch.object(ctypes, 'get_last_error', return_value=87, create=True):
+            with owned_process_exit_probe(123) as probe:
+                self.assertTrue(probe())
+
+    def test_browser_exit_timeout_is_a_failure_with_process_diagnostics(self):
+        clock = self.Clock()
+        with self.assertRaisesRegex(AssertionError, 'browser exit timeout') as caught:
+            wait_for_owned_browser_exit(123, lambda: False, timeout=0.2,
+                                        clock=clock.now, sleep=clock.sleep)
+        self.assertIn('"browserPid": 123', str(caught.exception))
+        self.assertIn('"browserExited": false', str(caught.exception))
+
+    def test_cleanup_is_refused_without_both_close_acknowledgement_and_exit(self):
+        class Untouched:
+            def cleanup(self):
+                raise AssertionError('must not clean a live browser profile')
+        for evidence in [{'browserExited': False}, {'browserStarted': True, 'browserExited': True}]:
+            with self.assertRaisesRegex(AssertionError, 'cleanup refused'):
+                cleanup_owned_fixture(Untouched(), evidence)
+
+    def test_transient_windows_sharing_lock_retries_only_after_verified_exit(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / 'owned'
+            target.mkdir()
+            class Locked:
+                name = str(target)
+                attempts = 0
+
+                def cleanup(self):
+                    self.attempts += 1
+                    if self.attempts < 3:
+                        error = PermissionError(13, 'fixture sharing violation', str(target / 'lock.tmp'))
+                        error.winerror = 32
+                        raise error
+                    target.rmdir()
+            clock, tmp = self.Clock(), Locked()
+            result = cleanup_owned_fixture(tmp, {'browserStarted': True, 'browserCloseAcknowledged': True,
+                                                 'browserExited': True}, clock=clock.now, sleep=clock.sleep)
+            self.assertEqual(result['cleanupAttempts'], 3)
+            self.assertFalse(target.exists())
+
+    def test_persistent_windows_lock_is_not_ignored(self):
+        class Locked:
+            name = 'synthetic-owned-directory'
+
+            def cleanup(self):
+                error = PermissionError(13, 'fixture sharing violation', 'profile-lock.tmp')
+                error.winerror = 32
+                raise error
+        clock = self.Clock()
+        with self.assertRaisesRegex(AssertionError, 'cleanup remained locked') as caught:
+            cleanup_owned_fixture(Locked(), {'browserStarted': True, 'browserCloseAcknowledged': True,
+                                             'browserExited': True}, timeout=0.2,
+                                  clock=clock.now, sleep=clock.sleep)
+        for expected in ['"winerror": 32', 'profile-lock.tmp', 'temporary_profile_cleanup', '"browserExited": true']:
+            self.assertIn(expected, str(caught.exception))
+
+    def test_successful_cleanup_must_actually_remove_the_directory(self):
+        with tempfile.TemporaryDirectory() as folder:
+            class NoOp:
+                name = folder
+
+                def cleanup(self):
+                    pass
+            with self.assertRaisesRegex(AssertionError, 'directory still present'):
+                cleanup_owned_fixture(NoOp(), {'browserStarted': False, 'browserExited': True})
 
 
 if __name__ == '__main__':

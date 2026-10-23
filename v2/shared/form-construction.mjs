@@ -143,5 +143,7 @@ export function buildFormTemplate({capture,profile,mappings=[],choices=[],page,t
  const pending=fields.map(f=>({id:f.id,label:f.label,source:f.source,...classifyPending(f,profile)}));
  const dateGoals=fields.filter(f=>f.constructionBlockers.includes('DATE_OPTIONS_NOT_CAPTURED')).map(f=>({fieldId:f.id,selector:f.inventorySelectors[0],reason:'DATE_OPTIONS_NOT_CAPTURED',nextTool:'capture_choice_options',tool:'capture_choice_options',arguments:{companyId:capture.companyId,pageUrl:capture.pageUrl,captureId:capture.captureId,selectors:[f.inventorySelectors[0]]},owner:'agent'}));
  const nextGoals=[...choiceGoals.nextGoals,...dateGoals];
- return {template,blockers,pending,choiceGoals:choiceGoals.goals,nextGoals,choices:choiceGoals.choices,readyToRegister:blockers.length===0,nextTools:blockers.length?[...new Set([...nextGoals.map(g=>g.nextTool),'capture_choice_options','profile_map_questions','form_build_template'])]:['template_register','probe_conditions','template_finalize','prepare_plan'],requiresUser:false};
+ // Content diagnostics are ordinary answer gaps, separate from structure and protected actions.
+ const contentBlockers=pending.filter(field=>field.kind==='answer');
+ return {template,blockers,pending,contentReady:contentBlockers.length===0,contentBlockers,choiceGoals:choiceGoals.goals,nextGoals,choices:choiceGoals.choices,readyToRegister:blockers.length===0,nextTools:blockers.length?[...new Set([...nextGoals.map(g=>g.nextTool),'capture_choice_options','profile_map_questions','form_build_template'])]:['template_register','probe_conditions','template_finalize','prepare_plan'],requiresUser:false};
 }

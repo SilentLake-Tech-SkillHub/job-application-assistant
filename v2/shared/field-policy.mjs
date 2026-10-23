@@ -1,4 +1,5 @@
 import {MATERIAL_SOURCES} from './business-materials.mjs';
+import {projectDateValue,validDate} from './value-contract.mjs';
 // Technical construction gaps are not human-only actions.
 export function humanActionReason(field) {
  const label=field.inventoryLabel||field.label||'';
@@ -47,6 +48,10 @@ export function classifyPending(field,profile) {
  const fact=profile?.facts?.[field.source];
  if(!fact||fact.status==='missing')return {kind:'answer',reason:'CANONICAL_ANSWER_MISSING',owner:'user'};
  if(fact.status==='conflict')return {kind:'answer',reason:'CANONICAL_ANSWER_CONFLICT',owner:'user'};
+ if(field.kind==='date'&&fact.status==='known'){
+  const units=['year','month','day'],sourcePrecision=units.find(precision=>validDate(fact.value,precision)),requiredPrecision=field.precision;
+  if(sourcePrecision&&units.includes(requiredPrecision)&&!validDate(projectDateValue(fact.value,requiredPrecision),requiredPrecision)&&units.indexOf(sourcePrecision)<units.indexOf(requiredPrecision))return {kind:'answer',reason:'DATE_SOURCE_PRECISION_INSUFFICIENT',owner:'user',sourcePrecision,requiredPrecision,missingComponents:units.slice(units.indexOf(sourcePrecision)+1,units.indexOf(requiredPrecision)+1)};
+ }
  return {kind:'ready',owner:'agent'};
 }
 export function verificationSummary(checks=[],fieldIds=[]) {

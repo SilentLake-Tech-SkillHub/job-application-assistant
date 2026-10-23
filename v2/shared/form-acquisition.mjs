@@ -40,7 +40,7 @@ export function capturedChoiceOptions(field) {
 export function compactConstructionResult(built) {
  const pendingCounts = {};
  for(const field of built.pending)pendingCounts[field.kind]=(pendingCounts[field.kind]||0)+1;
- return {readyToRegister:built.readyToRegister,blockers:built.blockers,
+ return {readyToRegister:built.readyToRegister,blockers:built.blockers,contentReady:built.contentReady,contentBlockers:built.contentBlockers,
   pending:built.pending.filter(field=>field.kind!=='ready'),pendingCounts,
   fieldCount:built.template.pages.reduce((n,page)=>n+page.fields.length,0),
   choiceGoals:built.choiceGoals,nextGoals:built.nextGoals,
