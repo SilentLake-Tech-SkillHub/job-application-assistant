@@ -33,7 +33,7 @@ function inputSnapshot(template,task){
   const values=Object.fromEntries(keys.map(k=>[k,task.values?.[k]??null]));
   const sources=Object.fromEntries(keys.filter(k=>task.sources?.[k]).map(k=>[k,task.sources[k]]));
   const refs=[...new Set(template.pages.flatMap(p=>p.fields).filter(f=>f.kind==='file').map(f=>task.values?.[f.source]).filter(v=>v!=null))].sort();
-  return json({companyId:task.companyId,pageUrl:task.pageUrl,templateHash:task.templateHash,values,sources,omissions:task.omissions||{},files:Object.fromEntries(refs.map(ref=>[ref,task.files?.[ref]??null])),contentPolicy:task.contentPolicy||null,materialContext:task.materialContext||null,dateRepresentations:task.dateRepresentations||{}});
+  return json({companyId:task.companyId,pageUrl:task.pageUrl,templateHash:task.templateHash,values,sources,omissions:task.omissions||{},files:Object.fromEntries(refs.map(ref=>[ref,task.files?.[ref]??null])),contentPolicy:task.contentPolicy||null,materialContext:task.materialContext||null,dateRepresentations:task.dateRepresentations||{},profileFillContext:task.profileFillContext||null});
 }
 
 async function validateFile(ref,files){
@@ -51,7 +51,7 @@ async function validateFile(ref,files){
 // their position, source, type, action, constraints and readback specification.
 export async function compileExecutionPlan(template,task){
   assertContentPolicy(task.values,task.contentPolicy);assertApplicationText(task.values);
-  const pages=[],counts={fill:0,observe:0,needs_user:0,omitted:0,user_only:0,inactive:0};
+  const pages=[],counts={fill:0,observe:0,needs_user:0,omitted:0,user_only:0,authorized_profile:0,inactive:0};
   const materialCoverage=materialAudit(template.pages.flatMap(p=>p.fields),task);
   const checkedFiles=new Set();
   for(const page of template.pages){
@@ -78,7 +78,8 @@ export async function compileExecutionPlan(template,task){
       if(required&&omission)throw Error('REQUIRED_FIELD_CANNOT_BE_OMITTED');
       if(omission&&(!['confirmed_absent','user_declined','not_applicable'].includes(omission.kind)||typeof omission.evidence!=='string'||!omission.evidence.trim()))throw Error('INVALID_PLAN_OMISSION');
       if(omission&&value!=null)throw Error('OMISSION_WITH_PLANNED_VALUE');
-      const disposition=inactive?'inactive':f.userOnly?'user_only':value==null?(!required&&omission?'omitted':'needs_user'):f.readonly?'observe':'fill';
+      const authorized=task.profileFillContext?.fields?.some(field=>field.fieldId===f.id);
+      const disposition=inactive?'inactive':f.userOnly?(authorized?'authorized_profile':'user_only'):value==null?(!required&&omission?'omitted':'needs_user'):f.readonly?'observe':'fill';
       counts[disposition]++;
       fields.push(json({...f,effectiveRequired:required,businessRequired:materialCoverage.requirements.some(r=>r.fieldId===f.id),value,disposition}));
     }
@@ -120,12 +121,13 @@ export async function compileExecutionPlan(template,task){
   if(template.coverage?.allConditionalBranchesVerified!==true)constructionBlockers.push('CONDITIONAL_BRANCHES_NOT_VERIFIED');
   if(template.coverage?.allControlsMapped!==true)constructionBlockers.push('CONTROLS_NOT_FULLY_MAPPED');
   if(template.coverage?.allDriversSupported!==true)constructionBlockers.push('CONTROL_DRIVERS_NOT_SUPPORTED');
-  const body=json({schemaVersion:1,compilerVersion:3,companyId:task.companyId,pageUrl:task.pageUrl,templateHash:task.templateHash,inputHash:digest(inputSnapshot(template,task)),files:inputSnapshot(template,task).files,pages,counts,materialCoverage,constructionBlockers,unstableFields,readyForExecution:constructionBlockers.length===0&&counts.needs_user===0,allKnown:counts.needs_user===0&&counts.user_only===0});
+  const body=json({schemaVersion:1,compilerVersion:3,companyId:task.companyId,pageUrl:task.pageUrl,templateHash:task.templateHash,inputHash:digest(inputSnapshot(template,task)),files:inputSnapshot(template,task).files,profileFillContext:task.profileFillContext||null,pages,counts,materialCoverage,constructionBlockers,unstableFields,readyForExecution:constructionBlockers.length===0&&counts.needs_user===0,allKnown:counts.needs_user===0&&counts.user_only===0});
   const planHash=digest(body);
   return {id:randomUUID(),createdAt:new Date().toISOString(),...body,planHash};
 }
 
-export async function assertPreparedPlan(prepared,template,task,authorization){
+export async function assertPreparedPlan(prepared,template,task,authorization,{scope='full'}={}){
+  if(!['full','authorized_profile_fields'].includes(scope))throw Error('INVALID_EXECUTION_SCOPE');
   if(!prepared||!task.planId||!task.planHash)throw Error('PREPARED_PLAN_REQUIRED');
   const {id,createdAt,planHash,...body}=prepared;
   if(id!==task.planId||planHash!==task.planHash||digest(body)!==planHash)throw Error('PREPARED_PLAN_HASH_MISMATCH');
@@ -137,6 +139,11 @@ export async function assertPreparedPlan(prepared,template,task,authorization){
   if(current.planHash!==planHash)throw Error('PREPARED_PLAN_CONTENT_CHANGED');
   if(prepared.constructionBlockers.length)throw Error('FORM_CONSTRUCTION_INCOMPLETE');
   if(prepared.counts.needs_user&&!authorization.allowPartialPreparation)throw Error('PROFILE_PREPARATION_INCOMPLETE');
+  if(scope==='authorized_profile_fields'){
+    const ids=new Set(prepared.profileFillContext?.fields?.map(field=>field.fieldId)||[]),fields=prepared.pages.flatMap(page=>page.fields).filter(field=>ids.has(field.id));
+    if(!ids.size||fields.length!==ids.size||fields.some(field=>field.disposition!=='authorized_profile'||field.kind!=='text'||!field.userOnly))throw Error('AUTHORIZED_PROFILE_EXECUTION_SCOPE_INVALID');
+    return prepared;
+  }
   for(const f of prepared.pages.flatMap(p=>p.fields).filter(f=>f.disposition==='fill')){
     if(f.sensitive&&!authorization.sensitiveFields)throw Error('SENSITIVE_FIELD_AUTHORIZATION_REQUIRED');
     if(f.kind==='file'&&!authorization.uploads)throw Error('UPLOAD_AUTHORIZATION_REQUIRED');

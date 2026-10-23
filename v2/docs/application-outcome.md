@@ -1,5 +1,7 @@
 # MCP 固定事件收尾（反向回传）
 
+用户对具体岗位及当前表单明确授权后，`role_submit` 绑定原队列、账号、页面、模板、核验报告和附件版本，一次执行提交并采集官网回执。响应给出带证据 Hash 的 `outcome`，交 `application_closeout` 校验写回。响应式页面出现同名同类型提交按钮时，按本次捕获的精确节点选择末个，动作前再次比对节点属性；不同提交动作并存则拒绝。点击不是成功；提交尝试先持久化，不确定也不自动再次点击。
+
 `application_closeout({outcome})` 校验官网证据后，把**本岗位的最新结果**覆盖写入工作区 `岗位交接/投递回传.json`（每个岗位一条，键为 `companyId|岗位ID`）。不保留事件历史，不另存备份；回滚靠 git。它不改主表状态、不提交网站、不同步 Excel。
 
 记录 `submission_confirmed` 前，MCP 还核对：本岗位在本批队列里由 MCP 按该公司**已封存**的表单模板填写，并有通过的独立核验记录（`role_prepare` / `role_verify` 的 `verify_current` 结果，模板 Hash 与核验时一致）。手工在浏览器里填写提交的岗位没有这条记录，拒绝记录，返回 `SUBMISSION_REQUIRES_VERIFIED_TEMPLATE_FILL`；模板未封存或核验后被改动分别返回 `SUBMISSION_COMPANY_TEMPLATE_NOT_SEALED`、`SUBMISSION_TEMPLATE_CHANGED_AFTER_VERIFY`。先按建库路线补齐表单，再用 `role_verify` 核验后收尾。

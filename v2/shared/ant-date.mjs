@@ -6,6 +6,12 @@ async function openPanel(page,input){
  const until=Date.now()+3000;
  while(await panel.count()!==1){if(Date.now()>=until)throw Error('DATE_MENU_NOT_UNIQUE');await new Promise(r=>setTimeout(r,20));}
  await panel.waitFor({state:'visible',timeout:3000});
+ if(typeof panel.getAttribute==='function'){
+  const settledUntil=Date.now()+3000;
+  while(/(?:^|\s)[\w-]+-(?:enter|appear|leave)-active(?:\s|$)/.test(await panel.getAttribute('class')||'')){
+   if(Date.now()>=settledUntil)throw Error('ANT_DATE_PANEL_ANIMATION_NOT_SETTLED');await new Promise(r=>setTimeout(r,20));
+  }
+ }
  return panel;
 }
 async function pickRenderedDay(panel,value,{select=true}={}){
@@ -20,11 +26,22 @@ async function pickRenderedDay(panel,value,{select=true}={}){
   if(indices.length===1){const cell=cells.nth(indices[0]);if(select)await cell.click({timeout:10000});return cell;}
   if(indices.length>1)throw Error('ANT_DATE_OPTION_NOT_UNIQUE');
   if(states.some(s=>s.inView&&s.disabled))throw Error('ANT_DATE_OPTION_DISABLED');
-  const headers=await panel.locator('.ant-picker-header-view,.ant-calendar-header').filter({visible:true}).allTextContents();
-  const months=headers.map(text=>{const match=text.match(/(\d{4})\s*年\s*(\d{1,2})\s*月/);return match?Number(match[1])*12+Number(match[2])-1:null;}).filter(x=>x!==null);
+  // Popup visibility precedes rendered calendar headers during transitions.
+  // Wait for actual headers rather than treating an intermediate empty frame
+  // as missing navigation. Date cells/selected markers remain mandatory.
+  let headers,months;const renderedUntil=Date.now()+2000;
+  do{headers=await panel.locator('.ant-picker-header-view,.ant-calendar-header').filter({visible:true}).allTextContents();
+   months=headers.map(text=>{const match=text.match(/(\d{4})\s*年\s*(\d{1,2})\s*月/);return match?Number(match[1])*12+Number(match[2])-1:null;}).filter(x=>x!==null);
+   if(months.length||Date.now()>=renderedUntil)break;await new Promise(r=>setTimeout(r,20));
+  }while(true);
   if(!months.length)throw Error('ANT_DATE_NAVIGATION_NOT_CAPTURED');
   const target=year*12+month-1,min=Math.min(...months),max=Math.max(...months);
-  if(target>=min&&target<=max)throw Error('ANT_DATE_OPTION_NOT_PRESENT');
+  if(target>=min&&target<=max){
+   // Header and body can update in separate React commits. The matching
+   // day must actually render before reading its selected-range marker.
+   if(typeof cells.first==='function'){try{await cells.first().waitFor({state:'visible',timeout:2000});continue;}catch{}}
+   throw Error('ANT_DATE_OPTION_NOT_PRESENT');
+  }
   const previous=target<min,distance=previous?min-target:target-max;
   const cls=distance>=12?(previous?'.ant-picker-header-super-prev-btn':'.ant-picker-header-super-next-btn'):(previous?'.ant-picker-header-prev-btn':'.ant-picker-header-next-btn');
   const candidates=panel.locator(cls),navigation=await candidates.evaluateAll(nodes=>nodes.map(n=>{const r=n.getBoundingClientRect(),style=getComputedStyle(n);return {visible:r.width>0&&r.height>0&&style.visibility!=='hidden'&&style.display!=='none',disabled:n.disabled||n.getAttribute('aria-disabled')==='true'};}));

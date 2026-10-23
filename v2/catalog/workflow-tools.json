@@ -19,6 +19,7 @@
     "inspect_choice"
   ],
   "stages": {
+    "role_submit": ["submit", ["application_closeout"]],
     "workflow_handoff": [
       "technical_block",
       []
@@ -315,6 +316,7 @@
         "form_build_template"
       ]
     ],
+    "role_prepare_profile_fields": ["prepare", ["role_verify"]],
     "form_remove_attachment": ["construct", ["capture_controls", "form_build_template"]],
     "role_prepare_materials": [
       "prepare",

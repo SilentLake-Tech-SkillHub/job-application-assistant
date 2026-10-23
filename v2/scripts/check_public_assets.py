@@ -39,7 +39,7 @@ def public_json_files(root):
     names = lifecycle['inspections'] + list(lifecycle['stages'])
     assert len(names) == len(set(names)) and all(re.fullmatch(r'[a-z_]+', n) for n in names)
     for phase, tools in lifecycle['stages'].values():
-        assert phase in {'construct', 'map', 'prepare', 'verify', 'route', 'login', 'closed', 'closeout', 'technical_block'}
+        assert phase in {'construct', 'map', 'prepare', 'verify', 'route', 'login', 'closed', 'closeout', 'technical_block', 'submit'}
         assert isinstance(tools, list) and all(t in names for t in tools)
     no_personal_data(json.dumps(lifecycle))
     assert not (root / 'catalog/companies.json').exists(), 'company catalog lives in the workspace, not the package'

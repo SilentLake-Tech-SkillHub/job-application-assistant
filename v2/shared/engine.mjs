@@ -1,5 +1,6 @@
 import {verifyDropdownSelections,attachChoiceProofs} from './choice-verification.mjs';
 import {verifyDateRanges,attachDateRangeProofs} from './date-range-verification.mjs';
+import {attachProfileFillProofs} from './profile-fill-authorization.mjs';
 import {templateMethods} from './control-registry.mjs';
 import {templateConstructionIssues,humanActionReason} from './field-policy.mjs';
 import {continuationFor} from './workflow-continuation.mjs';
@@ -94,7 +95,8 @@ export function compare(actual, expected) {
 }
 
 export class Engine {
-  constructor({store,companies,browser,onInventory,refreshCompanies,resolveTask,leaseRoot=defaultLeaseRoot()}) { Object.assign(this,{store,companies,browser,onInventory,refreshCompanies,resolveTask,leaseRoot}); this.locks = new Set(); }
+  constructor({store,companies,browser,onInventory,refreshCompanies,resolveTask,profileFields,leaseRoot=defaultLeaseRoot()}) { Object.assign(this,{store,companies,browser,onInventory,refreshCompanies,resolveTask,profileFields,leaseRoot}); this.locks = new Set(); }
+  async profileProofs(task,template,page,prepare=false){if(!task.profileFillContext)return {};if(!this.profileFields)throw Error('PROFILE_FILL_KERNEL_REQUIRED');return this.profileFields({task,template,page,prepare});}
   formRoute(task){return new FormRouter({store:this.store,companies:this.companies,validateTemplate}).resolve(task);}
   companyForTask(task){const c=this.companies.find(c=>c.id===task.companyId);return c?{...c,templateId:c.roleTemplates?.[task.roleId]||c.templateId}:null;}
   async acquireCompanies(companies){
@@ -178,6 +180,7 @@ export class Engine {
     const jobs=[];
     // Resolve every plan before any page is changed.
     for (const task of tasks) {
+      if(task.profileFillContext&&!task.roleQueueArgs)throw Error('PROFILE_FILL_ROLE_BINDING_REQUIRED');
       const company=this.companyForTask(task);
       if (!company?.templateId) throw Error(`COMPANY_NOT_COVERED:${task.companyId}`);
       if (new URL(task.pageUrl).origin!==company.origin) throw Error('COMPANY_ORIGIN_MISMATCH');
@@ -256,7 +259,8 @@ export class Engine {
     try{if(this.onInventory)await this.onInventory(company.id,task.pageUrl,inventory,plan);}catch(e){mappingError=/^[A-Z_]+$/.test(e.message)?e.message:'PROFILE_REGISTRATION_FAILED';}
     const choiceProofs=await verifyDropdownSelections(page,plan,task);
     const dateProofs=await verifyDateRanges(page,plan,task);
-    const observation=attachDateRangeProofs(attachChoiceProofs(attachInventory(await page.observe(plan),plan,inventory),choiceProofs),dateProofs),observationRunId=randomUUID();
+    const profileProofs=await this.profileProofs(task,template,page);
+    const observation=attachProfileFillProofs(attachDateRangeProofs(attachChoiceProofs(attachInventory(await page.observe(plan),plan,inventory),choiceProofs),dateProofs),profileProofs),observationRunId=randomUUID();
     await this.store.put('runs',observationRunId,{operation:'live_observation',companyId:company.id,observation});
     const result=verifyForm(compileExpected(plan,task),observation);
     const contractChanges=controlContractChanges(plan,inventory);
@@ -320,6 +324,8 @@ export class Engine {
           }
         }
         activeField=null;
+        const authorizedProofs=await this.profileProofs(task,template,page,true);
+        if(Object.values(authorizedProofs).some(proof=>proof.status!=='verified'))throw Error('AUTHORIZED_PROFILE_VALUE_MISMATCH');
         // A final read of the entire page catches later cascades or resume parsing overwriting earlier values.
         const finalInventory=await inventory();
         // Dependencies and parsing can reveal new optional questions after writing.
@@ -328,7 +334,8 @@ export class Engine {
         if(controlContractChanges(plan,finalInventory).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
         const choiceProofs=await verifyDropdownSelections(page,plan,task);
         const dateProofs=await verifyDateRanges(page,plan,task);
-        const observation=attachDateRangeProofs(attachChoiceProofs(attachInventory(await page.observe(plan),plan,finalInventory),choiceProofs),dateProofs);
+        const profileProofs=await this.profileProofs(task,template,page);
+        const observation=attachProfileFillProofs(attachDateRangeProofs(attachChoiceProofs(attachInventory(await page.observe(plan),plan,finalInventory),choiceProofs),dateProofs),profileProofs);
         result.selectionProofs={...(result.selectionProofs||{}),...choiceProofs};
         const observationRunId=randomUUID();
         await this.store.put('runs',observationRunId,{operation:'live_observation',companyId:company.id,observation});

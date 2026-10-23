@@ -41,7 +41,10 @@ export function verifyForm(expected, observed, {now=Date.now(),maxAgeMs=60000}={
   for(const field of expected.fields){
     const actual=observed.fields?.[field.id];
     const check={id:field.id,label:field.label,kind:field.kind,status:'unverified',reason:null};
-    if(field.userOnly){check.status=humanActionReason(field)?'needs_user':'construction_required';check.reason=humanActionReason(field)?'USER_ACTION_REQUIRED':'ORDINARY_FIELD_MARKED_USER_ONLY';checks.push(check);continue;}
+    if(field.userOnly){
+      if(field.profileFillBinding&&humanActionReason(field)==='sensitive_identity'){const proof=actual?.profileFillProof;check.status=actual?.present===true&&proof?.status==='verified'&&proof.readbackStable===true&&proof.contextHash===field.profileFillBinding.contextHash&&proof.sourceHash===field.profileFillBinding.sourceHash?'match':'mismatch';check.reason=check.status==='match'?null:proof?.reason||'AUTHORIZED_PROFILE_PROOF_REQUIRED';checks.push(check);continue;}
+      check.status=humanActionReason(field)?'needs_user':'construction_required';check.reason=humanActionReason(field)?'USER_ACTION_REQUIRED':'ORDINARY_FIELD_MARKED_USER_ONLY';checks.push(check);continue;
+    }
     if(!actual||actual.present!==true){check.reason='FIELD_NOT_READ';checks.push(check);continue;}
     if(field.lockedControl&&(actual.disabled!==true||actual.value!==field.lockedControl.value)){check.status='mismatch';check.reason='LOCKED_CONTROL_STATE_CHANGED';checks.push(check);continue;}
     if(isRedactedReadback(actual.value)){check.reason=REDACTED_READBACK_REASON;check.readbackVisibility='redacted';checks.push(check);continue;}

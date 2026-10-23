@@ -19,7 +19,7 @@
 3. 需要登录则返回绑定原岗位的 `loginPlan`；调用 `login_prepare`、按已授权声明处理、请求一次当前短信；图形验证及本人操作交用户。
 4. 用户完成后 `role_resume` 在原标签返回原岗位，核对账号、完整URL及标题，返回 `ready_to_fill` 才能继续。
 5. `role_prepare` 核对同一任务→全部字段离线编译→填写→独立只读核验；新增问题强制登记私有JSON。`role_verify`可额外核验；`role_screenshot`保存原标签截图并遮盖密码/短信码。
-6. 返回 `ready_for_user_review` 后交用户校验；该岗位准备完成才可开始顺序中的下一岗位。当前不提供最终提交操作。
+6. 返回 `ready_for_user_review` 后交用户校验；该岗位准备完成才可开始顺序中的下一岗位。用户明确授权具体岗位的当前表单后，调用 `role_submit`，传当前模板 Hash、已通过核验的 `reviewRunId` 与用户原话。内核重新核验字段、敏感来源及附件，先记录尝试再点击一个真实按钮；只认官网回执，随后用返回的 outcome 调用 `application_closeout`。不确定结果禁止自动重试；普通填写工具与模板不能提交。
 
 岗位详情与表单不同可使用上游已核实的 `applyUrl/apply_url`；对应公司进入方式必须已建库，缺少则报 `ROLE_ENTRY_RECIPE_REQUIRED`，不拼接链接。登录后首页不等于返回原岗位。公司 `login_open` 只供内部调试。
 

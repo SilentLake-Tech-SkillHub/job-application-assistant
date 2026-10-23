@@ -6,6 +6,13 @@ export function controlDOM(spec){
   const parts=[];for(let p=n;p&&p!==document.body;p=p.parentElement){let i=1;for(let s=p.previousElementSibling;s;s=s.previousElementSibling)if(s.tagName===p.tagName)i++;parts.unshift(p.tagName.toLowerCase()+':nth-of-type('+i+')');}
   return 'body > '+parts.join(' > ');
  };
+ if(['submission_controls','submission_receipt'].includes(spec?.operation)){
+  const candidates=[...document.querySelectorAll('button,input[type="submit"]')].filter(visible).map(n=>({label:(n.innerText||n.value||'').trim(),tag:n.tagName,type:n.type||'',disabled:!!n.disabled||n.getAttribute('aria-disabled')==='true'})).filter(n=>/^(?:确认提交|提交申请|提交简历|提交|确认投递|投递简历|立即投递|Submit|Submit application|Apply)$/i.test(n.label));
+  const receiptPattern=/^(?:恭喜(?:您)?[，,\s]*)?(?:您的)?(?:简历|职位申请)?(?:提交成功|投递成功|申请成功|已成功投递|已成功提交|申请已提交)[！!。.]?$/;
+  const receipts=[...document.querySelectorAll('h1,h2,h3,p,span,div,[role="status"],[role="alert"]')].filter(n=>visible(n)&&!n.closest('button')&&receiptPattern.test(n.innerText?.trim()||'')&&![...n.children].some(c=>visible(c)&&c.innerText?.trim()===n.innerText?.trim())).map(n=>({text:n.innerText.trim(),selector:diagnosticSelector(n)}));
+  const buttons=[...document.querySelectorAll('button,input[type="submit"]')].filter(visible).flatMap(n=>{const data={label:(n.innerText||n.value||'').trim(),tag:n.tagName,type:n.type||'',disabled:!!n.disabled||n.getAttribute('aria-disabled')==='true'};return candidates.some(c=>JSON.stringify(c)===JSON.stringify(data))?[{...data,selector:diagnosticSelector(n)}]:[];});
+  return {source:'live_dom',readAt:new Date().toISOString(),pageUrl:location.href,buttons,receipt:receipts.length===1?receipts[0]:null,receiptCount:receipts.length,validationErrors:[...document.querySelectorAll('.ant-form-item-explain-error,.has-error .ant-form-explain,.ant-message-error')].filter(visible).length};
+ }
  const fileCandidates=root=>[...new Set([...root.querySelectorAll('.ant-upload-list-item-name,[class*="file-name"]'),...[...root.querySelectorAll('a,span,p,h1,h2,h3,h4,div,[data-file-name],[data-filename]')].filter(n=>visible(n)&&/^[^\n]{1,200}\.(?:pdf|docx?|png|jpe?g)$/i.test(n.innerText?.trim()||''))])].filter(n=>visible(n)&&![...(n.children||[])].some(child=>visible(child)&&child.innerText?.trim()===n.innerText?.trim()));
  const uploadComplete=root=>[...root.querySelectorAll('*')].some(n=>visible(n)&&/^(?:[\d.]+\s*(?:KB|MB|K|M)\s*[·|]\s*)?(?:已完成|上传成功|completed|uploaded|done)$/i.test(n.innerText?.trim()||''));
  const uploadRoots=()=>[...document.querySelectorAll('input[type="file"]')].flatMap(input=>{
