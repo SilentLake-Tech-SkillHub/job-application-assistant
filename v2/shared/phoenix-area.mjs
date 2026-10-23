@@ -18,6 +18,42 @@ export function assertAreaSelection(proof,label,expectedId){
  if(expectedId!=null&&(proof.values.length!==1||proof.values[0]!==expectedId))throw Error('AREA_SELECTED_ID_MISMATCH');
  return true;
 }
+export function areaReadinessDOM(root){
+ const visible=n=>!!n.getClientRects().length&&getComputedStyle(n).visibility!=='hidden';
+ const busy='[aria-busy="true"],[role="progressbar"],[data-loading="true"],.phoenix-spin-spinning,.phoenix-loading,.loading';
+ const loaded='[aria-busy="false"],[data-loading="false"],[data-loaded="true"],[data-state="loaded"],[data-state="ready"]';
+ const busyNodes=[root,...root.querySelectorAll(busy)].filter(n=>n.matches?.(busy)&&visible(n)),readyNodes=[root,...root.querySelectorAll(loaded)].filter(n=>n.matches?.(loaded)&&visible(n));
+ const emptyNodes=[...root.querySelectorAll('.area-data-empty,.area-empty,[role="status"],.no-data')].filter(visible).map(n=>n.innerText?.trim()).filter(t=>t&&/无数据|暂无|无结果|未找到|无匹配|no (?:data|results|options)/i.test(t));
+ return {loading:busyNodes.length>0,explicitLoaded:readyNodes.length>0,loadingEvidence:busyNodes.map(n=>({tag:n.tagName,classes:String(n.className||''),ariaBusy:n.getAttribute('aria-busy')})),emptyEvidence:emptyNodes};
+}
+const rowsKey=records=>JSON.stringify((records||[]).map(({label,path,value,disabled})=>({label,path,value,disabled:!!disabled})));
+const normalizeQuery=value=>String(value||'').normalize('NFKC').toLowerCase().replace(/\s+/g,'');
+// The clock and sampler are injectable only at this internal boundary. A tool
+// caller cannot shorten the production wait by passing template action fields.
+export async function waitForAreaResults({read,query=null,baseline=null,now=Date.now,sleep=ms=>new Promise(r=>setTimeout(r,ms)),timeoutMs=6000,stableMs=450,pollMs=50}){
+ const started=now(),end=started+timeoutMs;let polls=0,stableSince=null,stableKey=null,sawLoading=false,loadingEnded=false,last=null;
+ const evidence=(decision)=>({decision,elapsedMs:now()-started,windowMs:timeoutMs,fullWindowElapsed:now()>=end,polls,stableMs:stableSince===null?0:now()-stableSince,requiredStableMs:stableMs,sawLoading,loadingEnded,queryApplied:query!==null&&last?.input===query,loading:last?.loading===true,freshness:last?.freshness||[],lastObservation:{input:last?.input,resultText:last?.resultText??null,rowCount:last?.records?.length||0,explicitLoaded:last?.explicitLoaded===true,loadingEvidence:last?.loadingEvidence||[]}});
+ for(;;){
+  const state=await read();polls++;last=state;
+  if(state.loading===true){sawLoading=true;stableSince=null;stableKey=null;}else if(sawLoading)loadingEnded=true;
+  const applied=query===null?state.input==='':state.input===query,records=state.records||[],zero=/搜索结果\s*0\s*个|\b0\s*(?:results|options)\b/i.test(state.resultText||'');
+  const changed=baseline&&(rowsKey(records)!==rowsKey(baseline.records)||(state.resultText??null)!==(baseline.resultText??null));
+  const freshness=[...(changed?['rendered_results_changed']:[]),...(loadingEnded?['observed_loading_ended']:[]),...(state.explicitLoaded===true?['explicit_loaded_marker']:[])];
+  last={...state,freshness};
+  const relevant=query===null||records.every(r=>normalizeQuery((r.label||'')+' '+(r.path||'')).includes(normalizeQuery(query)));
+  const resultCount=(state.resultText||'').match(/搜索结果\s*(\d+)\s*个/i),positive=applied&&state.loading!==true&&records.length>0&&(query===null||relevant&&resultCount&&Number(resultCount[1])>=records.length);
+  if(positive)return {status:'captured',records,empty:[],waitEvidence:evidence('observed_current_rows')};
+  const empty=[...(zero?[state.resultText]:[]),...(state.emptyEvidence||[])],settled=applied&&state.loading!==true&&!records.length&&empty.length>0&&freshness.length>0;
+  if(settled){const signature=JSON.stringify({input:state.input,empty,freshness});if(signature!==stableKey){stableKey=signature;stableSince=now();}}
+  else{stableKey=null;stableSince=null;}
+  if(now()>=end){
+   if(query!==null&&settled&&stableSince!==null&&now()-stableSince>=stableMs)return {status:'captured_empty_search',records:[],empty,waitEvidence:evidence('stable_current_query_empty')};
+   return {status:'options_not_observed',records:[],empty:[],waitEvidence:evidence('results_not_proven_settled')};
+  }
+  if(query===null&&settled&&(loadingEnded||state.explicitLoaded===true)&&now()-stableSince>=stableMs)return {status:'options_not_observed',records:[],empty:[],waitEvidence:evidence('observed_loaded_empty_branches')};
+  await sleep(Math.min(pollMs,end-now()));
+ }
+}
 export async function performPhoenixArea(adapter,action,value,{trigger,initial,dismiss}={}){
  const menu=adapter.page.locator(popup).filter({visible:true}),inspect=action.method.endsWith('_inspect'),verify=action.method.endsWith('_verify');
  if(await menu.count()!==1)throw Error('AREA_MENU_NOT_UNIQUE');
@@ -32,20 +68,15 @@ export async function performPhoenixArea(adapter,action,value,{trigger,initial,d
   if(verify){const proof=await proofFor();await cancel();if(await readDisplay()!==String(value))throw Error('CHOICE_SELECTED_LABEL_MISMATCH');return {performed:false,selectionProof:proof,verification:'requires_independent_readback'};}
   const search=menu.locator('.area-search-input input'),query=action.query||String(value||'');
   if(await search.count()!==1)throw Error('AREA_SEARCH_CONTROL_REQUIRED');
-  if(inspect&&!query){const records=await menu.evaluate(areaOptionsDOM);await cancel();return {status:records.length?'captured':'options_not_observed',options:records.map(r=>r.label),optionRecords:records,renderer:'phoenix_area',searchable:true,queryApplied:false,scope:'rendered_region_branches',coverage:{complete:false,reason:'query_not_requested'},restored:await readDisplay()===initial};}
+  const readResults=async()=>{const input=await search.inputValue(),headers=menu.locator('.search-result'),count=await headers.count(),resultText=count===1?await headers.innerText():null;const [records,readiness]=await Promise.all([menu.evaluate(areaOptionsDOM),menu.evaluate(areaReadinessDOM)]);return {input,resultText,records,...readiness};};
+  if(inspect&&!query){const result=await waitForAreaResults({read:readResults});await cancel();return {status:result.status,options:result.records.map(r=>r.label),optionRecords:result.records,renderer:'phoenix_area',searchable:true,queryApplied:false,scope:'rendered_region_branches',coverage:{complete:false,reason:result.waitEvidence.decision,waitEvidence:result.waitEvidence},restored:await readDisplay()===initial};}
   if(!query)throw Error('AREA_SEARCH_QUERY_REQUIRED');
+  const baseline=await readResults();
   await search.fill(query,{timeout:10000});
-  const end=Date.now()+6000;let records=[],empty=[];
-  for(;;){
-   const applied=await search.inputValue(),header=await menu.locator('.search-result').count();
-   if(applied===query&&header===1){
-    records=await menu.evaluate(areaOptionsDOM);const resultText=await menu.locator('.search-result').innerText();
-    if(records.length)break;
-    if(/(?:^|\D)0\s*个/.test(resultText)){empty=[resultText];break;}
-   }
-   if(Date.now()>=end)throw Error('AREA_SEARCH_RESULTS_NOT_READY');await pause();
-  }
-  if(inspect){await cancel();return {status:records.length?'captured':'captured_empty_search',options:records.map(r=>r.label),optionRecords:records,renderer:'phoenix_area',searchable:true,queryApplied:true,scope:'exact_search_results',coverage:{complete:false,...(empty.length?{emptyEvidence:empty,reason:'observed_no_results'}:{reason:'rendered_region_search_results'})},restored:await readDisplay()===initial};}
+  const result=await waitForAreaResults({read:readResults,query,baseline}),records=result.records,empty=result.empty;
+  if(inspect){await cancel();return {status:result.status,options:records.map(r=>r.label),optionRecords:records,renderer:'phoenix_area',searchable:true,queryApplied:true,scope:'exact_search_results',coverage:{complete:false,waitEvidence:result.waitEvidence,...(empty.length?{emptyEvidence:empty,reason:'observed_no_results'}:{reason:result.waitEvidence.decision})},restored:await readDisplay()===initial};}
+  if(result.status!=='captured')throw Error('AREA_SEARCH_RESULTS_NOT_READY');
+  const end=Date.now()+6000;
   const matches=records.filter(r=>r.label===String(value));
   if(matches.length!==1||!action.options?.includes(String(value)))throw Error('ACTUAL_CAPTURED_OPTION_REQUIRED');
   const candidate=matches[0];if(candidate.disabled)throw Error('CHOICE_OPTION_DISABLED');
