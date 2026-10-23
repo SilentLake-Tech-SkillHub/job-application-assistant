@@ -27,6 +27,61 @@ from synthetic_ats import serve  # noqa: E402
 ENV = dict(os.environ, PYTHONIOENCODING='utf-8')
 EXE = os.environ.get('CHROME_EXECUTABLE') or None
 
+# This launcher is only for the owned synthetic interruption fixture. Its
+# handshake means the child imported the real executor, not that a field is done.
+EXECUTOR_LAUNCHER = """
+import json, os, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import playwright_fill
+Path(sys.argv[2]).write_text(json.dumps({'phase': 'executor_imported', 'pid': os.getpid()}), encoding='utf-8')
+raise SystemExit(playwright_fill.main(sys.argv[3:]))
+"""
+
+
+def executor_diagnostics(process, path, phase, stdout, stderr):
+    def captured(stream):
+        stream.flush()
+        stream.seek(0)
+        return stream.read().decode('utf-8', errors='replace')[-12000:]
+
+    try:
+        states = [field.get('状态') for field in fill_plan.load(path)['字段']]
+    except (OSError, ValueError, KeyError) as exc:
+        states = {'read_error': type(exc).__name__}
+    return {'phase': phase, 'returncode': process.poll(), 'field_states': states,
+            'stdout': captured(stdout), 'stderr': captured(stderr)}
+
+
+def wait_for_executor_progress(process, path, ready_path, stdout, stderr,
+                               ready_timeout=20, progress_timeout=45, interval=0.05):
+    """Bound startup and actual first-field checkpoint separately; never infer success."""
+    phase = 'executor_import'
+    deadline = time.monotonic() + ready_timeout
+    while True:
+        if process.poll() is not None:
+            raise AssertionError('executor exited before first-field readback: ' +
+                                 json.dumps(executor_diagnostics(process, path, phase, stdout, stderr), ensure_ascii=False))
+        if phase == 'executor_import':
+            try:
+                ready = json.loads(ready_path.read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                ready = None
+            if ready == {'phase': 'executor_imported', 'pid': process.pid}:
+                phase = 'first_field_readback'
+                deadline = time.monotonic() + progress_timeout
+        if phase == 'first_field_readback':
+            try:
+                fields = fill_plan.load(path)['字段']
+            except (OSError, ValueError, KeyError):
+                fields = []  # A concurrent checkpoint write is not completion.
+            if fields and fields[0].get('状态') == '已读回':
+                return
+        if time.monotonic() >= deadline:
+            raise AssertionError('executor progress timeout: ' +
+                                 json.dumps(executor_diagnostics(process, path, phase, stdout, stderr), ensure_ascii=False))
+        time.sleep(interval)
+
 
 def plan_for(base, job='101'):
     return {
@@ -270,26 +325,111 @@ class Executor(unittest.TestCase):
         project.update(填法='点击', 点击步骤=[{'等待': 10000}, {'点击': project['定位']}], 读回定位=project['定位'])
         plan['字段'] = [name, project]; plan.pop('保存步骤')
         path = self.write_plan('killed', plan)
-        process = subprocess.Popen([sys.executable, str(HERE / 'playwright_fill.py'), '--plan', str(path),
-                                    '--headless', '--profile-dir', str(self.profile), '--no-save'],
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ENV)
-        try:
-            deadline = time.monotonic() + 20
-            while time.monotonic() < deadline and process.poll() is None:
-                if fill_plan.load(path)['字段'][0]['状态'] == '已读回':
-                    break
-                time.sleep(0.05)
-            self.assertEqual(fill_plan.load(path)['字段'][0]['状态'], '已读回')
+        # Establish readiness on this test's temporary profile and local mock
+        # before starting the child. Never attach to a user/DS browser.
+        with sync_playwright() as pw:
+            _, context, endpoint = connect(pw, self.profile, headless=True, executable_path=EXE)
+            target = self.base + '/apply/102'
+            pages = [page for page in context.pages if page.url == target]
+            self.assertLessEqual(len(pages), 1, 'synthetic role page must be unique')
+            page = pages[0] if pages else context.new_page()
+            if not pages:
+                page.goto(target)
+            page.get_by_label('姓名 *').wait_for(state='visible', timeout=10000)
+        ready_path = path.parent / 'executor-ready.json'
+        with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+            process = subprocess.Popen(
+                [sys.executable, '-u', '-c', EXECUTOR_LAUNCHER, str(HERE), str(ready_path),
+                 '--plan', str(path), '--headless', '--profile-dir', str(self.profile),
+                 '--cdp', endpoint, '--no-save'],
+                stdout=stdout, stderr=stderr, env=ENV)
+            try:
+                wait_for_executor_progress(process, path, ready_path, stdout, stderr)
+                self.assertEqual(fill_plan.load(path)['字段'][0]['状态'], '已读回')
+                self.assertIsNone(process.poll(), 'child must still be filling the delayed second field')
+                process.terminate()  # Only this fixture's own filling process.
+                process.wait(timeout=15)
+                with self.live_form(target) as page:
+                    self.assertEqual(page.get_by_label('姓名 *').input_value(), '合成候选人')
+                self.assertEqual(self.site.history, [])
+            except Exception as exc:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=15)
+                details = executor_diagnostics(process, path, 'interruption_fixture_failure', stdout, stderr)
+                raise AssertionError(str(exc) + '\nFinal executor diagnostics: ' +
+                                     json.dumps(details, ensure_ascii=False)) from exc
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=15)
+
+
+
+class ProgressHandshakeTests(unittest.TestCase):
+    def exercise(self, code, check, **timeouts):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'plan.json'
+            ready = Path(folder) / 'ready.json'
+            path.write_text(json.dumps({'字段': [{'状态': '待填'}]}), encoding='utf-8')
+            with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+                process = subprocess.Popen([sys.executable, '-u', '-c', code, str(path), str(ready)],
+                                           stdout=stdout, stderr=stderr, env=ENV)
+                try:
+                    check(process, path, ready, stdout, stderr, timeouts)
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait(timeout=10)
+
+    def test_import_handshake_alone_cannot_count_as_first_field_readback(self):
+        code = """
+import json, os, sys, time
+from pathlib import Path
+Path(sys.argv[2]).write_text(json.dumps({'phase': 'executor_imported', 'pid': os.getpid()}), encoding='utf-8')
+print('fixture is imported but has not filled a field', flush=True)
+time.sleep(5)
+"""
+        def check(process, path, ready, stdout, stderr, timeouts):
+            with self.assertRaisesRegex(AssertionError, 'progress timeout') as caught:
+                wait_for_executor_progress(process, path, ready, stdout, stderr,
+                                           ready_timeout=5, progress_timeout=0.15)
+            self.assertIn('first_field_readback', str(caught.exception))
+            self.assertIn('待填', str(caught.exception))
+            self.assertIn('fixture is imported', str(caught.exception))
+            self.assertIn('"returncode": null', str(caught.exception))
+        self.exercise(code, check)
+
+    def test_early_exit_preserves_code_and_both_output_streams(self):
+        code = "print('fixture stdout', flush=True); import sys; print('fixture stderr', file=sys.stderr, flush=True); raise SystemExit(7)"
+        def check(process, path, ready, stdout, stderr, timeouts):
+            with self.assertRaisesRegex(AssertionError, 'exited before first-field readback') as caught:
+                wait_for_executor_progress(process, path, ready, stdout, stderr, ready_timeout=5)
+            for value in ['"returncode": 7', 'fixture stdout', 'fixture stderr', 'executor_import']:
+                self.assertIn(value, str(caught.exception))
+        self.exercise(code, check)
+
+    def test_missing_import_handshake_times_out_in_its_own_phase(self):
+        def check(process, path, ready, stdout, stderr, timeouts):
+            with self.assertRaisesRegex(AssertionError, 'progress timeout') as caught:
+                wait_for_executor_progress(process, path, ready, stdout, stderr, ready_timeout=0.15)
+            self.assertIn('executor_import', str(caught.exception))
+            self.assertIn('待填', str(caught.exception))
+        self.exercise('import time; time.sleep(5)', check)
+
+    def test_actual_checkpoint_releases_handshake_only_while_child_is_alive(self):
+        code = """
+import json, os, sys, time
+from pathlib import Path
+Path(sys.argv[2]).write_text(json.dumps({'phase': 'executor_imported', 'pid': os.getpid()}), encoding='utf-8')
+Path(sys.argv[1]).write_text(json.dumps({'字段': [{'状态': '已读回'}]}), encoding='utf-8')
+time.sleep(5)
+"""
+        def check(process, path, ready, stdout, stderr, timeouts):
+            wait_for_executor_progress(process, path, ready, stdout, stderr, ready_timeout=5)
             self.assertIsNone(process.poll())
-            process.terminate()  # This fixture terminates only its own filling process.
-            process.communicate(timeout=15)
-            with self.live_form(self.base + '/apply/102') as page:
-                self.assertEqual(page.get_by_label('姓名 *').input_value(), '合成候选人')
-            self.assertEqual(self.site.history, [])
-        finally:
-            if process.poll() is None:
-                process.kill()
-            process.communicate(timeout=15)
+            self.assertEqual(fill_plan.load(path)['字段'][0]['状态'], '已读回')
+        self.exercise(code, check)
 
 
 if __name__ == '__main__':
