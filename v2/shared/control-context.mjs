@@ -2,7 +2,8 @@ import {normalizeControlPolicy} from './field-policy.mjs';
 // All execution modes consume the same normalized live question inventory.
 export async function liveControls(page,plan){
  const raw=await page.inventory(plan);
- return normalizeControlPolicy(plan?.provider==='feishu'?raw:await enrichControlContext(page,raw));
+ const controls=normalizeControlPolicy(plan?.provider==='feishu'?raw:await enrichControlContext(page,raw)),inside=controls.filter(c=>!c.outsideApplicationForm);
+ inside.scopeExclusions=controls.filter(c=>c.outsideApplicationForm).map(c=>({...c.outsideApplicationForm,label:c.label,diagnosticSelector:c.diagnosticSelector}));return inside;
 }
 // Read rendered question wrappers through the existing browser broker; no hidden state.
 export async function enrichControlContext(page,controls){

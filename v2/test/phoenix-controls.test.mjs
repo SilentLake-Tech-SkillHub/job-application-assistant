@@ -16,3 +16,11 @@ test('a missing Phoenix question fails rather than resolving another field',()=>
 test('PageAdapter resolves Phoenix semantic references for actions and independent readback',async()=>{const ref='phoenixq:'+JSON.stringify({label:'Name'});const calls=[],p=new PageAdapter({evaluate:async(fn,arg)=>{calls.push(arg);return arg.operation==='resolvePhoenix'?['#live-current-field']:{pageUrl:'https://fixture.test/form',fields:{name:{value:'actual'}}};}});assert.equal(await p.resolveSelector(ref),'#live-current-field');await p.observe({fields:[{id:'name',read:{kind:'value',selector:ref}}]});assert.equal(calls.at(-1).fields[0].read.selector,'#live-current-field');});
 
 test('Phoenix Node normalization accepts raw and encoded transport while DOM needs no URI builtins',async()=>{const {normalizePhoenixReference}=await import('../shared/control-dom.mjs');const raw='phoenixq:'+JSON.stringify({section:'Education',label:'Rate 100%',occurrence:0,part:'native',controlIndex:0});assert.equal(normalizePhoenixReference(raw),raw);assert.equal(normalizePhoenixReference('phoenixq:'+encodeURIComponent(raw.slice(9))),raw);});
+test('section identity can come from the exact visible outer heading without framework class names',()=>{
+ const f=fixture(),q=f.add('开始时间',{section:''}),part=q.parentElement,old=part.parentElement;
+ part.contains=n=>n===q;old.contains=n=>n===q||n===part;
+ const title={innerText:'教育经历',getClientRects:()=>[{}],querySelector:()=>null,contains:()=>false};
+ const outer={tagName:'DIV',parentElement:old.parentElement,children:[title,old],querySelectorAll:()=>[q,q],contains:n=>n===q,getClientRects:()=>[{}]};
+ old.parentElement=outer;old.querySelectorAll=()=>[q,q];
+ assert.equal(JSON.parse(f.read()[0].selector.slice(9)).section,'教育经历');
+});

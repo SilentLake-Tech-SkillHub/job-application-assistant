@@ -6,10 +6,16 @@ import {evaluateChoiceGoals} from './choice-goal-contract.mjs';
 import {createHash} from 'node:crypto';
 import {CONTROL_TYPES} from './control-registry.mjs';
 import {humanActionReason,classifyPending,templateConstructionIssues} from './field-policy.mjs';
+import {suggestSemanticMappings,enrichRegistryCandidate,rankMappingSuggestions} from './mapping-candidates.mjs';
 const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const key=s=>(s||'').normalize('NFKC').replace(/[\s＊*：:]/gu,'').toLowerCase();
 export function mappingCandidates(controls,profile){
- return controls.map(c=>({selector:c.selector,label:c.label,section:c.section||c.group||null,repeatIndex:c.repeatIndex??null,owner:'agent',candidates:[...(materialKey(c)?[{factKey:MATERIAL_SOURCES[materialKey(c)],status:'confirmed_handoff_material'}]:[]),...Object.entries(profile.fieldRegistry||{}).filter(([k,r])=>!k.startsWith('unmapped.')&&!r.neverStoreValue&&[r.label,r.question,...(r.aliases||[])].some(x=>key(x)&&key(x)===key(c.label))).map(([factKey])=>({factKey,status:profile.facts[factKey]?.status||'missing'}))],automaticMapping:false}));
+ return controls.map(c=>{
+  const semantic=suggestSemanticMappings(c,profile),exact=Object.entries(profile.fieldRegistry||{}).filter(([k,r])=>Object.hasOwn(profile.facts||{},k)&&!k.startsWith('unmapped.')&&!r.neverStoreValue&&[r.label,r.question,...(r.aliases||[])].some(x=>key(x)&&key(x)===key(c.label))).map(([factKey])=>enrichRegistryCandidate(c,profile,factKey));
+  const candidates=new Map(semantic.candidates.map(candidate=>[candidate.factKey,candidate]));
+  for(const candidate of exact)candidates.set(candidate.factKey,{...candidates.get(candidate.factKey),...candidate});
+  return {selector:c.selector,label:c.label,section:c.section||c.group||null,repeatIndex:c.repeatIndex??null,owner:'agent',context:semantic.context,candidates:[...(materialKey(c)?[{factKey:MATERIAL_SOURCES[materialKey(c)],status:'confirmed_handoff_material'}]:[]),...rankMappingSuggestions([...candidates.values()])],automaticMapping:false};
+ });
 }
 export function inferControl(c){
  if(c.multiple&&(c.renderer==='ant_select'||c.tag==='select'))return 'multiselect';
@@ -33,11 +39,11 @@ export function inferControl(c){
  return null;
 }
 function fieldFromControl(c,m,choice){
- const type=c.renderer==='phoenix_date_picker'&&choice?.dateOptions?.precision==='month'?'month_picker':inferControl(c),contract=CONTROL_TYPES[type],human=humanActionReason({inventoryLabel:c.label,inventoryType:c.type,inventoryRenderer:c.renderer,role:c.role});
+ const phoenixDate=c.renderer==='phoenix_date_picker'&&choice?.status==='captured_date_options'&&choice.restored===true&&['day','month','year'].includes(choice.dateOptions?.precision),type=phoenixDate?({day:'day_picker',month:'month_picker',year:'year_picker'})[choice.dateOptions.precision]:inferControl(c),contract=CONTROL_TYPES[type],human=humanActionReason({inventoryLabel:c.label,inventoryType:c.type,inventoryRenderer:c.renderer,role:c.role});
  const f={id:'field-'+digest([c.selector,c.label]).slice(0,20),source:m?.factKey||'unmapped.pending',label:c.label||'未识别题目',required:!!c.required,inventorySelectors:c.inventorySelectors||[c.selector],inventoryLabel:c.label,inventoryType:c.type,inventoryReadonly:c.readonly===true||c.type==='readonly',inventoryDisabled:!!c.disabled,inventoryRenderer:c.renderer||null,read:{selector:c.selector,kind:'value'},actions:[],constructionBlockers:[]};
  if(!c.label)f.constructionBlockers.push('QUESTION_LABEL_NOT_CAPTURED');
  if(!m?.factKey||m.factKey.startsWith('unmapped.'))f.constructionBlockers.push('SEMANTIC_MAPPING_REQUIRED');
- if(!type){f.constructionBlockers.push('CONTROL_DRIVER_REQUIRED');return f;}
+ if(!type){f.constructionBlockers.push(c.renderer==='phoenix_date_picker'?'DATE_OPTIONS_NOT_CAPTURED':'CONTROL_DRIVER_REQUIRED');return f;}
  f.kind=contract.kind;f.control={type,valueType:contract.valueType,readbackType:contract.readbackType};
  if(human){f.userOnly=true;f.userOnlyReason=human;f.constructionBlockers=f.constructionBlockers.filter(x=>x!=='SEMANTIC_MAPPING_REQUIRED');}
  const action=method=>({method,selector:c.actionSelector||c.selector});
@@ -68,7 +74,7 @@ function fieldFromControl(c,m,choice){
   else f.constructionBlockers.push('CONTROL_DRIVER_REQUIRED');
  }else if(f.kind==='date'){
   f.precision=type==='year_picker'?'year':type==='month_picker'?'month':'day';f.read.selectedSelector=c.selector;
-  if(c.renderer==='phoenix_date_picker'&&choice?.dateOptions?.precision==='month'){f.read.kind='text';f.read.selector=c.selectedSelector||c.selector;f.actions=human?[]:[{...action('phoenix_date'),labelSelector:c.labelSelector}];}
+  if(phoenixDate){f.read.kind='text';f.read.selector=c.selectedSelector||c.selector;if(c.inlineOngoing?.label==='至今'&&c.inlineOngoing.selector)f.read.ongoingSelector=c.inlineOngoing.selector;f.actions=human?[]:[{...action('phoenix_date'),labelSelector:c.labelSelector,precision:choice.dateOptions.precision,...(f.read.ongoingSelector?{ongoingSelector:f.read.ongoingSelector}:{})}];}
   else if(framework==='.atsx-form-item'&&type!=='day_picker'){f.read.kind=type==='month_picker'?'month':'text';f.actions=human?[]:[action(type==='month_picker'?'feishu_month':'feishu_year')];}
   else if(['date','month'].includes(c.type)&&c.tag==='input'&&!c.readonly)f.actions=human?[]:[action('native_date')];
   else if(type==='day_picker'&&framework==='.ant-form-item'&&c.renderer==='ant_date')f.actions=human?[]:[{...action('ant_day'),openSelector:c.selector,openLabel:c.label,openKind:'captured_date_input',...(c.rangePeerSelector?{rangePeerSelector:c.rangePeerSelector,rangeIndex:c.rangeIndex}:{})}];
@@ -87,7 +93,7 @@ function fieldFromControl(c,m,choice){
  }
  if(c.when)f.when=c.when;
  if(c.multiple&&type!=='multiselect')f.constructionBlockers.push('MULTISELECT_DRIVER_CONTRACT_REQUIRED');
- if(c.constructionBlockers?.length)f.constructionBlockers.push(...c.constructionBlockers.filter(reason=>!((c.renderer==='phoenix_date_picker'&&choice?.dateOptions?.precision==='month'||c.renderer==='phoenix_autocomplete'&&choice?.restored===true&&(choice.options?.length||choice.customValueEvidence))&&reason==='PHOENIX_OPTIONS_AND_DRIVER_REQUIRED')));
+ if(c.constructionBlockers?.length)f.constructionBlockers.push(...c.constructionBlockers.filter(reason=>!((phoenixDate||c.renderer==='phoenix_autocomplete'&&choice?.restored===true&&(choice.options?.length||choice.customValueEvidence))&&reason==='PHOENIX_OPTIONS_AND_DRIVER_REQUIRED')));
  if(m?.enumMap)f.enumMap=m.enumMap;
  f.constructionBlockers=[...new Set(f.constructionBlockers)];
  return f;
@@ -113,7 +119,7 @@ export function buildFormTemplate({capture,profile,mappings=[],choices=[],page,t
    const representation=resolveDateRepresentation(profile,{companyId:capture.companyId,pageUrl:capture.pageUrl,roleId:readRoleIdentity(page.roleIdentity,capture.pageUrl)?.value},f);
    if(representation)f.dateRepresentation={mode:representation.mode,source:representation.source};
    else if(c.renderer==='ant_date'&&choice?.status==='captured_date_options'&&choice.restored&&choice.dateOptions?.ongoingLabel)f.actions=f.actions.map(a=>({...a,ongoingLabel:choice.dateOptions.ongoingLabel}));
-   else if(c.renderer==='phoenix_date_picker'&&choice?.dateOptions?.ongoingLabel)f.actions=f.actions.map(a=>({...a,ongoingLabel:choice.dateOptions.ongoingLabel}));
+   else if(c.renderer==='phoenix_date_picker'&&(choice?.dateOptions?.ongoingLabel||c.inlineOngoing?.label==='至今'&&c.inlineOngoing.selector))f.actions=f.actions.map(a=>({...a,ongoingLabel:c.inlineOngoing?.label||choice.dateOptions.ongoingLabel}));
    else if(['ant_date','phoenix_date_picker'].includes(c.renderer))f.constructionBlockers.push('ONGOING_DATE_OPTION_REQUIRED');
   }
   return f;
@@ -135,5 +141,7 @@ export function buildFormTemplate({capture,profile,mappings=[],choices=[],page,t
   template.acquisitionBlockers=blockers.filter(x=>x.reason==='REA_CONTROL_RECONCILIATION_REQUIRED');
  }
  const pending=fields.map(f=>({id:f.id,label:f.label,source:f.source,...classifyPending(f,profile)}));
- return {template,blockers,pending,choiceGoals:choiceGoals.goals,nextGoals:choiceGoals.nextGoals,choices:choiceGoals.choices,readyToRegister:blockers.length===0,nextTools:blockers.length?[...new Set([...choiceGoals.nextGoals.map(g=>g.nextTool),'capture_choice_options','profile_map_questions','form_build_template'])]:['template_register','probe_conditions','template_finalize','prepare_plan'],requiresUser:false};
+ const dateGoals=fields.filter(f=>f.constructionBlockers.includes('DATE_OPTIONS_NOT_CAPTURED')).map(f=>({fieldId:f.id,selector:f.inventorySelectors[0],reason:'DATE_OPTIONS_NOT_CAPTURED',nextTool:'capture_choice_options',tool:'capture_choice_options',arguments:{companyId:capture.companyId,pageUrl:capture.pageUrl,captureId:capture.captureId,selectors:[f.inventorySelectors[0]]},owner:'agent'}));
+ const nextGoals=[...choiceGoals.nextGoals,...dateGoals];
+ return {template,blockers,pending,choiceGoals:choiceGoals.goals,nextGoals,choices:choiceGoals.choices,readyToRegister:blockers.length===0,nextTools:blockers.length?[...new Set([...nextGoals.map(g=>g.nextTool),'capture_choice_options','profile_map_questions','form_build_template'])]:['template_register','probe_conditions','template_finalize','prepare_plan'],requiresUser:false};
 }

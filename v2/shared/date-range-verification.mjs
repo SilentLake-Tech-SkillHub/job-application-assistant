@@ -3,7 +3,7 @@ export async function verifyDateRanges(page,plan,task){
  const proofs={},done=new Set();
  for(const field of plan.fields||[]){
   const custom=field.actions?.find(a=>a.method==='phoenix_date');
-  if(custom&&!field.userOnly){const value=resolvedFieldValue(field,task);if(value!=null){try{const result=await page.act({...custom,operation:'verify'},value,{});if(result.selectionVerified!==true)throw Error('DATE_SELECTION_PROOF_REQUIRED');proofs[field.id]={status:'verified',value,selectionVerified:true};}catch(error){proofs[field.id]={status:'failed',selectionVerified:false,reason:/^[A-Z_]+$/.test(error.message)?error.message:'DATE_SELECTION_VERIFICATION_FAILED'};}}continue;}
+  if(custom&&!field.userOnly){if(field.when&&task.values?.[field.when.source]!==field.when.equals)continue;const value=resolvedFieldValue(field,task);if(value!=null){try{const result=await page.act({...custom,precision:field.precision,operation:'verify'},value,{});if(result.selectionVerified!==true||result.value!==value||result.precision!==field.precision)throw Error('DATE_SELECTION_PROOF_REQUIRED');proofs[field.id]={status:'verified',value,precision:result.precision,selectionVerified:true};}catch(error){proofs[field.id]={status:'failed',selectionVerified:false,reason:/^[A-Z_]+$/.test(error.message)?error.message:'DATE_SELECTION_VERIFICATION_FAILED'};}}continue;}
   const action=field.actions?.find(a=>a.method==='ant_day'&&a.rangePeerSelector);
   if(!action||field.userOnly||field.when&&task.values?.[field.when.source]!==field.when.equals||done.has(field.id))continue;
   const peer=plan.fields.find(p=>p.read.selector===action.rangePeerSelector),value=resolvedFieldValue(field,task),peerValue=peer&&resolvedFieldValue(peer,task);

@@ -14,8 +14,8 @@ import {READY_TIMEOUT_MS,matchEntryPath} from './entry-recipe.mjs';
 export {PageAdapter,inventoryDOM} from './ui-page.mjs';
 
 export class BrowserAdapter {
-  constructor(endpoint,{connector=(url,options)=>chromium.connectOverCDP(url,options),chromePortFile=path.join(homedir(),'Library/Application Support/Google/Chrome/DevToolsActivePort'),profileDir,screenshotDir,launcher=(dir,options)=>chromium.launchPersistentContext(dir,options)}={}) {
-    Object.assign(this,{endpoint,connector,chromePortFile,profileDir,screenshotDir,launcher});this.connection=null;this.connecting=null;this.state='new';this.connectionAttempts=0;this.pageIds=new Map();
+  constructor(endpoint,{connector=(url,options)=>chromium.connectOverCDP(url,options),chromePortFile=path.join(homedir(),'Library/Application Support/Google/Chrome/DevToolsActivePort'),profileDir,screenshotDir,launcher=(dir,options)=>chromium.launchPersistentContext(dir,options),existingEndpoint=process.env.RECRUITING_BROWSER_ATTACH_ENDPOINT}={}) {
+    Object.assign(this,{endpoint,connector,chromePortFile,profileDir,screenshotDir,launcher,existingEndpoint});this.connection=null;this.connecting=null;this.state='new';this.connectionAttempts=0;this.pageIds=new Map();
   }
   async connect(){
     if(!this.endpoint)throw Error('BROWSER_CONNECTION_NOT_CONFIGURED');
@@ -30,6 +30,13 @@ export class BrowserAdapter {
         if(!this.profileDir||!path.isAbsolute(this.profileDir)||path.resolve(this.profileDir)===forbidden||path.resolve(this.profileDir).startsWith(forbidden+path.sep))throw Error('PRIVATE_AUTOMATION_PROFILE_REQUIRED');
         await mkdir(this.profileDir,{recursive:true,mode:0o700});await chmod(this.profileDir,0o700);
         this.state='connecting';this.connectionAttempts++;
+        if(this.existingEndpoint){
+          const existing=new URL(this.existingEndpoint);
+          if(!['http:','ws:'].includes(existing.protocol)||!['127.0.0.1','localhost','[::1]'].includes(existing.hostname)||existing.username||existing.password)throw Error('LOCAL_BROWSER_ENDPOINT_REQUIRED');
+          this.connection=await this.connector(existing.href,{timeout:120000});this.state='connected';
+          this.connection.on?.('disconnected',()=>{this.state='disconnected';this.connection=null;});
+          return this.connection;
+        }
         const cdpPort=process.env.RECRUITING_BROWSER_CDP_PORT;
         const context=await this.launcher(this.profileDir,{...(endpoint==='managed-chrome'?{channel:'chrome'}:{}),headless:false,viewport:null,...(cdpPort?{args:[`--remote-debugging-port=${cdpPort}`,'--remote-debugging-address=127.0.0.1']}:{})});
         this.connection={contexts:()=>[context],on:(event,fn)=>{if(event==='disconnected')context.on('close',fn);}};
@@ -147,5 +154,5 @@ export class BrowserAdapter {
     if(pages.length!==1)throw Error(pages.length?'AMBIGUOUS_PAGE':'EXISTING_PAGE_NOT_FOUND');
     return new PageAdapter(pages[0]);
   }
-  async tabs(){if(!this.connection&&this.state==='new')return [];const b=await this.connect();return Promise.all(b.contexts().flatMap(c=>c.pages()).filter(p=>!p.isClosed()).map(async p=>{let id=[...this.pageIds].find(([,tracked])=>tracked===p)?.[0];if(!id){id=randomUUID();this.pageIds.set(id,p);}return {id,url:p.url(),title:await p.title()};}));}
+  async tabs(){if(!this.connection&&this.state==='new'&&!this.existingEndpoint)return [];const b=await this.connect();return Promise.all(b.contexts().flatMap(c=>c.pages()).filter(p=>!p.isClosed()).map(async p=>{let id=[...this.pageIds].find(([,tracked])=>tracked===p)?.[0];if(!id){id=randomUUID();this.pageIds.set(id,p);}return {id,url:p.url(),title:await p.title()};}));}
 }

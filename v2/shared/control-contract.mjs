@@ -8,6 +8,7 @@ export function controlContractChanges(plan,inventory){
   if(f.inventoryLabel!==undefined&&f.inventoryLabel!==c.label||f.inventoryType!==undefined&&f.inventoryType!==c.type||!!f.required!==!!c.required)
    changes.push({id:f.id,selector:c.selector,reason:'question_type_label_or_requirement_changed'});
   if(f.inventoryDisabled!==undefined&&!!f.inventoryDisabled!==!!c.disabled)changes.push({id:f.id,selector:c.selector,reason:'disabled_state_changed'});
+  if((f.read?.ongoingSelector||null)!==(c.inlineOngoing?.selector||null))changes.push({id:f.id,selector:c.selector,reason:'inline_date_control_changed'});
  }
  return changes;
 }

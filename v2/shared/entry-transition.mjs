@@ -48,12 +48,19 @@ async function readRole(page,spec,expectedTitle,expectedRoleId){
 export async function executeTransition({entry,pageId,expectedTitle,expectedRoleId,expectedAccount,accountSelector,sessionAccountPageUrl},host){
  validateTransition(entry);if(!expectedRoleId||!expectedTitle||!expectedAccount||!accountSelector)fail('APPLICATION_ENTRY_IDENTITY_REQUIRED');
  const original=await host.getPage(pageId),before=new URL(await original.url()),origin=before.origin;
- if(origin!==new URL(entry.evidence.detailUrl).origin)fail('APPLICATION_ENTRY_ACCOUNT_SCOPE_CHANGED');
- const readAccount=async()=>{let p=original;if(sessionAccountPageUrl){if(new URL(sessionAccountPageUrl).origin!==origin)fail('APPLICATION_ENTRY_ACCOUNT_SCOPE_CHANGED');const matches=(await host.listPages()).filter(p=>p.url===sessionAccountPageUrl);if(matches.length!==1)fail('SESSION_IDENTITY_PAGE_NOT_UNIQUE');p=await host.getPage(matches[0].id);}const l=p.locator(accountSelector);if(await l.count()!==1||(await l.innerText()).trim()!==expectedAccount)fail('APPLICATION_ENTRY_ACCOUNT_CHANGED');};
+ if(origin!==new URL(entry.evidence.detailUrl).origin||sessionAccountPageUrl&&new URL(sessionAccountPageUrl).origin!==origin)fail('APPLICATION_ENTRY_ACCOUNT_SCOPE_CHANGED');
+ let target=original,targetId=pageId,clicked=false;
+ const readAccount=async()=>{
+  const current=target.locator(accountSelector).filter({visible:true}),currentCount=await current.count();if(currentCount>1)fail('APPLICATION_ENTRY_ACCOUNT_CHANGED');if(currentCount===1){if((await current.innerText()).trim()!==expectedAccount)fail('APPLICATION_ENTRY_ACCOUNT_CHANGED');return;}
+  if(!sessionAccountPageUrl)fail('APPLICATION_ENTRY_ACCOUNT_CHANGED');
+  if(new URL(sessionAccountPageUrl).origin!==origin)fail('APPLICATION_ENTRY_ACCOUNT_SCOPE_CHANGED');
+  const matches=(await host.listPages()).filter(p=>p.url===sessionAccountPageUrl);if(matches.length!==1)fail('SESSION_IDENTITY_PAGE_NOT_UNIQUE');
+  const proof=await host.getPage(matches[0].id),l=proof.locator(accountSelector).filter({visible:true});
+  if(await l.count()!==1||(await l.innerText()).trim()!==expectedAccount)fail('APPLICATION_ENTRY_ACCOUNT_CHANGED');
+ };
  await readAccount();
  const inDetail=transitionLocationMatches(entry.detail.location,before.href,expectedRoleId),inForm=transitionLocationMatches(entry.form.location,before.href,expectedRoleId);
  if(inDetail&&inForm)fail('ENTRY_DETAIL_FORM_AMBIGUOUS');if(!inDetail&&!inForm)fail('APPLICATION_ENTRY_PATH_REQUIRED');
- let target=original,targetId=pageId,clicked=false;
  const candidates=async()=>{const pages=await host.listPages();return pages.filter(p=>{let u;try{u=new URL(p.url);}catch{return false;}return u.origin===origin&&transitionLocationMatches(entry.form.location,u.href,expectedRoleId)&&(entry.target==='same'?p.id===pageId:entry.target==='new'?p.id!==pageId:true);});};
  if(inDetail){
   await readRole(original,entry.detail,expectedTitle,expectedRoleId);
@@ -73,6 +80,6 @@ export async function executeTransition({entry,pageId,expectedTitle,expectedRole
   if(matches.length!==1)fail(matches.length?'AMBIGUOUS_ROLE_FORM':'ROLE_FORM_NOT_OPEN');targetId=matches[0].id;target=await host.getPage(targetId);
  }
  const after=new URL(await target.url());if(after.origin!==origin||!transitionLocationMatches(entry.form.location,after.href,expectedRoleId))fail('APPLICATION_ENTRY_RESULT_ROLE_CHANGED');
- await target.locator(entry.form.readySelector).waitFor({state:'visible',timeout:READY_TIMEOUT_MS});const actual=await readRole(target,entry.form,expectedTitle,expectedRoleId);await readAccount();await host.preserve?.(pageId);await host.preserve?.(targetId);
+ await target.locator(entry.form.readySelector).filter({visible:true}).first().waitFor({state:'visible',timeout:READY_TIMEOUT_MS});const actual=await readRole(target,entry.form,expectedTitle,expectedRoleId);await readAccount();await host.preserve?.(pageId);await host.preserve?.(targetId);
  return {pageId:targetId,pageUrl:after.href,...actual,entryClicked:clicked,accountMatched:true,submission:'not_performed'};
 }

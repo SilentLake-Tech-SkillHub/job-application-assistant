@@ -16,6 +16,8 @@ export function controlDOM(spec){
  const fileCandidates=root=>[...new Set([...root.querySelectorAll('.ant-upload-list-item-name,[class*="file-name"]'),...[...root.querySelectorAll('a,span,p,h1,h2,h3,h4,div,[data-file-name],[data-filename]')].filter(n=>visible(n)&&/^[^\n]{1,200}\.(?:pdf|docx?|png|jpe?g)$/i.test(n.innerText?.trim()||''))])].filter(n=>visible(n)&&![...(n.children||[])].some(child=>visible(child)&&child.innerText?.trim()===n.innerText?.trim()));
  const uploadComplete=root=>[...root.querySelectorAll('*')].some(n=>visible(n)&&/^(?:[\d.]+\s*(?:KB|MB|K|M)\s*[·|]\s*)?(?:已完成|上传成功|completed|uploaded|done)$/i.test(n.innerText?.trim()||''));
  const uploadRoots=()=>[...document.querySelectorAll('input[type="file"]')].flatMap(input=>{
+  const phoenix=input.closest('.file-uploader__wrapper')?.closest('.form-item--phoenix');
+  if(phoenix&&visible(phoenix)){const label=phoenix.querySelector('.form-item__title .form-item__text')?.textContent?.trim();if(label&&phoenix.querySelectorAll('input[type="file"]').length===1)return [{input,root:phoenix,label}];}
   if(!input.closest('.ant-upload'))return [];
   for(let root=input.parentElement;root&&root!==document.body;root=root.parentElement){
    if(root.querySelectorAll('input[type="file"]').length!==1)break;
@@ -35,13 +37,40 @@ export function controlDOM(spec){
  // Structural selectors are produced only for the current operation.
  const phoenixRoots=()=>[...document.querySelectorAll('.form-item--phoenix')].filter(visible);
  const phoenixLabel=n=>n.querySelector('.form-item__title .form-item__text')?.textContent?.trim()||'';
- const phoenixSection=n=>{const body=n.closest('.form-part-body'),section=body?.parentElement;if(!section)return '';const heading=[...section.children].filter(c=>c!==body&&!c.contains(body)).map(c=>c.innerText?.trim()).find(Boolean);return heading?.split('\n')[0]?.trim()||'';};
+ const phoenixSection=n=>{
+  const body=n.closest('.form-part-body'),section=body?.parentElement;
+  const known=section&&[...section.children].filter(c=>c!==body&&!c.contains(body)).map(c=>c.innerText?.trim()).find(Boolean);if(known)return known.split('\n')[0].trim();
+  for(let root=n.parentElement;root&&root!==document.body;root=root.parentElement){
+   const children=[...(root.children||[])],owner=children.findIndex(c=>c===n||c.contains(n));if(owner<1)continue;
+   if(root.querySelectorAll('.form-item--phoenix').length<2)continue;
+   const headings=children.slice(0,owner).filter(c=>visible(c)&&!c.querySelector('input,textarea,select,[role="combobox"],[role="checkbox"],[role="radio"]')).map(c=>c.innerText?.trim()).filter(t=>t&&t.length<=60&&!t.includes('\n')&&!/^(添加|新增|删除|移除|展开|收起)/.test(t));
+   if(headings.length===1)return headings[0];
+  }
+  return '';
+ };
+ const phoenixInlineOngoing=root=>{
+  const col=root.closest('.fields-col');if(!col||col.querySelectorAll('.form-item--phoenix').length!==1)return null;
+  const boxes=[...col.querySelectorAll('input[type="checkbox"]')].filter(eligible);if(boxes.length!==1)return null;
+  const node=boxes[0];let marker=node.parentElement;
+  while(marker&&marker!==col){if(visible(marker)&&marker.innerText?.trim()==='至今'&&marker.querySelectorAll('input[type="checkbox"]').length===1)return {node,scope:col,label:'至今',evidence:'same observed date column; one checkbox; exact rendered 至今 marker'};marker=marker.parentElement;}
+  return null;
+ };
  const phoenixParts=n=>{const radio=n.querySelector('.phoenix-radio-group');if(radio)return [{node:radio,part:'radio',type:'radio',renderer:'phoenix_radio'}];const select=n.querySelector('.phoenix-select');if(select)return [{node:select,part:'select',type:'combobox',renderer:n.querySelector('[id$="field_date_time_picker"]')?'phoenix_date_picker':'phoenix_select'}];const fields=[...n.querySelectorAll('input,textarea,select')].filter(x=>x.type!=='hidden'&&(visible(x)||x.type==='file'||['radio','checkbox'].includes(x.type)));if(fields.length)return fields.map((node,index)=>({node,part:'native',index,type:node.closest('.phoenix-auto-complete-container')?'combobox':node.type||node.tagName.toLowerCase(),renderer:node.closest('.phoenix-auto-complete-container')?'phoenix_autocomplete':'phoenix_native'}));return [{node:n.querySelector('.form-item__control')||n,part:'custom',type:'custom_question',renderer:'phoenix_unknown'}];};
  const phoenixResolve=reference=>{
   let r;try{r=JSON.parse(reference.slice(9));}catch{throw Error('PHOENIX_REFERENCE_INVALID');}
+  if(['repeatRecords','repeatAdd'].includes(r.part)){
+   if(!r.title||!r.headingSelector||!r.containerSelector||!r.recordSelector?.startsWith(':scope > ')||r.recordSelector.includes(','))throw Error('REPEAT_CAPTURED_SCOPE_REQUIRED');
+   const headings=[...document.querySelectorAll(r.headingSelector)].filter(n=>visible(n)&&n.innerText?.trim()===r.title);
+   if(headings.length!==1)throw Error('REPEAT_HEADING_NOT_UNIQUE');
+   const root=headings[0].closest(r.containerSelector);if(!root||!visible(root))throw Error('REPEAT_SECTION_NOT_FOUND');
+   if(r.part==='repeatRecords')return diagnosticSelector(root)+r.recordSelector.slice(6);
+   const buttons=[...root.querySelectorAll(r.addSelector)].filter(n=>visible(n)&&n.innerText?.trim()===r.addLabel);
+   if(buttons.length!==1)throw Error('REPEAT_ADD_CONTROL_CHANGED');return diagnosticSelector(buttons[0]);
+  }
   const roots=phoenixRoots().filter(n=>phoenixLabel(n)===r.label&&phoenixSection(n)===r.section);
   if(!Number.isInteger(r.occurrence)||r.occurrence<0||r.occurrence>=roots.length)throw Error('PHOENIX_QUESTION_NOT_FOUND');
   const root=roots[r.occurrence];
+  if(r.part==='ongoingInline'){const inline=phoenixInlineOngoing(root);return inline?diagnosticSelector(inline.node):null;}
   if(r.part==='documentType'){const prefix=root.querySelector('.form-item__control .phoenix-button__content');return prefix?diagnosticSelector(prefix):null;}
   if(r.part==='label')return diagnosticSelector(root.querySelector('.form-item__title .form-item__text'));
   if(r.part==='selected'){const content=root.querySelector('.phoenix-select__content');return content?diagnosticSelector(content):null;}
@@ -67,7 +96,7 @@ export function controlDOM(spec){
       if(invalid||renderedErrors.length)o.errors.push({scope:'question',source:invalid?'aria_invalid':'rendered_validation'});
       if(r.requireDisabled)o.disabled=n.disabled===true||n.getAttribute('aria-disabled')==='true'||!!n.closest('.ant-select-disabled,[aria-disabled="true"]');
       if(r.kind==='value')o.value=n.tagName==='SELECT'?n.selectedOptions[0]?.textContent?.trim()??null:n.value??null;
-      else if(r.kind==='text')o.value=text(n);
+      else if(r.kind==='text')o.value=r.ongoingSelector&&one(r.ongoingSelector)?.checked===true?'至今':text(n);
       else if(r.kind==='selected_values')o.value=n.tagName==='SELECT'?[...n.selectedOptions].filter(o=>o.value!=='').map(o=>o.textContent.trim()):[...n.querySelectorAll(r.itemSelector)].map(e=>e.textContent.trim());
       else if(r.kind==='checked')o.value=typeof n.checked==='boolean'?n.checked:n.getAttribute('aria-checked')==='true';
       else if(r.kind==='attribute')o.value=n.getAttribute(r.attribute);
@@ -90,6 +119,7 @@ export function controlDOM(spec){
         if(f.kind==='choice'&&n.tagName!=='SELECT'){const marker=one(r.selectedSelector);if(!marker||['INPUT','TEXTAREA'].includes(marker.tagName)||marker.isContentEditable)o.selected=false;}
       }
     }
+    if(f.kind==='date'&&r.ongoingSelector){const ongoing=one(r.ongoingSelector);if(ongoing?.type==='checkbox'&&ongoing.checked===true&&eligible(ongoing)){o.present=true;o.value='至今';o.selected=true;}}
     fields[f.id]=o;
   }
   const groups={};
@@ -155,18 +185,20 @@ export function controlDOM(spec){
     return diagnosticSelector(n);
   };
   const phoenixFields=phoenixRoots().flatMap(root=>{
-    const label=phoenixLabel(root),section=phoenixSection(root),peers=phoenixRoots().filter(n=>phoenixLabel(n)===label&&phoenixSection(n)===section),occurrence=peers.indexOf(root);
-    return phoenixParts(root).map(p=>({selector:'phoenixq:'+JSON.stringify({section,label,occurrence,part:p.part,controlIndex:p.index||0}),labelSelector:'phoenixq:'+JSON.stringify({section,label,occurrence,part:'label'}),selectedSelector:p.part==='select'?'phoenixq:'+JSON.stringify({section,label,occurrence,part:'selected'}):undefined,documentTypePrefix:/证件号码|身份证号码/.test(label)&&root.querySelector('.form-item__control .phoenix-button__content')?{label:root.querySelector('.form-item__control .phoenix-button__content').innerText?.trim(),selector:'phoenixq:'+JSON.stringify({section,label,occurrence,part:'documentType'})}:undefined,locatorStrategy:'semantic_question',tag:p.node.tagName.toLowerCase(),type:p.type,label,required:!!root.querySelector('.form-item__title .form-item__required'),readonly:!!p.node.readOnly,disabled:!!p.node.disabled,accept:p.node.getAttribute('accept'),placeholder:p.node.getAttribute('placeholder'),contextProvider:'.form-item--phoenix',group:section||null,repeatIndex:occurrence,renderer:p.renderer,options:p.part==='radio'?[...p.node.querySelectorAll('.phoenix-radio__radio-text')].filter(visible).map(n=>n.textContent.trim()):undefined,constructionBlockers:['phoenix_native','phoenix_select','phoenix_radio'].includes(p.renderer)?[]:[p.renderer==='phoenix_radio'?'PHOENIX_RADIO_DRIVER_REQUIRED':p.renderer==='phoenix_unknown'?'PHOENIX_CONTROL_UNSUPPORTED':'PHOENIX_OPTIONS_AND_DRIVER_REQUIRED'],userOnly:p.type==='password'||/证件号码|身份证|护照号|验证码|密码/.test(label)}));
+    const label=phoenixLabel(root),section=phoenixSection(root),inline=phoenixInlineOngoing(root),peers=phoenixRoots().filter(n=>phoenixLabel(n)===label&&phoenixSection(n)===section),occurrence=peers.indexOf(root);
+    return phoenixParts(root).map(p=>({inlineOngoing:p.renderer==='phoenix_date_picker'&&inline?{label:inline.label,evidence:inline.evidence,selector:'phoenixq:'+JSON.stringify({section,label,occurrence,part:'ongoingInline'})}:undefined,diagnosticSelector:diagnosticSelector(p.renderer==='phoenix_date_picker'&&inline?inline.scope:p.node),selector:'phoenixq:'+JSON.stringify({section,label,occurrence,part:p.part,controlIndex:p.index||0}),labelSelector:'phoenixq:'+JSON.stringify({section,label,occurrence,part:'label'}),selectedSelector:p.part==='select'?'phoenixq:'+JSON.stringify({section,label,occurrence,part:'selected'}):undefined,documentTypePrefix:/证件号码|身份证号码/.test(label)&&root.querySelector('.form-item__control .phoenix-button__content')?{label:root.querySelector('.form-item__control .phoenix-button__content').innerText?.trim(),selector:'phoenixq:'+JSON.stringify({section,label,occurrence,part:'documentType'})}:undefined,locatorStrategy:'semantic_question',tag:p.node.tagName.toLowerCase(),type:p.type,label,required:!!root.querySelector('.form-item__title .form-item__required'),readonly:!!p.node.readOnly,disabled:!!p.node.disabled,accept:p.node.getAttribute('accept'),placeholder:p.node.getAttribute('placeholder'),contextProvider:'.form-item--phoenix',group:section||null,repeatIndex:occurrence,renderer:p.renderer,options:p.part==='radio'?[...p.node.querySelectorAll('.phoenix-radio__radio-text')].filter(visible).map(n=>n.textContent.trim()):undefined,constructionBlockers:['phoenix_native','phoenix_select','phoenix_radio'].includes(p.renderer)?[]:[p.renderer==='phoenix_radio'?'PHOENIX_RADIO_DRIVER_REQUIRED':p.renderer==='phoenix_unknown'?'PHOENIX_CONTROL_UNSUPPORTED':'PHOENIX_OPTIONS_AND_DRIVER_REQUIRED'],userOnly:p.type==='password'||/证件号码|身份证|护照号|验证码|密码/.test(label)}));
   });
+  const navigationScope=n=>{const nav=n.closest('nav,header,[role="navigation"],[role="search"],.print-nav');return nav&&!n.closest('.form-item--phoenix,.ant-form-item,.ud-formily-item,.atsx-form-item')?{reason:'outside_application_form',kind:'navigation',containerSelector:diagnosticSelector(nav),controlSelector:diagnosticSelector(n)}:null;};
+  const dateAuxiliaries=new Set(phoenixRoots().filter(r=>r.querySelector('[id$="field_date_time_picker"]')).map(phoenixInlineOngoing).filter(Boolean).map(a=>a.node));
   const controls=[...document.querySelectorAll('input,textarea,select,[role="combobox"],[role="checkbox"],[role="radio"]')]
     // Styled checkbox/radio inputs can have zero layout rectangles while their labels remain visible.
-    .filter(n=> !n.closest('.form-item--phoenix')&&(visible(n)||n.type==='file'||(['checkbox','radio'].includes(n.type)&&visible(n.closest('label')))) && n.type!=='hidden');
+    .filter(n=> !dateAuxiliaries.has(n)&&!n.closest('.form-item--phoenix')&&(visible(n)||n.type==='file'||(['checkbox','radio'].includes(n.type)&&visible(n.closest('label')))) && n.type!=='hidden');
   // Some custom selectors and read-only answers contain no native/ARIA input.
   // Register their labeled question container so they cannot disappear from coverage.
   const containers=[...document.querySelectorAll('.atsx-form-item,[data-form-question],.ud-formily-item')]
     .filter(n=>visible(n)&&(n.querySelector('label')||n.querySelector(':scope > .ud-formily-item-label'))&&!controls.some(c=>n.contains(c)));
   return [...controls,...containers]
-    .map(n=>({selector:selector(n),locatorStrategy:selector(n).startsWith('body > ')?'structural_diagnostic':'anchored_unique',tag:n.tagName.toLowerCase(),type:n.type||n.getAttribute('role')||'custom_question',label:[...(n.labels||[])].map(l=>l.textContent.trim()).join(' ')||n.closest('.atsx-form-item,[data-form-question]')?.querySelector('label')?.textContent.trim()||n.getAttribute('aria-label')||'',placeholder:n.getAttribute('placeholder'),required:!!n.required||n.getAttribute('aria-required')==='true'||!!n.closest('.atsx-form-item')?.querySelector('.atsx-form-item-required'),readonly:!!n.readOnly,disabled:!!n.disabled,accept:n.getAttribute('accept'),role:n.getAttribute('role'),options:n.tagName==='SELECT'?[...(n.options||[])].filter(o=>!o.disabled&&o.value!=='').map(o=>o.textContent.trim()):undefined,optionRecords:n.tagName==='SELECT'?[...(n.options||[])].map(o=>({label:o.textContent.trim(),value:o.value,valueAttribute:'value',disabled:!!o.disabled||!!o.closest?.('optgroup')?.disabled,selected:!!o.selected})):undefined}))
+    .map(n=>({outsideApplicationForm:navigationScope(n),diagnosticSelector:diagnosticSelector(n),selector:selector(n),locatorStrategy:selector(n).startsWith('body > ')?'structural_diagnostic':'anchored_unique',tag:n.tagName.toLowerCase(),type:n.type||n.getAttribute('role')||'custom_question',label:[...(n.labels||[])].map(l=>l.textContent.trim()).join(' ')||n.closest('.atsx-form-item,[data-form-question]')?.querySelector('label')?.textContent.trim()||n.getAttribute('aria-label')||'',placeholder:n.getAttribute('placeholder'),required:!!n.required||n.getAttribute('aria-required')==='true'||!!n.closest('.atsx-form-item')?.querySelector('.atsx-form-item-required'),readonly:!!n.readOnly,disabled:!!n.disabled,accept:n.getAttribute('accept'),role:n.getAttribute('role'),options:n.tagName==='SELECT'?[...(n.options||[])].filter(o=>!o.disabled&&o.value!=='').map(o=>o.textContent.trim()):undefined,optionRecords:n.tagName==='SELECT'?[...(n.options||[])].map(o=>({label:o.textContent.trim(),value:o.value,valueAttribute:'value',disabled:!!o.disabled||!!o.closest?.('optgroup')?.disabled,selected:!!o.selected})):undefined}))
     .map(f=>({...f,userOnly:f.type==='password'||/otp|验证码|password|密码|token|captcha|身份证|护照号|银行卡/i.test(f.label+' '+f.selector)}))
     .map((f,i)=>{
       const n=[...controls,...containers][i];
@@ -175,9 +207,14 @@ export function controlDOM(spec){
       const label=root.querySelector(':scope > .ud-formily-item-label')?.innerText?.trim();
       const group=n.closest('[id^="formily-item-"][id$="_list"]'),row=n.closest('.register-form-group-wrapper');
       return {...f,label:label?.replace(/[＊*\s]+$/gu,'')||f.label,required:f.required||!!label&&/[＊*]/u.test(label),readonly:f.readonly||f.type==='custom_question',contextProvider:'.ud-formily-item',questionSelector:selector(root),labelSelector:selector(root)+' > .ud-formily-item-label',selectedSelector:root.querySelector('.ud__select__selector')?selector(root)+' .ud__select__selector':null,multiple:n.getAttribute('aria-multiselectable')==='true'||!!root.querySelector('.ud__select--multiple'),group:group?.id?.replace('formily-item-','')||null,groupSelector:group?selector(group):null,rowSelector:row?selector(row):null,repeatIndex:group&&row?[...group.querySelectorAll('.register-form-group-wrapper')].indexOf(row):null,fieldKey:root.id?.replace('formily-item-','')||null,controlIndex:[...root.querySelectorAll('input,textarea,select,[role="combobox"]')].indexOf(n)};
-    }).concat(phoenixFields);
+    }).concat(phoenixFields.map(f=>{
+      if(f.type!=='file')return f;
+      const actual=phoenixResolve(f.selector),input=actual&&document.querySelector(actual),entry=uploadRoots().find(e=>e.input===input);
+      if(!entry)return f;
+      return {...f,observationSelector:f.selector,selector:uploadRef(entry),actionSelector:uploadRef(entry),uploadContainerSelector:uploadRef(entry,'container'),filenameSelector:uploadRef(entry,'filenames'),uploadedSelector:uploadRef(entry,'uploaded'),uploadedItems:uploadItems(entry)};
+    }));
 
 }
 
 // Normalize legacy URL-encoded transport in Node, never inside the DOM sandbox.
-export function normalizePhoenixReference(reference){if(!reference?.startsWith('phoenixq:'))return reference;const raw=reference.slice(9);let value;try{value=JSON.parse(raw);}catch{try{value=JSON.parse(decodeURIComponent(raw));}catch{throw Error('PHOENIX_REFERENCE_INVALID');}}return 'phoenixq:'+JSON.stringify(value);}
+export function normalizePhoenixReference(reference){if(!reference?.startsWith('phoenixq:'))return reference;const raw=reference.slice(9);let value;try{value=JSON.parse(raw);}catch{try{value=JSON.parse(decodeURIComponent(raw));}catch{throw Error('PHOENIX_REFERENCE_INVALID');}}if(['repeatRecords','repeatAdd'].includes(value?.part)&&(!value.title||!value.headingSelector||!value.containerSelector||!value.recordSelector?.startsWith(':scope > ')||value.recordSelector.includes(',')))throw Error('REPEAT_CAPTURED_SCOPE_REQUIRED');return 'phoenixq:'+JSON.stringify(value);}

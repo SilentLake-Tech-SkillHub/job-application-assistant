@@ -27,16 +27,21 @@ export class RoleFlow{
  async open(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{
   let prior;try{prior=await this.queues.read(x.t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
   if(prior?.status==='ready_for_user_review')throw Error('ROLE_ALREADY_PREPARED_FOR_REVIEW');
+  if(prior){
+   if(prior.queueId!==x.q.id||prior.taskId!==x.t.taskId||prior.originalRoleUrl!==x.t.url||prior.expectedTitle!==x.t.title||!prior.returnUrl||prior.applicationUrl&&prior.applicationUrl!==prior.returnUrl)throw Error('ROLE_TASK_STATE_CHANGED');
+   // Reopening an already bound task is a read/rebind operation. Never send a
+   // retained application editor back to its frozen detail URL or reset state.
+   return this.resumeBoundPage(x,prior,{allowNavigation:false});
+  }
   const readySelectors=[x.c.fields?.root,x.c.account.selector,x.plan.readySelector].filter(Boolean);
-  let opened;try{opened=await this.browser.request('openPage',{pageUrl:x.t.url,...(prior?.pageId?{pageId:prior.pageId}:{}),readySelectors});}
-  catch(e){if(!prior?.pageId||!['ROLE_BROWSER_PAGE_LOST','EXISTING_PAGE_NOT_FOUND','PAGE_NOT_READY'].includes(e.message))throw e;opened=await this.browser.request('openPage',{pageUrl:x.t.url,readySelectors});}
+  const opened=await this.browser.request('openPage',{pageUrl:x.t.url,readySelectors});
   const state={queueId:x.q.id,taskId:x.t.taskId,pageId:opened.pageId,originalRoleUrl:x.t.url,returnUrl:x.target,expectedTitle:x.t.title,status:'opened',openedAt:new Date().toISOString()};await this.queues.put(x.t.taskId,state);
   return this.assess(x,state);
  },{waitMs:x.q.parallelRoles||x.q.executionMode==='parallel_roles'?30000:0});}
- async assess(x,state){const s=await this.snapshot(x,state.pageId),account=resolveAccount(await this.login.profile(),x.c);
+ async assess(x,state,{allowNavigation=true}={}){const s=await this.snapshot(x,state.pageId),account=resolveAccount(await this.login.profile(),x.c);
   if(s.account&&!matchesAccount(s.account,account))throw Error('LOGIN_ACCOUNT_MISMATCH');
   if(matchesAccount(s.account,account)&&!s.loginFormPresent){
-   if(s.pageUrl!==state.returnUrl){await this.browser.request('openPage',{pageId:state.pageId,pageUrl:state.returnUrl,readySelectors:[x.plan.readySelector,x.c.fields?.root].filter(Boolean)});}
+   if(s.pageUrl!==state.returnUrl){if(!allowNavigation)throw Error('ROLE_BOUND_PAGE_LOCATION_CHANGED');await this.browser.request('openPage',{pageId:state.pageId,pageUrl:state.returnUrl,readySelectors:[x.plan.readySelector,x.c.fields?.root].filter(Boolean)});}
    if(x.plan.entryOnly){
     state.status='authenticated_at_role';state.accountMatched=true;await this.queues.put(x.t.taskId,state);
     return {status:state.status,taskId:state.taskId,pageId:state.pageId,companyId:x.t.companyId,roleId:x.t.roleId,pageUrl:state.returnUrl,accountMatched:true,nextTools:['role_enter_application'],formAssetRequiredBeforeFill:true,submission:'not_performed'};
@@ -53,14 +58,15 @@ export class RoleFlow{
   state.status='needs_login';state.loginPlan=plan;await this.queues.put(x.t.taskId,state);
   return {status:'needs_login',taskId:state.taskId,pageId:state.pageId,originalRoleUrl:state.originalRoleUrl,returnUrl:state.returnUrl,loginPlan:plan,submission:'not_performed'};
  }
- async resume(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{const state=await this.queues.read(x.t.taskId);if(state.queueId!==x.q.id||state.returnUrl!==x.target||state.expectedTitle!==x.t.title)throw Error('ROLE_TASK_STATE_CHANGED');
+ async resume(args){const x=await this.context(args);return this.login.locked(x.c,async()=>this.resumeBoundPage(x,await this.queues.read(x.t.taskId)),{waitMs:x.q.parallelRoles||x.q.executionMode==='parallel_roles'?30000:0});}
+ async resumeBoundPage(x,state,{allowNavigation=true}={}){if(state.queueId!==x.q.id||state.returnUrl!==x.target||state.expectedTitle!==x.t.title)throw Error('ROLE_TASK_STATE_CHANGED');
   // Rebind only a lost tab to the unique already-open original URL. No new tab,
   // navigation, expected-value injection or account/role bypass is permitted.
   const tabs=await this.browser.request('tabs',{pageUrl:state.returnUrl});
   const pageIdOf=p=>typeof p.id==='string'&&p.id?(p.browserChannel&&!p.id.startsWith(p.browserChannel+':')?p.browserChannel+':'+p.id:p.id):null;
   if(!tabs.some(p=>pageIdOf(p)===state.pageId)){
    let candidates=tabs.filter(p=>p.url===state.returnUrl);
-   if(!candidates.length&&x.plan?.roleIdentity){
+   if(!candidates.length&&allowNavigation&&x.plan?.roleIdentity){
     const expected=new URL(state.returnUrl);
     candidates=tabs.filter(p=>{try{const u=new URL(p.url),identity=readRoleIdentity(x.plan.roleIdentity,p.url);return u.origin===expected.origin&&u.pathname===expected.pathname&&u.hash===expected.hash&&identity?.value===x.t.roleId;}catch{return false;}});
    }
@@ -73,17 +79,29 @@ export class RoleFlow{
    state.pageId=pageId;
    state.returnUrl=candidate.url;if(state.applicationUrl)state.applicationUrl=candidate.url;
   }
-  return this.assess(x,state);},{waitMs:x.q.parallelRoles||x.q.executionMode==='parallel_roles'?30000:0});}
+  return this.assess(x,state,{allowNavigation});}
  async enter(args){const {q,t}=await this.queues.task(args),c=await this.login.company(t.companyId),entry=resolveEntry(c);return this.login.locked(c,async()=>{
   let prior;try{prior=await this.queues.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
   if(prior?.queueId&&prior.queueId!==q.id)throw Error('ROLE_TASK_STATE_CHANGED');
-  let observedForm;
-  if(!prior?.applicationUrl){
-   if(entry?.kind==='declarative_transition'){const tabs=await this.browser.request('tabs',{pageUrl:t.url}),matches=tabs.filter(p=>new URL(p.url).origin===c.origin&&transitionLocationMatches(entry.form.location,p.url,t.roleId));if(matches.length>1)throw Error('AMBIGUOUS_ROLE_FORM');observedForm=matches[0]?.url;}
+  let observedForm,observedPage;
+  if(entry?.kind==='declarative_transition'){
+   const tabs=await this.browser.request('tabs',{pageUrl:t.url}),sameOrigin=tabs.filter(p=>{try{return new URL(p.url).origin===c.origin;}catch{return false;}});
+   const forms=sameOrigin.filter(p=>transitionLocationMatches(entry.form.location,p.url,t.roleId));
+   if(forms.length>1)throw Error('AMBIGUOUS_ROLE_FORM');
+   if(forms.length)observedPage=forms[0];
+   else{
+    const details=sameOrigin.filter(p=>transitionLocationMatches(entry.detail.location,p.url,t.roleId));
+    if(details.length>1)throw Error('AMBIGUOUS_ROLE_DETAIL');
+    if(!details.length)throw Error('EXISTING_PAGE_NOT_FOUND');
+    observedPage=details[0];
+   }
+  }else if(!prior?.applicationUrl){
    if(entry?.kind==='resume_modal'){const tabs=await this.browser.request('tabs',{pageUrl:t.url}),matches=tabs.filter(p=>{const u=new URL(p.url);return u.origin===c.origin&&u.pathname===entry.formPath&&u.searchParams.get(entry.formIdParameter)===t.roleId;});if(matches.length>1)throw Error('AMBIGUOUS_ROLE_FORM');observedForm=matches[0]?.url;}
    if(entry?.kind==='detail_to_form'){const role=matchEntryPath(entry,new URL(t.url).pathname);if(role.detail){const tabs=await this.browser.request('tabs',{pageUrl:t.url});const matches=(tabs||[]).filter(p=>{const u=new URL(p.url);return u.origin===c.origin&&u.pathname===role.expectedApplyPath;});if(matches.length>1)throw Error('AMBIGUOUS_ROLE_FORM');observedForm=matches[0]?.url;}}
   }
-  const opened=await this.browser.request('openPage',{pageUrl:prior?.applicationUrl||observedForm||t.url,...(!observedForm&&prior?.pageId?{pageId:prior.pageId}:{}),readySelectors:[c.account.selector,c.fields?.root,entry?.detailReadySelector,entry?.formReadySelector].filter(Boolean)});
+  const observedId=observedPage?.id?observedPage.browserChannel&&!observedPage.id.startsWith(observedPage.browserChannel+':')?observedPage.browserChannel+':'+observedPage.id:observedPage.id:null;
+  const opened=await this.browser.request('openPage',{pageUrl:observedPage?.url||prior?.applicationUrl||observedForm||t.url,...(observedPage?{reuseOnly:true,...(observedId?{pageId:observedId}:{})}:!observedForm&&prior?.pageId?{pageId:prior.pageId}:{}),readySelectors:[c.account.selector,c.fields?.root,entry?.detailReadySelector,entry?.formReadySelector].filter(Boolean)});
+  if(observedPage&&(opened.reused!==true||opened.pageUrl!==observedPage.url||!opened.pageId||observedId&&opened.pageId!==observedId))throw Error('ROLE_EXISTING_PAGE_REBIND_FAILED');
   const snapshot=await this.browser.request('roleSnapshot',{pageId:opened.pageId,accountSelector:c.account.selector,loginRoot:c.fields?.root});if(c.loginMethod==='user_operated'){const session=await this.login.state(c,snapshot.pageUrl);snapshot.account=session.account;snapshot.loginFormPresent=session.form;}
   if(snapshot.loginFormPresent||!matchesAccount(snapshot.account,resolveAccount(await this.login.profile(),c)))throw Error('SHARED_LOGIN_SESSION_REQUIRED');
   const result=await this.browser.request('roleEnterApplication',{pageId:opened.pageId,expectedTitle:t.title,accountSelector:c.account.selector,expectedAccount:snapshot.account,roleSelector:entry?.roleSelector,entry,expectedRoleId:t.roleId,sessionAccountPageUrl:c.account.pageUrl});

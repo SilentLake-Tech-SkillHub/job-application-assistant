@@ -1,6 +1,7 @@
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {createHash} from 'node:crypto';
+import {bindNativeDom,correlateNativeControls} from './structure-dom-binding.mjs';
 const run=promisify(execFile);
 const hash=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const documentUrl=value=>{const u=new URL(value);u.hash='';return u.href;};
@@ -21,7 +22,7 @@ export async function inspectRea({endpoint,targetId,pageUrl,allowedOrigins=[new 
  let evidence;try{evidence=JSON.parse(stdout);}catch{throw Error('REA_COMPLETE_JSON_REQUIRED');}
  return evidence;
 }
-export function normalizeReaStructure(evidence,binding,{now=Date.now(),maxAgeMs=120000}={}){
+export function normalizeReaStructure(evidence,binding,{now=Date.now(),maxAgeMs=120000,nativeStructure}={}){
  const n=evidence?.normalized_result,p=evidence?.parameters;
  if(evidence?.operation!=='inspect_web_page'||evidence?.predicate_type!=='rea.web-page-inspection'||!n?.dom?.nodes||!n?.accessibility?.nodes)throw Error('REA_STRUCTURE_EVIDENCE_REQUIRED');
  if(!binding?.pageId||!binding?.targetId||binding.beforeUrl!==binding.afterUrl||new URL(binding.beforeUrl).protocol!=='https:')throw Error('REA_PAGE_BINDING_CHANGED');
@@ -32,15 +33,18 @@ export function normalizeReaStructure(evidence,binding,{now=Date.now(),maxAgeMs=
  if(n.completeness?.truncated_sections?.some(s=>/dom|accessibility/.test(s))||n.completeness?.unavailable_sections?.some(s=>/dom|accessibility/.test(s)))throw Error('REA_STRUCTURE_INCOMPLETE');
  const roles=new Set(['textbox','combobox','checkbox','radio','button','heading','group','radiogroup','listbox','option']);
  const nodes=n.accessibility.nodes.filter(x=>!x.ignored&&roles.has(x.role)).map(x=>({nodeId:x.node_id,parentId:x.parent_id,role:x.role,label:x.name||'',states:(x.states||[]).filter(s=>['required','disabled','readonly','expanded','multiselectable'].includes(s.name))}));
- return {schemaVersion:1,provider:'rea',evidenceId:evidence.evidence_id,evidenceHash:hash(evidence),pageId:binding.pageId,pageUrl:binding.beforeUrl,targetId:binding.targetId,observedAt:n.capture_window.ended_at,domNodeCount:n.dom.total_nodes,accessibility:nodes,limitations:n.limitations||[],completeness:n.completeness,executableSelectors:false,executionVerified:false};
+ const structure={schemaVersion:1,provider:'rea',evidenceId:evidence.evidence_id,evidenceHash:hash(evidence),pageId:binding.pageId,pageUrl:binding.beforeUrl,targetId:binding.targetId,observedAt:n.capture_window.ended_at,domNodeCount:n.dom.total_nodes,accessibility:nodes,limitations:n.limitations||[],completeness:n.completeness,executableSelectors:false,executionVerified:false};
+ structure.accessibility=bindNativeDom(structure,nativeStructure,{maxAgeMs});
+ return structure;
 }
 export function bindStructureControls(structure,capture){
  if(structure.pageUrl!==capture.pageUrl||capture.pageId&&structure.pageId!==capture.pageId)throw Error('REA_CONTROL_CAPTURE_SCOPE_MISMATCH');
- if(Math.abs(Date.parse(capture.observedAt)-Date.parse(structure.observedAt))>120000)throw Error('REA_CONTROL_CAPTURE_TOO_FAR_APART');
- // REA labels supplement the actual browser inventory; AX node IDs are never CSS.
- const clean=s=>(s||'').replace(/[\s＊*：:]/gu,'').toLowerCase();
- const controls=capture.controls.map(c=>({...c,reaCandidates:structure.accessibility.filter(n=>clean(n.label)===clean(c.label)&&c.label).map(n=>n.nodeId)}));
- const bound=new Set(controls.flatMap(c=>c.reaCandidates));
- const uncorrelatedControls=structure.accessibility.filter(n=>['textbox','combobox','checkbox','radio'].includes(n.role)&&!bound.has(n.nodeId));
- return {companyId:capture.companyId,pageUrl:capture.pageUrl,pageId:structure.pageId,reaEvidenceId:structure.evidenceId,reaEvidenceHash:structure.evidenceHash,captureId:capture.captureId,controls,uncorrelatedControls,requiresLiveProbe:true};
+ const elapsed=Math.abs(Date.parse(capture.observedAt)-Date.parse(structure.observedAt));
+ if(!Number.isFinite(elapsed)||elapsed>120000)throw Error('REA_CONTROL_CAPTURE_TOO_FAR_APART');
+ // Names are context, never a substitute for current backend DOM identity.
+ const {controls,bound}=correlateNativeControls(structure.accessibility,capture.controls);
+ const excluded=correlateNativeControls(structure.accessibility,(capture.scopeExclusions||[]).filter(e=>e.kind==='navigation'&&e.reason==='outside_application_form'));
+ const scopeExclusions=excluded.controls.flatMap(c=>c.reaBindings.map(binding=>({...binding,kind:'navigation',reason:'outside_application_form',containerSelector:c.containerSelector})));
+ const uncorrelatedControls=structure.accessibility.filter(n=>['textbox','combobox','checkbox','radio'].includes(n.role)&&!bound.has(String(n.nodeId))&&!excluded.bound.has(String(n.nodeId)));
+ return {companyId:capture.companyId,pageUrl:capture.pageUrl,pageId:structure.pageId,reaEvidenceId:structure.evidenceId,reaEvidenceHash:structure.evidenceHash,captureId:capture.captureId,controls,scopeExclusions,uncorrelatedControls,requiresLiveProbe:true};
 }

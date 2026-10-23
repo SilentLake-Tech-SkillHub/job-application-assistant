@@ -14,7 +14,12 @@ export class LoginBrowser{
   }
   async observe(c,url){
     if(c.loginMethod==='user_operated'){
-      const page=await this.broker.existingPage(c.account.pageUrl),raw=await page.observe({fields:[{id:'account',read:{selector:c.account.selector,kind:'text'}}]});
+      const read=async pageUrl=>{if(new URL(pageUrl).origin!==c.origin)throw Error('LOGIN_PAGE_SCOPE_MISMATCH');const page=await this.broker.existingPage(pageUrl);const raw=await page.observe({fields:[{id:'account',read:{selector:c.account.selector,kind:'text'}}]});if(new URL(raw.pageUrl).origin!==c.origin)throw Error('LOGIN_PAGE_SCOPE_MISMATCH');return raw;};
+      let raw;try{raw=await read(url);}catch(cause){if(cause.message!=='EXISTING_PAGE_NOT_FOUND')throw cause;}
+      if(!raw?.fields.account.present&&url!==c.account.pageUrl){
+       try{raw=await read(c.account.pageUrl);}catch(cause){if(cause.message!=='EXISTING_PAGE_NOT_FOUND')throw cause;const error=Error('ACCOUNT_PROOF_PAGE_NOT_OPEN');error.details={identityPagePath:new URL(c.account.pageUrl).pathname,rolePagePath:new URL(url).pathname,recovery:'verify_real_account_locator_on_an_existing_same_origin_page'};throw error;}
+      }
+      if(!raw)throw Error('ACCOUNT_PROOF_PAGE_NOT_OPEN');
       return {url,identityPageUrl:raw.pageUrl,readAt:raw.readAt,account:raw.fields.account.present?raw.fields.account.value:null,form:!raw.fields.account.present,userOperated:true,dialogs:0,challenges:0,errors:0};
     }
     const f=c.fields,p=c.popups[0];

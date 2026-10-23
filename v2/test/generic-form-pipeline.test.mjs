@@ -13,6 +13,12 @@ const profile={facts:{name:{status:'known',value:'Applicant'},gender:{status:'kn
 const capture=(companyId,framework)=>({companyId,captureId:'captured',pageUrl:`https://${companyId}.example/form`,observedAt:new Date().toISOString(),controls:[{selector:'#name',label:'姓名',tag:'input',type:'text',required:true,contextProvider:framework},{selector:'#gender',questionSelector:'#gender-wrapper',selectedSelector:'#gender-selected',labelSelector:'#gender-label',label:'性别',tag:'input',type:'combobox',required:true,contextProvider:framework}]});
 const page={roleTitle:'Product',roleSelector:'h1',readySelector:'form',sections:[{title:'基本信息'}],sectionDiscovery:{selector:'section',titleSelector:'h2'}};
 const mappings=[{selector:'#name',factKey:'name'},{selector:'#gender',factKey:'gender'}];
+test('an uncaptured date panel returns the exact acquisition call instead of claiming a missing driver',()=>{
+ const c=capture('dates','phoenix');c.provider='phoenix';c.controls=[{selector:'#start',label:'开始时间',renderer:'phoenix_date_picker',type:'combobox',tag:'div',labelSelector:'#label'}];
+ const b=buildFormTemplate({capture:c,profile,mappings:[{selector:'#start',factKey:'start'}],page,templateId:'dates'});
+ assert.equal(b.readyToRegister,false);assert.ok(b.blockers.some(x=>x.reason==='DATE_OPTIONS_NOT_CAPTURED'));
+ assert.equal(b.blockers.some(x=>x.reason==='CONTROL_DRIVER_REQUIRED'),false);assert.deepEqual(b.nextGoals[0].arguments,{companyId:c.companyId,pageUrl:c.pageUrl,captureId:c.captureId,selectors:['#start']});
+});
 test('a captured autocomplete uses its selection contract and never falls back to plain fill',()=>{
  const c=capture('autocomplete',null);c.controls=[{selector:'#school',label:'学校',type:'combobox',tag:'input',renderer:'phoenix_autocomplete',labelSelector:'#school-label'}];
  const p={facts:{school:{status:'known',value:'Example University'}}},choices=[{selector:'#school',captureId:c.captureId,choicesId:'choices-school',status:'captured',restored:true,options:['Example University']}];
@@ -46,14 +52,14 @@ test('ordinary userOnly cannot bypass routing or preflight even with known answe
  assert.ok((await compileExecutionPlan(t,{values:{name:'Applicant',gender:'女'}})).constructionBlockers.includes('ORDINARY_FIELD_MARKED_USER_ONLY'));
 });
 test('mapping suggestions preserve multiple school records for semantic resolution',()=>{
- const candidates=mappingCandidates([{selector:'#school',label:'学校',repeatIndex:0}],{facts:{},fieldRegistry:{'education.one.school':{label:'学校'},'education.two.school':{label:'学校'}}});
+ const candidates=mappingCandidates([{selector:'#school',label:'学校',repeatIndex:0}],{facts:{'education.one.school':{status:'known',value:'Example School A'},'education.two.school':{status:'known',value:'Example School B'}},fieldRegistry:{'education.one.school':{label:'学校'},'education.two.school':{label:'学校'}}});
  assert.equal(candidates[0].candidates.length,2);assert.equal(candidates[0].automaticMapping,false);assert.equal(candidates[0].owner,'agent');
 });
 function evidence(){return {operation:'inspect_web_page',predicate_type:'rea.web-page-inspection',evidence_id:'test-evidence',parameters:{target_id:'target'},normalized_result:{target:{target_id:'target',url:'https://alpha.example/form',origin:'https://alpha.example'},capture_window:{ended_at:new Date().toISOString()},dom:{total_nodes:2,nodes:[{}]},accessibility:{text_capture:{status:'included'},nodes:[{node_id:'n1',role:'textbox',name:'姓名',value:'must not be retained',states:[]}]},completeness:{truncated_sections:[]}}};}
 const binding=()=>({pageId:'iab:1',targetId:'target',beforeUrl:'https://alpha.example/form#job=1',afterUrl:'https://alpha.example/form#job=1'});
 test('REA evidence preserves exact bound page identity, never turns AX IDs into selectors',()=>{
  const s=normalizeReaStructure(evidence(),binding());assert.equal(s.executableSelectors,false);assert.equal(s.accessibility[0].value,undefined);assert.equal(s.pageUrl,binding().beforeUrl);
- const c={...capture('alpha','.ant-form-item'),pageUrl:s.pageUrl,pageId:'iab:1'};const j=bindStructureControls(s,c);assert.deepEqual(j.controls[0].reaCandidates,['n1']);assert.equal(j.controls[0].selector,'#name');
+ const c={...capture('alpha','.ant-form-item'),pageUrl:s.pageUrl,pageId:'iab:1'};const j=bindStructureControls(s,c);assert.deepEqual(j.controls[0].reaCandidates,[]);assert.deepEqual(j.uncorrelatedControls.map(n=>n.nodeId),['n1']);assert.equal(j.controls[0].selector,'#name');
  assert.throws(()=>bindStructureControls(s,{...c,pageId:'iab:2'}),/SCOPE_MISMATCH/);
 });
 test('REA rejects stale, cross-target, partial and changed-page evidence',()=>{

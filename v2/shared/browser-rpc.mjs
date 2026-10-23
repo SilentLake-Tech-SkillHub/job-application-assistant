@@ -1,9 +1,12 @@
+import {normalizePhoenixReference} from './control-dom.mjs';
 import {sharedRecordKey} from './shared-record.mjs';
 import http from 'node:http';
 import {canonicalizeInventory,remapSpec} from './feishu-selectors.mjs';
 export class BrokerBrowserAdapter {
   constructor(socketPath,{requestTimeoutMs=45000}={}){this.socketPath=socketPath;this.requestTimeoutMs=requestTimeoutMs;}
   async request(method,args={}){
+    const normalize=v=>typeof v==='string'&&v.startsWith('phoenixq:')?normalizePhoenixReference(v):Array.isArray(v)?v.map(normalize):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,normalize(x)])):v;
+    args=normalize(args);
     const data=JSON.stringify({method,args});
     const result=await new Promise((resolve,reject)=>{
       const req=http.request({socketPath:this.socketPath,path:'/rpc',method:'POST',headers:{'content-type':'application/json','content-length':Buffer.byteLength(data)}},res=>{

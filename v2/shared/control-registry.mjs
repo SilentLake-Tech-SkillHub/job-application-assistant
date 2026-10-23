@@ -7,9 +7,9 @@ export const CONTROL_TYPES = freeze({
  dropdown:{kind:'choice',valueType:'string',readbackType:'string',methods:['dropdown','select','ud_dropdown','ant_dropdown','phoenix_dropdown'],reads:['value','text']},
  multiselect:{kind:'choice',valueType:'string[]',readbackType:'string[]',methods:['ant_multiselect','select_multiple'],reads:['selected_values']},
  radio:{kind:'choice',valueType:'string',readbackType:'string',methods:['radio','phoenix_radio'],reads:['radio']},
- year_picker:{kind:'date',valueType:'string',readbackType:'string',methods:['feishu_year','ud_date'],reads:['value','text']},
- month_picker:{kind:'date',valueType:'string',readbackType:'string',methods:['feishu_month','ud_date','native_date','phoenix_date'],reads:['month','value']},
- day_picker:{kind:'date',valueType:'string',readbackType:'string',methods:['ant_day','native_date'],reads:['value']},
+ year_picker:{kind:'date',valueType:'string',readbackType:'string',methods:['feishu_year','ud_date','phoenix_date'],reads:['value','text']},
+ month_picker:{kind:'date',valueType:'string',readbackType:'string',methods:['feishu_month','ud_date','native_date','phoenix_date'],reads:['month','value','text']},
+ day_picker:{kind:'date',valueType:'string',readbackType:'string',methods:['ant_day','native_date','phoenix_date'],reads:['value','text']},
  checkbox:{kind:'boolean',valueType:'boolean',readbackType:'boolean',methods:['check'],reads:['checked']},
  file_upload:{kind:'file',valueType:'string',readbackType:'string[]',methods:['upload'],reads:['files']}
 });

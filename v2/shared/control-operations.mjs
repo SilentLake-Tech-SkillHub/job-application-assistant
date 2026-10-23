@@ -55,6 +55,16 @@ async function performChoice(adapter,action,value,family){
  const expanded=await l.evaluate(n=>n.getAttribute('aria-expanded'));
  if(expanded!=='true')await trigger.click({timeout:10000});
  try{
+  if(family==='phoenix'){
+   const popup=page.locator('.common-unmodeled-layer').filter({visible:true});await popup.first().waitFor({state:'visible',timeout:5000});
+   const areaPanels=await page.locator('.common-unmodeled-layer:has(.area-selector-container)').filter({visible:true}).count(),listPanels=await page.locator('.common-unmodeled-layer:has(.list-item-container)').filter({visible:true}).count();
+   if(areaPanels||listPanels){
+    if(areaPanels+listPanels!==1)throw Error('CHOICE_MENU_NOT_UNIQUE');
+    const url=new URL('./phoenix-area.mjs',import.meta.url);url.searchParams.set('revision',String((await stat(url)).mtimeMs));
+    const driver=await import(url.href);
+    return (areaPanels?driver.performPhoenixArea:driver.performPhoenixListPopup)(adapter,action,value,{trigger,initial,dismiss});
+   }
+  }
   let menus=page.locator(action.menuSelector||(family==='phoenix'?'.common-unmodeled-layer:has(.phoenix-selectList)':family==='ud'?'.ud__select__list':family==='ant'?'.ant-select-dropdown':'[role="listbox"]')).filter({visible:true});
   const owned=await l.evaluate(n=>n.getAttribute('aria-controls')||n.getAttribute('aria-owns'));
   if(owned){
