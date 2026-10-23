@@ -47,7 +47,7 @@ export class RoleQueue{
     if(status==='岗位失效/关闭'){protectedRoles.push({companyId,roleId,reason:'role_closed'});continue;}
     if(!['待投递','not_submitted','岗位待投递'].includes(status))throw Error('ROLE_APPLICATION_STATE_UNRESOLVED');
     if(['submission_uncertain','application_blocked','user_skipped'].includes(r.applicationOutcome?.event)){protectedRoles.push({companyId,roleId,reason:'outcome_requires_resolution'});continue;}
-    tasks.push({taskId:randomUUID(),companyId,roleId,title:r.title,url:u.href,applyUrl,order:tasks.length+1,companyOrder:sequence?sequence.indexOf(c.companyId||c.company_key)+1:c.order||1,roleOrder:r.order});
+    tasks.push({taskId:randomUUID(),companyId,roleId,title:r.title,url:u.href,applyUrl,...(r.materials?{materials:structuredClone(r.materials)}:{}),order:tasks.length+1,companyOrder:sequence?sequence.indexOf(c.companyId||c.company_key)+1:c.order||1,roleOrder:r.order});
    }
   }
   const upstreamMode=input.execution?.mode||(args.parallelRoles?'parallel_roles':'sequential');if(!['sequential','parallel_roles'].includes(upstreamMode))throw Error('INVALID_EXECUTION_MODE');
@@ -60,6 +60,29 @@ export class RoleQueue{
   queue.queueHash=digest(queue);await this.put(queue.id,queue);return this.public(queue);
  }
  public(q){return {queueId:q.id,queueHash:q.queueHash,inputKind:q.inputKind,executionMode:q.executionMode,parallelRoles:q.parallelRoles,tasks:q.tasks,protectedRoles:q.protectedRoles,browserAccess:false,submission:'forbidden'};}
+ async refreshMaterials({queueId,queueHash,authorizationRef}){
+  if(!authorizationRef?.trim())throw Error('MATERIAL_AMENDMENT_AUTHORIZATION_REQUIRED');
+  const q=await this.read(queueId),{queueHash:h,...payload}=q;
+  if(h!==queueHash||digest(payload)!==h||q.source.kind!=='handoff')throw Error('ROLE_QUEUE_HASH_MISMATCH');
+  const {input,source}=await this.inputAdapter({});
+  if(source.contentSha256===q.source.contentSha256)return this.public(q);
+  if(source.amendment?.scope!=='materials_only'||source.amendment.previousContentSha256!==q.source.contentSha256||input.materialContractVersion!==1)throw Error('CONFIRMED_MATERIAL_AMENDMENT_REQUIRED');
+  const selection=value=>{const x=structuredClone(value);delete x.materialContractVersion;delete x.confirmation;
+   for(const c of x.companies)for(const r of c.roles)delete r.materials;return x;};
+  if(digest(selection(input))!==digest(selection(q.input)))throw Error('MATERIAL_AMENDMENT_CHANGED_SELECTION');
+  for(const task of q.tasks){
+   const parent=this.catalog.find(c=>c.id===task.companyId)?.companyId||task.companyId;
+   const hits=input.companies.filter(c=>c.companyId===parent).flatMap(c=>c.roles).filter(r=>String(r.roleId)===task.roleId&&r.url===task.url);
+   if(hits.length!==1||!hits[0].materials)throw Error('ROLE_MATERIAL_SCOPE_MISMATCH');
+   task.materials=structuredClone(hits[0].materials);
+   let state;try{state=await this.read(task.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
+   if(state){delete state.verifyRunId;delete state.verifiedAt;delete state.planId;delete state.planHash;
+    if(state.status==='ready_for_user_review')state.status='ready_to_fill';
+    state.materialVerificationRequired=true;await this.put(task.taskId,state);}
+  }
+  q.input=input;q.source=source;q.inputHash=digest(input);q.materialAmendmentAuthorization=authorizationRef;
+  delete q.queueHash;q.queueHash=digest(q);await this.put(q.id,q);return this.public(q);
+ }
  async get({queueId,queueHash}){const q=await this.read(queueId),{queueHash:h,...payload}=q;if(h!==queueHash||digest(payload)!==h)throw Error('ROLE_QUEUE_HASH_MISMATCH');if(q.source.kind==='file'&&await fileHash(q.source.file)!==q.source.hash)throw Error('ROLE_INPUT_CHANGED');if(q.source.kind==='handoff')await assertHandoffUnchanged(q.source);return q;}
  async task(args){const q=await this.get(args),index=q.tasks.findIndex(t=>t.taskId===args.taskId);if(index<0)throw Error('ROLE_NOT_IN_CONFIRMED_QUEUE');const target=q.tasks[index];const predecessors=q.tasks.slice(0,index).filter(t=>q.executionMode==='parallel_companies'?t.companyId===target.companyId&&!q.parallelRoles:q.executionMode!=='parallel_roles'||t.companyId!==target.companyId);for(const t of predecessors){let state;try{state=await this.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}if(state?.status!=='ready_for_user_review')throw Error('CONFIRMED_ROLE_ORDER_BLOCKED');}return {q,t:target};}
 }

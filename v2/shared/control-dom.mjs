@@ -36,8 +36,10 @@ export function controlDOM(spec){
     const o={present:!!n && (r.presenceSelector?visible(one(r.presenceSelector)):eligible(n)),value:null,errors:errors(r.errorSelectors)};
     if(f.userOnly){fields[f.id]={present:!!n && eligible(n),userOnly:true};continue;}
     if(n){
+      if(r.requireDisabled)o.disabled=n.disabled===true||n.getAttribute('aria-disabled')==='true'||!!n.closest('.ant-select-disabled,[aria-disabled="true"]');
       if(r.kind==='value')o.value=n.tagName==='SELECT'?n.selectedOptions[0]?.textContent?.trim()??null:n.value??null;
       else if(r.kind==='text')o.value=text(n);
+      else if(r.kind==='selected_values')o.value=n.tagName==='SELECT'?[...n.selectedOptions].filter(o=>o.value!=='').map(o=>o.textContent.trim()):[...n.querySelectorAll(r.itemSelector)].map(e=>e.textContent.trim());
       else if(r.kind==='checked')o.value=typeof n.checked==='boolean'?n.checked:n.getAttribute('aria-checked')==='true';
       else if(r.kind==='attribute')o.value=n.getAttribute(r.attribute);
       else if(r.kind==='month'){

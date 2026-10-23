@@ -34,6 +34,6 @@ class BrokerPage {
     return this.call('observe',{plan});
   }
   async assertSingleEditor(){const key=sharedRecordKey(this.pageUrl);if(!key)return;const tabs=await this.browser.tabs();if(tabs.some(t=>t.url!==this.pageUrl&&sharedRecordKey(t.url)===key))throw Error('SHARED_RESUME_HAS_OTHER_OPEN_EDITORS');}
-  async act(action,value,files){if(this.readOnly)throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');if(!['capture_wecruit_schema','wait','dropdown_inspect','ant_dropdown_inspect','ud_dropdown_inspect'].includes(action.method))await this.assertSingleEditor();return this.call('act',{action:action.provider==='feishu'?{...remapSpec(action,this.rowKeys||{}),selectorsResolved:true}:action,value,files});}
+  async act(action,value,files){if(this.readOnly)throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');if(!['capture_wecruit_schema','wait','dropdown_inspect','ant_dropdown_inspect','ud_dropdown_inspect','ant_dropdown_verify','ud_dropdown_verify','dropdown_verify'].includes(action.method))await this.assertSingleEditor();return this.call('act',{action:action.provider==='feishu'?{...remapSpec(action,this.rowKeys||{}),selectorsResolved:true}:action,value,files});}
   async ensureGroups(groups){if(this.readOnly)throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');if(groups?.length)await this.assertSingleEditor();return this.call('ensureGroups',{groups});}
 }

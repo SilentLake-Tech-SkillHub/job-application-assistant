@@ -1,10 +1,10 @@
 import {hash} from './engine.mjs';
-import {formLocation} from './profile.mjs';
+import {lookupCompanyForm} from './profile.mjs';
 // Reconcile superseded locator mappings only after complete restored UI proof.
 // Preserve canonical facts; retain only the current question mapping.
 export function retireLegacyQuestionMappings(profile,{companyId,template,probe}){
  if(probe.operation!=='internal_condition_probe'||probe.companyId!==companyId||probe.templateHash!==hash(template)||probe.status!=='verified'||probe.restoration!=='verified'||!probe.branches?.length||probe.branches.some(b=>b.status!=='verified'||b.newQuestions!==0))throw Error('VERIFIED_MIGRATION_PROOF_REQUIRED');
- const key=hash({companyId,pageUrl:formLocation(template.evidence.sourceUrl)}).slice(0,20),form=profile.companyForms?.[key];
+ const {form}=lookupCompanyForm(profile,companyId,template.evidence.sourceUrl,{migrate:true});
  if(!form)throw Error('FORM_QUESTIONS_NOT_REGISTERED');
  const observed=new Set(probe.branches.flatMap(b=>(b.inventory||[]).map(c=>c.selector)));
  const planned=new Set(template.pages.flatMap(p=>p.fields.flatMap(f=>f.inventorySelectors||[f.read.selector])));

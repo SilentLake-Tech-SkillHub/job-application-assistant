@@ -15,7 +15,8 @@
     "login_inspect",
     "login_browser_status",
     "login_run_status",
-    "login_verification_inspect"
+    "login_verification_inspect",
+    "inspect_choice"
   ],
   "stages": {
     "workflow_handoff": [
@@ -299,6 +300,12 @@
       "login",
       [
         "role_resume"
+      ]
+    ],
+    "company_batch_refresh_materials": [
+      "route",
+      [
+        "workflow_next"
       ]
     ]
   }

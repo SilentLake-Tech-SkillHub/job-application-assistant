@@ -1,9 +1,10 @@
+import {materialAudit,effectiveRequired} from './business-materials.mjs';
 import {assertApplicationText} from './application-text.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {compileExpected} from './observation.mjs';
 import {assertContentPolicy} from './content-policy.mjs';
-import {validateControlContract,validDate,projectDateValue} from './value-contract.mjs';
+import {validateControlContract,validDate,projectDateValue,matchesValueType} from './value-contract.mjs';
 import {templateConstructionIssues} from './field-policy.mjs';
 
 const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
@@ -23,7 +24,7 @@ function inputSnapshot(template,task){
   const values=Object.fromEntries(keys.map(k=>[k,task.values?.[k]??null]));
   const sources=Object.fromEntries(keys.filter(k=>task.sources?.[k]).map(k=>[k,task.sources[k]]));
   const refs=[...new Set(template.pages.flatMap(p=>p.fields).filter(f=>f.kind==='file').map(f=>task.values?.[f.source]).filter(v=>v!=null))].sort();
-  return json({companyId:task.companyId,pageUrl:task.pageUrl,templateHash:task.templateHash,values,sources,omissions:task.omissions||{},files:Object.fromEntries(refs.map(ref=>[ref,task.files?.[ref]??null])),contentPolicy:task.contentPolicy||null});
+  return json({companyId:task.companyId,pageUrl:task.pageUrl,templateHash:task.templateHash,values,sources,omissions:task.omissions||{},files:Object.fromEntries(refs.map(ref=>[ref,task.files?.[ref]??null])),contentPolicy:task.contentPolicy||null,materialContext:task.materialContext||null});
 }
 
 async function validateFile(ref,files){
@@ -42,6 +43,7 @@ async function validateFile(ref,files){
 export async function compileExecutionPlan(template,task){
   assertContentPolicy(task.values,task.contentPolicy);assertApplicationText(task.values);
   const pages=[],counts={fill:0,observe:0,needs_user:0,omitted:0,user_only:0,inactive:0};
+  const materialCoverage=materialAudit(template.pages.flatMap(p=>p.fields),task);
   const checkedFiles=new Set();
   for(const page of template.pages){
     const fields=[];
@@ -51,22 +53,25 @@ export async function compileExecutionPlan(template,task){
       let value;
       if(!inactive){
         const raw=task.values?.[f.source];
-        if(raw!==undefined&&raw!==null&&typeof raw!==f.control.valueType)throw Error('PROFILE_CONTROL_VALUE_TYPE_MISMATCH');
+        if(f.choiceResolution&&raw!=null&&JSON.stringify(raw)!==JSON.stringify(f.choiceResolution.sourceValue))throw Error('CHOICE_RESOLUTION_STALE');
+        if(!f.enumMap&&raw!==undefined&&raw!==null&&!matchesValueType(raw,f.control.valueType))throw Error('PROFILE_CONTROL_VALUE_TYPE_MISMATCH');
         if(f.ongoingSource&&task.values?.[f.ongoingSource]!=null&&typeof task.values[f.ongoingSource]!=='boolean')throw Error('ONGOING_VALUE_MUST_BE_BOOLEAN');
         value=resolvedFieldValue(f,task);
         if(value!==undefined&&value!==null){
+          if(!matchesValueType(value,f.control.valueType))throw Error('PRESENTATION_CONTROL_VALUE_TYPE_MISMATCH');
           if(f.kind==='date'&&!(value==='至今'&&f.ongoingSource)&&!validDate(value,f.precision))throw Error('INVALID_PREFLIGHT_DATE');
-          if(f.kind==='choice'&&!f.control.options.includes(value))throw Error('VALUE_OUTSIDE_CAPTURED_OPTIONS');
+          if(f.kind==='choice'&&(f.control.valueType==='string[]'?(!Array.isArray(value)||new Set(value).size!==value.length||value.some(v=>!f.control.options.includes(v))||f.required&&!value.length):!f.control.options.includes(value)))throw Error('VALUE_OUTSIDE_CAPTURED_OPTIONS');
           if(typeof value==='string'&&!value.trim())throw Error('EMPTY_KNOWN_VALUE');
           if(f.kind==='file'&&!checkedFiles.has(value)){await validateFile(value,task.files);checkedFiles.add(value);}
         }
       }
-      const omission=task.omissions?.[f.id];
+      const required=effectiveRequired(f,task),omission=task.omissions?.[f.id];
+      if(required&&omission)throw Error('REQUIRED_FIELD_CANNOT_BE_OMITTED');
       if(omission&&(!['confirmed_absent','user_declined','not_applicable'].includes(omission.kind)||typeof omission.evidence!=='string'||!omission.evidence.trim()))throw Error('INVALID_PLAN_OMISSION');
       if(omission&&value!=null)throw Error('OMISSION_WITH_PLANNED_VALUE');
-      const disposition=inactive?'inactive':f.userOnly?'user_only':value==null?(!f.required&&omission?'omitted':'needs_user'):f.readonly?'observe':'fill';
+      const disposition=inactive?'inactive':f.userOnly?'user_only':value==null?(!required&&omission?'omitted':'needs_user'):f.readonly?'observe':'fill';
       counts[disposition]++;
-      fields.push(json({...f,value,disposition}));
+      fields.push(json({...f,effectiveRequired:required,businessRequired:required&&!f.required,value,disposition}));
     }
     const writable=fields.filter(f=>f.disposition==='fill');
     pages.push({pathPrefix:page.pathPrefix,fields,
@@ -79,7 +84,7 @@ export async function compileExecutionPlan(template,task){
   }
   // Captured/mapped does not mean construction is complete. Preserve explicit
   // failures in the frozen plan so every entry path rejects them before I/O.
-  const constructionBlockers=[...new Set(templateConstructionIssues(template).map(x=>x.reason))];
+  const constructionBlockers=[...new Set([...templateConstructionIssues(template).map(x=>x.reason),...materialCoverage.blockers])];
   const globalPositional = selector => typeof selector==='string' && /^\s*(?:html\s*>\s*)?body\s*>/i.test(selector) && /:nth-(?:of-type|child)\(/.test(selector);
   const unstableFields=template.pages.flatMap(p=>p.fields).filter(f=>!f.userOnly&&!f.readonly&&[f.read?.selector,f.read?.selectedSelector,...(f.inventorySelectors||[]),...(f.actions||[]).flatMap(a=>[a.selector,a.labelSelector,a.openSelector])].some(globalPositional)).map(f=>f.id);
   if(unstableFields.length)constructionBlockers.push('PAGE_GLOBAL_POSITIONAL_LOCATORS');
@@ -87,7 +92,7 @@ export async function compileExecutionPlan(template,task){
   if(template.coverage?.allConditionalBranchesVerified!==true)constructionBlockers.push('CONDITIONAL_BRANCHES_NOT_VERIFIED');
   if(template.coverage?.allControlsMapped!==true)constructionBlockers.push('CONTROLS_NOT_FULLY_MAPPED');
   if(template.coverage?.allDriversSupported!==true)constructionBlockers.push('CONTROL_DRIVERS_NOT_SUPPORTED');
-  const body=json({schemaVersion:1,compilerVersion:3,companyId:task.companyId,pageUrl:task.pageUrl,templateHash:task.templateHash,inputHash:digest(inputSnapshot(template,task)),files:inputSnapshot(template,task).files,pages,counts,constructionBlockers,unstableFields,readyForExecution:constructionBlockers.length===0&&counts.needs_user===0,allKnown:counts.needs_user===0&&counts.user_only===0});
+  const body=json({schemaVersion:1,compilerVersion:3,companyId:task.companyId,pageUrl:task.pageUrl,templateHash:task.templateHash,inputHash:digest(inputSnapshot(template,task)),files:inputSnapshot(template,task).files,pages,counts,materialCoverage,constructionBlockers,unstableFields,readyForExecution:constructionBlockers.length===0&&counts.needs_user===0,allKnown:counts.needs_user===0&&counts.user_only===0});
   const planHash=digest(body);
   return {id:randomUUID(),createdAt:new Date().toISOString(),...body,planHash};
 }

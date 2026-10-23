@@ -1,4 +1,5 @@
 import {CONTROL_TYPES} from './control-registry.mjs';
+export const matchesValueType=(value,type)=>type==='string[]'?Array.isArray(value)&&value.every(v=>typeof v==='string'):typeof value===type;
 // Canonical profile values are checked at ingestion, never repaired after writing.
 export function validDate(value,precision) {
   if(typeof value!=='string')return false;

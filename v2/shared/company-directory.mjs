@@ -1,3 +1,4 @@
+import {validateMaterials} from './business-materials.mjs';
 import {readFile,readdir} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
@@ -88,12 +89,13 @@ export async function readHandoffBatch({handoffDir=handoffDirFromEnv()}={}){
    const os=list.map(r=>r['顺序']);if(list.length===1&&os[0]==null)continue;
    if(!os.every(o=>Number.isInteger(o)&&o>0)||new Set(os).size!==os.length)throw Error('INVALID_CONFIRMED_ROLE_ORDER');
   }
+  for(const role of c['岗位'])if(b.materialContractVersion===1)validateMaterials(role.materials);
   const ordered=[...groups.values()].flatMap(list=>[...list].sort((x,y)=>(x['顺序']||1)-(y['顺序']||1)));
-  return {companyId:c.companyId,name:c['公司'],order:i+1,roles:ordered.map((r,j)=>({id:r['岗位ID'],roleId:r['岗位ID'],title:r['岗位名称'],url:r['岗位链接'],...(r['投递链接']?{applyUrl:r['投递链接']}:{}),order:j+1,preference:{group:r['志愿分组']||'公司',rank:r['顺序']||1,bu:r.BU||null},selected:true,applicationStatus:statusOf(c.companyId,r['岗位ID']),...(outcomes[c.companyId+'|'+r['岗位ID']]?{applicationOutcome:{event:outcomes[c.companyId+'|'+r['岗位ID']].event}}:{})}))};
+  return {companyId:c.companyId,name:c['公司'],order:i+1,roles:ordered.map((r,j)=>({id:r['岗位ID'],roleId:r['岗位ID'],title:r['岗位名称'],url:r['岗位链接'],...(r.materials?{materials:r.materials}:{}),...(r['投递链接']?{applyUrl:r['投递链接']}:{}),order:j+1,preference:{group:r['志愿分组']||'公司',rank:r['顺序']||1,bu:r.BU||null},selected:true,applicationStatus:statusOf(c.companyId,r['岗位ID']),...(outcomes[c.companyId+'|'+r['岗位ID']]?{applicationOutcome:{event:outcomes[c.companyId+'|'+r['岗位ID']].event}}:{})}))};
  });
- const input={schemaVersion:1,batchId:b.batchId,version:1,confirmation:{status:'confirmed',reference:b.confirmation.userQuote},companies};
+ const input={schemaVersion:1,...(b.materialContractVersion?{materialContractVersion:b.materialContractVersion}:{}),batchId:b.batchId,version:1,confirmation:{status:'confirmed',reference:b.confirmation.userQuote},companies};
  // 批次文件之后会因阶段推进被覆盖写（状态、时间），所以冻结的是用户确认的内容摘要而不是文件字节。
- return {input,source:{kind:'handoff',file,contentSha256:b.confirmation.contentSha256}};
+ return {input,source:{kind:'handoff',file,contentSha256:b.confirmation.contentSha256,...(b.confirmation.scope==='materials_only'?{amendment:{scope:'materials_only',previousContentSha256:b.confirmation.previousContentSha256}}:{})}};
 }
 
 export async function assertHandoffUnchanged(source){

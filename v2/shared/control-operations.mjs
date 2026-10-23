@@ -1,3 +1,4 @@
+import {choiceProofDOM,confirmChoiceEvidence} from './choice-proof.mjs';
 import {validDate} from './value-contract.mjs';
 import {remapFeishuSpecDOM} from './feishu-selectors.mjs';
 import {CONTROL_METHODS} from './control-registry.mjs';
@@ -32,6 +33,7 @@ async function assertValue(l,value,{deferRedacted=false}={}){
  }while(true);
 }
 async function performChoice(adapter,action,value,family){
+ const verifyOnly=action.method.endsWith('_verify');
  const page=adapter.page,l=await locateControl(page,action);
  if(await l.evaluate(n=>n.getAttribute('role'))!=='combobox')throw Error('CHOICE_COMBOBOX_REQUIRED');
  const root=action.labelSelector?.replace(/ > \.ud-formily-item-label$/,'');
@@ -67,15 +69,30 @@ async function performChoice(adapter,action,value,family){
   const searchable=!!search;
   if(searchable){initialQuery=await search.evaluate(n=>n.value);if(action.query||!action.method.endsWith('_inspect')){await search.fill(action.query||String(value),{timeout:10000});await assertValue(search,action.query||String(value));queryApplied=true;}}
   const tree=family==='ud'&&await menus.evaluate(n=>!!n.classList?.contains('ud__treeSelect__overlay')||!!n.querySelector?.('.ud__tree'));
-  const options=menus.locator(tree?UD_TREE_LEAF_LABEL:family==='ud'?'.ud__select__list__item':family==='ant'?'[role="option"], .ant-select-item-option':'[role="option"]').filter({visible:true});
+  let optionSelector=tree?UD_TREE_LEAF_LABEL:family==='ud'?'.ud__select__list__item':family==='ant'?'.ant-select-item-option, .ant-select-dropdown-menu-item':'[role="option"]';
+  // Prefer actual renderer rows; the hidden rc-select ARIA mirror is not a click target.
+  if(family==='ant'&&await menus.locator(optionSelector).filter({visible:true}).count()===0)optionSelector='[role="option"]';
+  const options=menus.locator(optionSelector).filter({visible:true});
   if(tree&&action.method.endsWith('_inspect')&&await options.count()===0){
    const treeEvidence=await menus.evaluate(treeChoiceDOM);
    if(queryApplied&&initialQuery!==undefined)await search.fill(initialQuery,{timeout:10000});await dismiss();await menus.waitFor({state:'hidden',timeout:3000});
    return {options:[],tree:treeEvidence,renderer:'ud_tree_select',restored:(await trigger.innerText()).trim()===initial&&await menus.count()===0,searchable,queryApplied,scope:'rendered_tree_branches',coverage:{complete:false,reason:'no_rendered_leaf_options'},status:'branches_only'};
   }
-  await options.first().waitFor({state:'visible',timeout:3000});
+  const emptyEvidence=()=>menus.evaluate(n=>{
+   const selectors='.ant-empty-description,.ant-select-item-empty,.ant-select-not-found,.ant-select-dropdown-menu-item-disabled,.ud__select__empty,[role="status"]';
+   return [...n.querySelectorAll(selectors)].filter(e=>e.getClientRects().length).map(e=>e.textContent.trim()).filter(t=>/暂无数据|无匹配|无结果|未找到|not found|no (?:data|options|results)/i.test(t));
+  });
+  let empty=await emptyEvidence();
+  if(!empty.length||await options.count()){
+   try{await options.first().waitFor({state:'visible',timeout:3000});}catch(error){empty=await emptyEvidence();if(!action.method.endsWith('_inspect')||!queryApplied||!empty.length)throw error;}
+  }
+  if(action.method.endsWith('_inspect')&&queryApplied&&await options.count()===0&&empty.length){
+   if(initialQuery!==undefined)await search.fill(initialQuery,{timeout:10000});
+   await dismiss();await menus.waitFor({state:'hidden',timeout:3000});
+   return {options:[],optionRecords:[],restored:(await trigger.innerText()).trim()===initial&&await menus.count()===0,searchable,queryApplied,scope:'exact_search_results',coverage:{complete:true,reason:'observed_no_results',emptyEvidence:empty},status:'captured_empty_search'};
+  }
   const optionText=action.optionTextMap?.[value]||String(value);
-  const captured=await collectChoiceViews({read:()=>choiceViewport(menus,options),press:key=>(search||l).press(key),target:action.method.endsWith('_inspect')?undefined:optionText});
+  const captured=await collectChoiceViews({read:()=>choiceViewport(menus,options,optionSelector),press:key=>(search||l).press(key),target:action.method.endsWith('_inspect')?undefined:optionText});
   const values=captured.options;
   if(action.method.endsWith('_inspect')){
    const treeEvidence=tree?await menus.evaluate(treeChoiceDOM):null;
@@ -83,30 +100,55 @@ async function performChoice(adapter,action,value,family){
    await dismiss();
    await menus.waitFor({state:'hidden',timeout:3000});
    const restored=(await trigger.innerText()).trim()===initial&&await menus.count()===0;
-   return {options:values,restored,searchable,queryApplied,...(tree?{renderer:'ud_tree_select',tree:treeEvidence}:{}),scope:queryApplied&&action.query?'exact_search_results':tree?'rendered_tree_leaves':captured.complete?'all_menu_options':captured.steps?'partial_menu_options':'current_visible_menu',coverage:{complete:tree?false:captured.complete,reason:tree?'rendered_leaf_paths_only':captured.reason,keyboardSteps:captured.steps},status:'captured'};
+   return {options:values,optionRecords:captured.optionRecords,restored,searchable,queryApplied,...(tree?{renderer:'ud_tree_select',tree:treeEvidence}:{}),scope:queryApplied&&action.query?'exact_search_results':tree?'rendered_tree_leaves':captured.complete?'all_menu_options':captured.steps?'partial_menu_options':'current_visible_menu',coverage:{complete:tree?false:captured.complete,reason:tree?'rendered_leaf_paths_only':captured.reason,keyboardSteps:captured.steps},status:'captured'};
   }
   if(action.optionTextMap&&(!action.observedOptionTexts?.includes(optionText)))throw Error('CHOICE_ALIAS_REQUIRES_CAPTURED_OPTION_TEXT');
   if(!action.options?.includes(String(value))||!values.includes(optionText))throw Error('UNSUPPORTED_CHOICE_NO_FALLBACK');
-  const option=options.filter({hasText:exact(optionText)});
+  let option=options.filter({hasText:exact(optionText)});
+  if(await option.count()!==1)option=menus.locator(':is('+optionSelector+')[title='+JSON.stringify(optionText)+']').filter({visible:true});
   if(await option.count()!==1)throw Error('CHOICE_NOT_UNIQUE_OR_NOT_PRESENT');
-  await option.click({timeout:10000});await dismiss();await menus.waitFor({state:'hidden',timeout:3000});
-  // Full field readback remains independently enforced by Engine/verifyForm.
-  return {performed:true,verification:'requires_independent_readback'};
+  const candidate=await option.evaluate(choiceProofDOM);
+  if(candidate.disabled)throw Error('CHOICE_OPTION_DISABLED');
+  if(action.expectedOptionValue!=null&&candidate.value!==action.expectedOptionValue)throw Error('CHOICE_OPTION_VALUE_CHANGED');
+  if(!verifyOnly)await option.click({timeout:10000});
+  if(queryApplied&&initialQuery!==undefined&&verifyOnly)await search.fill(initialQuery,{timeout:10000});
+  await dismiss();await menus.waitFor({state:'hidden',timeout:3000});
+  const blurredLabel=(await trigger.innerText()).trim();
+  if(blurredLabel!==optionText)throw Error('CHOICE_SELECTED_LABEL_MISMATCH');
+  if(verifyOnly){const proof=confirmChoiceEvidence(candidate,candidate,{expectedLabel:optionText,blurredLabel});return {performed:false,selectionProof:proof,verification:'requires_independent_readback'};}
+  // Reopen with no click on the option. Keyboard highlight or a search result
+  // must not be confused with the portal's actual selected state.
+  const checked=await performChoice(adapter,{...action,method:action.method+'_verify'},value,family);
+  const proof=confirmChoiceEvidence(candidate,{...checked.selectionProof,selected:checked.selectionProof.reopenedOptionSelected},{expectedLabel:optionText,blurredLabel});
+  return {performed:true,selectionProof:proof,verification:'requires_independent_readback'};
  }catch(e){if(queryApplied&&search&&initialQuery!==undefined)await search.fill(initialQuery,{timeout:10000}).catch(()=>{});await dismiss().catch(()=>{});throw e;}
+}
+async function performAntMulti(adapter,action,value){
+ if(!Array.isArray(value)||new Set(value).size!==value.length||value.some(v=>!action.options?.includes(v)))throw Error('CAPTURED_MULTISELECT_VALUES_REQUIRED');
+ const l=await locateControl(adapter.page,action),root=l.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " ant-select ")][1]');
+ if(await root.count()!==1||!await root.evaluate(n=>n.classList.contains('ant-select-multiple')||!!n.querySelector('.ant-select-selection--multiple,.ant-select-selection-overflow')))throw Error('OBSERVED_MULTISELECT_REQUIRED');
+ const content='.ant-select-selection-item-content, .ant-select-selection__choice__content',read=()=>root.evaluate((n)=>[...n.querySelectorAll('.ant-select-selection-item-content, .ant-select-selection__choice__content')].map(e=>e.textContent.trim()));
+ let current=await read();if(JSON.stringify(current)===JSON.stringify(value))return {performed:false,verification:'requires_independent_readback'};
+ if(new Set(current).size!==current.length)throw Error('MULTISELECT_CHIPS_AMBIGUOUS');
+ // Remove only observed selection chips in this question, never résumé rows.
+ for(const text of current){const chip=root.locator('.ant-select-selection-item, .ant-select-selection__choice').filter({has:adapter.page.locator(content).filter({hasText:exact(text)})});if(await chip.count()!==1)throw Error('MULTISELECT_CHIP_NOT_UNIQUE');const remove=chip.locator('.ant-select-selection-item-remove, .ant-select-selection__choice__remove');if(await remove.count()!==1)throw Error('MULTISELECT_REMOVE_CONTROL_REQUIRED');await remove.click({timeout:10000});current=current.filter(v=>v!==text);await waitCommit(read,current);}
+ for(const text of value)await performChoice(adapter,{...action,method:'ant_dropdown',query:action.queryMap?.[text]||text},text,'ant');
+ await waitCommit(read,value);return {performed:true,verification:'requires_independent_readback'};
 }
 export async function performControl(adapter,action,value,files={}){
 
     if(!CONTROL_METHODS[action.method])throw Error('UNKNOWN_ACTION');
     if(action.method==='capture_wecruit_schema')return captureWecruitSchema(adapter.page,action);
-    if(!['wait','dropdown_inspect','ant_dropdown_inspect','ud_dropdown_inspect'].includes(action.method))await adapter.assertSingleEditor();
+    if(!['wait','dropdown_inspect','ant_dropdown_inspect','ud_dropdown_inspect','ant_dropdown_verify','ud_dropdown_verify','dropdown_verify'].includes(action.method))await adapter.assertSingleEditor();
     if(action.method==='ant_day')return performAntDay(adapter,action,value);
     if(action.provider==='feishu'&&!action.selectorsResolved)action=await adapter.page.evaluate(remapFeishuSpecDOM,action);
     action=await adapter.resolveSpec(action);
     if(action.method==='wait')return adapter.wait(action.selector);
+    if(action.method==='ant_multiselect')return performAntMulti(adapter,action,value);
     const l=await locateControl(adapter.page,action);
     const meta=await l.evaluate(n=>({tag:n.tagName,type:n.type||n.getAttribute('type'),role:n.getAttribute('role'),label:n.getAttribute('aria-label')||n.querySelector(':scope > .ant-form-item-label')?.innerText?.replace(/[＊*\s:：]+$/gu,'').trim()||n.textContent?.trim(),readonly:n.readOnly}));
-    if(['ant_dropdown','ant_dropdown_inspect'].includes(action.method))return performChoice(adapter,action,value,'ant');
-    if(['ud_dropdown','ud_dropdown_inspect'].includes(action.method))return performChoice(adapter,action,value,'ud');
+    if(['ant_dropdown','ant_dropdown_inspect','ant_dropdown_verify'].includes(action.method))return performChoice(adapter,action,value,'ant');
+    if(['ud_dropdown','ud_dropdown_inspect','ud_dropdown_verify'].includes(action.method))return performChoice(adapter,action,value,'ud');
     if(action.method==='native_date'){
       const precision=meta.type==='date'?'day':meta.type==='month'?'month':null;
       if(meta.tag!=='INPUT'||meta.readonly||!precision||!validDate(value,precision))throw Error('NATIVE_DATE_CONTRACT_REQUIRED');
@@ -125,8 +167,9 @@ export async function performControl(adapter,action,value,files={}){
       if(meta.readonly||['date','month','password','file','radio','checkbox'].includes(meta.type))throw Error('CONTROL_REQUIRES_SPECIFIC_ACTION');
       if(action.inputMode==='keyboard'){await l.fill('',{timeout:10000});await l.pressSequentially(String(value),{timeout:10000});}else await l.fill(String(value),{timeout:10000});if(action.selector==='.ant-calendar-input')await l.press('Enter');await l.press('Tab');return assertValue(l,String(value),{deferRedacted:true});
     }
+    if(action.method==='select_multiple'){if(meta.tag!=='SELECT'||!await l.evaluate(n=>n.multiple)||!Array.isArray(value)||value.some(v=>!action.options?.includes(v)))throw Error('NATIVE_MULTISELECT_REQUIRED');await l.selectOption(value.map(label=>({label})));await l.press('Tab');await waitCommit(()=>l.evaluate(n=>[...n.selectedOptions].map(o=>o.textContent.trim())),value);return;}
     if(action.method==='select'){if(meta.tag!=='SELECT')throw Error('NATIVE_SELECT_REQUIRED');await l.selectOption({label:String(value)});await l.press('Tab');await waitCommit(()=>l.evaluate(n=>n.selectedOptions[0]?.textContent?.trim()),String(value));return;}
-    if(['dropdown','dropdown_inspect'].includes(action.method))return performChoice(adapter,action,value,'aria');
+    if(['dropdown','dropdown_inspect','dropdown_verify'].includes(action.method))return performChoice(adapter,action,value,'aria');
     if(action.method==='radio'){
       if(!action.options?.includes(String(value)))throw Error('UNSUPPORTED_CHOICE_NO_FALLBACK');
       const choice=l.getByRole('radio',{name:String(value),exact:true});if(await choice.count()!==1)throw Error('CHOICE_NOT_UNIQUE_OR_NOT_PRESENT');await choice.check();await waitCommit(()=>choice.evaluate(n=>n.checked===true||n.getAttribute('aria-checked')==='true'||n.querySelector('input')?.checked===true),true);return;

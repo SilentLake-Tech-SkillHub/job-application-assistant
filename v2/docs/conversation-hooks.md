@@ -22,3 +22,11 @@ python3 hooks/conversation_scope.py disable --scope-file <private-scope.json>
 前置 Hook 只检查申请写入，不阻断源码修复、读取和状态查询。当前已启用的 V2 对话不得误调旧 recruiting-form 写入；其他对话仍不受影响。真正的顺序依据由 MCP 的 `workflow_next`、资产覆盖声明、问题映射、冻结方案和读回证据决定，Hook 不把提示词加载当成业务完成，也不直接调度模型回合。
 
 启动时读取两模块的 `runtime_info`，核对实际代码版本；IAB 仍通过活跃宿主执行上下文中的 `withHostBrowserBridge` 运行，缺少桥接时明确返回阻塞，禁止退回 Chrome。MCP 配置写入不代表当前进程已重载。
+
+## DSH 驻留宿主验收
+
+配置文件里写有插件名不等于运行成功。先用宿主的 `pluginInventory.list` 核对目标 Hook 插件 `enabled=true` 且 `fiberPhase=active`；仅 enabled 而 phase 为空时检查正式插件管理接口的实际加载错误。插件包必须能从该 profile 解析；开发安装可用已存在、已核实本机入口的 file URL，不能用另一个宿主或新浏览器代替修复。通过宿主插件管理接口重载目标插件后，读回状态。
+
+随后由执行 Agent 在自己的宿主上下文调用作用域 enable，并在同一真实会话验证 UserPromptSubmit、PreToolUse、PostToolUse 和 continuation 文件。错误响应可能由宿主包装为 `Error: {JSON}`，仍必须保留技术待办。每个阶段的 pending 在 SDK 校验之前登记；参数失败不能使 Stop 静默放行。只有组件已核实的用户等待、完整审阅或技术交接允许结束。代码维护/纯查询无需伪造投递回执。
+
+真实日志没有 Hook 事件时，应先确认插件实际加载；不能仅根据会话恢复时间推断是 resumed-agent 接线故障。宿主重载和 MCP 子进程重载分别核实，保持原浏览器、原页面及未保存内容。

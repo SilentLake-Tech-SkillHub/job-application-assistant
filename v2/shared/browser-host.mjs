@@ -18,7 +18,7 @@ try{
 }catch(error){if(error.code!=='ENOENT')throw error;}
 const diagnostics=installBrokerDiagnostics(path.join(path.dirname(socketPath),'broker-events.jsonl'));
 const hostMode=process.env.RECRUITING_BROWSER_MODE||'managed';
-const browser=new BrowserAdapter(hostMode==='cdp'?(process.env.RECRUITING_CDP_URL||'chrome-default'):hostMode==='iab'?'managed-iab':'managed-chrome',{profileDir:process.env.RECRUITING_BROWSER_PROFILE_DIR});
+const browser=new BrowserAdapter(hostMode==='cdp'?(process.env.RECRUITING_CDP_URL||'chrome-default'):hostMode==='iab'?'managed-iab':'managed-chrome',{profileDir:process.env.RECRUITING_BROWSER_PROFILE_DIR,screenshotDir:path.join(path.dirname(socketPath),'screenshots')});
 const status=()=>({pid:process.pid,brokerPid:process.pid,protocolVersion:4,...browser.status(),runtimeHealth:diagnostics.isDegraded()?'degraded_read_only':'healthy'});
 const methods=new Set(['assertLocation','wait','inventory','observe','act','ensureGroups','verificationInspect']);
 const code=error=>/^[A-Z_]+$/.test(error.message)?error.message:'BROWSER_HOST_OPERATION_FAILED';
@@ -37,7 +37,7 @@ const server=http.createServer(async(req,res)=>{
     else if(method==='reaInspect')data=await browser.reaInspect(args);
     else if(method==='roleEnterApplication')data=await browser.enterApplication(args);
     else if(method==='roleSnapshot')data=await browser.roleSnapshot(args);
-    else if(method==='screenshot')data=await browser.screenshot(args.pageId);
+    else if(method==='screenshot')data=await browser.screenshot(args.pageId,{selector:args.selector});
     else{
       if(method!=='existingPage'&&!methods.has(method))throw Error('UNKNOWN_BROWSER_HOST_METHOD');
       if(args.pageId&&(!args.readOnly||!['existingPage','inventory','observe','assertLocation','wait'].includes(method)))throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');

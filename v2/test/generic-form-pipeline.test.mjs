@@ -18,7 +18,7 @@ for(const [company,framework,method]of [['alpha','.ant-form-item','ant_dropdown'
  assert.equal(b.template.pages[0].fields[1].userOnly,undefined);
  const plan=await compileExecutionPlan(b.template,{companyId:company,pageUrl:c.pageUrl,templateHash:hash(b.template),values:{name:'Applicant',gender:'女'}});
  assert.equal(plan.readyForExecution,false);assert.ok(plan.constructionBlockers.includes('CONTROLS_NOT_FULLY_MAPPED')); // generation does not forge probe evidence
- const expected=plan.pages[0].expected,fields=Object.fromEntries(expected.fields.map(f=>[f.id,{present:true,value:f.value,selected:true}]));
+ const expected=plan.pages[0].expected,fields=Object.fromEntries(expected.fields.map(f=>[f.id,{present:true,value:f.value,selected:true,selectionProof:{status:'verified',label:f.value,blurConfirmed:true,reopenedOptionSelected:true}}]));
  const v=verifyForm(expected,{source:'live_dom',readAt:new Date().toISOString(),pageUrl:c.pageUrl,roleTitle:'Product',sections:[{title:'基本信息'}],inventoryIds:expected.fields.map(f=>f.id),fields});
  assert.equal(v.status,'verified');assert.deepEqual(v.summary.fields,{match:2});assert.deepEqual(v.summary.structure,{match:1});
 });
@@ -96,4 +96,13 @@ test('shared browser origins advance serially while independent origins keep pro
  const tasks=[{id:1,origin:'same'},{id:2,origin:'same'},{id:3,origin:'other'}];
  const r=await advanceCompanies(tasks,async t=>{if(active.has(t.origin))overlap=true;active.add(t.origin);await new Promise(r=>setTimeout(r,5));active.delete(t.origin);done.push(t.id);return {done:true};},{concurrency:3,affinity:t=>t.origin});
  assert.equal(overlap,false);assert.equal(r.results.length,3);assert.ok(done.indexOf(1)<done.indexOf(2));assert.ok(done.includes(3));
+});
+
+test('native and Ant multi selections keep array values and full selection readback contracts',async()=>{
+ const p={facts:{locations:{status:'known',value:['Beijing']}},fieldRegistry:{locations:{label:'Locations'}}};
+ for(const native of [true,false]){const c={...capture('multi',native?null:'.ant-form-item'),controls:[{selector:'#locations',questionSelector:'#question',selectedSelector:'#selected',labelSelector:'#label',label:'Locations',tag:native?'select':'input',type:native?'select-multiple':'search',renderer:native?null:'ant_select',contextProvider:native?null:'.ant-form-item',multiple:true,required:true,options:native?['Beijing','Shanghai']:undefined}]};
+ const b=buildFormTemplate({capture:c,profile:p,mappings:[{selector:'#locations',factKey:'locations'}],choices:native?[]:[{selector:'#locations',status:'captured',restored:true,options:['Beijing','Shanghai']}],page,templateId:native?'native-multi':'ant-multi'});assert.equal(b.readyToRegister,true);validateTemplate(b.template);assert.equal(b.template.pages[0].fields[0].control.type,'multiselect');
+ const plan=await compileExecutionPlan(b.template,{values:{locations:['Beijing']}});assert.deepEqual(plan.pages[0].fields[0].value,['Beijing']);assert.equal(plan.pages[0].fields[0].read.kind,'selected_values');
+ await assert.rejects(compileExecutionPlan(b.template,{values:{locations:['Not offered']}}),/VALUE_OUTSIDE_CAPTURED_OPTIONS/);
+ }
 });

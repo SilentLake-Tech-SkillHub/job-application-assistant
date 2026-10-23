@@ -17,6 +17,16 @@ export class CompanyBatch{
  async get({batchId,batchHash}){const b=await this.store.get('runs',batchId);if(b.batchHash!==batchHash)throw Error('BATCH_HASH_MISMATCH');await this.queues.get({queueId:b.queueId,queueHash:b.queueHash});return b;}
  async locked(args,fn){const release=await acquireLease(leasePath(this.leaseRoot,'company-dispatch:'+this.store.root),{waitMs:30000,busyCode:'COMPANY_BATCH_BUSY'});try{return await fn(await this.get(args));}finally{await release();}}
  async owners(){try{return await this.store.get('runs','company-channel-owners');}catch(e){if(e.code!=='ENOENT')throw e;return {};}}
+ async refreshMaterials(args){
+  const release=await acquireLease(leasePath(this.leaseRoot,'company-dispatch:'+this.store.root),{waitMs:30000,busyCode:'COMPANY_BATCH_BUSY'});
+  try{
+   const b=await this.store.get('runs',args.batchId);if(b.batchHash!==args.batchHash)throw Error('BATCH_HASH_MISMATCH');
+   const queue=await this.queues.refreshMaterials({queueId:b.queueId,queueHash:b.queueHash,authorizationRef:args.authorizationRef});
+   b.queueHash=queue.queueHash;for(const c of b.companies){c.tasks=c.tasks.map(t=>queue.tasks.find(n=>n.taskId===t.taskId)||t);if(c.status==='ready_for_user_review')c.status='pending';}
+   b.revision++;await this.store.put('runs',b.id,b);
+   return {batchId:b.id,batchHash:b.batchHash,queue,pagesPreserved:true,submission:'not_performed'};
+  }finally{await release();}
+ }
  async restrictChannels(args){return this.locked(args,async b=>{
   const channels=args.channels;if(!args.authorizationRef?.trim()||!Array.isArray(channels)||!channels.length||new Set(channels).size!==channels.length||channels.some(ch=>!b.channels.includes(ch)))throw Error('INVALID_CHANNEL_RESTRICTION');
   if(b.closedAt)throw Error('BATCH_ALREADY_CLOSED');
@@ -85,6 +95,7 @@ export class CompanyBatch{
     if(state?.status!=='ready_for_user_review'||!state.verifyRunId)throw Error('FULL_ROLE_VERIFICATION_REQUIRED');
     const expected=state.applicationUrl||state.returnUrl||task.applyUrl||task.url,verify=await this.store.get('runs',state.verifyRunId);
     if(verify.operation!=='verify_current'||verify.companyId!==c.companyId||verify.pageUrl!==expected||verify.status!=='verified'||!verify.checks?.length||!verify.checks.every(check=>['match','confirmed_omission'].includes(check.status))||!runs.some(run=>run.id===state.verifyRunId||run.id===state.fillRunId))throw Error('FULL_ROLE_VERIFICATION_REQUIRED');
+    if(task.materials&&(!verify.materialCoverage?.enabled||!verify.materialCoverage.complete||verify.materialCoverage.materialsHash!==digest(task.materials)))throw Error('ROLE_MATERIAL_VERIFICATION_REQUIRED');
    }
   }
   if(args.status==='waiting_for_user'){

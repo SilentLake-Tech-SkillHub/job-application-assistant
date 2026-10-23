@@ -1,3 +1,4 @@
+import {verifyMaterialCoverage} from './business-materials.mjs';
 import {matchesRole} from './role-identity.mjs';
 import {humanActionReason,verificationSummary} from './field-policy.mjs';
 import { contentViolations } from './content-policy.mjs';
@@ -42,6 +43,7 @@ export function verifyForm(expected, observed, {now=Date.now(),maxAgeMs=60000}={
     const check={id:field.id,label:field.label,kind:field.kind,status:'unverified',reason:null};
     if(field.userOnly){check.status=humanActionReason(field)?'needs_user':'construction_required';check.reason=humanActionReason(field)?'USER_ACTION_REQUIRED':'ORDINARY_FIELD_MARKED_USER_ONLY';checks.push(check);continue;}
     if(!actual||actual.present!==true){check.reason='FIELD_NOT_READ';checks.push(check);continue;}
+    if(field.lockedControl&&(actual.disabled!==true||actual.value!==field.lockedControl.value)){check.status='mismatch';check.reason='LOCKED_CONTROL_STATE_CHANGED';checks.push(check);continue;}
     if(isRedactedReadback(actual.value)){check.reason=REDACTED_READBACK_REASON;check.readbackVisibility='redacted';checks.push(check);continue;}
     if(field.value===undefined||field.value===null){
       const empty=actual.value===null||actual.value===undefined||actual.value===''||(Array.isArray(actual.value)&&!actual.value.length);
@@ -51,6 +53,7 @@ export function verifyForm(expected, observed, {now=Date.now(),maxAgeMs=60000}={
     }
     if(actual.errors?.length){check.status='invalid';check.reason='FIELD_VALIDATION_ERROR';checks.push(check);continue;}
     if(field.kind==='choice' && actual.selected!==true){check.status='mismatch';check.reason='DISPLAY_TEXT_WITHOUT_SELECTED_OPTION';checks.push(check);continue;}
+    if(field.selectionVerificationRequired&&(actual.selectionProof?.status!=='verified'||actual.selectionProof?.reopenedOptionSelected!==true||actual.selectionProof?.blurConfirmed!==true||actual.selectionProof?.label!==actual.value||field.choiceValue!=null&&actual.selectionProof?.value!==field.choiceValue)){check.status='mismatch';check.reason=actual.selectionProof?.reason||'CHOICE_SELECTION_PROOF_REQUIRED';checks.push(check);continue;}
     if(field.kind==='date'){
       const pattern=field.precision==='year'?/^\d{4}$/:field.precision==='month'?/^\d{4}-\d{2}$/:/^\d{4}-\d{2}-\d{2}$/;
       const parts=String(actual.value).split('-').map(Number);
@@ -66,6 +69,7 @@ export function verifyForm(expected, observed, {now=Date.now(),maxAgeMs=60000}={
     checks.push(check);
   }
   for(const error of observed.pageErrors||[])checks.push({id:'page_validation',status:'invalid',reason:'VISIBLE_PAGE_ERROR',selector:error.selector});
+  const materialCoverage=verifyMaterialCoverage(expected,observed);checks.push(...materialCoverage.checks);
   const counts={};for(const c of checks)counts[c.status]=(counts[c.status]||0)+1;
-  return {status:checks.every(c=>['match','confirmed_omission'].includes(c.status))?'verified':'needs_attention',readAt:observed.readAt,counts,summary:verificationSummary(checks,expected.fields.map(f=>f.id)),checks,save:observed.saveEvidence||'not_verified',submission:'not_performed'};
+  return {status:checks.every(c=>['match','confirmed_omission'].includes(c.status))?'verified':'needs_attention',readAt:observed.readAt,counts,materialCoverage,summary:verificationSummary(checks,expected.fields.map(f=>f.id)),checks,save:observed.saveEvidence||'not_verified',submission:'not_performed'};
 }

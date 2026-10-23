@@ -14,8 +14,8 @@ import {READY_TIMEOUT_MS,matchEntryPath} from './entry-recipe.mjs';
 export {PageAdapter,inventoryDOM} from './ui-page.mjs';
 
 export class BrowserAdapter {
-  constructor(endpoint,{connector=(url,options)=>chromium.connectOverCDP(url,options),chromePortFile=path.join(homedir(),'Library/Application Support/Google/Chrome/DevToolsActivePort'),profileDir,launcher=(dir,options)=>chromium.launchPersistentContext(dir,options)}={}) {
-    Object.assign(this,{endpoint,connector,chromePortFile,profileDir,launcher});this.connection=null;this.connecting=null;this.state='new';this.connectionAttempts=0;this.pageIds=new Map();
+  constructor(endpoint,{connector=(url,options)=>chromium.connectOverCDP(url,options),chromePortFile=path.join(homedir(),'Library/Application Support/Google/Chrome/DevToolsActivePort'),profileDir,screenshotDir,launcher=(dir,options)=>chromium.launchPersistentContext(dir,options)}={}) {
+    Object.assign(this,{endpoint,connector,chromePortFile,profileDir,screenshotDir,launcher});this.connection=null;this.connecting=null;this.state='new';this.connectionAttempts=0;this.pageIds=new Map();
   }
   async connect(){
     if(!this.endpoint)throw Error('BROWSER_CONNECTION_NOT_CONFIGURED');
@@ -50,7 +50,7 @@ export class BrowserAdapter {
     })();
     try{return await this.connecting;}catch(error){this.state='failed';throw error;}finally{this.connecting=null;}
   }
-  status(){return {state:this.state,mode:this.endpoint==='managed-chrome'?'managed':this.endpoint==='managed-iab'?'iab':'cdp',connectionAttempts:this.connectionAttempts,automaticRetries:0,driverRevision:'2026-10-23.2',reloadableReaders:['ant','native_dom','control_operations']};}
+  status(){return {state:this.state,mode:this.endpoint==='managed-chrome'?'managed':this.endpoint==='managed-iab'?'iab':'cdp',connectionAttempts:this.connectionAttempts,automaticRetries:0,driverRevision:'2026-10-23.4',reloadableReaders:['ant','native_dom','control_operations']};}
   async trackedPage(id){const page=this.pageIds.get(id);if(!page||page.isClosed())throw Error('ROLE_BROWSER_PAGE_LOST');return page;}
   async pageIdentity(id){const page=await this.trackedPage(id);return {pageId:id,pageUrl:page.url()};}
   async reaInspect({pageId,pageUrl,authorization}){
@@ -71,7 +71,7 @@ export class BrowserAdapter {
     const read=async s=>{if(!s)return null;const l=page.locator(s);if(await l.count()!==1)return null;return ((await l.innerText())||'').trim()||null;};
     return {pageUrl:page.url(),roleTitle:await read(roleSelector),...(roleIdentity?{roleIdentity:readRoleIdentity(roleIdentity,page.url())}:{}),account:await read(accountSelector),loginFormPresent:loginRoot?await page.locator(loginRoot).count()>0:false,readAt:new Date().toISOString()};
   }
-  async screenshot(pageId){const page=await this.trackedPage(pageId);const dir=path.join(path.dirname(this.profileDir),'screenshots');await mkdir(dir,{recursive:true,mode:0o700});const file=path.join(dir,randomUUID()+'.png');const masks=await page.evaluate(screenshotMaskDOM);await page.screenshot({path:file,fullPage:true,mask:masks.map(selector=>page.locator(selector))});await chmod(file,0o600);return {path:file,sensitiveFieldsMasked:masks.length};}
+  async screenshot(pageId,{selector}={}){const page=await this.trackedPage(pageId);const dir=this.screenshotDir||(this.profileDir?path.join(path.dirname(this.profileDir),'screenshots'):null);if(!dir)throw Error('SCREENSHOT_DIRECTORY_REQUIRED');await mkdir(dir,{recursive:true,mode:0o700});const file=path.join(dir,randomUUID()+'.png');const masks=await page.evaluate(screenshotMaskDOM),options={path:file,mask:masks.map(selector=>page.locator(selector))};if(selector){const actual=await new PageAdapter(page).resolveSelector(selector),target=page.locator(actual);if(await target.count()!==1)throw Error('SCREENSHOT_TARGET_NOT_UNIQUE');await target.screenshot(options);}else await page.screenshot({...options,fullPage:true});await chmod(file,0o600);return {path:file,scope:selector?'captured_field':'full_page',sensitiveFieldsMasked:masks.length};}
   async openPage(url,{pageId,readySelectors=[],reuseOnly=false}={}){
     if(new URL(url).protocol!=='https:')throw Error('HTTPS_BROWSER_PAGE_REQUIRED');
     const b=await this.connect(),context=b.contexts()[0];

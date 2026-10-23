@@ -1,5 +1,6 @@
+import {verifyDropdownSelections,attachChoiceProofs} from './choice-verification.mjs';
 import {templateMethods} from './control-registry.mjs';
-import {templateConstructionIssues} from './field-policy.mjs';
+import {templateConstructionIssues,humanActionReason} from './field-policy.mjs';
 import {continuationFor} from './workflow-continuation.mjs';
 import {matchesRole} from './role-identity.mjs';
 import {assertIndependentDrafts} from './shared-record.mjs';
@@ -35,12 +36,12 @@ export function validateTemplate(t) {
     for (const f of p.fields) {
       if (!idOK(f.id) || fields.has(f.id)) throw Error('DUPLICATE_OR_INVALID_FIELD');
       fields.add(f.id);
-      if (!f.source || !f.label || !f.read?.selector || !['value','text','checked','files','attribute','month','radio'].includes(f.read.kind)) throw Error('INCOMPLETE_FIELD_MAPPING');
+      if (!f.source || !f.label || !f.read?.selector || !['value','text','checked','files','attribute','month','radio','selected_values'].includes(f.read.kind)) throw Error('INCOMPLETE_FIELD_MAPPING');
       if(!['text','choice','date','file','boolean'].includes(f.kind))throw Error('FIELD_KIND_REQUIRED');
       if(['choice','date'].includes(f.kind)&&!f.read.selectedSelector&&!f.read.nativeSelect)throw Error('SELECTION_EVIDENCE_REQUIRED');
       if(f.kind==='file'&&(!f.read.filenameSelector||!f.read.uploadedSelector))throw Error('UPLOAD_EVIDENCE_REQUIRED');
       if (f.read.kind === 'attribute' && !['aria-checked','aria-selected','data-value'].includes(f.read.attribute)) throw Error('INVALID_READ_ATTRIBUTE');
-      if (f.userOnly || blocked.test(f.label)) {
+      if (f.userOnly || humanActionReason(f)) {
         if (f.actions?.length) throw Error('USER_ONLY_FIELD_HAS_ACTIONS');
         continue;
       }
@@ -50,7 +51,7 @@ export function validateTemplate(t) {
         if (a.method === 'click' && !a.label) throw Error('CLICK_NEEDS_OBSERVED_LABEL');
         if(a.method==='ant_day'&&(!a.openSelector||!a.openLabel||blocked.test(a.openLabel)))throw Error('ANT_DAY_CAPTURE_CONTRACT_REQUIRED');
         if (Object.hasOwn(a, 'value') || Object.hasOwn(a, 'code')) throw Error('VALUES_AND_CODE_DO_NOT_BELONG_IN_TEMPLATE');
-        if(['dropdown','radio','ud_dropdown','ant_dropdown'].includes(a.method)&&(!Array.isArray(a.options)||!a.options.length))throw Error('CAPTURED_OPTIONS_REQUIRED');
+        if(['dropdown','radio','ud_dropdown','ant_dropdown','ant_multiselect','select_multiple'].includes(a.method)&&(!Array.isArray(a.options)||!a.options.length))throw Error('CAPTURED_OPTIONS_REQUIRED');
       }
       validateControlContract(f);
     }
@@ -252,7 +253,8 @@ export class Engine {
     const inventory=plan.provider==='feishu'?rawInventory:await enrichControlContext(page,rawInventory);
     let mappingError=null;
     try{if(this.onInventory)await this.onInventory(company.id,task.pageUrl,inventory,plan);}catch(e){mappingError=/^[A-Z_]+$/.test(e.message)?e.message:'PROFILE_REGISTRATION_FAILED';}
-    const observation=attachInventory(await page.observe(plan),plan,inventory),observationRunId=randomUUID();
+    const choiceProofs=await verifyDropdownSelections(page,plan,task);
+    const observation=attachChoiceProofs(attachInventory(await page.observe(plan),plan,inventory),choiceProofs),observationRunId=randomUUID();
     await this.store.put('runs',observationRunId,{operation:'live_observation',companyId:company.id,observation});
     const result=verifyForm(compileExpected(plan,task),observation);
     const contractChanges=controlContractChanges(plan,inventory);
@@ -304,6 +306,7 @@ export class Engine {
           if(f.when&&!initial.fields[f.id]?.present)await page.wait(f.read.presenceSelector||f.read.selector);
           const current=initial.fields[f.id];
           if(current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'&&(!['choice','date'].includes(f.kind)||current.selected===true)){
+            if(f.control?.type==='dropdown'&&!f.read.nativeSelect){const proofs=await verifyDropdownSelections(page,{fields:[f]},task);if(proofs[f.id]?.status!=='verified')throw Error('EXISTING_CHOICE_NOT_VERIFIED');}
             (result.skippedMatchingFields??=[]).push(f.id);continue;
           }
           for(const action of f.actions||[]){
@@ -317,7 +320,9 @@ export class Engine {
         // Persist these before any completion verdict, just like the initial capture.
         if(this.onInventory)await this.onInventory(company.id,task.pageUrl,finalInventory,plan);
         if(controlContractChanges(plan,finalInventory).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
-        const observation=attachInventory(await page.observe(plan),plan,finalInventory);
+        const choiceProofs=await verifyDropdownSelections(page,plan,task);
+        const observation=attachChoiceProofs(attachInventory(await page.observe(plan),plan,finalInventory),choiceProofs);
+        result.selectionProofs={...(result.selectionProofs||{}),...choiceProofs};
         const observationRunId=randomUUID();
         await this.store.put('runs',observationRunId,{operation:'live_observation',companyId:company.id,observation});
         (result.observationRunIds??=[]).push(observationRunId);

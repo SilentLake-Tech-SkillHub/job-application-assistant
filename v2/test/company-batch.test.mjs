@@ -1,5 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,rm} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
 import {Store} from '../shared/engine.mjs';import {RoleQueue} from '../shared/role-queue.mjs';import {CompanyBatch} from '../shared/company-batch.mjs';
+import {createHash} from 'node:crypto';
 async function fixture(fn,n=24){const root=await mkdtemp(path.join(os.tmpdir(),'company-batch-'));const catalog=Array.from({length:n},(_,i)=>({id:'c'+i,origin:`https://c${i}.example.com`}));const input={schemaVersion:1,batchId:'synthetic',version:1,confirmation:{status:'confirmed',reference:'synthetic-user-confirmation'},companies:catalog.map((c,i)=>({companyId:c.id,order:i+1,roles:[{id:'r1',title:'Role',url:c.origin+'/role/1',selected:true,order:1,applicationStatus:'待投递'}]}))};const store=new Store(path.join(root,'store')),queues=new RoleQueue({root:path.join(root,'queues'),catalog});let now=1000000;const batch=new CompanyBatch({store,queues,catalog,clock:()=>now,leaseRoot:root});try{await fn({catalog,input,store,queues,batch,tick:()=>now+=31*60*1000});}finally{await rm(root,{recursive:true,force:true});}}
 test('default takes ten companies per channel, not ten roles; repeat take cannot duplicate',()=>fixture(async({batch,input})=>{input.companies[0].roles.push({...input.companies[0].roles[0],id:'r2',url:'https://c0.example.com/role/2',order:2});const b=await batch.create({companyPlan:input,authorizationRef:'synthetic approved batch'}),r=await batch.take(b);assert.deepEqual(r.activeCompanies,{chrome:10,iab:10});assert.equal(r.assignments.length,20);assert.equal(r.assignments[0].tasks.length,2);assert.equal(r.pendingCompanies,4);assert.equal(r.browserExecuted,false);assert.equal((await batch.take(b)).assignments.length,0);}));
 test('same verified login scope is pinned to one channel; a waiting login does not block the other',()=>fixture(async({batch,input,catalog,queues})=>{catalog[1].loginScope=catalog[0].origin;catalog[0].loginScope=catalog[0].origin;const b=await batch.create({companyPlan:input,authorizationRef:'synthetic',companiesPerChannel:2}),r=await batch.take(b);assert.equal(r.assignments[0].channel,r.assignments[1].channel);const a=r.assignments[0];await queues.put(a.tasks[0].taskId,{status:'needs_login',loginPlan:{planId:'observed-login'}});await batch.record({...b,...a,status:'waiting_for_user'});assert.equal((await batch.status(b)).companies[0].status,'waiting_for_user');assert.equal(r.activeCompanies.iab,2);}));
@@ -13,3 +14,15 @@ test('an explanation alone cannot turn technical work into a user wait or compan
  await assert.rejects(batch.record({...b,...a,status:'waiting_for_user',reason:'driver missing'}),/USER_WAIT_EVIDENCE_REQUIRED/);
  await assert.rejects(batch.record({...b,...a,status:'blocked',reason:'driver missing'}),/VERIFIED_BLOCK_HANDOFF_REQUIRED/);
 }));
+
+test('company completion requires an independent receipt for the exact role materials',()=>fixture(async({batch,input,queues,store})=>{
+ input.companies[0].roles[0].materials={schemaVersion:1,items:[{key:'referralCode',value:'SyntheticCode'}]};
+ const b=await batch.create({companyPlan:input,authorizationRef:'synthetic'}),a=(await batch.take(b)).assignments[0],task=a.tasks[0];
+ await queues.put(task.taskId,{status:'ready_for_user_review',verifyRunId:'material-verify',applicationUrl:task.url});
+ const run={id:'material-verify',operation:'verify_current',companyId:task.companyId,pageUrl:task.url,status:'verified',checks:[{id:'field',status:'match'}]};
+ await store.put('runs',run.id,run);
+ const args={...b,...a,status:'ready_for_user_review',runIds:[run.id]};
+ await assert.rejects(batch.record(args),/ROLE_MATERIAL_VERIFICATION_REQUIRED/);
+ run.materialCoverage={enabled:true,complete:true,materialsHash:'wrong-hash'};await store.put('runs',run.id,run);await assert.rejects(batch.record(args),/ROLE_MATERIAL_VERIFICATION_REQUIRED/);
+ run.materialCoverage.materialsHash=createHash('sha256').update(JSON.stringify(task.materials)).digest('hex');await store.put('runs',run.id,run);assert.equal((await batch.record(args)).status,'ready_for_user_review');
+},1));

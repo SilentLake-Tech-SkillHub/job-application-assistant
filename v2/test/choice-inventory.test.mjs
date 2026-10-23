@@ -27,21 +27,24 @@ test('a target can be located in a later virtual window without claiming a compl
  assert.equal(r.reason,'target_visible');assert.equal(r.complete,false);assert.equal(i,1);
 });
 
-function fixture({editable=true,tree=false,leaf=true}={}){
+function fixture({editable=true,tree=false,leaf=true,empty=false}={}){
  let opened=false,query='',selection='Original',writes=[],menuSelectors=[];
  const node={tagName:'INPUT',type:editable?'search':'text',readOnly:!editable,disabled:false,get value(){return query;},getAttribute:k=>k==='role'?'combobox':null,querySelector:()=>null};
  const input={count:async()=>1,waitFor:async()=>{},evaluate:async f=>f(node),innerText:async()=>'',filter(){return this;},fill:async v=>{query=v;writes.push(v);},press:async k=>{if(k==='Escape')opened=false;},click:async()=>{opened=true;},locator:()=>none};
  const none={count:async()=>0,filter(){return this;}};
  const display={...input,innerText:async()=>selection};
- const option={...input,click:async()=>{selection='中国';query='';opened=false;}};
- const options={...input,count:async()=>leaf?1:0,allTextContents:async()=>query?['中国']:['阿尔巴尼亚','阿联酋'],first:()=>input,waitFor:async()=>{},filter:o=>o.visible?options:option};
+ const option={...input,evaluate:async f=>f({tagName:'DIV',textContent:'中国',hasAttribute:()=>false,getAttribute:k=>k==='aria-selected'?String(selection==='中国'):null}),click:async()=>{selection='中国';query='';opened=false;}};
+ const options={...input,count:async()=>leaf&&!empty?1:0,allTextContents:async()=>query?['中国']:['阿尔巴尼亚','阿联酋'],first:()=>input,waitFor:async()=>{},filter:o=>o.visible?options:option};
  const treeRow=(depth,isLeaf)=>({querySelector:s=>s==='.ud__tree__node__label'?{innerText:'中国'}:s==='button.ud__expandButton-as-placeholder'&&isLeaf?{}:null,querySelectorAll:()=>Array(depth).fill({})});
- const menu={count:async()=>opened?1:0,filter(){return this;},waitFor:async()=>{},evaluate:async f=>f({classList:{contains:()=>tree},querySelectorAll:s=>tree&&s==='.ud__tree__node'?[treeRow(0,false),treeRow(1,false),...(leaf?[treeRow(2,true)]:[])]:[],parentElement:null,clientHeight:100,scrollHeight:100}),locator:s=>{menuSelectors.push(s);return s.startsWith('input')?none:options;}};
+ const menu={count:async()=>opened?1:0,filter(){return this;},waitFor:async()=>{},evaluate:async (f,args)=>f({classList:{contains:()=>tree},querySelectorAll:s=>empty&&s.includes('.ud__select__empty')?[{getClientRects:()=>[{}],textContent:'暂无数据'}]:tree&&s==='.ud__tree__node'?[treeRow(0,false),treeRow(1,false),...(leaf?[treeRow(2,true)]:[])]:[],parentElement:null,clientHeight:100,scrollHeight:100},args),locator:s=>{menuSelectors.push(s);return s.startsWith('input')?none:options;}};
  const label={...input,click:async()=>{opened=false;}};
  const page={locator:s=>s==='.ud__select__list'?menu:s.endsWith('.ud-formily-item-label')?label:s.endsWith('.ud__select__selector')?display:input};
  return {adapter:{page,resolveSpec:async a=>a,assertSingleEditor:async()=>{}},selectors:()=>menuSelectors,state:()=>({opened,query,selection,writes})};
 }
 const inspect={method:'ud_dropdown_inspect',selector:'#control',labelSelector:'#question > .ud-formily-item-label',query:'中国'};
+test('a real no-results marker returns restored empty search evidence instead of a driver crash',async()=>{
+ const f=fixture({empty:true}),r=await performControl(f.adapter,inspect,null);assert.equal(r.status,'captured_empty_search');assert.deepEqual(r.options,[]);assert.equal(r.coverage.reason,'observed_no_results');assert.equal(r.restored,true);assert.equal(f.state().selection,'Original');
+});
 test('UD search is executed and read back before exact search results can be claimed',async()=>{
  const f=fixture(),r=await performControl(f.adapter,inspect,null);
  assert.equal(r.searchable,true);assert.equal(r.queryApplied,true);assert.equal(r.scope,'exact_search_results');assert.deepEqual(r.options,['中国']);assert.equal(r.restored,true);

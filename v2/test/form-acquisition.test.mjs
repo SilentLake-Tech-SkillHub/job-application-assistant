@@ -1,7 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {acquisitionPlan,isChoiceControl,capturedChoiceOptions,compactConstructionResult,templateFromDraft} from '../shared/form-acquisition.mjs';
+import {acquisitionPlan,detectedAcquisitionPlan,captureContentId,isChoiceControl,capturedChoiceOptions,compactConstructionResult,templateFromDraft} from '../shared/form-acquisition.mjs';
 import {hash} from '../shared/engine.mjs';
+
+test('same-page observed framework chooses the collector without an agent flag; ambiguity stays explicit',async()=>{
+ const page={observe:async spec=>{assert.deepEqual(spec.fields,[]);return {groups:{ant:3,feishu:0}};}};
+ assert.equal((await detectedAcquisitionPlan(page,{provider:'feishu'})).provider,'ant');
+ await assert.rejects(detectedAcquisitionPlan(page,{},'feishu'),/EVIDENCE_MISMATCH/);
+ await assert.rejects(detectedAcquisitionPlan({observe:async()=>({groups:{ant:1,feishu:1}})},{}),/AMBIGUOUS/);
+});
+test('unchanged captures keep evidence identity; company, page, provider and control changes invalidate it',()=>{
+ const controls=[{selector:'#a',required:true}],id=captureContentId('sample','https://a.test/form','ant',controls,hash);
+ assert.equal(id,captureContentId('sample','https://a.test/form','ant',structuredClone(controls),hash));
+ for(const args of [['other','https://a.test/form','ant',controls],['sample','https://a.test/other','ant',controls],['sample','https://a.test/form','feishu',controls],['sample','https://a.test/form','ant',[{selector:'#a',required:false}]]])assert.notEqual(id,captureContentId(...args,hash));
+});
 
 test('explicit construction provider overrides an obsolete template without dropping its page contract',()=>{
  const plan={provider:'feishu',readySelector:'form',fields:[{id:'original'}]};

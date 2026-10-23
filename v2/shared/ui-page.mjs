@@ -48,7 +48,7 @@ export class PageAdapter {
    }
    const raw=await this.page.evaluate(plan?.provider==='feishu'?inventoryFeishuDOM:await currentNative());return plan?.provider==='feishu'&&!plan.rawKeys?canonicalizeInventory(raw).fields:raw;
   }
-  async observe(plan){plan=await this.resolveSpec(plan);const result=await this.page.evaluate(observeDOM,plan.provider==='feishu'&&!plan.selectorsResolved?await this.page.evaluate(remapFeishuSpecDOM,plan):plan);if(plan.roleIdentity)result.roleIdentity=readRoleIdentity(plan.roleIdentity,result.pageUrl);return result;}
+  async observe(plan){plan=await this.resolveSpec(plan);const result=await this.page.evaluate(await currentNative(),plan.provider==='feishu'&&!plan.selectorsResolved?await this.page.evaluate(remapFeishuSpecDOM,plan):plan);if(plan.roleIdentity)result.roleIdentity=readRoleIdentity(plan.roleIdentity,result.pageUrl);return result;}
   async ensureGroups(groups){
     if(groups?.length)await this.assertSingleEditor();
     for(const group of groups||[]){

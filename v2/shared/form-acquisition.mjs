@@ -4,6 +4,18 @@ export function acquisitionPlan(plan, provider) {
  return {...(plan || {}), ...(provider ? {provider} : {})};
 }
 
+export async function detectedAcquisitionPlan(page,plan,provider){
+ const observed=await page.observe({fields:[],groups:[{id:'ant',selector:'form.ant-form .ant-form-item'},{id:'feishu',selector:'.atsx-form-item[data-cy]'}]});
+ const found=['ant','feishu'].filter(key=>observed.groups?.[key]>0);
+ if(!provider&&found.length>1)throw Error('FORM_PROVIDER_AMBIGUOUS');
+ if(provider&&found.length&&!found.includes(provider))throw Error('FORM_PROVIDER_EVIDENCE_MISMATCH');
+ return acquisitionPlan(plan,provider||found[0]);
+}
+
+export function captureContentId(companyId,pageUrl,provider,controls,digest){
+ return 'capture-'+companyId+'-'+digest({companyId,pageUrl,provider:provider||null,controls}).slice(0,24);
+}
+
 export function isChoiceControl(field) {
  return field.type === 'radio' || field.tag === 'select' || field.type === 'select' || field.renderer === 'ant_select' ||
   field.type === 'search' && field.contextProvider === '.ud-formily-item' ||

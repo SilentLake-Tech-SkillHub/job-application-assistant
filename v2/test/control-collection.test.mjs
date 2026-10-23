@@ -9,8 +9,8 @@ import {withHostBrowserBridge} from '../shared/host-browser-bridge.mjs';
 import {BrokerBrowserAdapter} from '../shared/browser-rpc.mjs';
 import {mkdtemp,rm} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
 
-test('all ten control contracts share the frozen action registry; inspections never enter templates',()=>{
- assert.equal(Object.keys(CONTROL_TYPES).length,10);
+test('all declared control contracts share the frozen action registry; inspections never enter templates',()=>{
+ assert.equal(Object.keys(CONTROL_TYPES).length,11);
  for(const c of Object.values(CONTROL_TYPES)){assert.ok(Object.isFrozen(c));for(const m of c.methods)assert.ok(templateMethods().has(m));assert.ok(c.reads.length);}
  assert.equal(templateMethods().has('ud_dropdown_inspect'),false);assert.equal(templateMethods().has('capture_wecruit_schema'),false);
  assert.ok(CONTROL_METHODS.ant_day);assert.throws(()=>CONTROL_TYPES.text.methods.push('submit'));
@@ -51,9 +51,9 @@ function fixture(family='ud',duplicate=false){
  let opened=false,selected='Original',checks=0;
  const node={tagName:'INPUT',type:'text',value:'',readOnly:false,textContent:'Original',getAttribute:k=>k==='role'?'combobox':null,querySelector:()=>null};
  const single={fill:async value=>{node.value=value;},waitFor:async()=>{},count:async()=>1,innerText:async()=>selected,evaluate:async f=>f(node),press:async key=>{if(key==='Escape')opened=false;},click:async()=>{opened=true;},locator:()=>({count:async()=>0}),filter(){return this;}};
- const option={...single,click:async()=>{selected='Other';opened=false;checks++;}};
+ const option={...single,evaluate:async f=>f({tagName:'DIV',textContent:'Other',hasAttribute:()=>false,getAttribute:k=>k==='aria-selected'?String(selected==='Other'):null}),click:async()=>{selected='Other';opened=false;checks++;}};
  const options={...single,allTextContents:async()=>duplicate?['Other','Other']:['Other','Other extended'],first:()=>single,waitFor:async()=>{},filter:o=>{if(o.visible)return options;assert.ok(o.hasText.test('Other'));assert.equal(o.hasText.test('Other extended'),false);return option;}};
- const menu={count:async()=>opened?1:0,waitFor:async()=>{},filter(){return this;},locator:()=>options,evaluate:async f=>f({querySelectorAll:()=>[],parentElement:null,clientHeight:100,scrollHeight:100})};
+ const menu={count:async()=>opened?1:0,waitFor:async()=>{},filter(){return this;},locator:()=>options,evaluate:async (f,args)=>f({querySelectorAll:()=>[],parentElement:null,clientHeight:100,scrollHeight:100},args)};
  const page={url:()=> 'https://fixture.test/form',locator:s=>s.endsWith(' > .ud-formily-item-label')?{...single,click:async()=>{opened=false;}}:s===('.ud__select__list')||s==='[role="listbox"]'?menu:s.includes('ant-select-open')?{count:async()=>0,filter(){return this;}}:single};
  return {page,state:()=>({opened,selected,checks})};
 }
@@ -96,9 +96,10 @@ test('host role identity is read from actual query rather than the expected ID',
 
 import {retireLegacyQuestionMappings} from '../shared/profile-migration.mjs';
 import {hash} from '../shared/engine.mjs';
+import {formLocation} from '../shared/profile.mjs';
 test('locator upgrades replace inactive mappings only after full live proof, without deleting facts',()=>{
  const url='https://fixture.test/form',template={evidence:{sourceUrl:url},pages:[{fields:[{source:'hasNoExperience',inventorySelectors:['label.question input'],read:{selector:'label.question input'}}]}]};
- const key=hash({companyId:'fixture',pageUrl:'/form'}).slice(0,20);
+ const key=hash({companyId:'fixture',pageUrl:formLocation(url)}).slice(0,20);
  const profile={facts:{hasNoExperience:{value:false}},companyForms:{[key]:{mappings:{old:{factKey:'hasNoExperience',selector:'input[type="checkbox"]',active:false,coverageRequired:true,status:'mapped'},unknown:{factKey:'unknown',selector:'#unknown',active:false,coverageRequired:true,status:'mapped'}}}}};
  const probe={operation:'internal_condition_probe',companyId:'fixture',templateHash:hash(template),status:'verified',restoration:'verified',branches:[{status:'verified',newQuestions:0,inventory:[{selector:'label.question input'}]}]};
  assert.equal(retireLegacyQuestionMappings(profile,{companyId:'fixture',template,probe}).retired,1);assert.ok(!profile.companyForms[key].mappings.old);assert.ok(profile.companyForms[key].mappings.unknown);assert.equal(profile.facts.hasNoExperience.value,false);
@@ -155,10 +156,10 @@ test('Ant readonly search input opens via its selector and scopes rendered popup
  const parent={count:async()=>1,locator:s=>{assert.equal(s,'.ant-select-selector, .ant-select-selection');return display;}};
  const l={count:async()=>1,evaluate:async f=>f(inputNode),locator:s=>{assert.ok(s.includes('" ant-select "'));return parent;},filter(){return this;},press:async()=>{open=false;}};
  const label={count:async()=>1,click:async()=>{open=false;}};
- const option={count:async()=>1,click:async()=>{selected='Master';open=false;}};
- const options={filter:o=>o.visible?options:option,first:()=>({waitFor:async()=>{}}),allTextContents:async()=>['Bachelor','Master']};
- const menu={filter(){return this;},count:async()=>open?1:0,waitFor:async()=>{},locator:()=>options,evaluate:async f=>f({querySelectorAll:()=>[],parentElement:null,clientHeight:100,scrollHeight:100})};
+ const option={count:async()=>1,evaluate:async f=>f({tagName:'DIV',textContent:'Master',hasAttribute:()=>false,getAttribute:k=>k==='aria-selected'?String(selected==='Master'):null}),click:async()=>{selected='Master';open=false;}};
+ const options={count:async()=>2,filter:o=>o.visible?options:option,first:()=>({waitFor:async()=>{}}),allTextContents:async()=>['Bachelor','Master']};
+ const menu={filter(){return this;},count:async()=>open?1:0,waitFor:async()=>{},locator:()=>options,evaluate:async (f,args)=>f({querySelectorAll:()=>[],parentElement:null,clientHeight:100,scrollHeight:100},args)};
  const page={url:()=> 'https://fixture.test/form',locator:s=>{events.push(s);if(s==='#field')return l;if(s==='#label')return label;if(s.startsWith('.ant-select-dropdown'))return menu;return {filter(){return this;},count:async()=>0};}};
  const p=new PageAdapter(page,{listOpenPageUrls:async()=>[]});await p.act({method:'ant_dropdown',selector:'#field',labelSelector:'#label',options:['Master']},'Master',{});
- assert.equal(triggerClicks,1);assert.equal(selected,'Master');assert.ok(events.some(s=>s.includes('.ant-select-dropdown:has([id="field_list"])')));
+ assert.equal(triggerClicks,2);assert.equal(selected,'Master');assert.ok(events.some(s=>s.includes('.ant-select-dropdown:has([id="field_list"])')));
 });

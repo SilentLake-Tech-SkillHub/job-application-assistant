@@ -1,3 +1,4 @@
+import {materialKey,MATERIAL_SOURCES} from './business-materials.mjs';
 import {applyChoiceResolution} from './choice-resolution.mjs';
 import {createHash} from 'node:crypto';
 import {CONTROL_TYPES} from './control-registry.mjs';
@@ -5,9 +6,10 @@ import {humanActionReason,classifyPending,templateConstructionIssues} from './fi
 const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const key=s=>(s||'').normalize('NFKC').replace(/[\s＊*：:]/gu,'').toLowerCase();
 export function mappingCandidates(controls,profile){
- return controls.map(c=>({selector:c.selector,label:c.label,section:c.section||c.group||null,repeatIndex:c.repeatIndex??null,owner:'agent',candidates:Object.entries(profile.fieldRegistry||{}).filter(([k,r])=>!k.startsWith('unmapped.')&&!r.neverStoreValue&&[r.label,r.question,...(r.aliases||[])].some(x=>key(x)&&key(x)===key(c.label))).map(([factKey])=>({factKey,status:profile.facts[factKey]?.status||'missing'})),automaticMapping:false}));
+ return controls.map(c=>({selector:c.selector,label:c.label,section:c.section||c.group||null,repeatIndex:c.repeatIndex??null,owner:'agent',candidates:[...(materialKey(c)?[{factKey:MATERIAL_SOURCES[materialKey(c)],status:'confirmed_handoff_material'}]:[]),...Object.entries(profile.fieldRegistry||{}).filter(([k,r])=>!k.startsWith('unmapped.')&&!r.neverStoreValue&&[r.label,r.question,...(r.aliases||[])].some(x=>key(x)&&key(x)===key(c.label))).map(([factKey])=>({factKey,status:profile.facts[factKey]?.status||'missing'}))],automaticMapping:false}));
 }
 export function inferControl(c){
+ if(c.multiple&&(c.renderer==='ant_select'||c.tag==='select'))return 'multiselect';
  if(c.contextProvider==='.atsx-form-item'){
   const type={month:'month_picker',year:'year_picker',choice:'dropdown',radio_group:'radio',readonly:'readonly_text',school_text:'dropdown'}[c.type];if(type)return type;
  }
@@ -26,7 +28,7 @@ export function inferControl(c){
  return null;
 }
 function fieldFromControl(c,m,choice){
- const type=inferControl(c),contract=CONTROL_TYPES[type],human=humanActionReason({inventoryLabel:c.label,inventoryType:c.type});
+ const type=inferControl(c),contract=CONTROL_TYPES[type],human=humanActionReason({inventoryLabel:c.label,inventoryType:c.type,inventoryRenderer:c.renderer,role:c.role});
  const f={id:'field-'+digest([c.selector,c.label]).slice(0,20),source:m?.factKey||'unmapped.pending',label:c.label||'未识别题目',required:!!c.required,inventorySelectors:c.inventorySelectors||[c.selector],inventoryLabel:c.label,inventoryType:c.type,inventoryReadonly:c.readonly===true||c.type==='readonly',inventoryDisabled:!!c.disabled,inventoryRenderer:c.renderer||null,read:{selector:c.selector,kind:'value'},actions:[],constructionBlockers:[]};
  if(!c.label)f.constructionBlockers.push('QUESTION_LABEL_NOT_CAPTURED');
  if(!m?.factKey||m.factKey.startsWith('unmapped.'))f.constructionBlockers.push('SEMANTIC_MAPPING_REQUIRED');
@@ -40,12 +42,13 @@ function fieldFromControl(c,m,choice){
  else if(type==='searchable_text'){f.constructionBlockers.push('SEARCHABLE_TEXT_COMMIT_CONTRACT_REQUIRED');}
  else if(type==='text'){if(!human)f.actions=[action('fill')];}
  else if(type==='checkbox'){f.read.kind='checked';if(!human)f.actions=[action('check')];}
- else if(type==='dropdown'||type==='radio'){
+ else if(type==='dropdown'||type==='radio'||type==='multiselect'){
   const options=choice?.restored&&choice.status==='captured'?choice.options:c.tag==='select'||c.type==='select'||type==='radio'?c.options:null;
   f.control.options=options||[];
   if(!options?.length)f.constructionBlockers.push('OPTIONS_NOT_CAPTURED');
   f.read.selectedSelector=c.selectedSelector||c.questionSelector||c.selector;
-  if(type==='radio'){f.read={...f.read,selector:c.questionSelector||c.selector,kind:'radio'};if(!human)f.actions=[{method:'radio',selector:c.questionSelector||c.selector,options:options||[]}];}
+  if(type==='multiselect'){f.read={selector:c.tag==='select'?c.selector:c.questionSelector||c.selector,kind:'selected_values',selectedSelector:c.selectedSelector||c.selector,...(c.tag==='select'?{nativeSelect:true}:{itemSelector:'.ant-select-selection-item-content, .ant-select-selection__choice__content'})};f.actions=[{...action(c.tag==='select'?'select_multiple':'ant_multiselect'),labelSelector:c.labelSelector,options:options||[],queryMap:choice?.optionQueries||{}}];}
+  else if(type==='radio'){f.read={...f.read,selector:c.questionSelector||c.selector,kind:'radio'};if(!human)f.actions=[{method:'radio',selector:c.questionSelector||c.selector,options:options||[]}];}
   else if(c.tag==='select'||c.type==='select'){f.read.nativeSelect=true;f.actions=[{...action('select'),options:options||[]}];}
   else if(framework==='.ant-form-item'||framework==='.ud-formily-item'){
    const method=framework==='.ant-form-item'?'ant_dropdown':'ud_dropdown';
@@ -65,9 +68,14 @@ function fieldFromControl(c,m,choice){
   if(c.uploadContainerSelector&&c.filenameSelector&&c.uploadedSelector){f.read.selector=c.uploadContainerSelector;f.read.filenameSelector=c.filenameSelector;f.read.uploadedSelector=c.uploadedSelector;if(!human)f.actions=[action('upload')];}
   else f.constructionBlockers.push('UPLOAD_SITE_READBACK_REQUIRED');
  }
- if(c.disabled&&!c.when)f.constructionBlockers.push('DISABLED_CONTROL_DEPENDENCY_REQUIRED');
+ if(c.disabled&&!c.when&&!human){
+  if(choice?.status==='captured_locked_value'&&choice.restored===true&&choice.lockedControl?.disabled===true&&choice.lockedControl.selected===true&&choice.options?.length===1){
+   f.readonly=true;f.actions=[];f.control.options=choice.options;f.read.requireDisabled=true;f.lockedControl=choice.lockedControl;
+   f.constructionBlockers=f.constructionBlockers.filter(reason=>reason!=='OPTIONS_NOT_CAPTURED');
+  }else f.constructionBlockers.push('DISABLED_CONTROL_DEPENDENCY_REQUIRED');
+ }
  if(c.when)f.when=c.when;
- if(c.multiple)f.constructionBlockers.push('MULTISELECT_DRIVER_CONTRACT_REQUIRED');
+ if(c.multiple&&type!=='multiselect')f.constructionBlockers.push('MULTISELECT_DRIVER_CONTRACT_REQUIRED');
  if(c.constructionBlockers?.length)f.constructionBlockers.push(...c.constructionBlockers);
  if(m?.enumMap)f.enumMap=m.enumMap;
  f.constructionBlockers=[...new Set(f.constructionBlockers)];
@@ -80,7 +88,12 @@ export function buildFormTemplate({capture,profile,mappings=[],choices=[],page,t
  if(reaStructure&&(reaStructure.pageUrl!==capture.pageUrl||reaStructure.companyId!==capture.companyId))throw Error('REA_CONTROL_CAPTURE_SCOPE_MISMATCH');
  const groups=new Map();
  for(const c of capture.controls){const identity=c.type==='radio'&&c.questionSelector?c.questionSelector:c.selector;const prior=groups.get(identity);if(prior&&c.type!=='radio')throw Error('DUPLICATE_CAPTURED_SELECTOR');if(prior)prior.inventorySelectors.push(c.selector);else groups.set(identity,{...c,inventorySelectors:[c.selector]});}
- const fields=[...groups.values()].map(c=>applyChoiceResolution(fieldFromControl(c,mappings.find(m=>m.active!==false&&c.inventorySelectors.includes(m.selector)),choices.find(x=>x.selector===c.selector)),choices.find(x=>x.selector===c.selector),profile));
+ const fields=[...groups.values()].map(c=>{
+  const f=fieldFromControl(c,mappings.find(m=>m.active!==false&&c.inventorySelectors.includes(m.selector)),choices.find(x=>x.selector===c.selector));
+  const ongoing=f.source.replace(/\.(?:end|endDate|dateEnd|endMonth)$/u,'.ongoing');
+  if(f.kind==='date'&&ongoing!==f.source&&profile.facts?.[ongoing]?.status==='known'&&typeof profile.facts[ongoing].value==='boolean')f.ongoingSource=ongoing;
+  return f.lockedControl?f:applyChoiceResolution(f,choices.find(x=>x.selector===c.selector),profile);
+ });
  const template={id:templateId,version,evidence:{sourceUrl:capture.pageUrl,observedAt:capture.observedAt,captureId:capture.captureId,...(reaStructure?{reaEvidenceId:reaStructure.reaEvidenceId,reaEvidenceHash:reaStructure.reaEvidenceHash}: {})},pages:[{...page,pathPrefix:page.pathPrefix||new URL(capture.pageUrl).pathname,fields}],coverage:{allControlsMapped:false,allDriversSupported:false,allConditionalBranchesVerified:false}};
  const blockers=templateConstructionIssues(template);
  if(reaStructure){
