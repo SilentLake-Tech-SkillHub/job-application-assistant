@@ -80,6 +80,12 @@ test('two dates sharing one range label keep their independent captured control 
  const b=buildFormTemplate({capture:c,profile,mappings:[{selector:'#range-0',factKey:'start'},{selector:'#range-1',factKey:'end'}],page,templateId:'dates'});
  assert.equal(b.readyToRegister,true);assert.deepEqual(b.template.pages[0].fields.map(f=>f.actions[0].openSelector),['#range-0','#range-1']);assert.ok(b.template.pages[0].fields.every(f=>!f.userOnly));
 });
+test('section contracts normalize titles and use captured section roots instead of a shared form root',()=>{
+ const c=capture('sections','.ant-form-item');c.provider='ant';c.controls=[{selector:'#name',sectionSelector:'#basics',section:'Basics',label:'姓名',type:'text',tag:'input',contextProvider:'.ant-form-item'}];
+ const b=buildFormTemplate({capture:c,profile,mappings:[{selector:'#name',factKey:'name'}],page:{...page,sections:['Basics']},templateId:'sections'});
+ assert.deepEqual(b.template.pages[0].sections,[{title:'Basics'}]);assert.deepEqual(b.template.pages[0].sectionDiscovery.selectors,['#basics']);validateTemplate(b.template);
+ const bad=structuredClone(b.template);bad.pages[0].sections=['Basics'];assert.throws(()=>validateTemplate(bad),/SECTION_TITLES_REQUIRED/);
+});
 test('captured editable Ant date uses real input and rejects failed commit',async()=>{
  let value='',keys=[];const input={count:async()=>1,evaluate:async fn=>fn({tagName:'INPUT',readOnly:false,closest:()=>({}),get value(){return value;}}),fill:async v=>{value=v;},press:async k=>keys.push(k)};
  const adapter={resolveSelector:async s=>s,page:{locator:()=>input}},action={selector:'#date',openSelector:'#date',openLabel:'起止时间',openKind:'captured_date_input'};

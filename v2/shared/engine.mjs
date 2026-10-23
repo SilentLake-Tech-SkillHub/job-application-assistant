@@ -1,4 +1,5 @@
 import {verifyDropdownSelections,attachChoiceProofs} from './choice-verification.mjs';
+import {verifyDateRanges,attachDateRangeProofs} from './date-range-verification.mjs';
 import {templateMethods} from './control-registry.mjs';
 import {templateConstructionIssues,humanActionReason} from './field-policy.mjs';
 import {continuationFor} from './workflow-continuation.mjs';
@@ -13,7 +14,7 @@ import {compileExecutionPlan,assertPreparedPlan} from './execution-plan.mjs';
 import {validateControlContract} from './value-contract.mjs';
 import {acquireLease,leasePath,defaultLeaseRoot} from './leases.mjs';
 import {probeConditions} from './condition-probe.mjs';
-import {enrichControlContext} from './control-context.mjs';
+import {enrichControlContext,liveControls} from './control-context.mjs';
 import {controlContractChanges} from './control-contract.mjs';
 import {FormRouter} from './form-route.mjs';
 
@@ -31,6 +32,7 @@ export function validateTemplate(t) {
     if (!p.pathPrefix?.startsWith('/') || !p.readySelector || !Array.isArray(p.fields) || !p.fields.length) throw Error('INVALID_PAGE');
     if(!p.roleTitle || (!p.roleSelector&&!p.roleIdentity?.parameter))throw Error('ROLE_IDENTITY_REQUIRED');
     if(!p.sections?.length||!p.sectionDiscovery?.selector||!p.sectionDiscovery?.titleSelector)throw Error('SECTION_COVERAGE_PLAN_REQUIRED');
+    if(p.sections.some(section=>typeof section?.title!=='string'||!section.title.trim()))throw Error('SECTION_TITLES_REQUIRED');
     for(const g of p.groups||[])if(!idOK(g.id)||!g.selector||!Number.isInteger(g.count)||g.count<0)throw Error('INVALID_REPEAT_GROUP');
     if(p.provider&&!['feishu','ant'].includes(p.provider))throw Error('UNKNOWN_PROVIDER');
     for (const f of p.fields) {
@@ -50,7 +52,7 @@ export function validateTemplate(t) {
         if (!methods.has(a.method) || !a.selector || blocked.test(a.label || '')) throw Error('UNSAFE_OR_UNKNOWN_ACTION');
         if (a.method === 'click' && !a.label) throw Error('CLICK_NEEDS_OBSERVED_LABEL');
         if(a.method==='ant_day'&&(!a.openSelector||!a.openLabel||blocked.test(a.openLabel)))throw Error('ANT_DAY_CAPTURE_CONTRACT_REQUIRED');
-        if (Object.hasOwn(a, 'value') || Object.hasOwn(a, 'code')) throw Error('VALUES_AND_CODE_DO_NOT_BELONG_IN_TEMPLATE');
+        if (['value','code','rangePeerValue','rangePeerFieldId'].some(k=>Object.hasOwn(a,k))) throw Error('VALUES_AND_CODE_DO_NOT_BELONG_IN_TEMPLATE');
         if(['dropdown','radio','ud_dropdown','ant_dropdown','ant_multiselect','select_multiple'].includes(a.method)&&(!Array.isArray(a.options)||!a.options.length))throw Error('CAPTURED_OPTIONS_REQUIRED');
       }
       validateControlContract(f);
@@ -249,12 +251,12 @@ export class Engine {
     if(matches.length!==1)throw Error('AMBIGUOUS_VERIFICATION_PAGE');
     const plan=matches[0],page=await this.browser.existingPage(task.pageUrl);
     await page.assertLocation(company.origin,plan.pathPrefix);await page.wait(plan.readySelector);
-    const rawInventory=await page.inventory(plan);
-    const inventory=plan.provider==='feishu'?rawInventory:await enrichControlContext(page,rawInventory);
+    const inventory=await liveControls(page,plan);
     let mappingError=null;
     try{if(this.onInventory)await this.onInventory(company.id,task.pageUrl,inventory,plan);}catch(e){mappingError=/^[A-Z_]+$/.test(e.message)?e.message:'PROFILE_REGISTRATION_FAILED';}
     const choiceProofs=await verifyDropdownSelections(page,plan,task);
-    const observation=attachChoiceProofs(attachInventory(await page.observe(plan),plan,inventory),choiceProofs),observationRunId=randomUUID();
+    const dateProofs=await verifyDateRanges(page,plan,task);
+    const observation=attachDateRangeProofs(attachChoiceProofs(attachInventory(await page.observe(plan),plan,inventory),choiceProofs),dateProofs),observationRunId=randomUUID();
     await this.store.put('runs',observationRunId,{operation:'live_observation',companyId:company.id,observation});
     const result=verifyForm(compileExpected(plan,task),observation);
     const contractChanges=controlContractChanges(plan,inventory);
@@ -266,7 +268,7 @@ export class Engine {
   async runCompany({task,company,template,prepared},authorization) {
     const started=performance.now();
     const result={companyId:company.id,roleId:task.roleId||null,pageUrl:task.pageUrl,startedAt:new Date().toISOString(),templateHash:hash(template),planId:prepared.id,planHash:prepared.planHash,profileHash:task.profileHash,status:'needs_attention',fields:[],pageChecks:[],submission:'not_performed',save:'not_verified'};
-    let activePage,activePlan;
+    let activePage,activePlan,activeField;
     try {
       const page=await this.browser.existingPage(task.pageUrl);
       activePage=page;
@@ -275,7 +277,7 @@ export class Engine {
         activePlan=plan;
         await page.assertLocation(company.origin,plan.pathPrefix);
         await page.wait(plan.readySelector);
-        const inventory=async()=>{const controls=await page.inventory(plan);return plan.provider==='feishu'?controls:enrichControlContext(page,controls);};
+        const inventory=()=>liveControls(page,plan);
         const live=await inventory();
         if(this.onInventory)await this.onInventory(company.id,task.pageUrl,live,plan);
         const mapped=new Set(plan.fields.flatMap(f=>f.inventorySelectors||[f.read.selector]));
@@ -301,8 +303,11 @@ export class Engine {
         if((uploads.length||plan.groups?.length)&&this.onInventory)await this.onInventory(company.id,task.pageUrl,expanded,plan);
         if(expanded.some(f=>!mapped.has(f.selector)))throw Error('UNMAPPED_FORM_FIELDS_AFTER_EXPANSION');
         if(controlContractChanges(plan,expanded).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
-        for(const f of frozenFields){
+        const fillOrder=compiled.executionOrder?.find(step=>step.stage==='fill')?.fieldIds;
+        const fillFields=fillOrder?fillOrder.map(id=>frozenFields.find(f=>f.id===id)):frozenFields;
+        for(const f of fillFields){
           if(f.disposition!=='fill'||uploads.includes(f)||f.prepareBeforeGroups)continue;
+          activeField={id:f.id,source:f.source,kind:f.kind,label:f.label};
           if(f.when&&!initial.fields[f.id]?.present)await page.wait(f.read.presenceSelector||f.read.selector);
           const current=initial.fields[f.id];
           if(current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'&&(!['choice','date'].includes(f.kind)||current.selected===true)){
@@ -314,6 +319,7 @@ export class Engine {
             await page.act(action, f.value, prepared.files);
           }
         }
+        activeField=null;
         // A final read of the entire page catches later cascades or resume parsing overwriting earlier values.
         const finalInventory=await inventory();
         // Dependencies and parsing can reveal new optional questions after writing.
@@ -321,7 +327,8 @@ export class Engine {
         if(this.onInventory)await this.onInventory(company.id,task.pageUrl,finalInventory,plan);
         if(controlContractChanges(plan,finalInventory).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
         const choiceProofs=await verifyDropdownSelections(page,plan,task);
-        const observation=attachChoiceProofs(attachInventory(await page.observe(plan),plan,finalInventory),choiceProofs);
+        const dateProofs=await verifyDateRanges(page,plan,task);
+        const observation=attachDateRangeProofs(attachChoiceProofs(attachInventory(await page.observe(plan),plan,finalInventory),choiceProofs),dateProofs);
         result.selectionProofs={...(result.selectionProofs||{}),...choiceProofs};
         const observationRunId=randomUUID();
         await this.store.put('runs',observationRunId,{operation:'live_observation',companyId:company.id,observation});
@@ -335,8 +342,9 @@ export class Engine {
       result.status=result.pageChecks.length===template.pages.length&&result.pageChecks.every(p=>p.verification?.status==='verified')?'verified':'needs_attention';
     }catch(error){
       result.errorCode=/^[A-Z_]+(?::[a-z0-9_-]+)?$/.test(error.message)?error.message:'BROWSER_OPERATION_FAILED';
+      if(activeField)result.failedField=activeField;
       if(activePage&&activePlan)try{
-        const inventory=await activePage.inventory(activePlan);
+        const inventory=await liveControls(activePage,activePlan);
         if(this.onInventory)await this.onInventory(company.id,task.pageUrl,inventory,activePlan);
         result.failureExitInventory={registered:true,count:inventory.length};
       }catch{result.failureExitInventory={registered:false,reason:'FAILURE_EXIT_CAPTURE_OR_MAPPING_INCOMPLETE'};}

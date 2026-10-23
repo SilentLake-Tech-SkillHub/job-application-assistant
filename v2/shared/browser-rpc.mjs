@@ -20,7 +20,15 @@ class BrokerPage {
   constructor(browser,pageUrl,{pageId,readOnly=false}={}){Object.assign(this,{browser,pageUrl,pageId,readOnly});}
   call(method,args={}){if(this.readOnly&&!['inventory','observe','assertLocation','wait'].includes(method))throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');return this.browser.request(method,{pageUrl:this.pageUrl,...args,...(this.pageId?{pageId:this.pageId,readOnly:true}:{})});}
   assertLocation(origin,prefix){return this.call('assertLocation',{origin,prefix});}
-  wait(selector){return this.call('wait',{selector});}
+  async wait(selector){
+    // Readiness means a visible match exists. It is not an action locator and
+    // may intentionally cover several form roots. Writes still require unique
+    // captured control references, and independent role/field checks remain.
+    const deadline=Date.now()+10000;
+    do{const observed=await this.call('observe',{plan:{fields:[],groups:[{id:'ready',selector}]}});if(observed.groups?.ready>0)return;
+      if(Date.now()>=deadline)throw Error('PAGE_NOT_READY');await new Promise(resolve=>setTimeout(resolve,40));
+    }while(true);
+  }
   async inventory(plan){
     const fields=await this.call('inventory',{plan:{...plan,rawKeys:true}});
     if(plan?.provider!=='feishu')return fields;

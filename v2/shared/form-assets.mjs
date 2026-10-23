@@ -39,6 +39,10 @@ export async function assertSubmissionPrepared({queues,store,catalog,outcome}){
  const tasks=[];
  for(const f of files){let q;try{q=JSON.parse(await readFile(path.join(queues.root,f),'utf8'));}catch{continue;}
   if(!Array.isArray(q.tasks)||q.batchId!==outcome.batchId)continue;
+  if(q.tasks.some(t=>t.materials)){
+   if(typeof queues.get!=='function')throw Error('CURRENT_MATERIAL_QUEUE_REQUIRED');
+   await queues.get({queueId:q.id,queueHash:q.queueHash});
+  }
   for(const t of q.tasks)if(String(t.roleId)===String(outcome.roleId)&&sameCompany(t.companyId))tasks.push(t);}
  if(!tasks.length)throw Error('SUBMISSION_ROLE_NOT_IN_MCP_QUEUE');
  for(const t of tasks){

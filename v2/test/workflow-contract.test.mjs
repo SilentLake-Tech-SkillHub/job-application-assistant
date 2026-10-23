@@ -42,6 +42,8 @@ test('ordinary semantic and input errors cannot be laundered into terminal super
  const {technicalHandoffReasons}=await import('../shared/workflow-contract.mjs');
  for(const error of ['SEMANTIC_MAPPING_REQUIRED','UNKNOWN_QUESTION_OR_FACT','NEW_QUESTIONS_REQUIRE_PROFILE_MAPPING','ACTUAL_CAPTURED_OPTION_REQUIRED','COMPANY_ORIGIN_MISMATCH'])assert.deepEqual(technicalHandoffReasons({operation:'mcp_error',error}),[]);
  assert.deepEqual(technicalHandoffReasons({operation:'mcp_error',error:'BROWSER_HOST_OPERATION_FAILED'}),['BROWSER_HOST_OPERATION_FAILED']);
+ assert.deepEqual(technicalHandoffReasons({operation:'internal_condition_probe',errorCode:'BROWSER_HOST_OPERATION_FAILED'}),['BROWSER_HOST_OPERATION_FAILED']);
+ assert.deepEqual(technicalHandoffReasons({operation:'internal_condition_probe',errorCode:'SEMANTIC_MAPPING_REQUIRED'}),[]);
 });
 
 test('dropdown presentation labels do not overwrite numeric canonical fact types',()=>{

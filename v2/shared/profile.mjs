@@ -1,3 +1,4 @@
+import {resolveDateRepresentation} from './date-representation.mjs';
 import {MATERIAL_SOURCES,materialKey,resolveMaterialValues} from './business-materials.mjs';
 import {majorFacts} from './major-policy.mjs';
 import {humanActionReason} from './field-policy.mjs';
@@ -92,7 +93,7 @@ export function assertQuestionsMapped(profile,companyId,pageUrl){
   if(!form)throw Error('FORM_QUESTIONS_NOT_REGISTERED');
   if(Object.values(form.mappings).some(m=>(m.active!==false||m.coverageRequired)&&m.status!=='mapped'&&m.status!=='user_only'))throw Error('NEW_QUESTIONS_REQUIRE_PROFILE_MAPPING');
   for(const m of Object.values(form.mappings))if(m.coverageRequired&&m.status==='mapped'&&!form.executionContract?.fields?.some(f=>f.source===m.factKey&&f.inventorySelectors?.includes(m.selector)))throw Error('NEW_QUESTIONS_REQUIRE_TEMPLATE_MAPPING');
-  for(const m of Object.values(form.mappings))if(!profile.facts[m.factKey])throw Error('MAPPED_FACT_MISSING');
+  for(const m of Object.values(form.mappings))if((m.active!==false||m.coverageRequired)&&!Object.values(MATERIAL_SOURCES).includes(m.factKey)&&!profile.facts[m.factKey])throw Error('MAPPED_FACT_MISSING');
 }
 
 export function registerPlannedQuestions(profile,args,plan) {
@@ -150,7 +151,7 @@ export function resolveProfile(profile, template, decisions={}, companyId, mater
   if(companyId)assertStoredExecutionContract(profile,companyId,template);
   assertDefinitionMapped(profile,companyId,template);
   const material=materialContext?resolveMaterialValues(materialContext):null;
-  const values={...material?.values},missing=[],sources={...material?.sources},omissions={...decisions.omissions};
+  const dateRepresentations={},values={...material?.values},missing=[],sources={...material?.sources},omissions={...decisions.omissions};
   const factValue=key=>{
     if(/^education\.[^.]+\.major\.(canonical|application)$/.test(key)&&majorFacts(profile,key)?.real)throw Error('MAJOR_REAL_SOURCE_REQUIRES_REBUILD');
     if(Object.values(MATERIAL_SOURCES).includes(key)){if(!material)throw Error('CONFIRMED_MATERIAL_CONTEXT_REQUIRED');return material.values[key];}
@@ -168,13 +169,17 @@ export function resolveProfile(profile, template, decisions={}, companyId, mater
     const omission=material?.omissions[field.source]||profile.facts[field.source]?.omission;
     if(!field.required && omission && (material?.omissions[field.source]||profile.sources[omission.evidence]))omissions[field.id]=omission;
     if(field.source.startsWith('decision:')){values[field.source]=decisions[field.source.slice(9)];continue;}
-    if(field.ongoingSource&&values[field.ongoingSource]===true){values[field.source]=undefined;continue;}
+    if(field.ongoingSource&&values[field.ongoingSource]===true){
+      const representation=resolveDateRepresentation(profile,{companyId,pageUrl:template.evidence.sourceUrl,roleId:materialContext?.roleId},field);
+      if(representation){dateRepresentations[field.id]=representation;sources[representation.source]={sourceIds:representation.sourceIds,precision:'day'};}
+      values[field.source]=undefined;continue;
+    }
     if(field.compose){
       const parts=field.compose.sources.map(key=>field.compose.optionalSources?.includes(key)&&profile.facts[key]?.status!=='known'?'':factValue(key));
       if(parts.every(v=>v!==undefined))values[field.source]=parts.filter(v=>v!=='').join(field.compose.separator??'\n');
     }else values[field.source]=factValue(field.source);
   }
-  return {values,missing:[...new Set(missing)],sources,...(material?{materialContext}:{}),profileHash:hash(profile),files:profile.files||{},omissions,contentPolicy:resolveContentPolicy(profile,companyId)};
+  return {values,dateRepresentations,missing:[...new Set(missing)],sources,...(material?{materialContext}:{}),profileHash:hash(profile),files:profile.files||{},omissions,contentPolicy:resolveContentPolicy(profile,companyId)};
 }
 
 export function profileStatus(profile,companyId,pageUrl) {

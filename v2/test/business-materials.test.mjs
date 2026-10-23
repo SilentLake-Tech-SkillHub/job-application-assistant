@@ -6,8 +6,8 @@ import {MATERIAL_SOURCES,materialAudit,resolveMaterialValues} from '../shared/bu
 import {readHandoffBatch,contentSha} from '../shared/company-directory.mjs';
 import {confirmedMaterialContext} from '../shared/role-material-context.mjs';
 import {RoleQueue} from '../shared/role-queue.mjs';
-import {registerObservedQuestions,registerTemplateContract,resolveProfile} from '../shared/profile.mjs';
-import {compileExecutionPlan,assertPreparedPlan} from '../shared/execution-plan.mjs';
+import {registerObservedQuestions,registerTemplateContract,resolveProfile,assertQuestionsMapped} from '../shared/profile.mjs';
+import {compileExecutionPlan,assertPreparedPlan,orderedFillIds} from '../shared/execution-plan.mjs';
 import {compileExpected} from '../shared/observation.mjs';import {verifyForm} from '../shared/verifier.mjs';import {hash} from '../shared/engine.mjs';
 const roleUrl='https://alpha.example/job/12345',pageUrl='https://alpha.example/apply/12345';
 const materials=()=>({schemaVersion:1,items:[{key:'referralCode',status:'available',value:'SampleCode17',raw:'SampleCode17',requireWhenAvailable:true,evidence:{masterDataSha256:'sample-master',roleUrl,column:'内推码'}}]});
@@ -18,6 +18,10 @@ const profile=()=>({schemaVersion:1,facts:{},entities:{},sources:{},fieldRegistr
 const task=()=>({...resolveMaterialValues(context()),companyId:'alpha',roleId:'12345',pageUrl,templateHash:hash(template())});
 const observation=(value='SampleCode17')=>({source:'live_dom',readAt:new Date().toISOString(),pageUrl,roleTitle:'Product',sections:[{title:'Basics'}],inventoryIds:['referral'],fields:{referral:{present:true,value}},pageErrors:[]});
 const confirmed=b=>({...b,confirmation:{userQuote:'Confirm synthetic roles',contentSha256:contentSha(b)}});
+test('known required role materials run first after prerequisites, using the frozen order',()=>{
+ const fields=[{id:'name',source:'name',kind:'text',disposition:'fill'},{id:'channel',source:'channel',kind:'choice',disposition:'fill'},{id:'code',source:'material:referralCode',kind:'text',disposition:'fill',when:{source:'channel',equals:'Referral'}}];
+ assert.deepEqual(orderedFillIds(fields,[{fieldId:'code'}]),['channel','code','name']);
+});
 test('complete material chain: exporter → handoff → queue → mapping → resolution → frozen plan → independent readback',async()=>{
  const root=await mkdtemp(path.join(os.tmpdir(),'role-material-chain-'));
  try{
@@ -27,8 +31,8 @@ test('complete material chain: exporter → handoff → queue → mapping → re
   const adapter=()=>readHandoffBatch({handoffDir:root}),catalog=[{id:'alpha',origin:'https://alpha.example'}];
   const queues=new RoleQueue({root:path.join(root,'queue'),catalog,inputAdapter:adapter}),q=await queues.import({});assert.deepEqual(q.tasks[0].materials,exported);
   const ctx=await confirmedMaterialContext({handoffDir:root,companyId:'alpha',roleId:'12345',pageUrl,catalog}),p=profile(),t=template();
-  const reg=registerObservedQuestions(p,{companyId:'alpha',pageUrl,observedAt:'synthetic',fields:[{selector:'#referral',label:'推荐码',type:'text',required:false}]});
-  assert.equal(Object.values(p.companyForms[reg.pageKey].mappings)[0].factKey,MATERIAL_SOURCES.referralCode);registerTemplateContract(p,{companyId:'alpha',template:t,templateHash:hash(t)});assert.equal(p.facts[MATERIAL_SOURCES.referralCode],undefined);
+  const reg=registerObservedQuestions(p,{companyId:'alpha',pageUrl,observedAt:'synthetic',coverageRequired:true,fields:[{selector:'#referral',label:'推荐码',type:'text',required:false}]});
+  assert.equal(Object.values(p.companyForms[reg.pageKey].mappings)[0].factKey,MATERIAL_SOURCES.referralCode);registerTemplateContract(p,{companyId:'alpha',template:t,templateHash:hash(t)});assert.equal(p.facts[MATERIAL_SOURCES.referralCode],undefined);assertQuestionsMapped(p,'alpha',pageUrl);
   const resolved=resolveProfile(p,t,{},'alpha',ctx),job={companyId:'alpha',roleId:'12345',pageUrl,templateHash:hash(t),...resolved};assert.equal(resolved.values[MATERIAL_SOURCES.referralCode],'SampleCode17');
   const plan=await compileExecutionPlan(t,job);assert.equal(plan.readyForExecution,true);assert.equal(plan.pages[0].fields[0].required,false);assert.equal(plan.pages[0].fields[0].effectiveRequired,true);assert.equal(plan.pages[0].fields[0].disposition,'fill');
   const expected=compileExpected(t.pages[0],job),result=verifyForm(expected,observation());assert.equal(result.status,'verified');assert.equal(result.materialCoverage.complete,true);

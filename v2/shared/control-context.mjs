@@ -1,3 +1,9 @@
+import {normalizeControlPolicy} from './field-policy.mjs';
+// All execution modes consume the same normalized live question inventory.
+export async function liveControls(page,plan){
+ const raw=await page.inventory(plan);
+ return normalizeControlPolicy(plan?.provider==='feishu'?raw:await enrichControlContext(page,raw));
+}
 // Read rendered question wrappers through the existing browser broker; no hidden state.
 export async function enrichControlContext(page,controls){
  if(!controls.length)return [];

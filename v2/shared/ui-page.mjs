@@ -39,7 +39,7 @@ export class PageAdapter {
     const mapping=new Map([...ant.map((k,i)=>[k,antValues[i]||':not(*)']),...phoenix.map((k,i)=>[k,phoenixValues[i]||':not(*)']),...uploads.map((k,i)=>[k,uploadValues[i]||':not(*)'])]);
     const walk=v=>typeof v==='string'?mapping.get(v)||v:Array.isArray(v)?v.map(walk):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,walk(x)])):v;return walk(spec);
   }
-  async wait(selector){selector=await this.resolveSelector(selector);await this.page.locator(selector).waitFor({state:'visible',timeout:10000});}
+  async wait(selector){selector=await this.resolveSelector(selector);await this.page.locator(selector).filter({visible:true}).first().waitFor({state:'visible',timeout:10000});}
   async inventory(plan){
    if(plan?.provider==='ant'){
     const reader=await currentAnt(),primary=await this.page.evaluate(reader),coveredSelectors=await this.page.evaluate(reader,{operation:'resolve',references:primary.map(c=>c.selector)});

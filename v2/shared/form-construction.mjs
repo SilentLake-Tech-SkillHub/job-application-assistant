@@ -1,3 +1,5 @@
+import {resolveDateRepresentation} from './date-representation.mjs';
+import {readRoleIdentity} from './role-identity.mjs';
 import {materialKey,MATERIAL_SOURCES} from './business-materials.mjs';
 import {applyChoiceResolution} from './choice-resolution.mjs';
 import {createHash} from 'node:crypto';
@@ -60,7 +62,7 @@ function fieldFromControl(c,m,choice){
   f.precision=type==='year_picker'?'year':type==='month_picker'?'month':'day';f.read.selectedSelector=c.selector;
   if(framework==='.atsx-form-item'&&type!=='day_picker'){f.read.kind=type==='month_picker'?'month':'text';f.actions=human?[]:[action(type==='month_picker'?'feishu_month':'feishu_year')];}
   else if(['date','month'].includes(c.type)&&c.tag==='input'&&!c.readonly)f.actions=human?[]:[action('native_date')];
-  else if(type==='day_picker'&&framework==='.ant-form-item'&&c.renderer==='ant_date')f.actions=human?[]:[{...action('ant_day'),openSelector:c.selector,openLabel:c.label,openKind:'captured_date_input'}];
+  else if(type==='day_picker'&&framework==='.ant-form-item'&&c.renderer==='ant_date')f.actions=human?[]:[{...action('ant_day'),openSelector:c.selector,openLabel:c.label,openKind:'captured_date_input',...(c.rangePeerSelector?{rangePeerSelector:c.rangePeerSelector,rangeIndex:c.rangeIndex}:{})}];
   else if(type!=='day_picker'&&framework==='.ud-formily-item')f.actions=human?[]:[action('ud_date')];
   else f.constructionBlockers.push('DATE_DRIVER_CONTRACT_REQUIRED');
  }else if(type==='file_upload'){
@@ -86,13 +88,25 @@ export function buildFormTemplate({capture,profile,mappings=[],choices=[],page,t
  if(!capture?.controls?.length||!capture.pageUrl||!capture.observedAt)throw Error('CURRENT_CONTROL_CAPTURE_REQUIRED');
  if(!page?.roleTitle||!page.readySelector||!page.sections?.length||!page.sectionDiscovery)throw Error('OBSERVED_PAGE_CONTRACT_REQUIRED');
  if(reaStructure&&(reaStructure.pageUrl!==capture.pageUrl||reaStructure.companyId!==capture.companyId))throw Error('REA_CONTROL_CAPTURE_SCOPE_MISMATCH');
+ if(page.provider&&capture.provider&&page.provider!==capture.provider)throw Error('FORM_PROVIDER_EVIDENCE_MISMATCH');
+ page={...page,sections:page.sections.map(section=>typeof section==='string'?{title:section}:section),...(capture.provider?{provider:capture.provider}:{})};
+ if(page.sections.some(section=>!section?.title))throw Error('OBSERVED_SECTION_TITLE_REQUIRED');
+ const sectionSelectors=[...new Set(capture.controls.map(c=>c.sectionSelector).filter(Boolean))];
+ if(capture.provider==='ant'&&sectionSelectors.length)page.sectionDiscovery={...page.sectionDiscovery,selectors:sectionSelectors};
  const groups=new Map();
  for(const c of capture.controls){const identity=c.type==='radio'&&c.questionSelector?c.questionSelector:c.selector;const prior=groups.get(identity);if(prior&&c.type!=='radio')throw Error('DUPLICATE_CAPTURED_SELECTOR');if(prior)prior.inventorySelectors.push(c.selector);else groups.set(identity,{...c,inventorySelectors:[c.selector]});}
  const fields=[...groups.values()].map(c=>{
   const f=fieldFromControl(c,mappings.find(m=>m.active!==false&&c.inventorySelectors.includes(m.selector)),choices.find(x=>x.selector===c.selector));
   const ongoing=f.source.replace(/\.(?:end|endDate|dateEnd|endMonth)$/u,'.ongoing');
   if(f.kind==='date'&&ongoing!==f.source&&profile.facts?.[ongoing]?.status==='known'&&typeof profile.facts[ongoing].value==='boolean')f.ongoingSource=ongoing;
-  return f.lockedControl?f:applyChoiceResolution(f,choices.find(x=>x.selector===c.selector),profile);
+  if(f.ongoingSource&&profile.facts[ongoing].value===true){
+   const choice=choices.find(x=>x.selector===c.selector);
+   const representation=resolveDateRepresentation(profile,{companyId:capture.companyId,pageUrl:capture.pageUrl,roleId:readRoleIdentity(page.roleIdentity,capture.pageUrl)?.value},f);
+   if(representation)f.dateRepresentation={mode:representation.mode,source:representation.source};
+   else if(c.renderer==='ant_date'&&choice?.status==='captured_date_options'&&choice.restored&&choice.dateOptions?.ongoingLabel)f.actions=f.actions.map(a=>({...a,ongoingLabel:choice.dateOptions.ongoingLabel}));
+   else if(c.renderer==='ant_date')f.constructionBlockers.push('ONGOING_DATE_OPTION_REQUIRED');
+  }
+  return applyChoiceResolution(f,choices.find(x=>x.selector===c.selector),profile);
  });
  const template={id:templateId,version,evidence:{sourceUrl:capture.pageUrl,observedAt:capture.observedAt,captureId:capture.captureId,...(reaStructure?{reaEvidenceId:reaStructure.reaEvidenceId,reaEvidenceHash:reaStructure.reaEvidenceHash}: {})},pages:[{...page,pathPrefix:page.pathPrefix||new URL(capture.pageUrl).pathname,fields}],coverage:{allControlsMapped:false,allDriversSupported:false,allConditionalBranchesVerified:false}};
  const blockers=templateConstructionIssues(template);

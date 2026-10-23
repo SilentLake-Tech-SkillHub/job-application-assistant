@@ -15,7 +15,7 @@ STATE = Path(os.environ['RECRUITING_WORKFLOW_STATE'])
 SCOPE = Path(os.environ['RECRUITING_WORKFLOW_SCOPE'])
 INJECT = {'UserPromptSubmit', 'SessionStart', 'SubagentStart'}
 ROUTE = Path(__file__).with_name('route.md')
-MUTATIONS = {'batch_prepare','role_prepare','roles_prepare_batch','workflow_advance','roles_patch_text','material_import_run','login_prepare','login_request_sms','login_verify_otp','application_closeout'}
+MUTATIONS = {'batch_prepare','role_prepare','role_prepare_materials','form_remove_attachment','roles_prepare_batch','workflow_advance','roles_patch_text','material_import_run','login_prepare','login_request_sms','login_verify_otp','application_closeout'}
 LEGACY_CONTINUATION_TOOLS = {'workflow_next', 'form_route', 'workflow_advance', 'role_prepare', 'prepare_plan', 'batch_prepare', 'role_verify', 'verify_current', 'capture_rea_structure', 'capture_controls', 'form_mapping_candidates', 'capture_choice_options', 'form_build_template', 'template_register', 'probe_conditions', 'template_finalize', 'profile_map_questions', 'material_import_prepare', 'material_import_run', 'roles_prepare_batch', 'roles_patch_text', 'workflow_handoff'}
 
 LIFECYCLE = json.loads((Path(__file__).resolve().parents[1] / 'catalog/workflow-tools.json').read_text(encoding='utf-8'))
@@ -105,10 +105,22 @@ def handle_continuation(event):
         route = {k: result.get(k) for k in ['state', 'owner', 'requiresUser', 'shouldContinue', 'nextTools', 'reason', 'handoffVerified']}
         fingerprint = hashlib.sha256(json.dumps(route, sort_keys=True).encode()).hexdigest()
         write_atomic(file, {**route, 'fingerprint': fingerprint,
-                            'reminded': old.get('reminded', False) if old.get('fingerprint') == fingerprint else False})
+                            'reminded': False, 'stopAttempts': 0,
+                            'receiptRevision': old.get('receiptRevision', 0) + 1,
+                            'lastTool': tool.split('__')[-1]})
         return {}
     if old.get('owner') == 'agent' and old.get('shouldContinue'):
-        write_atomic(file, {**old, 'reminded': True, 'stopAttempts': old.get('stopAttempts', 0) + 1})
+        attempts = old.get('stopAttempts', 0) + 1
+        if attempts >= 2:
+            # Two Stop attempts without any new tracked tool result are an
+            # observed host/agent stall, not a missing user answer or success.
+            write_atomic(file, {**old, 'state': 'technical_block', 'owner': 'supervisor',
+                               'requiresUser': False, 'shouldContinue': False,
+                               'handoffVerified': True, 'reason': 'AGENT_NO_PROGRESS_LOOP',
+                               'complete': False, 'stopAttempts': attempts,
+                               'pendingNextTools': old.get('nextTools', []), 'nextTools': []})
+            return {'systemMessage': '检测到连续两次结束尝试之间没有新的MCP结果，已登记 AGENT_NO_PROGRESS_LOOP，complete=false，交监督者修复；停止重复生成等待说明，不把责任转给用户。'}
+        write_atomic(file, {**old, 'reminded': True, 'stopAttempts': attempts})
         return {'decision': 'block', 'reason': '当前 MCP 仍有 Agent 待处理的建库、映射或修复步骤，不能结束或报告完成。请执行已返回的 nextTools；没有证据/输入变化不得盲重试。真实技术阻塞请用 workflow_handoff 提供MCP错误或驱动缺口证据交给监督者，complete仍为false；只有已核实的用户等待、完整核验审阅或技术交接才允许停下，不能要求用户重复回复“继续”。'}
     return {}
 

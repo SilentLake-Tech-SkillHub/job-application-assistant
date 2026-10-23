@@ -307,6 +307,22 @@
       [
         "workflow_next"
       ]
+    ],
+    "workflow_wait_for_user": [
+      "route",
+      [
+        "profile_record_answers",
+        "form_build_template"
+      ]
+    ],
+    "form_remove_attachment": ["construct", ["capture_controls", "form_build_template"]],
+    "role_prepare_materials": [
+      "prepare",
+      [
+        "workflow_next",
+        "role_prepare",
+        "role_verify"
+      ]
     ]
   }
 }

@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {acquisitionPlan,detectedAcquisitionPlan,captureContentId,isChoiceControl,capturedChoiceOptions,compactConstructionResult,templateFromDraft} from '../shared/form-acquisition.mjs';
+import {acquisitionPlan,detectedAcquisitionPlan,assertCollectionProvider,captureContentId,isChoiceControl,capturedChoiceOptions,compactConstructionResult,templateFromDraft} from '../shared/form-acquisition.mjs';
 import {hash} from '../shared/engine.mjs';
 
 test('same-page observed framework chooses the collector without an agent flag; ambiguity stays explicit',async()=>{
  const page={observe:async spec=>{assert.deepEqual(spec.fields,[]);return {groups:{ant:3,feishu:0}};}};
  assert.equal((await detectedAcquisitionPlan(page,{provider:'feishu'})).provider,'ant');
+ await assert.rejects(assertCollectionProvider(page,{}),/FORM_PROVIDER_REQUIRES_REBUILD/);
+ assert.equal(await assertCollectionProvider(page,{provider:'ant'}),true);
  await assert.rejects(detectedAcquisitionPlan(page,{},'feishu'),/EVIDENCE_MISMATCH/);
  await assert.rejects(detectedAcquisitionPlan({observe:async()=>({groups:{ant:1,feishu:1}})},{}),/AMBIGUOUS/);
 });

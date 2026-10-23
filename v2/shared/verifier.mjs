@@ -55,6 +55,7 @@ export function verifyForm(expected, observed, {now=Date.now(),maxAgeMs=60000}={
     if(field.kind==='choice' && actual.selected!==true){check.status='mismatch';check.reason='DISPLAY_TEXT_WITHOUT_SELECTED_OPTION';checks.push(check);continue;}
     if(field.selectionVerificationRequired&&(actual.selectionProof?.status!=='verified'||actual.selectionProof?.reopenedOptionSelected!==true||actual.selectionProof?.blurConfirmed!==true||actual.selectionProof?.label!==actual.value||field.choiceValue!=null&&actual.selectionProof?.value!==field.choiceValue)){check.status='mismatch';check.reason=actual.selectionProof?.reason||'CHOICE_SELECTION_PROOF_REQUIRED';checks.push(check);continue;}
     if(field.kind==='date'){
+      if(field.dateRangeProofRequired&&(actual.dateRangeProof?.status!=='verified'||actual.dateRangeProof.rangeVerified!==true||actual.dateRangeProof.value!==field.value)){check.status='mismatch';check.reason=actual.dateRangeProof?.reason||'DATE_RANGE_SELECTION_PROOF_REQUIRED';checks.push(check);continue;}
       const pattern=field.precision==='year'?/^\d{4}$/:field.precision==='month'?/^\d{4}-\d{2}$/:/^\d{4}-\d{2}-\d{2}$/;
       const parts=String(actual.value).split('-').map(Number);
       const valid=pattern.test(String(actual.value))&&parts[0]>0&&(parts.length<2||parts[1]>=1&&parts[1]<=12)&&(parts.length<3||parts[2]>=1&&parts[2]<=new Date(Date.UTC(parts[0],parts[1],0)).getUTCDate());

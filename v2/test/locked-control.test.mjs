@@ -2,6 +2,22 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {captureLockedChoice} from '../shared/locked-control.mjs';
 import {buildFormTemplate} from '../shared/form-construction.mjs';
 import {compileExpected} from '../shared/observation.mjs';import {verifyForm} from '../shared/verifier.mjs';
+import {performAntDay} from '../shared/ant-date.mjs';
+import {BrokerBrowserAdapter} from '../shared/browser-rpc.mjs';
+test('readiness accepts multiple visible form roots without treating them as an action target',async()=>{
+ const browser=new BrokerBrowserAdapter('unused'),calls=[];browser.request=async(method,args)=>{calls.push({method,args});return method==='observe'?{groups:{ready:2}}:{found:true};};
+ const page=await browser.existingPage('https://sample.test/form');await page.wait('form');assert.equal(calls.at(-1).method,'observe');assert.deepEqual(calls.at(-1).args.plan.fields,[]);
+});
+test('ongoing dates require an actual captured footer option; inspection restores the prior value',async()=>{
+ let value='',opened=false,clicks=0;const labels=['至今'];
+ const input={count:async()=>1,evaluate:async fn=>fn({tagName:'INPUT',closest:()=>({}),get value(){return value;}}),click:async()=>{opened=true;},press:async key=>{if(key==='Escape')opened=false;}};
+ const panel={filter(){return this;},count:async()=>opened?1:0,waitFor:async()=>{},innerText:async()=>labels.join(' '),locator:()=>({filter(){return this;},allTextContents:async()=>labels}),getByText:label=>({count:async()=>labels.includes(label)?1:0,click:async()=>{clicks++;value='至今';opened=false;}})};
+ const page={resolveSelector:async s=>s,page:{locator:s=>s==='#end'?input:panel}};
+ const capture=await performAntDay(page,{selector:'#end',operation:'inspect'},null);assert.equal(capture.dateOptions.ongoingLabel,'至今');assert.equal(capture.restored,true);assert.equal(clicks,0);assert.equal(opened,false);
+ await assert.rejects(performAntDay(page,{selector:'#end'},'至今'),/ONGOING_DATE_OPTION_NOT_CAPTURED/);
+ await performAntDay(page,{selector:'#end',ongoingLabel:capture.dateOptions.ongoingLabel},'至今');assert.equal(value,'至今');assert.equal(clicks,1);
+ value='';labels.splice(0,1,'Today');const absent=await performAntDay(page,{selector:'#end',operation:'inspect'},null);assert.equal(absent.dateOptions.ongoingLabel,null);assert.equal(value,'');
+});
 const field={selector:'#country',selectedSelector:'#selected-country',label:'Country',type:'combobox',renderer:'ant_select',contextProvider:'.ant-form-item',disabled:true};
 test('disabled controls require a stable observed selected value; empty or unlocked controls retain dependency blockers',async()=>{
  for(const patch of [{disabled:false},{selected:false},{value:''},{present:false}]){

@@ -80,9 +80,10 @@ export function registerWorkflowTool(server,tool,definition,handler){
 
 export function technicalHandoffReasons(source){
  const drivers=new Set(['CONTROL_DRIVER_REQUIRED','DATE_DRIVER_CONTRACT_REQUIRED','UPLOAD_SITE_READBACK_REQUIRED','SEARCHABLE_TEXT_COMMIT_CONTRACT_REQUIRED','MULTISELECT_DRIVER_CONTRACT_REQUIRED']);
- if(source.operation!=='mcp_error')return [...new Set((source.blockers||[]).filter(b=>drivers.has(b.reason)).map(b=>b.reason))];
  // Bad arguments, missing mappings and unfinished construction are ordinary
  // Agent work. A stored error alone does not make them supervisor blockers.
  const technical=/^(?:BROWSER_|HOST_BROWSER_|HOST_FILE_|REA_|CDP_|IAB_|CONTROL_COMMIT_|CHOICE_(?:TRIGGER_|MENU_|COMBOBOX_|INSPECTION_)|SHARED_RESUME_|OPERATION_FAILED$)/;
- return drivers.has(source.error)||technical.test(source.error||'')?[source.error]:[];
+ const error=source.operation==='mcp_error'?source.error:source.operation==='internal_condition_probe'?source.errorCode:null;
+ if(error&&(drivers.has(error)||technical.test(error)))return [error];
+ return [...new Set((source.blockers||[]).filter(b=>drivers.has(b.reason)).map(b=>b.reason))];
 }

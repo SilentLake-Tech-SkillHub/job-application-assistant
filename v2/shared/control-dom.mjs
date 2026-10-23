@@ -6,16 +6,23 @@ export function controlDOM(spec){
   const parts=[];for(let p=n;p&&p!==document.body;p=p.parentElement){let i=1;for(let s=p.previousElementSibling;s;s=s.previousElementSibling)if(s.tagName===p.tagName)i++;parts.unshift(p.tagName.toLowerCase()+':nth-of-type('+i+')');}
   return 'body > '+parts.join(' > ');
  };
+ const fileCandidates=root=>[...new Set([...root.querySelectorAll('.ant-upload-list-item-name,[class*="file-name"]'),...[...root.querySelectorAll('a,span,p,h1,h2,h3,h4,div,[data-file-name],[data-filename]')].filter(n=>visible(n)&&/^[^\n]{1,200}\.(?:pdf|docx?|png|jpe?g)$/i.test(n.innerText?.trim()||''))])].filter(n=>visible(n)&&![...(n.children||[])].some(child=>visible(child)&&child.innerText?.trim()===n.innerText?.trim()));
+ const uploadComplete=root=>[...root.querySelectorAll('*')].some(n=>visible(n)&&/^(?:[\d.]+\s*(?:KB|MB|K|M)\s*[·|]\s*)?(?:已完成|上传成功|completed|uploaded|done)$/i.test(n.innerText?.trim()||''));
  const uploadRoots=()=>[...document.querySelectorAll('input[type="file"]')].flatMap(input=>{
   if(!input.closest('.ant-upload'))return [];
   for(let root=input.parentElement;root&&root!==document.body;root=root.parentElement){
    if(root.querySelectorAll('input[type="file"]').length!==1)break;
-   const headings=[...root.querySelectorAll('h1,h2,h3,h4,[role="heading"]')].filter(h=>visible(h)&&!h.closest('.ant-upload'));
+   const names=fileCandidates(root).map(n=>n.innerText?.trim());
+   const headings=[...root.querySelectorAll('h1,h2,h3,h4,[role="heading"]')].filter(h=>visible(h)&&!h.closest('.ant-upload,.ant-upload-list')&&!names.includes(h.innerText?.trim()));
    const label=headings[0]?.innerText?.trim();if(label)return [{input,root,label}];
   }return [];
  });
  const uploadRef=(entry,part='input')=>'uploadq:'+JSON.stringify({label:entry.label,occurrence:uploadRoots().filter(x=>x.label===entry.label).findIndex(x=>x.input===entry.input),part});
- if(spec?.operation==='resolveUpload')return (spec.references||[]).map(reference=>{const ref=JSON.parse(reference.slice(8)),entry=uploadRoots().filter(x=>x.label===ref.label)[ref.occurrence];if(!entry)return null;const root=diagnosticSelector(entry.root);return ref.part==='container'?root:ref.part==='uploaded'?root+' .ant-upload-list-item-done':diagnosticSelector(entry.input);});
+ const removeFor=row=>{const nodes=[...row.querySelectorAll('button,a,[role="button"],[role="img"],[title]')].filter(n=>visible(n)&&/^(删除文件|删除|移除|delete|remove|remove file)$/i.test((n.getAttribute('aria-label')||n.getAttribute('title')||n.innerText||'').trim())).map(n=>n.closest('button,a,[role="button"]')||n);return [...new Set(nodes)].length===1?nodes[0]:null;};
+ const filenameSelector='.ant-upload-list-item-name,[class*="file-name"]';
+ const uploadRows=entry=>fileCandidates(entry.root).map(name=>{let row=name.parentElement;while(row){if(fileCandidates(row).length!==1)break;if(removeFor(row)||uploadComplete(row))return {row,name};if(row===entry.root)break;row=row.parentElement;}const done=name.closest('.ant-upload-list-item-done');return done?{row:done,name}:null;}).filter(Boolean);
+ const uploadItems=entry=>uploadRows(entry).map(({row,name})=>{const filename=name.innerText?.trim(),remove=removeFor(row);return {filename,removeSelector:remove&&filename?'uploadq:'+JSON.stringify({...JSON.parse(uploadRef(entry).slice(8)),part:'remove',filename}):null};});
+ if(spec?.operation==='resolveUpload')return (spec.references||[]).map(reference=>{const ref=JSON.parse(reference.slice(8)),entry=uploadRoots().filter(x=>x.label===ref.label)[ref.occurrence];if(!entry)return null;const root=diagnosticSelector(entry.root);if(ref.part==='filenames')return uploadRows(entry).map(({name})=>diagnosticSelector(name)).join(',')||null;if(ref.part==='remove'){const rows=uploadRows(entry).filter(({name})=>name.innerText?.trim()===ref.filename);const remove=rows.length===1?removeFor(rows[0].row):null;return remove?diagnosticSelector(remove):null;}return ref.part==='container'?root:ref.part==='uploaded'?uploadRows(entry).length?root:null:diagnosticSelector(entry.input);});
  const eligible=n=>visible(n)||!!n&&['checkbox','radio'].includes(n.type)&&visible(n.closest('label'));
  // Phoenix question references are based on rendered section/label identity.
  // Structural selectors are produced only for the current operation.
@@ -36,6 +43,10 @@ export function controlDOM(spec){
     const o={present:!!n && (r.presenceSelector?visible(one(r.presenceSelector)):eligible(n)),value:null,errors:errors(r.errorSelectors)};
     if(f.userOnly){fields[f.id]={present:!!n && eligible(n),userOnly:true};continue;}
     if(n){
+      const question=n.closest?.('.ant-form-item,.ud-formily-item,.atsx-form-item,.form-item--phoenix');
+      const invalid=n.getAttribute?.('aria-invalid')==='true';
+      const renderedErrors=question?[...question.querySelectorAll('.ant-form-item-explain-error,.has-error .ant-form-explain,.ud-formily-item-feedback-error')].filter(visible):[];
+      if(invalid||renderedErrors.length)o.errors.push({scope:'question',source:invalid?'aria_invalid':'rendered_validation'});
       if(r.requireDisabled)o.disabled=n.disabled===true||n.getAttribute('aria-disabled')==='true'||!!n.closest('.ant-select-disabled,[aria-disabled="true"]');
       if(r.kind==='value')o.value=n.tagName==='SELECT'?n.selectedOptions[0]?.textContent?.trim()??null:n.value??null;
       else if(r.kind==='text')o.value=text(n);
@@ -65,7 +76,7 @@ export function controlDOM(spec){
   }
   const groups={};
   for(const g of spec.groups||[])groups[g.id]=[...document.querySelectorAll(g.selector)].filter(n=>visible(n)&&(!g.containsSelector||!!one(g.containsSelector)&&n.contains(one(g.containsSelector)))).length;
-  const sections=spec.sectionDiscovery?[...document.querySelectorAll(spec.sectionDiscovery.selector)].filter(visible).map(n=>{
+  const sections=spec.sectionDiscovery?[...new Set((spec.sectionDiscovery.selectors||[spec.sectionDiscovery.selector]).flatMap(selector=>[...document.querySelectorAll(selector)]))].filter(visible).map(n=>{
     const root=spec.sectionDiscovery.parentContainer?n.parentElement:n;
     return {title:text(n.querySelector(spec.sectionDiscovery.titleSelector)),unexpanded:!!spec.sectionDiscovery.unexpandedSelector&&[...root.querySelectorAll(spec.sectionDiscovery.unexpandedSelector)].some(visible)};
   }):undefined;
@@ -141,7 +152,7 @@ export function controlDOM(spec){
     .map(f=>({...f,userOnly:f.type==='password'||/otp|验证码|password|密码|token|captcha|身份证|护照号|银行卡/i.test(f.label+' '+f.selector)}))
     .map((f,i)=>{
       const n=[...controls,...containers][i];
-      if(n.type==='file'){const entry=uploadRoots().find(x=>x.input===n);if(entry)return {...f,observationSelector:f.selector,selector:uploadRef(entry),actionSelector:uploadRef(entry),label:entry.label,section:entry.label,locatorStrategy:'semantic_question',contextProvider:'.ant-upload',uploadContainerSelector:uploadRef(entry,'container'),filenameSelector:'.ant-upload-list-item-name',uploadedSelector:uploadRef(entry,'uploaded')};}
+      if(n.type==='file'){const entry=uploadRoots().find(x=>x.input===n);if(entry)return {...f,observationSelector:f.selector,selector:uploadRef(entry),actionSelector:uploadRef(entry),label:entry.label,section:entry.label,locatorStrategy:'semantic_question',contextProvider:'.ant-upload',uploadContainerSelector:uploadRef(entry,'container'),filenameSelector:uploadRef(entry,'filenames'),uploadedSelector:uploadRef(entry,'uploaded'),uploadedItems:uploadItems(entry)};}
       const root=n.closest('.ud-formily-item');if(!root)return f;
       const label=root.querySelector(':scope > .ud-formily-item-label')?.innerText?.trim();
       const group=n.closest('[id^="formily-item-"][id$="_list"]'),row=n.closest('.register-form-group-wrapper');

@@ -31,6 +31,7 @@ export function classifyPending(field,profile) {
  if(field.userOnly)return {kind:'human_action',reason:humanActionReason(field),owner:'user'};
  if(field.source?.startsWith('unmapped.'))return {kind:'mapping',reason:'SEMANTIC_MAPPING_REQUIRED',owner:'agent'};
  if(Object.values(MATERIAL_SOURCES).includes(field.source))return {kind:'ready',owner:'agent',resolution:'confirmed_role_material_required_at_preflight'};
+ if(field.ongoingSource&&profile?.facts?.[field.ongoingSource]?.status==='known'&&profile.facts[field.ongoingSource].value===true)return {kind:'ready',owner:'agent',resolution:'sourced_same_record_ongoing'};
  const fact=profile?.facts?.[field.source];
  if(!fact||fact.status==='missing')return {kind:'answer',reason:'CANONICAL_ANSWER_MISSING',owner:'user'};
  if(fact.status==='conflict')return {kind:'answer',reason:'CANONICAL_ANSWER_CONFLICT',owner:'user'};

@@ -2,6 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import {mkd
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {registerObservedQuestions,mapProfileQuestions} from '../shared/profile.mjs';
 import {Store,hash} from '../shared/engine.mjs';
+import {randomUUID} from 'node:crypto';
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 test('actual application MCP reports new runtime and missing company form routes offline to acquisition', {timeout:10000},async()=>{
  const d=await mkdtemp(path.join(os.tmpdir(),'application-protocol-'));const profile=path.join(d,'profile.json');await writeFile(profile,JSON.stringify({schemaVersion:1,facts:{},sources:{},entities:{}}));
@@ -10,7 +11,8 @@ test('actual application MCP reports new runtime and missing company form routes
  await writeFile(path.join(firm,'公司.json'),JSON.stringify({schemaVersion:2,companyId,'公司':'测试公司','地区':'测试地区',origins:[origin],roles:[]}));
  const c=new Client({name:'application-repair-regression',version:'1'});
  try{await c.connect(new StdioClientTransport({command:process.execPath,args:[path.join(root,'application/server.mjs')],cwd:d,env:{PATH:process.env.PATH,RECRUITING_HANDOFF_DIR:handoff,RECRUITING_PROFILE_JSON:profile,RECRUITING_PRIVATE_DIR:path.join(d,'application'),RECRUITING_ROLE_QUEUE_DIR:path.join(d,'queue'),RECRUITING_BROWSER_SOCKET:path.join(d,'absent.sock')},stderr:'pipe'}));
- const names=(await c.listTools()).tools.map(t=>t.name);for(const name of ['runtime_info','workflow_next','template_rebind_role','application_closeout','capture_form_definition','inspect_choice'])assert.ok(names.includes(name));
+ const toolList=(await c.listTools()).tools,names=toolList.map(t=>t.name);for(const name of ['runtime_info','workflow_next','template_rebind_role','application_closeout','capture_form_definition','inspect_choice','form_remove_attachment'])assert.ok(names.includes(name));
+ const checkPatterns=value=>{if(!value||typeof value!=='object')return;for(const [key,item]of Object.entries(value)){if(key==='pattern')assert.doesNotThrow(()=>new RegExp(item,'u'));else checkPatterns(item);}};toolList.forEach(t=>checkPatterns(t.inputSchema));
  const call=async(name,args={})=>{const r=await c.callTool({name,arguments:args},undefined,{timeout:3000}),data=JSON.parse(r.content[0].text);assert.notEqual(r.isError,true,`${name}: ${data.error||'MCP error'}`);return data;};
  const info=await call('runtime_info');assert.equal(info.version,'2.0.0-alpha.7');assert.equal(info.compilerVersion,3);assert.equal(info.pipelineRevision,'rea-contract-5');assert.ok(info.capabilities.includes('choice_resolution_pending_diagnostics'));
  const unknown=await c.callTool({name:'workflow_next',arguments:{companyId:'absent-company',pageUrl}},undefined,{timeout:3000});assert.equal(unknown.isError,true);const failure=JSON.parse(unknown.content[0].text);assert.equal(failure.error,'COMPANY_ORIGIN_MISMATCH');assert.equal(failure.continuation.owner,'agent');assert.ok(failure.failureEvidenceId);
@@ -31,5 +33,14 @@ test('actual application MCP reports new runtime and missing company form routes
  await privateStore.put('runs','test-choices',{companyId,pageUrl,captureId:'synthetic',choices:[{selector:'#school',status:'captured',restored:true,options:['Alpha University']}]});
  const pending=await call('form_resolve_choices',{companyId,choicesId:'test-choices',resolutions:[{selector:'#missing',factKey:'school'},{selector:'#school',factKey:'wrong'}]});assert.deepEqual(pending.pending.map(p=>p.status),['needs_option_capture','needs_question_mapping']);assert.equal(pending.pending[1].questionId,questionId);assert.equal(pending.continuation.owner,'agent');
  const resolved=await call('form_resolve_choices',{companyId,choicesId:'test-choices',resolutions:[{selector:'#school',factKey:'school'}]});assert.equal(resolved.pending.length,0);assert.equal((await privateStore.get('runs','test-choices')).choices[0].resolutions.school.selectedOption,'Alpha University');
+ // Exercise the actual sealing endpoint with a role-material source that must
+ // never be duplicated as a personal fact. The owned fixture supplies its probe.
+ const materialProfile={schemaVersion:1,entities:{},facts:{},sources:{},fieldRegistry:{}};
+ registerObservedQuestions(materialProfile,{companyId,pageUrl,observedAt:'synthetic',coverageRequired:true,fields:[{selector:'#code',label:'推荐码',type:'text',required:false}]});await writeFile(profile,JSON.stringify(materialProfile));
+ const materialField={...template.pages[0].fields[0],id:'code',source:'material:referralCode',label:'推荐码',inventoryLabel:'推荐码',inventoryType:'text',inventorySelectors:['#code'],read:{kind:'value',selector:'#code'},actions:[{method:'fill',selector:'#code'}]};
+ const materialTemplate={...template,id:'material-form',coverage:{},pages:[{...template.pages[0],fields:[materialField]}]};await call('template_register',{companyId,template:materialTemplate});
+ const stored=await privateStore.get('templates','material-form'),probeId=randomUUID();
+ await privateStore.put('runs',probeId,{id:probeId,operation:'internal_condition_probe',companyId,templateHash:hash(stored),status:'verified',restoration:'verified',branches:[{source:'__baseline__',value:null,status:'verified',newQuestions:0,selected:true,roleMatched:true,conditionFieldsMatched:true,inventory:[{selector:'#code',label:'推荐码',type:'text',required:false}]}]});
+ const sealed=await call('template_finalize',{companyId,templateHash:hash(stored),probeRunId:probeId});assert.equal(sealed.status,'asset_sealed_require_profile_preflight');assert.equal(JSON.parse(await readFile(profile,'utf8')).facts['material:referralCode'],undefined);
  }finally{await c.close();await rm(d,{recursive:true,force:true});}
 });

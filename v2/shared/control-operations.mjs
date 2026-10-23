@@ -1,4 +1,5 @@
 import {choiceProofDOM,confirmChoiceEvidence} from './choice-proof.mjs';
+import {selectorAliasDOM} from './selector-aliases.mjs';
 import {validDate} from './value-contract.mjs';
 import {remapFeishuSpecDOM} from './feishu-selectors.mjs';
 import {CONTROL_METHODS} from './control-registry.mjs';
@@ -137,12 +138,22 @@ async function performAntMulti(adapter,action,value){
 }
 export async function performControl(adapter,action,value,files={}){
 
-    if(!CONTROL_METHODS[action.method])throw Error('UNKNOWN_ACTION');
+    if(!CONTROL_METHODS[action.method]){const url=new URL('./control-registry.mjs',import.meta.url);url.searchParams.set('revision',String((await stat(url)).mtimeMs));if(!(await import(url.href)).CONTROL_METHODS[action.method])throw Error('UNKNOWN_ACTION');}
     if(action.method==='capture_wecruit_schema')return captureWecruitSchema(adapter.page,action);
     if(!['wait','dropdown_inspect','ant_dropdown_inspect','ud_dropdown_inspect','ant_dropdown_verify','ud_dropdown_verify','dropdown_verify'].includes(action.method))await adapter.assertSingleEditor();
-    if(action.method==='ant_day')return performAntDay(adapter,action,value);
+    if(action.method==='ant_day'){
+      const url=new URL('./ant-date.mjs',import.meta.url);url.searchParams.set('revision',String((await stat(url)).mtimeMs));
+      return (await import(url.href)).performAntDay(adapter,action,value);
+    }
+    if(action.method==='remove_uploaded_file'){
+      const {performAttachmentRemoval}=await import(new URL('./uploaded-file-removal.mjs',import.meta.url));return performAttachmentRemoval(adapter,action);
+    }
     if(action.provider==='feishu'&&!action.selectorsResolved)action=await adapter.page.evaluate(remapFeishuSpecDOM,action);
     action=await adapter.resolveSpec(action);
+    if(action.method==='wait'&&action.operation==='compare_control_aliases'){
+      if(!Array.isArray(action.alternatives)||!Array.isArray(action.references)||action.alternatives.length>600||action.references.length>600)throw Error('BOUNDED_SELECTOR_REFERENCES_REQUIRED');
+      return adapter.page.evaluate(selectorAliasDOM,{alternatives:action.alternatives,references:action.references});
+    }
     if(action.method==='wait')return adapter.wait(action.selector);
     if(action.method==='ant_multiselect')return performAntMulti(adapter,action,value);
     const l=await locateControl(adapter.page,action);

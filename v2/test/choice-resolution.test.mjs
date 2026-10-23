@@ -3,6 +3,13 @@ import {rankChoices,resolveObservedChoice,applyChoiceResolution} from '../shared
 import {preferRealMajorMappings} from '../shared/major-policy.mjs';
 import {registerTemplateContract,resolveProfile,recordProfileAnswers} from '../shared/profile.mjs';
 import {hash} from '../shared/engine.mjs';
+test('a locked portal enum still needs an evidenced presentation mapping, preserving canonical meaning and no write action',()=>{
+ const key='identity.documentType',p={facts:{[key]:{status:'known',value:'Canonical document type'}}},choice={status:'captured_locked_value',restored:true,options:['Portal document type'],lockedControl:{disabled:true,selected:true,value:'Portal document type'}};
+ assert.throws(()=>resolveObservedChoice({profile:p,factKey:key,choice,selectedOption:'Portal document type'}),/SEMANTIC_REVIEW_REQUIRED/);
+ choice.resolutions={[key]:resolveObservedChoice({profile:p,factKey:key,choice,selectedOption:'Portal document type',evidence:'Observed locked portal label is the same sourced document type'})};
+ const field={source:key,kind:'choice',readonly:true,lockedControl:choice.lockedControl,control:{type:'dropdown'},actions:[],constructionBlockers:[]};applyChoiceResolution(field,choice,p);
+ assert.equal(field.enumMap['Canonical document type'],'Portal document type');assert.deepEqual(field.actions,[]);assert.equal(p.facts[key].value,'Canonical document type');
+});
 test('real and application majors stay separate; text uses the real major, dropdown fallback needs absence evidence',()=>{
  const key='education.sample.major.zh',p={schemaVersion:1,entities:{},sources:{user:{kind:'user_reply'}},fieldRegistry:{},facts:{[key]:{status:'known',value:'Specific Discipline',sourceIds:['user']},'education.sample.major.canonical':{status:'known',value:'General Discipline',sourceIds:['user']}},policy:{majorDropdownResolution:{autoSelect:true,whenOriginalUnavailable:true}}};
  preferRealMajorMappings(p,{evidence:'User distinguishes original and application majors'});assert.equal(p.facts[key].value,'Specific Discipline');assert.equal(p.facts['education.sample.major.application'].value,'General Discipline');assert.equal(p.facts['education.sample.major.canonical'],undefined);

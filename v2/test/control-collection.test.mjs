@@ -26,6 +26,10 @@ test('independent readback ignores hidden duplicate but rejects two visible answ
  const ambiguous=fakeDOM({'#answer':[element('one'),element('two')]});
  assert.equal(ambiguous({fields:[{id:'a',read:{kind:'value',selector:'#answer'}}]}).fields.a.present,false);
 });
+test('section readback visits every captured root once and preserves actual titles',()=>{
+ const root=title=>element(null,true,{tagName:'DIV',querySelector:()=>({innerText:title})}),read=fakeDOM({'#one':[root('One')],'#two':[root('Two')]});
+ assert.deepEqual(JSON.parse(JSON.stringify(read({fields:[],sectionDiscovery:{selector:'form',selectors:['#one','#two','#one'],titleSelector:'h3'}}).sections)),[{title:'One',unexpanded:false},{title:'Two',unexpanded:false}]);
+});
 test('styled checkbox uses visible label; files need rendered server evidence',()=>{
  const label=element(null);const input=element(null,false,{type:'checkbox',checked:false,closest:s=>s==='label'?label:null});
  const file=element(null,true,{tagName:'INPUT',type:'file',files:[{name:'local.pdf'}]});
@@ -85,7 +89,8 @@ test('real RPC and direct page paths invoke the same UD driver',async()=>{
 });
 
 test('wait never requires an already-present control before it waits',async()=>{
- let waited=false;const p=new PageAdapter({url:()=> 'https://fixture.test/form',locator:()=>({waitFor:async()=>{waited=true;}})},{listOpenPageUrls:async()=>[]});
+ let waited=false;const locator={filter(options){assert.deepEqual(options,{visible:true});return this;},first(){return this;},waitFor:async()=>{waited=true;}};
+ const p=new PageAdapter({url:()=> 'https://fixture.test/form',locator:()=>locator},{listOpenPageUrls:async()=>[]});
  await p.act({method:'wait',selector:'#late'},null,{});assert.equal(waited,true);
 });
 test('host role identity is read from actual query rather than the expected ID',async()=>{
@@ -147,6 +152,11 @@ test('typed school search text is not an actual committed dropdown selection',()
  const input=element('Invented University',true,{role:'combobox'}),read=fakeDOM({'#school':[input]});
  const result=read({fields:[{id:'school',kind:'choice',read:{kind:'value',selector:'#school',selectedSelector:'#school'}}]}).fields.school;
  assert.equal(result.value,'Invented University');assert.equal(result.selected,false);
+});
+test('field readback automatically carries website validation errors even without agent-supplied error selectors',()=>{
+ const input=element('SampleCode',true,{getAttribute:key=>key==='aria-invalid'?'true':null}),read=fakeDOM({'#code':[input]});
+ const result=read({fields:[{id:'code',read:{kind:'value',selector:'#code'}}]}).fields.code;
+ assert.equal(result.errors[0].source,'aria_invalid');
 });
 
 test('Ant readonly search input opens via its selector and scopes rendered popup rather than hidden aria list',async()=>{

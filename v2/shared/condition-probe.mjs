@@ -1,5 +1,5 @@
 import {matchesRole} from './role-identity.mjs';
-import {enrichControlContext} from './control-context.mjs';
+import {liveControls} from './control-context.mjs';
 // Internal maintenance only. Traverse captured branch choices through real UI
 // controls, persist every discovery, then restore and read back the initial form.
 const signature=f=>JSON.stringify({selector:f.selector,label:f.label,type:f.type,required:!!f.required});
@@ -8,7 +8,7 @@ const state=o=>({pageUrl:o.pageUrl,roleTitle:o.roleTitle,roleIdentity:o.roleIden
 const mapped=(f,plan)=>plan.fields.some(p=>(p.inventorySelectors||[p.read.selector]).includes(f.selector)&&p.inventoryLabel===f.label&&p.inventoryType===f.type&&!!p.required===!!f.required);
 
 export async function probeConditions({page,plan,pageUrl,origin,onInventory,checkpoint=async()=>{},settleMs=2000}){
- const inventory=async()=>{const raw=await page.inventory(plan);return plan.provider==='feishu'?raw:enrichControlContext(page,raw);};
+ const inventory=()=>liveControls(page,plan);
  const branches=[],dependencies=[...new Set(plan.fields.map(f=>f.when?.source).filter(Boolean))];
  const parents=dependencies.map(source=>{
   const matches=plan.fields.filter(f=>f.source===source);

@@ -11,6 +11,11 @@ export async function detectedAcquisitionPlan(page,plan,provider){
  if(provider&&found.length&&!found.includes(provider))throw Error('FORM_PROVIDER_EVIDENCE_MISMATCH');
  return acquisitionPlan(plan,provider||found[0]);
 }
+export async function assertCollectionProvider(page,plan){
+ const actual=await detectedAcquisitionPlan(page,plan,plan?.provider);
+ if(actual.provider&&actual.provider!==plan?.provider)throw Error('FORM_PROVIDER_REQUIRES_REBUILD');
+ return true;
+}
 
 export function captureContentId(companyId,pageUrl,provider,controls,digest){
  return 'capture-'+companyId+'-'+digest({companyId,pageUrl,provider:provider||null,controls}).slice(0,24);
@@ -22,6 +27,7 @@ export function isChoiceControl(field) {
   field.type === 'combobox' && field.contextProvider === '.ant-form-item' ||
   ['choice','school_text'].includes(field.type) && field.contextProvider === '.atsx-form-item';
 }
+export const isDateControl=field=>field.renderer==='ant_date'||['date','month'].includes(field.type);
 
 // These options came from rendered controls in the bound capture, not a model
 // supplied list. Reading them needs no clicks and cannot alter the selection.

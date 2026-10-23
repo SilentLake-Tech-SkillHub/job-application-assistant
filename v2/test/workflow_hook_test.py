@@ -12,18 +12,24 @@ class WorkflowHookTest(unittest.TestCase):
   r=self.invoke(hook_event_name='UserPromptSubmit');self.assertEqual(r.returncode,0,r.stderr);ctx=json.loads(r.stdout)['hookSpecificOutput']['additionalContext'];self.assertIn('company_batch_create',ctx);self.assertNotIn(self.policy.read_text(),ctx);self.assertLess(len(ctx.encode('utf-8')),1800);self.assertEqual(self.invoke().returncode,0)
  def test_unloaded_mutation_denied_but_maintenance_and_reads_work(self):
   self.assertEqual(self.invoke().returncode,2)
+  self.assertEqual(self.invoke(tool_name='mcp__recruiting_application_v2__role_prepare_materials').returncode,2)
   for tool in ['Bash','apply_patch','mcp__recruiting_form__profile_status','mcp__recruiting_form__workflow_next']:self.assertEqual(self.invoke(tool_name=tool).returncode,0)
  def test_other_conversation_unaffected_by_missing_policy(self):
   self.policy.unlink();self.assertEqual(json.loads(self.invoke(session_id='other').stdout),{})
  def test_receipt_from_another_turn_never_releases_mutation(self):
   self.invoke(hook_event_name='UserPromptSubmit');self.assertEqual(self.invoke(turn_id='other').returncode,2)
 
- def test_agent_work_cannot_stop_after_ignoring_one_reminder(self):
+ def test_repeated_stops_without_new_tools_escalate_to_supervisor(self):
   response={'continuation':{'state':'map','owner':'agent','requiresUser':False,'shouldContinue':True}}
   self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__workflow_next',tool_response=response)
   self.assertEqual(json.loads(self.invoke(hook_event_name='Stop',session_id='other').stdout),{})
   self.assertEqual(json.loads(self.invoke(hook_event_name='Stop',turn_id='other').stdout),{})
   self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout)['decision'],'block')
+  self.assertIn('AGENT_NO_PROGRESS_LOOP',json.loads(self.invoke(hook_event_name='Stop').stdout)['systemMessage'])
+  state=json.loads(next((self.root/'state').glob('continuation-*.json')).read_text())
+  self.assertEqual(state['owner'],'supervisor');self.assertFalse(state['requiresUser']);self.assertFalse(state['complete'])
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout),{})
+  self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__workflow_next',tool_response=response)
   self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout)['decision'],'block')
   self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__workflow_handoff',tool_response={'continuation':{'state':'technical_block','owner':'supervisor','requiresUser':False,'shouldContinue':False,'handoffVerified':True}})
   self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout),{})

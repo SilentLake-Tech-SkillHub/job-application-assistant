@@ -9,13 +9,22 @@ import {templateConstructionIssues} from './field-policy.mjs';
 
 const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const json=v=>JSON.parse(JSON.stringify(v));
+export function orderedFillIds(fields,requiredMaterials=[]){
+ const fill=fields.filter(f=>f.disposition==='fill'&&f.kind!=='file'&&!f.prepareBeforeGroups),required=new Set(requiredMaterials.map(r=>r.fieldId)),done=new Set(),visiting=new Set(),order=[];
+ const visit=field=>{if(done.has(field.id))return;if(visiting.has(field.id))throw Error('CYCLIC_FIELD_DEPENDENCY');visiting.add(field.id);
+  if(field.when)for(const parent of fill.filter(f=>f.source===field.when.source))visit(parent);
+  visiting.delete(field.id);done.add(field.id);order.push(field.id);
+ };
+ for(const field of [...fill.filter(f=>required.has(f.id)),...fill])visit(field);
+ return order;
+}
 export function resolvedFieldValue(f,task) {
   let value=task.values?.[f.source];
   if(f.enumMap&&value!==undefined&&value!==null){
     if(!Object.hasOwn(f.enumMap,value))throw Error('UNMAPPED_ENUM_VALUE');
     value=f.enumMap[value];
   }
-  if(f.ongoingSource&&task.values?.[f.ongoingSource]===true)value='至今';
+  if(f.ongoingSource&&task.values?.[f.ongoingSource]===true)value=task.dateRepresentations?.[f.id]?.value||'至今';
   return f.kind==='date'?projectDateValue(value,f.precision):value;
 }
 
@@ -24,7 +33,7 @@ function inputSnapshot(template,task){
   const values=Object.fromEntries(keys.map(k=>[k,task.values?.[k]??null]));
   const sources=Object.fromEntries(keys.filter(k=>task.sources?.[k]).map(k=>[k,task.sources[k]]));
   const refs=[...new Set(template.pages.flatMap(p=>p.fields).filter(f=>f.kind==='file').map(f=>task.values?.[f.source]).filter(v=>v!=null))].sort();
-  return json({companyId:task.companyId,pageUrl:task.pageUrl,templateHash:task.templateHash,values,sources,omissions:task.omissions||{},files:Object.fromEntries(refs.map(ref=>[ref,task.files?.[ref]??null])),contentPolicy:task.contentPolicy||null,materialContext:task.materialContext||null});
+  return json({companyId:task.companyId,pageUrl:task.pageUrl,templateHash:task.templateHash,values,sources,omissions:task.omissions||{},files:Object.fromEntries(refs.map(ref=>[ref,task.files?.[ref]??null])),contentPolicy:task.contentPolicy||null,materialContext:task.materialContext||null,dateRepresentations:task.dateRepresentations||{}});
 }
 
 async function validateFile(ref,files){
@@ -60,7 +69,7 @@ export async function compileExecutionPlan(template,task){
         if(value!==undefined&&value!==null){
           if(!matchesValueType(value,f.control.valueType))throw Error('PRESENTATION_CONTROL_VALUE_TYPE_MISMATCH');
           if(f.kind==='date'&&!(value==='至今'&&f.ongoingSource)&&!validDate(value,f.precision))throw Error('INVALID_PREFLIGHT_DATE');
-          if(f.kind==='choice'&&(f.control.valueType==='string[]'?(!Array.isArray(value)||new Set(value).size!==value.length||value.some(v=>!f.control.options.includes(v))||f.required&&!value.length):!f.control.options.includes(value)))throw Error('VALUE_OUTSIDE_CAPTURED_OPTIONS');
+          if(f.kind==='choice'&&(f.control.valueType==='string[]'?(!Array.isArray(value)||new Set(value).size!==value.length||value.some(v=>!f.control.options.includes(v))||f.required&&!value.length):!f.control.options.includes(value))){const error=Error('VALUE_OUTSIDE_CAPTURED_OPTIONS');error.details={fieldId:f.id,source:f.source,kind:f.kind,label:f.label};throw error;}
           if(typeof value==='string'&&!value.trim())throw Error('EMPTY_KNOWN_VALUE');
           if(f.kind==='file'&&!checkedFiles.has(value)){await validateFile(value,task.files);checkedFiles.add(value);}
         }
@@ -71,20 +80,39 @@ export async function compileExecutionPlan(template,task){
       if(omission&&value!=null)throw Error('OMISSION_WITH_PLANNED_VALUE');
       const disposition=inactive?'inactive':f.userOnly?'user_only':value==null?(!required&&omission?'omitted':'needs_user'):f.readonly?'observe':'fill';
       counts[disposition]++;
-      fields.push(json({...f,effectiveRequired:required,businessRequired:required&&!f.required,value,disposition}));
+      fields.push(json({...f,effectiveRequired:required,businessRequired:materialCoverage.requirements.some(r=>r.fieldId===f.id),value,disposition}));
+    }
+    // Pair only inputs captured inside the same real range widget. Values are
+    // resolved from this plan's peer field, never stored in reusable templates.
+    for(const f of fields)for(const action of f.actions||[])if(action.method==='ant_day'&&action.rangePeerSelector){
+      const peers=fields.filter(p=>p.id!==f.id&&p.kind==='date'&&p.read.selector===action.rangePeerSelector);
+      if(peers.length!==1||![0,1].includes(action.rangeIndex))throw Error('DATE_RANGE_PEER_MAPPING_REQUIRED');
+      const peer=peers[0],back=peer.actions?.find(a=>a.method==='ant_day'&&a.rangePeerSelector===f.read.selector);
+      if(!back||back.rangeIndex===action.rangeIndex)throw Error('DATE_RANGE_PEER_MAPPING_REQUIRED');
+      if(f.disposition==='fill'){
+        if(!['fill','observe'].includes(peer.disposition)||!validDate(peer.value,'day'))throw Error('DATE_RANGE_PEER_VALUE_REQUIRED');
+        const pair=action.rangeIndex===0?[f.value,peer.value]:[peer.value,f.value];
+        if(pair[0]>pair[1])throw Error('DATE_RANGE_ORDER_INVALID');
+        action.rangePeerValue=peer.value;action.rangePeerFieldId=peer.id;
+      }
     }
     const writable=fields.filter(f=>f.disposition==='fill');
     pages.push({pathPrefix:page.pathPrefix,fields,
       executionOrder:[{stage:'upload',fieldIds:writable.filter(f=>f.kind==='file').map(f=>f.id)},
         {stage:'prepare_groups',fieldIds:writable.filter(f=>f.prepareBeforeGroups).map(f=>f.id)},
         {stage:'ensure_groups',groups:page.groups||[]},
-        {stage:'fill',fieldIds:writable.filter(f=>f.kind!=='file'&&!f.prepareBeforeGroups).map(f=>f.id)},
+        {stage:'fill',fieldIds:orderedFillIds(fields,materialCoverage.requirements)},
         {stage:'observe_and_verify',fieldIds:fields.filter(f=>f.disposition!=='inactive').map(f=>f.id)}],
       expected:compileExpected(page,task)});
   }
   // Captured/mapped does not mean construction is complete. Preserve explicit
   // failures in the frozen plan so every entry path rejects them before I/O.
   const constructionBlockers=[...new Set([...templateConstructionIssues(template).map(x=>x.reason),...materialCoverage.blockers])];
+  for(const f of template.pages.flatMap(p=>p.fields))if(f.kind==='date'&&f.ongoingSource&&task.values?.[f.ongoingSource]===true){
+   const representation=task.dateRepresentations?.[f.id];
+   if(f.dateRepresentation&&(!representation||representation.source!==f.dateRepresentation.source))constructionBlockers.push('DATE_REPRESENTATION_AUTHORIZATION_CHANGED');
+   if(!representation&&f.actions?.some(a=>a.method==='ant_day'&&!a.ongoingLabel))constructionBlockers.push('ONGOING_DATE_OPTION_REQUIRED');
+  }
   const globalPositional = selector => typeof selector==='string' && /^\s*(?:html\s*>\s*)?body\s*>/i.test(selector) && /:nth-(?:of-type|child)\(/.test(selector);
   const unstableFields=template.pages.flatMap(p=>p.fields).filter(f=>!f.userOnly&&!f.readonly&&[f.read?.selector,f.read?.selectedSelector,...(f.inventorySelectors||[]),...(f.actions||[]).flatMap(a=>[a.selector,a.labelSelector,a.openSelector])].some(globalPositional)).map(f=>f.id);
   if(unstableFields.length)constructionBlockers.push('PAGE_GLOBAL_POSITIONAL_LOCATORS');

@@ -10,10 +10,13 @@ export function retireLegacyQuestionMappings(profile,{companyId,template,probe})
  const planned=new Set(template.pages.flatMap(p=>p.fields.flatMap(f=>f.inventorySelectors||[f.read.selector])));
  if([...observed].some(s=>!planned.has(s)))throw Error('MIGRATION_HAS_UNMAPPED_CURRENT_CONTROL');
  const retired=[];
+ const aliases=probe.selectorEquivalences;
+ if(aliases&&(aliases.companyId!==companyId||aliases.pageUrl!==template.evidence.sourceUrl||aliases.templateHash!==hash(template)))throw Error('SELECTOR_EQUIVALENCE_SCOPE_MISMATCH');
  for(const [id,m]of Object.entries(form.mappings)){
   const replacements=template.pages.flatMap(p=>p.fields).filter(f=>f.source===m.factKey&&(f.inventorySelectors||[f.read.selector]).some(s=>observed.has(s)));
   const replaced=m.status==='mapped'&&replacements.length===1;
-  const obsolete=replaced||!m.selector||/^\s*body\s*>/i.test(m.selector)&&/:nth-(?:of-type|child)\(/.test(m.selector);
+  const equivalent=aliases?.pairs?.some(pair=>pair.selector===m.selector&&observed.has(pair.reference)&&planned.has(pair.reference));
+  const obsolete=equivalent||replaced||!m.selector||/^\s*body\s*>/i.test(m.selector)&&/:nth-(?:of-type|child)\(/.test(m.selector);
   if(m.active!==false||!m.coverageRequired||!obsolete||observed.has(m.selector)||planned.has(m.selector))continue;
   delete form.mappings[id];retired.push(id);
  }
