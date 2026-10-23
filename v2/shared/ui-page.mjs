@@ -5,9 +5,22 @@ import {antDOM} from './ant-reference.mjs';
 import {observeDOM} from './observation.mjs';
 import {inventoryFeishuDOM} from './feishu-inventory.mjs';
 import {remapFeishuSpecDOM,canonicalizeInventory} from './feishu-selectors.mjs';
+import {stat} from 'node:fs/promises';
 
 export {controlDOM as inventoryDOM} from './control-dom.mjs';
 import {controlDOM as inventoryDOM,normalizePhoenixReference} from './control-dom.mjs';
+const currentReader=async(file,name)=>{const url=new URL(file,import.meta.url),info=await stat(url);url.searchParams.set('revision',String(info.mtimeMs));return (await import(url.href))[name];};
+const currentAnt=()=>currentReader('./ant-reference.mjs','antDOM');
+const currentNative=()=>currentReader('./control-dom.mjs','controlDOM');
+export function uncoveredControlsDOM({coveredSelectors,controls,primary=[]}){
+ const covered=new Map(coveredSelectors.flatMap((s,i)=>s?[...document.querySelectorAll(s)].map(n=>[n,i]):[])),result=[...primary];
+ for(const c of controls){let nodes;try{nodes=[...document.querySelectorAll(c.observationSelector||c.selector)];}catch{nodes=[];}
+  const index=nodes.length===1?covered.get(nodes[0]):undefined;
+  if(index===undefined)result.push(c);
+  else if(c.type==='file'&&c.uploadContainerSelector)result[index]={...result[index],...Object.fromEntries(['actionSelector','uploadContainerSelector','filenameSelector','uploadedSelector'].map(k=>[k,c[k]])),label:result[index].label||c.label};
+ }
+ return result;
+}
 
 export class PageAdapter {
   constructor(page,{listOpenPageUrls}={}){Object.assign(this,{page,listOpenPageUrls});}
@@ -18,16 +31,23 @@ export class PageAdapter {
     if(peers.length)throw Error('SHARED_RESUME_HAS_OTHER_OPEN_EDITORS');
   }
   async assertLocation(origin,prefix){const u=new URL(this.page.url());if(u.origin!==origin||!u.pathname.startsWith(prefix))throw Error('PAGE_IDENTITY_CHANGED');}
-  async resolveSelector(selector){if(selector?.startsWith('phoenixq:'))return (await this.page.evaluate(inventoryDOM,{operation:'resolvePhoenix',references:[normalizePhoenixReference(selector)]}))[0];if(!selector?.startsWith('antq:'))return selector;const actual=await this.page.evaluate(antDOM,{operation:'resolve',reference:selector});return actual||':not(*)';}
+  async resolveSelector(selector){if(selector?.startsWith('uploadq:'))return (await this.page.evaluate(await currentNative(),{operation:'resolveUpload',references:[selector]}))[0]||':not(*)';if(selector?.startsWith('phoenixq:'))return (await this.page.evaluate(await currentNative(),{operation:'resolvePhoenix',references:[normalizePhoenixReference(selector)]}))[0];if(!selector?.startsWith('antq:'))return selector;const actual=await this.page.evaluate(await currentAnt(),{operation:'resolve',reference:selector});return actual||':not(*)';}
   async resolveSpec(spec){
-    const refs=new Set();const collect=v=>{if(typeof v==='string'&&(v.startsWith('antq:')||v.startsWith('phoenixq:')))refs.add(v);else if(Array.isArray(v))v.forEach(collect);else if(v&&typeof v==='object')Object.values(v).forEach(collect);};collect(spec);if(!refs.size)return spec;
-    const keys=[...refs],ant=keys.filter(k=>k.startsWith('antq:')),phoenix=keys.filter(k=>k.startsWith('phoenixq:'));
-    const [antValues,phoenixValues]=await Promise.all([ant.length?this.page.evaluate(antDOM,{operation:'resolve',references:ant}):[],phoenix.length?this.page.evaluate(inventoryDOM,{operation:'resolvePhoenix',references:phoenix.map(normalizePhoenixReference)}):[]]);
-    const mapping=new Map([...ant.map((k,i)=>[k,antValues[i]||':not(*)']),...phoenix.map((k,i)=>[k,phoenixValues[i]||':not(*)'])]);
+    const refs=new Set();const collect=v=>{if(typeof v==='string'&&['antq:','phoenixq:','uploadq:'].some(prefix=>v.startsWith(prefix)))refs.add(v);else if(Array.isArray(v))v.forEach(collect);else if(v&&typeof v==='object')Object.values(v).forEach(collect);};collect(spec);if(!refs.size)return spec;
+    const keys=[...refs],ant=keys.filter(k=>k.startsWith('antq:')),phoenix=keys.filter(k=>k.startsWith('phoenixq:')),uploads=keys.filter(k=>k.startsWith('uploadq:'));
+    const [antValues,phoenixValues,uploadValues]=await Promise.all([ant.length?this.page.evaluate(await currentAnt(),{operation:'resolve',references:ant}):[],phoenix.length?this.page.evaluate(await currentNative(),{operation:'resolvePhoenix',references:phoenix.map(normalizePhoenixReference)}):[],uploads.length?this.page.evaluate(await currentNative(),{operation:'resolveUpload',references:uploads}):[]]);
+    const mapping=new Map([...ant.map((k,i)=>[k,antValues[i]||':not(*)']),...phoenix.map((k,i)=>[k,phoenixValues[i]||':not(*)']),...uploads.map((k,i)=>[k,uploadValues[i]||':not(*)'])]);
     const walk=v=>typeof v==='string'?mapping.get(v)||v:Array.isArray(v)?v.map(walk):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,walk(x)])):v;return walk(spec);
   }
   async wait(selector){selector=await this.resolveSelector(selector);await this.page.locator(selector).waitFor({state:'visible',timeout:10000});}
-  async inventory(plan){if(plan?.provider==='ant')return this.page.evaluate(antDOM);const raw=await this.page.evaluate(plan?.provider==='feishu'?inventoryFeishuDOM:inventoryDOM);return plan?.provider==='feishu'&&!plan.rawKeys?canonicalizeInventory(raw).fields:raw;}
+  async inventory(plan){
+   if(plan?.provider==='ant'){
+    const reader=await currentAnt(),primary=await this.page.evaluate(reader),coveredSelectors=await this.page.evaluate(reader,{operation:'resolve',references:primary.map(c=>c.selector)});
+    const controls=await this.page.evaluate(await currentNative());
+    return this.page.evaluate(uncoveredControlsDOM,{coveredSelectors,controls,primary});
+   }
+   const raw=await this.page.evaluate(plan?.provider==='feishu'?inventoryFeishuDOM:await currentNative());return plan?.provider==='feishu'&&!plan.rawKeys?canonicalizeInventory(raw).fields:raw;
+  }
   async observe(plan){plan=await this.resolveSpec(plan);const result=await this.page.evaluate(observeDOM,plan.provider==='feishu'&&!plan.selectorsResolved?await this.page.evaluate(remapFeishuSpecDOM,plan):plan);if(plan.roleIdentity)result.roleIdentity=readRoleIdentity(plan.roleIdentity,result.pageUrl);return result;}
   async ensureGroups(groups){
     if(groups?.length)await this.assertSingleEditor();
@@ -46,7 +66,7 @@ export class PageAdapter {
       }
     }
   }
-  async act(action,value,files){return performControl(this,action,value,files);}
+  async act(action,value,files){return (await currentReader('./control-operations.mjs','performControl'))(this,action,value,files);}
   async readBatch(fields){const o=await this.observe({fields});return Object.fromEntries(Object.entries(o.fields).map(([id,f])=>[id,f.value]));}
   async validationErrors(selectors){return this.page.evaluate(ss=>ss.flatMap(s=>[...document.querySelectorAll(s)].filter(n=>n.getClientRects().length&&getComputedStyle(n).visibility!=='hidden').map(()=>({selector:s,visible:true}))),selectors);}
 }

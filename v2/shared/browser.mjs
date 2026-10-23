@@ -1,5 +1,6 @@
 import {executeTransition} from './entry-transition.mjs';
 import {inspectRea} from './rea-structure.mjs';
+import {captureNativePageStructure} from './page-structure.mjs';
 import {readRoleIdentity} from './role-identity.mjs';
 import {screenshotMaskDOM} from './screenshot-mask.mjs';
 import { chromium } from 'playwright-core';
@@ -49,7 +50,7 @@ export class BrowserAdapter {
     })();
     try{return await this.connecting;}catch(error){this.state='failed';throw error;}finally{this.connecting=null;}
   }
-  status(){return {state:this.state,mode:this.endpoint==='managed-chrome'?'managed':this.endpoint==='managed-iab'?'iab':'cdp',connectionAttempts:this.connectionAttempts,automaticRetries:0,driverRevision:'2026-10-17.4'};}
+  status(){return {state:this.state,mode:this.endpoint==='managed-chrome'?'managed':this.endpoint==='managed-iab'?'iab':'cdp',connectionAttempts:this.connectionAttempts,automaticRetries:0,driverRevision:'2026-10-23.2',reloadableReaders:['ant','native_dom','control_operations']};}
   async trackedPage(id){const page=this.pageIds.get(id);if(!page||page.isClosed())throw Error('ROLE_BROWSER_PAGE_LOST');return page;}
   async pageIdentity(id){const page=await this.trackedPage(id);return {pageId:id,pageUrl:page.url()};}
   async reaInspect({pageId,pageUrl,authorization}){
@@ -60,8 +61,9 @@ export class BrowserAdapter {
     const cdp=await page.context().newCDPSession(page);
     try{const {targetInfo}=await cdp.send('Target.getTargetInfo');
       if(targetInfo.url!==pageUrl)throw Error('REA_PAGE_BINDING_CHANGED');
-      const evidence=await inspectRea({endpoint,targetId:targetInfo.targetId,pageUrl});
-      return {evidence,binding:{pageId,targetId:targetInfo.targetId,beforeUrl,afterUrl:page.url()}};
+      const nativeStructure=await captureNativePageStructure(cdp,{pageUrl,targetId:targetInfo.targetId});
+      const evidence=await inspectRea({endpoint,targetId:targetInfo.targetId,pageUrl,allowedOrigins:nativeStructure.scriptOrigins});
+      return {evidence,nativeStructure,binding:{pageId,targetId:targetInfo.targetId,beforeUrl,afterUrl:page.url()}};
     }finally{await cdp.detach();}
   }
   async roleSnapshot({pageId,roleSelector,accountSelector,loginRoot,roleIdentity}){
@@ -70,11 +72,12 @@ export class BrowserAdapter {
     return {pageUrl:page.url(),roleTitle:await read(roleSelector),...(roleIdentity?{roleIdentity:readRoleIdentity(roleIdentity,page.url())}:{}),account:await read(accountSelector),loginFormPresent:loginRoot?await page.locator(loginRoot).count()>0:false,readAt:new Date().toISOString()};
   }
   async screenshot(pageId){const page=await this.trackedPage(pageId);const dir=path.join(path.dirname(this.profileDir),'screenshots');await mkdir(dir,{recursive:true,mode:0o700});const file=path.join(dir,randomUUID()+'.png');const masks=await page.evaluate(screenshotMaskDOM);await page.screenshot({path:file,fullPage:true,mask:masks.map(selector=>page.locator(selector))});await chmod(file,0o600);return {path:file,sensitiveFieldsMasked:masks.length};}
-  async openPage(url,{pageId,readySelectors=[]}={}){
+  async openPage(url,{pageId,readySelectors=[],reuseOnly=false}={}){
     if(new URL(url).protocol!=='https:')throw Error('HTTPS_BROWSER_PAGE_REQUIRED');
     const b=await this.connect(),context=b.contexts()[0];
     const matches=pageId?[await this.trackedPage(pageId)]:context.pages().filter(p=>p.url()===url);
     if(matches.length>1)throw Error('AMBIGUOUS_PAGE');
+    if(reuseOnly&&(!matches.length||matches[0].url()!==url))throw Error('EXISTING_PAGE_REQUIRED_FOR_REBIND');
     const blank=context.pages().find(p=>p.url()==='about:blank');
     const page=matches[0]||blank||await context.newPage(),reused=page.url()===url;
     if(!reused)await page.goto(url,{waitUntil:'domcontentloaded',timeout:30000});
@@ -144,5 +147,5 @@ export class BrowserAdapter {
     if(pages.length!==1)throw Error(pages.length?'AMBIGUOUS_PAGE':'EXISTING_PAGE_NOT_FOUND');
     return new PageAdapter(pages[0]);
   }
-  async tabs(){if(!this.connection&&this.state==='new')return [];const b=await this.connect();return Promise.all(b.contexts().flatMap(c=>c.pages()).map(async p=>({url:p.url(),title:await p.title()})));}
+  async tabs(){if(!this.connection&&this.state==='new')return [];const b=await this.connect();return Promise.all(b.contexts().flatMap(c=>c.pages()).filter(p=>!p.isClosed()).map(async p=>{let id=[...this.pageIds].find(([,tracked])=>tracked===p)?.[0];if(!id){id=randomUUID();this.pageIds.set(id,p);}return {id,url:p.url(),title:await p.title()};}));}
 }

@@ -1,6 +1,7 @@
 // Offline company-form lookup. A profile answer gap is not a reason to recapture
 // an existing form. An incomplete or incompatible form asset still needs work.
 import {templateConstructionIssues} from './field-policy.mjs';
+import {assertSealContract} from './form-seal.mjs';
 export class FormRouter {
   constructor({store,companies,validateTemplate}) {Object.assign(this,{store,companies,validateTemplate});}
   async resolve({companyId,roleId,pageUrl}) {
@@ -20,6 +21,7 @@ export class FormRouter {
     const legacySelectors=pages.flatMap(p=>p.fields).filter(f=>!f.userOnly&&!f.readonly).some(f=>[f.read?.selector,...(f.inventorySelectors||[]),...(f.actions||[]).flatMap(a=>[a.selector,a.labelSelector,a.openSelector])].some(s=>/^\s*(?:html\s*>\s*)?body\s*>/i.test(s||'')&&/:nth-(?:of-type|child)\(/.test(s)));
     if(legacySelectors)blockers.push('PAGE_GLOBAL_POSITIONAL_LOCATORS');
     if(blockers.length)return acquire('COMPANY_FORM_ASSET_INCOMPLETE',{templateId,blockers});
+    try{assertSealContract(template);const probe=await this.store.get('runs',template.coverage.proof.runId);assertSealContract(template,probe,companyId);}catch(e){return acquire('COMPANY_FORM_ASSET_NOT_SEALED',{templateId,blockers:[e.code==='ENOENT'?'SEAL_PROBE_EVIDENCE_MISSING':e.message],requiresUser:false});}
     return {companyId,templateId,route:'reuse',nextStage:'local_profile_preflight',reason:'COMPANY_FORM_ASSET_AVAILABLE',fullAcquisitionRequired:false,lightweightStructureCheckRequired:true,browserAccess:false};
   }
 }

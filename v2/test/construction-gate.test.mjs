@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {Engine,Store,hash} from '../shared/engine.mjs';
 import {compileExecutionPlan,assertPreparedPlan} from '../shared/execution-plan.mjs';
+import {observedSeal} from './fixtures/observed-seal.mjs';
 
 const template=(id,origin,coverage)=>({id,version:1,coverage:{allConditionalBranchesVerified:true,allControlsMapped:true,allDriversSupported:true,...coverage},evidence:{sourceUrl:origin+'/form',observedAt:'synthetic'},pages:[{pathPrefix:'/form',readySelector:'#form',roleTitle:'Synthetic role',roleSelector:'h1',sections:[{title:'Basics'}],sectionDiscovery:{selector:'section',titleSelector:'h2'},groups:[],fields:[{id:'name',source:'name',label:'Name',kind:'text',required:true,control:{type:'text',valueType:'string',readbackType:'string'},read:{selector:'#name',kind:'value'},actions:[{method:'fill',selector:'#name'}]}]}]});
 async function fixture(fn){
@@ -12,19 +13,19 @@ async function fixture(fn){
  const companies=[{id:'a',origin:'https://a.example.com',templateId:'form-a'},{id:'b',origin:'https://b.example.com',templateId:'form-b'}];
  const browser={existingPage:async()=>{browserAccesses++;throw Error('UNEXPECTED_BROWSER_ACCESS');}};
  const engine=new Engine({store,companies,browser,leaseRoot:path.join(root,'leases')});
- const task=async(index,coverage,values={name:'Synthetic'})=>{const c=companies[index],t=template(c.templateId,c.origin,coverage);await store.put('templates',t.id,t);const args={companyId:c.id,pageUrl:c.origin+'/form',templateHash:hash(t),values};const plan=await engine.preparePlan(args);return {...args,planId:plan.planId,planHash:plan.planHash,compiled:plan};};
+ const task=async(index,coverage,values={name:'Synthetic'})=>{const c=companies[index];let t=template(c.templateId,c.origin,coverage);if(!coverage){const observed=observedSeal(t,c.id);t=observed.template;await store.put('runs',observed.probe.id,observed.probe);}await store.put('templates',t.id,t);const args={companyId:c.id,pageUrl:c.origin+'/form',templateHash:hash(t),values};const plan=await engine.preparePlan(args);return {...args,planId:plan.planId,planHash:plan.planHash,compiled:plan};};
  try{await fn({engine,task,accesses:()=>browserAccesses});}finally{await rm(root,{recursive:true,force:true});}
 }
 test('one incomplete company blocks the batch before any company touches a browser',()=>fixture(async({engine,task,accesses})=>{
  const a=await task(0),b=await task(1,{allConditionalBranchesVerified:false});
- assert.equal(b.compiled.status,'blocked_construction');
- await assert.rejects(engine.prepare({tasks:[a,b],concurrency:2,authorization:{prepare:true,evidence:'synthetic'}}),/FORM_CONSTRUCTION_INCOMPLETE/);
+ assert.equal(b.compiled.status,'needs_form_acquisition');assert.equal(b.compiled.readyForExecution,false);
+ await assert.rejects(engine.prepare({tasks:[a,b],concurrency:2,authorization:{prepare:true,evidence:'synthetic'}}),/PREPARED_PLAN_REQUIRED/);
  assert.equal(accesses(),0);
 }));
 test('partial answer authority cannot override an unsupported driver or unknown mapping',()=>fixture(async({engine,task,accesses})=>{
  for(const coverage of [{allDriversSupported:false},{allControlsMapped:false}]){
   const a=await task(0,coverage);
-  await assert.rejects(engine.prepare({tasks:[a],authorization:{prepare:true,evidence:'synthetic',allowPartialPreparation:true}}),/FORM_CONSTRUCTION_INCOMPLETE/);
+  assert.equal(a.compiled.readyForExecution,false);await assert.rejects(engine.prepare({tasks:[a],authorization:{prepare:true,evidence:'synthetic',allowPartialPreparation:true}}),/PREPARED_PLAN_REQUIRED/);
  }
  assert.equal(accesses(),0);
 }));

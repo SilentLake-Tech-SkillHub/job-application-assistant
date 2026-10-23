@@ -9,6 +9,8 @@ export function humanActionReason(field) {
 export function fieldConstructionIssues(field) {
  const issues=[];
  if(field.userOnly&&!humanActionReason(field))issues.push('ORDINARY_FIELD_MARKED_USER_ONLY');
+ if(['school_text','choice','combobox','radio_group'].includes(field.inventoryType)&&field.kind==='text')issues.push('INTERACTIVE_WIDGET_REQUIRES_SELECTION_CONTRACT');
+ if(field.readonly&&field.inventoryReadonly!==true&&field.inventoryDisabled!==true&&field.inventoryType!=='readonly')issues.push('READONLY_STATE_NOT_CAPTURED');
  if(field.constructionBlockers?.length)issues.push(...field.constructionBlockers);
  if(field.control?.options?.some(x=>/^(待补充|默认选项|暂无数据|placeholder)$/i.test(x)))issues.push('PLACEHOLDER_OPTIONS_NOT_EVIDENCE');
  return [...new Set(issues)];

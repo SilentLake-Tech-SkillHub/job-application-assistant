@@ -3,6 +3,7 @@ import {mkdtemp,mkdir,writeFile,readFile} from 'node:fs/promises';import os from
 import {recordApplicationUrl,assertSubmissionPrepared,formAssetStatus,readBatchFile} from '../shared/form-assets.mjs';
 import {CompanyDirectory,readHandoffBatch,contentSha} from '../shared/company-directory.mjs';
 import {Store,hash} from '../shared/engine.mjs';
+import {observedSeal} from './fixtures/observed-seal.mjs';
 
 const roleUrl='https://jobs.example.cn/campus/position/123456/detail',apply='https://jobs.example.cn/campus/apply/123456';
 async function workspace(){
@@ -13,7 +14,8 @@ async function workspace(){
  const directory=new CompanyDirectory({handoffDir:dir});await directory.load();
  return {dir,firm,directory};
 }
-const sealedTemplate=()=>({id:'jia-formal',pages:[{pathPrefix:'/campus/apply/',fields:[]}],coverage:{allConditionalBranchesVerified:true,allControlsMapped:true,allDriversSupported:true,proof:{runId:'p'}}});
+const sealedFixture=()=>observedSeal({id:'jia-formal',version:1,evidence:{sourceUrl:apply,observedAt:'synthetic'},pages:[{pathPrefix:'/campus/apply/',fields:[{id:'name',source:'name',label:'Name',kind:'text',control:{type:'text',valueType:'string',readbackType:'string'},read:{selector:'#name',kind:'value'},actions:[{method:'fill',selector:'#name'}]}]}]},'jia');
+const sealedTemplate=()=>sealedFixture().template;
 
 test('application URL is written back to the company folder by official role ID, same site only',async()=>{
  const {firm,directory}=await workspace(),file=path.join(firm,'公司.json');
@@ -46,7 +48,7 @@ test('submission is recorded only for a role filled from a sealed company templa
  const taskId='11111111-1111-4111-8111-111111111111';
  await writeFile(path.join(qdir,'q1.json'),JSON.stringify({id:'q1',batchId:'B1',tasks:[{taskId,companyId:'jia',roleId:'123456'}]}));
  await assert.rejects(check(),/SUBMISSION_REQUIRES_VERIFIED_TEMPLATE_FILL/);  // 没有 MCP 填写核验记录（手工填写）
- const template=sealedTemplate();await store.put('templates','jia-formal',template);
+ const fixture=sealedFixture(),template=fixture.template;await store.put('templates','jia-formal',template);await store.put('runs',fixture.probe.id,fixture.probe);
  const runId='22222222-2222-4222-8222-222222222222';
  await store.put('runs',runId,{id:runId,operation:'verify_current',status:'needs_attention',templateHash:hash(template)});
  await writeFile(path.join(qdir,taskId+'.json'),JSON.stringify({status:'ready_for_user_review',verifyRunId:runId}));
@@ -56,7 +58,7 @@ test('submission is recorded only for a role filled from a sealed company templa
  await store.put('templates','jia-formal',{...template,coverage:{allControlsMapped:true}});
  await assert.rejects(check(),/SUBMISSION_COMPANY_TEMPLATE_NOT_SEALED/);
  await store.put('templates','jia-formal',{...template,pages:[]});
- await assert.rejects(check(),/SUBMISSION_TEMPLATE_CHANGED_AFTER_VERIFY/);
+ await assert.rejects(check(),/SUBMISSION_COMPANY_TEMPLATE_NOT_SEALED/);
 });
 
 test('form asset status lists login, sealed template and application URL gaps per batch company',async()=>{

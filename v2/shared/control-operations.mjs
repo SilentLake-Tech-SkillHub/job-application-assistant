@@ -43,17 +43,27 @@ async function performChoice(adapter,action,value,family){
   if(await display.count()===1)trigger=display;
  }
  const dismiss=async()=>{if(action.labelSelector){const label=await locateControl(page,{selector:action.labelSelector});await label.click({timeout:10000});}else{await l.press('Escape');await l.press('Tab');}};
- if(family==='ant'){const parent=l.locator('xpath=ancestor::*[contains(@class, "ant-select")][1]');if(await parent.count()===1)trigger=parent;}
+ if(family==='ant'){
+  const parent=l.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " ant-select ")][1]');
+  if(await parent.count()===1){const display=parent.locator('.ant-select-selector, .ant-select-selection').filter({visible:true});trigger=await display.count()===1?display:parent;}
+ }
  const initial=(await trigger.innerText()).trim();let search=null,initialQuery,queryApplied=false;
- await trigger.click({timeout:10000});
+ const expanded=await l.evaluate(n=>n.getAttribute('aria-expanded'));
+ if(expanded!=='true')await trigger.click({timeout:10000});
  try{
   let menus=page.locator(action.menuSelector||(family==='ud'?'.ud__select__list':family==='ant'?'.ant-select-dropdown':'[role="listbox"]')).filter({visible:true});
   const owned=await l.evaluate(n=>n.getAttribute('aria-controls')||n.getAttribute('aria-owns'));
-  if(owned){menus=page.locator('[id='+JSON.stringify(owned)+']').filter({visible:true});}
+  if(owned){
+   const id='[id='+JSON.stringify(owned)+']';
+   // rc-select's aria list may be a hidden accessibility mirror. Scope to its
+   // actual popup ancestor, whose rendered options carry the click targets.
+   menus=page.locator(family==='ant'?'.ant-select-dropdown'+id+', .ant-select-dropdown:has('+id+')':id).filter({visible:true});
+  }
+  if(await l.evaluate(n=>n.getAttribute('aria-expanded'))==='false')throw Error('CHOICE_TRIGGER_NOT_EXPANDED');
   await menus.waitFor({state:'visible',timeout:3000});
   if(await menus.count()!==1)throw Error('CHOICE_MENU_NOT_UNIQUE');
-  const candidates=family==='ant'?[page.locator('.ant-select-open input.ant-select-search__field, .ant-select-open input.ant-select-selection-search-input').filter({visible:true})]:family==='ud'?[menus.locator('input[type="search"], input[placeholder*="搜索"], input[placeholder*="Search"]').filter({visible:true}),l.filter({visible:true})]:[];
-  for(const candidate of candidates){if(await candidate.count()===1&&await candidate.evaluate(n=>n.tagName==='INPUT'&&!n.readOnly&&!n.disabled&&(n.type==='search'||/搜索|search/i.test(n.getAttribute('placeholder')||n.className||'')))){search=candidate;break;}}
+  const candidates=family==='ant'?[page.locator('.ant-select-open input.ant-select-search__field, .ant-select-open input.ant-select-selection-search-input').filter({visible:true})]:family==='ud'?[menus.locator('input[type="search"], input[placeholder*="搜索"], input[placeholder*="Search"]').filter({visible:true}),l.filter({visible:true})]:[menus.locator('input[type="search"], input[role="combobox"], input[placeholder*="搜索"], input[placeholder*="Search"]').filter({visible:true}),l.filter({visible:true})];
+  for(const candidate of candidates){if(await candidate.count()===1&&await candidate.evaluate(n=>n.tagName==='INPUT'&&!n.readOnly&&!n.disabled&&(n.type==='search'||n.getAttribute('role')==='combobox'||/搜索|search/i.test(n.getAttribute('placeholder')||n.className||'')))){search=candidate;break;}}
   const searchable=!!search;
   if(searchable){initialQuery=await search.evaluate(n=>n.value);if(action.query||!action.method.endsWith('_inspect')){await search.fill(action.query||String(value),{timeout:10000});await assertValue(search,action.query||String(value));queryApplied=true;}}
   const tree=family==='ud'&&await menus.evaluate(n=>!!n.classList?.contains('ud__treeSelect__overlay')||!!n.querySelector?.('.ud__tree'));

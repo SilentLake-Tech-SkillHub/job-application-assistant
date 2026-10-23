@@ -25,7 +25,7 @@ export class MaterialImport{
    const previousId='material-'+planId;let previous;try{previous=await this.store.get('runs',previousId);}catch(e){if(e.code!=='ENOENT')throw e;}if(previous)throw Error('MATERIAL_ATTEMPT_ALREADY_RECORDED');
    const page=await this.browser.existingPage(plan.pageUrl);await page.assertLocation(new URL(plan.pageUrl).origin,new URL(plan.pageUrl).pathname);
    const inventory=await page.inventory({...(capture.provider?{provider:capture.provider}:{})});if(!inventory.some(c=>c.selector===plan.selector&&c.type==='file'))throw Error('MATERIAL_CONTROL_CHANGED');
-   const o=await page.observe({fields:[{id:'container',read:{selector:plan.containerSelector,kind:'text'}}],groups:[{id:'target',selector:plan.containerSelector+':has(:is('+plan.selector+'))'}]});
+   const o=await page.observe({fields:[{id:'container',read:{selector:plan.containerSelector,kind:'text'}}],groups:[{id:'target',selector:plan.containerSelector,containsSelector:plan.selector}]});
    if(o.groups.target!==1||!/上传文件简历|简历附件|上传简历|将你的简历|Resume/i.test(o.fields.container.value||''))throw Error('MATERIAL_RESUME_CONTAINER_REQUIRED');
    const result={id:previousId,companyId:plan.companyId,pageUrl:plan.pageUrl,startedAt:new Date().toISOString(),status:'upload_attempt_started',submission:'not_performed'};await this.store.put('runs',previousId,result);
    try{await page.act({method:'upload',selector:plan.selector},plan.ref,p.files);result.status='input_uploaded_server_unverified';}catch(e){result.status='upload_result_uncertain';result.error=/^[A-Z_]+$/.test(e.message)?e.message:'MATERIAL_UPLOAD_FAILED';}

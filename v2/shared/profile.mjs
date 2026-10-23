@@ -1,6 +1,6 @@
 // Query-addressed editors can share a pathname while belonging to different jobs
 // or form schemas. Retain only observed non-secret identity parameters.
-export function formLocation(pageUrl){const u=new URL(pageUrl),keys=['pid','postId','tid','qTid','recruitType','jobId','positionId','formId'],q=new URLSearchParams();for(const key of keys)if(u.searchParams.has(key))q.set(key,u.searchParams.get(key));return u.pathname+(q.size?'?'+q:'');}
+export function formLocation(pageUrl){const u=new URL(pageUrl),keys=['pid','postId','tid','qTid','recruitType','jobId','positionId','formId'],q=new URLSearchParams();for(const key of keys)if(u.searchParams.has(key))q.set(key,u.searchParams.get(key));return u.pathname+(q.size?'?'+q:'')+(u.hash.startsWith('#/')?u.hash.split('?')[0]:'');}
 import { readFile, writeFile, rename, mkdir, realpath, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -8,6 +8,7 @@ import { hash } from './engine.mjs';
 import { resolveContentPolicy } from './content-policy.mjs';
 import {acquireLease,leasePath,defaultLeaseRoot} from './leases.mjs';
 import {validDate,ingestFactValue} from './value-contract.mjs';
+import {auditStoredContract} from './workflow-contract.mjs';
 import {assertDefinitionMapped} from './definition-coverage.mjs';
 
 const forbidden = /(?:^|\.)(?:password|otp|cookie|accessToken|idNumber|passportNumber|bankAccount)(?:\.|$)/i;
@@ -47,23 +48,28 @@ export async function updateProfile(file,mutate){
 export function registerObservedQuestions(profile,{companyId,pageUrl,fields,observedAt,coverageRequired=false}){
   profile.companyForms??={}; profile.fieldRegistry??={};
   const pageKey=hash({companyId,pageUrl:formLocation(pageUrl)}).slice(0,20);
+  if(!profile.companyForms[pageKey]){const legacy=Object.entries(profile.companyForms).filter(([key,f])=>key!==pageKey&&f.companyId===companyId&&f.pageUrl===pageUrl);if(legacy.length===1){profile.companyForms[pageKey]=legacy[0][1];delete profile.companyForms[legacy[0][0]];}}
   const old=profile.companyForms[pageKey];
   const questions=fields.filter(f=>!['button','submit','reset','hidden'].includes(f.type));
   const mappings=Object.fromEntries(Object.entries(old?.mappings||{}).map(([key,m])=>[key,{...m,active:false}])); const added=[];
   for(const field of questions){
     const observedKey=hash({selector:field.selector,label:field.label}).slice(0,20);
     const prior=old?.mappings?.[observedKey];
-    const definitionHash=hash({type:field.type||null,required:!!field.required,options:field.options||null,userOnly:!!field.userOnly});
-    if(prior?.definitionHash===definitionHash){mappings[observedKey]={...prior,observedAt,active:field.active!==false,coverageRequired:!!prior.coverageRequired||coverageRequired};continue;}
+    const definitionHash=hash({type:field.type||null,required:!!field.required,options:field.options||null,userOnly:!!field.userOnly,renderer:field.renderer||null,readonly:!!field.readonly,disabled:!!field.disabled,multiple:!!field.multiple,selectedSelector:field.selectedSelector||null});
+    const observedControl=Object.fromEntries(['type','renderer','contextProvider','readonly','disabled','role','multiple','controlIndex','repeatIndex','section','options','actionSelector','readSelector','selectedSelector','uploadContainerSelector','filenameSelector','uploadedSelector'].filter(k=>field[k]!==undefined).map(k=>[k,field[k]]));
+    if(prior?.definitionHash===definitionHash){mappings[observedKey]={...prior,observedAt,observedControl,operationContractStatus:'requires_current_contract_audit',active:field.active!==false,coverageRequired:!!prior.coverageRequired||coverageRequired};continue;}
     const factKey=`unmapped.${companyId}.${observedKey}`;
     const previous=profile.fieldRegistry[factKey];
-    profile.fieldRegistry[factKey]={label:field.label||null,question:field.label||field.placeholder||null,companyId,pageUrl,selector:field.selector,type:field.type||null,required:!!field.required,options:field.options||null,status:'needs_semantic_mapping',observedAt,definitionHash,previousDefinition:previous?{definitionHash:previous.definitionHash||null,aliasOf:previous.aliasOf||null,observedAt:previous.observedAt}:null};
+    profile.fieldRegistry[factKey]={label:field.label||null,question:field.label||field.placeholder||null,companyId,pageUrl,selector:field.selector,type:field.type||null,required:!!field.required,options:field.options||null,status:'needs_semantic_mapping',observedAt,definitionHash};
     profile.facts[factKey]??={value:null,status:'missing',sourceIds:[],reason:'新公司表单新增字段；须明确语义映射或向用户补充，禁止忽略'};
-    mappings[observedKey]={factKey,selector:field.selector,required:!!field.required,status:'needs_semantic_mapping',observedAt,definitionHash,active:field.active!==false,coverageRequired:!!prior?.coverageRequired||coverageRequired};
+    mappings[observedKey]={factKey,selector:field.selector,required:!!field.required,status:'needs_semantic_mapping',observedAt,definitionHash,observedControl,operationContractStatus:'missing',active:field.active!==false,coverageRequired:!!prior?.coverageRequired||coverageRequired};
+    if(prior?.status==='mapped'&&profile.facts[prior.factKey])Object.assign(mappings[observedKey],{factKey:prior.factKey,status:'mapped',mappingEvidence:prior.mappingEvidence,operationContractStatus:'requires_rebuild_after_component_change'});
     if(field.userOnly){profile.fieldRegistry[factKey].status='user_only';profile.fieldRegistry[factKey].neverStoreValue=true;mappings[observedKey].status='user_only';}
     added.push(factKey);
   }
-  profile.companyForms[pageKey]={...old,companyId,pageUrl,observedAt,inventoryHash:hash(questions),mappings,previousInventoryHash:old?.inventoryHash||null};
+  profile.companyForms[pageKey]={...old,companyId,pageUrl,observedAt,inventoryHash:hash(questions),mappings};
+  delete profile.companyForms[pageKey].previousInventoryHash;
+  if(old?.executionContract&&old.inventoryHash!==hash(questions))Object.assign(profile.companyForms[pageKey].executionContract,{validForCurrentInventory:false,status:'requires_rebuild'});
   profile.updatedAt=observedAt;
   return {pageKey,added,unmapped:Object.values(mappings).filter(m=>m.active!==false&&m.status==='needs_semantic_mapping').length};
 }
@@ -96,15 +102,17 @@ export function registerPlannedQuestions(profile,args,plan) {
 
 // Stored during internal asset registration, before any preparation call. This
 // includes inactive conditional fields, rather than only the currently visible DOM.
-export function registerTemplateContract(profile,{companyId,template,templateHash}){
+export function registerTemplateContract(profile,{companyId,template,templateHash,stage='registered'}){
   profile.companyForms??={};profile.fieldRegistry??={};
+  const audit=auditStoredContract(template);if(stage!=='construction'&&!audit.ready)throw Error('COMPLETE_EXECUTION_CONTRACT_REQUIRED');
   for(const page of template.pages){
     const sourceUrl=new URL(template.evidence.sourceUrl),pageUrl=sourceUrl.pathname.startsWith(page.pathPrefix)?sourceUrl.href:new URL(page.pathPrefix,sourceUrl).href;
     const pageKey=hash({companyId,pageUrl:formLocation(pageUrl)}).slice(0,20);
     const prior=profile.companyForms[pageKey]||{companyId,pageUrl,mappings:{}};
-    const fields=page.fields.map((f,index)=>({index,id:f.id,source:f.source,label:f.label,required:!!f.required,kind:f.kind,control:f.control,precision:f.precision||null,read:f.read,actions:f.actions||[],readonly:!!f.readonly,userOnly:!!f.userOnly,when:f.when||null,ongoingSource:f.ongoingSource||null,compose:f.compose||null,enumMap:f.enumMap||null,inventorySelectors:f.inventorySelectors||[f.read.selector],prepareBeforeGroups:!!f.prepareBeforeGroups}));
-    prior.executionContract={templateId:template.id,templateVersion:template.version,templateHash,sections:page.sections,groups:page.groups||[],fields,evidence:template.evidence};
+    const fields=page.fields.map((f,index)=>({...structuredClone(f),index}));
+    prior.executionContract={revision:2,status:stage==='construction'?(audit.ready?'construction_complete':'construction_incomplete'):'registered',validForCurrentInventory:true,templateId:template.id,templateVersion:template.version,templateHash,inventoryHash:prior.inventoryHash||null,sections:page.sections,groups:page.groups||[],fields,evidence:template.evidence,storageAudit:audit};
     profile.companyForms[pageKey]=prior;
+    if(stage==='construction')continue;
     for(const f of page.fields){
       const old=profile.fieldRegistry[f.source]||{};
       if(old.canonicalType&&old.canonicalType!==f.control.valueType)throw Error('CANONICAL_FIELD_TYPE_CONFLICT');
@@ -116,8 +124,15 @@ export function registerTemplateContract(profile,{companyId,template,templateHas
   validateProfile(profile);
   return {companyId,templateHash,registeredFields:template.pages.reduce((n,p)=>n+p.fields.length,0)};
 }
+export function assertStoredExecutionContract(profile,companyId,template){
+ for(const page of template.pages){const source=new URL(template.evidence.sourceUrl),url=source.pathname.startsWith(page.pathPrefix)?source.href:new URL(page.pathPrefix,source).href,key=hash({companyId,pageUrl:formLocation(url)}).slice(0,20),stored=profile.companyForms?.[key]?.executionContract;
+  if(!stored||stored.templateHash!==hash(template)||hash((stored.fields||[]).map(({index,...f})=>f))!==hash(page.fields))throw Error('PROFILE_CONTRACT_STORAGE_READBACK_FAILED');
+ }
+ return true;
+}
 export function resolveProfile(profile, template, decisions={}, companyId) {
   validateProfile(profile);
+  if(companyId)assertStoredExecutionContract(profile,companyId,template);
   assertDefinitionMapped(profile,companyId,template);
   const values={},missing=[],sources={},omissions={...decisions.omissions};
   const factValue=key=>{

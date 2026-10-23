@@ -1,5 +1,5 @@
 import {transitionLocationMatches} from './entry-transition.mjs';
-import {matchesRole} from './role-identity.mjs';
+import {matchesRole,readRoleIdentity} from './role-identity.mjs';
 import {resolveEntry,matchEntryPath} from './entry-recipe.mjs';
 import {accountMatches,matchesAccount,resolveAccount,assertScope} from '../login/contracts.mjs';
 export class RoleFlow{
@@ -57,10 +57,21 @@ export class RoleFlow{
   // Rebind only a lost tab to the unique already-open original URL. No new tab,
   // navigation, expected-value injection or account/role bypass is permitted.
   const tabs=await this.browser.request('tabs',{pageUrl:state.returnUrl});
-  if(!tabs.some(p=>p.id===state.pageId)){
-   const candidates=tabs.filter(p=>p.url===state.returnUrl);
+  const pageIdOf=p=>typeof p.id==='string'&&p.id?(p.browserChannel&&!p.id.startsWith(p.browserChannel+':')?p.browserChannel+':'+p.id:p.id):null;
+  if(!tabs.some(p=>pageIdOf(p)===state.pageId)){
+   let candidates=tabs.filter(p=>p.url===state.returnUrl);
+   if(!candidates.length&&x.plan?.roleIdentity){
+    const expected=new URL(state.returnUrl);
+    candidates=tabs.filter(p=>{try{const u=new URL(p.url),identity=readRoleIdentity(x.plan.roleIdentity,p.url);return u.origin===expected.origin&&u.pathname===expected.pathname&&u.hash===expected.hash&&identity?.value===x.t.roleId;}catch{return false;}});
+   }
    if(candidates.length!==1)throw Error('ROLE_EXISTING_PAGE_NOT_UNIQUE');
-   const candidate=candidates[0];state.pageId=candidate.browserChannel&&!candidate.id.startsWith(candidate.browserChannel+':')?candidate.browserChannel+':'+candidate.id:candidate.id;
+   const candidate=candidates[0];let pageId=pageIdOf(candidate);
+   // Compatibility with an already-running older broker whose tabs omit IDs.
+   // The unique full URL was just observed; claim that existing page and require
+   // the broker's reused receipt before permitting account/role assessment.
+   if(!pageId){const rebound=await this.browser.request('openPage',{pageUrl:candidate.url,readySelectors:[],reuseOnly:true});if(rebound.reused!==true||rebound.pageUrl!==candidate.url||!rebound.pageId)throw Error('ROLE_EXISTING_PAGE_REBIND_FAILED');pageId=rebound.pageId;}
+   state.pageId=pageId;
+   state.returnUrl=candidate.url;if(state.applicationUrl)state.applicationUrl=candidate.url;
   }
   return this.assess(x,state);},{waitMs:x.q.parallelRoles||x.q.executionMode==='parallel_roles'?30000:0});}
  async enter(args){const {q,t}=await this.queues.task(args),c=await this.login.company(t.companyId),entry=resolveEntry(c);return this.login.locked(c,async()=>{

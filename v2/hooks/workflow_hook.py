@@ -16,7 +16,13 @@ SCOPE = Path(os.environ['RECRUITING_WORKFLOW_SCOPE'])
 INJECT = {'UserPromptSubmit', 'SessionStart', 'SubagentStart'}
 ROUTE = Path(__file__).with_name('route.md')
 MUTATIONS = {'batch_prepare','role_prepare','roles_prepare_batch','workflow_advance','roles_patch_text','material_import_run','login_prepare','login_request_sms','login_verify_otp','application_closeout'}
-CONTINUATION_TOOLS = {'workflow_next', 'workflow_advance', 'role_prepare', 'batch_prepare', 'role_verify', 'verify_current'}
+LEGACY_CONTINUATION_TOOLS = {'workflow_next', 'form_route', 'workflow_advance', 'role_prepare', 'prepare_plan', 'batch_prepare', 'role_verify', 'verify_current', 'capture_rea_structure', 'capture_controls', 'form_mapping_candidates', 'capture_choice_options', 'form_build_template', 'template_register', 'probe_conditions', 'template_finalize', 'profile_map_questions', 'material_import_prepare', 'material_import_run', 'roles_prepare_batch', 'roles_patch_text', 'workflow_handoff'}
+
+LIFECYCLE = json.loads((Path(__file__).resolve().parents[1] / 'catalog/workflow-tools.json').read_text(encoding='utf-8'))
+CONTINUATION_TOOLS = set(LIFECYCLE['stages']) | LEGACY_CONTINUATION_TOOLS
+
+def recruiting_tool(tool):
+    return 'recruiting_application_v2' in tool.replace('-', '_') or 'recruiting_login_v2' in tool.replace('-', '_')
 
 
 def emit(value):
@@ -38,11 +44,16 @@ def write_atomic(file, value):
 def continuation_result(value):
     if isinstance(value, str):
         try:
-            value = json.loads(value)
+            value = json.loads(value.removeprefix('Error: '))
         except ValueError:
             return None
     if not isinstance(value, dict):
         return None
+    for wrapper in ('result', 'data', 'structuredContent', 'output'):
+        if isinstance(value.get(wrapper), (dict, str)):
+            found = continuation_result(value[wrapper])
+            if found:
+                return found
     if isinstance(value.get('content'), list):
         for block in value['content']:
             if block.get('type') == 'text':
@@ -53,6 +64,22 @@ def continuation_result(value):
     candidates += [r.get('continuation') for r in value.get('results', []) if isinstance(r, dict)]
     continuations = [c for c in candidates if isinstance(c, dict)]
     return next((c for c in continuations if c.get('owner') == 'agent'), continuations[0] if continuations else None)
+
+
+def workflow_metadata(value):
+    if isinstance(value, str):
+        try: value = json.loads(value.removeprefix('Error: '))
+        except ValueError: return None
+    if not isinstance(value, dict): return None
+    if isinstance(value.get('workflowContract'), dict): return value['workflowContract']
+    for name in ('result', 'data', 'structuredContent', 'output'):
+        found = workflow_metadata(value.get(name))
+        if found: return found
+    for block in value.get('content', []):
+        if isinstance(block, dict) and block.get('type') == 'text':
+            found = workflow_metadata(block.get('text'))
+            if found: return found
+    return None
 
 
 def handle_continuation(event):
@@ -66,21 +93,23 @@ def handle_continuation(event):
     except (FileNotFoundError, ValueError):
         old = {}
     if event['hook_event_name'] == 'PostToolUse':
-        if event.get('tool_name', '').split('__')[-1] not in CONTINUATION_TOOLS:
-            return {}
+        tool = event.get('tool_name', '')
         value = event.get('tool_response', event.get('tool_result', event.get('output')))
+        declared = workflow_metadata(value)
+        if tool.split('__')[-1] not in CONTINUATION_TOOLS and not (declared and declared.get('tracked') is True and recruiting_tool(tool)):
+            return {}
         result = continuation_result(value)
         if not result:
             return {}
         # Store only fixed routing metadata, never form values or website text.
-        route = {k: result.get(k) for k in ['state', 'owner', 'requiresUser', 'shouldContinue']}
+        route = {k: result.get(k) for k in ['state', 'owner', 'requiresUser', 'shouldContinue', 'nextTools', 'reason', 'handoffVerified']}
         fingerprint = hashlib.sha256(json.dumps(route, sort_keys=True).encode()).hexdigest()
         write_atomic(file, {**route, 'fingerprint': fingerprint,
                             'reminded': old.get('reminded', False) if old.get('fingerprint') == fingerprint else False})
         return {}
-    if old.get('owner') == 'agent' and old.get('shouldContinue') and not old.get('reminded'):
-        write_atomic(file, {**old, 'reminded': True})
-        return {'decision': 'block', 'reason': '当前 MCP 返回的是 Agent 待处理的建库、映射或修复步骤，并非用户缺资料。请执行 continuation.nextTools 并推进其它可处理公司；若实际技术阻塞无法解除，明确报告具体阻塞，不要要求用户重复回复“继续”。'}
+    if old.get('owner') == 'agent' and old.get('shouldContinue'):
+        write_atomic(file, {**old, 'reminded': True, 'stopAttempts': old.get('stopAttempts', 0) + 1})
+        return {'decision': 'block', 'reason': '当前 MCP 仍有 Agent 待处理的建库、映射或修复步骤，不能结束或报告完成。请执行已返回的 nextTools；没有证据/输入变化不得盲重试。真实技术阻塞请用 workflow_handoff 提供MCP错误或驱动缺口证据交给监督者，complete仍为false；只有已核实的用户等待、完整核验审阅或技术交接才允许停下，不能要求用户重复回复“继续”。'}
     return {}
 
 
@@ -104,6 +133,10 @@ def handle(event):
     if name in {'PostToolUse', 'Stop'}:
         return handle_continuation(event)
     tool = event.get('tool_name', '')
+    if name == 'PreToolUse' and recruiting_tool(tool) and tool.split('__')[-1] in LIFECYCLE['stages']:
+        # Establish pending work before SDK validation. Invalid arguments may
+        # bypass MCP handlers, but cannot erase an actual attempted stage.
+        handle_continuation({**event, 'hook_event_name': 'PostToolUse', 'tool_response': {'continuation': {'state': 'tool_pending', 'owner': 'agent', 'requiresUser': False, 'shouldContinue': True, 'nextTools': [tool.split('__')[-1]], 'reason': 'STAGE_RESULT_REQUIRED'}}})
     # Source repair, Skill reads and status reporting must remain possible even
     # when an enabled conversation has no same-turn application receipt.
     if name == 'PreToolUse' and tool.split('__')[-1] not in MUTATIONS:

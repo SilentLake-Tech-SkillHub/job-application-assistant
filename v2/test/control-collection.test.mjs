@@ -50,7 +50,7 @@ test('ambiguous actions cannot use first to bypass uniqueness; visible duplicate
 function fixture(family='ud',duplicate=false){
  let opened=false,selected='Original',checks=0;
  const node={tagName:'INPUT',type:'text',value:'',readOnly:false,textContent:'Original',getAttribute:k=>k==='role'?'combobox':null,querySelector:()=>null};
- const single={waitFor:async()=>{},count:async()=>1,innerText:async()=>selected,evaluate:async f=>f(node),press:async key=>{if(key==='Escape')opened=false;},click:async()=>{opened=true;},locator:()=>({count:async()=>0}),filter(){return this;}};
+ const single={fill:async value=>{node.value=value;},waitFor:async()=>{},count:async()=>1,innerText:async()=>selected,evaluate:async f=>f(node),press:async key=>{if(key==='Escape')opened=false;},click:async()=>{opened=true;},locator:()=>({count:async()=>0}),filter(){return this;}};
  const option={...single,click:async()=>{selected='Other';opened=false;checks++;}};
  const options={...single,allTextContents:async()=>duplicate?['Other','Other']:['Other','Other extended'],first:()=>single,waitFor:async()=>{},filter:o=>{if(o.visible)return options;assert.ok(o.hasText.test('Other'));assert.equal(o.hasText.test('Other extended'),false);return option;}};
  const menu={count:async()=>opened?1:0,waitFor:async()=>{},filter(){return this;},locator:()=>options,evaluate:async f=>f({querySelectorAll:()=>[],parentElement:null,clientHeight:100,scrollHeight:100})};
@@ -137,7 +137,28 @@ test('sourced full dates project consistently to month and year without inventin
 import {registerTemplateContract} from '../shared/profile.mjs';
 test('portal month registration preserves canonical day precision and keeps its own contract precision',()=>{
  const p={schemaVersion:1,entities:{},sources:{s:{kind:'user_reply'}},facts:{start:{value:'2026-08-01',status:'known',sourceIds:['s'],precision:'day'}},fieldRegistry:{start:{canonicalType:'string',precision:'day'}}};
- const f={id:'start',source:'start',label:'Start',kind:'date',precision:'month',control:{type:'month_picker',valueType:'string',readbackType:'string'},read:{selector:'#start',kind:'value'},actions:[]};
+ const f={id:'start',source:'start',label:'Start',kind:'date',precision:'month',control:{type:'month_picker',valueType:'string',readbackType:'string'},read:{selector:'#start',kind:'value',selectedSelector:'#start'},actions:[{method:'ud_date',selector:'#start'}]};
  registerTemplateContract(p,{companyId:'sample',template:{id:'t',version:1,evidence:{sourceUrl:'https://example.com/form'},pages:[{pathPrefix:'/form',fields:[f]}]},templateHash:'hash'});
  assert.equal(p.fieldRegistry.start.precision,'day');assert.equal(p.facts.start.value,'2026-08-01');assert.equal(Object.values(p.companyForms)[0].executionContract.fields[0].precision,'month');
+});
+
+test('typed school search text is not an actual committed dropdown selection',()=>{
+ const input=element('Invented University',true,{role:'combobox'}),read=fakeDOM({'#school':[input]});
+ const result=read({fields:[{id:'school',kind:'choice',read:{kind:'value',selector:'#school',selectedSelector:'#school'}}]}).fields.school;
+ assert.equal(result.value,'Invented University');assert.equal(result.selected,false);
+});
+
+test('Ant readonly search input opens via its selector and scopes rendered popup rather than hidden aria list',async()=>{
+ let open=false,selected='Original',triggerClicks=0;const events=[];
+ const inputNode={tagName:'INPUT',type:'search',readOnly:true,querySelector:()=>null,getAttribute:k=>({role:'combobox','aria-controls':'field_list','aria-expanded':String(open)})[k]??null};
+ const display={count:async()=>1,filter(){return this;},click:async()=>{open=true;triggerClicks++;},innerText:async()=>selected};
+ const parent={count:async()=>1,locator:s=>{assert.equal(s,'.ant-select-selector, .ant-select-selection');return display;}};
+ const l={count:async()=>1,evaluate:async f=>f(inputNode),locator:s=>{assert.ok(s.includes('" ant-select "'));return parent;},filter(){return this;},press:async()=>{open=false;}};
+ const label={count:async()=>1,click:async()=>{open=false;}};
+ const option={count:async()=>1,click:async()=>{selected='Master';open=false;}};
+ const options={filter:o=>o.visible?options:option,first:()=>({waitFor:async()=>{}}),allTextContents:async()=>['Bachelor','Master']};
+ const menu={filter(){return this;},count:async()=>open?1:0,waitFor:async()=>{},locator:()=>options,evaluate:async f=>f({querySelectorAll:()=>[],parentElement:null,clientHeight:100,scrollHeight:100})};
+ const page={url:()=> 'https://fixture.test/form',locator:s=>{events.push(s);if(s==='#field')return l;if(s==='#label')return label;if(s.startsWith('.ant-select-dropdown'))return menu;return {filter(){return this;},count:async()=>0};}};
+ const p=new PageAdapter(page,{listOpenPageUrls:async()=>[]});await p.act({method:'ant_dropdown',selector:'#field',labelSelector:'#label',options:['Master']},'Master',{});
+ assert.equal(triggerClicks,1);assert.equal(selected,'Master');assert.ok(events.some(s=>s.includes('.ant-select-dropdown:has([id="field_list"])')));
 });

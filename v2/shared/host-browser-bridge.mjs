@@ -29,6 +29,7 @@ export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,
   }
   if(method==='openPage'){
    scope(args.pageUrl);const all=await tabs(),matches=args.pageId?all.filter(t=>t.id===args.pageId):all.filter(t=>t.url===args.pageUrl);if(matches.length>1)throw Error('AMBIGUOUS_PAGE');
+   if(args.reuseOnly&&(!matches.length||matches[0].url!==args.pageUrl))throw Error('EXISTING_PAGE_REQUIRED_FOR_REBIND');
    const tab=matches.length?await get(matches[0].id):await browser.tabs.new(),reused=await tab.url()===args.pageUrl;if(!reused)await tab.goto(args.pageUrl);tracked.set(tab.id,tab);await tab.markHandoff();return {pageId:tab.id,pageUrl:await tab.url(),reused};
   }
   if(method==='roleEnterApplication'){

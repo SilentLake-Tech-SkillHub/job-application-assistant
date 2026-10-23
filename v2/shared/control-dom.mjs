@@ -1,6 +1,21 @@
 // Serializable shared DOM policy. Reads rendered state only; no expected answers.
 export function controlDOM(spec){
  const visible=n=>!!n?.getClientRects().length&&getComputedStyle(n).visibility!=='hidden';
+ const diagnosticSelector = n => {
+  if(n.id && document.querySelectorAll('#'+CSS.escape(n.id)).length===1)return '#'+CSS.escape(n.id);
+  const parts=[];for(let p=n;p&&p!==document.body;p=p.parentElement){let i=1;for(let s=p.previousElementSibling;s;s=s.previousElementSibling)if(s.tagName===p.tagName)i++;parts.unshift(p.tagName.toLowerCase()+':nth-of-type('+i+')');}
+  return 'body > '+parts.join(' > ');
+ };
+ const uploadRoots=()=>[...document.querySelectorAll('input[type="file"]')].flatMap(input=>{
+  if(!input.closest('.ant-upload'))return [];
+  for(let root=input.parentElement;root&&root!==document.body;root=root.parentElement){
+   if(root.querySelectorAll('input[type="file"]').length!==1)break;
+   const headings=[...root.querySelectorAll('h1,h2,h3,h4,[role="heading"]')].filter(h=>visible(h)&&!h.closest('.ant-upload'));
+   const label=headings[0]?.innerText?.trim();if(label)return [{input,root,label}];
+  }return [];
+ });
+ const uploadRef=(entry,part='input')=>'uploadq:'+JSON.stringify({label:entry.label,occurrence:uploadRoots().filter(x=>x.label===entry.label).findIndex(x=>x.input===entry.input),part});
+ if(spec?.operation==='resolveUpload')return (spec.references||[]).map(reference=>{const ref=JSON.parse(reference.slice(8)),entry=uploadRoots().filter(x=>x.label===ref.label)[ref.occurrence];if(!entry)return null;const root=diagnosticSelector(entry.root);return ref.part==='container'?root:ref.part==='uploaded'?root+' .ant-upload-list-item-done':diagnosticSelector(entry.input);});
  const eligible=n=>visible(n)||!!n&&['checkbox','radio'].includes(n.type)&&visible(n.closest('label'));
  // Phoenix question references are based on rendered section/label identity.
  // Structural selectors are produced only for the current operation.
@@ -41,12 +56,13 @@ export function controlDOM(spec){
       if(f.kind==='choice'||f.kind==='date'){
         o.selected=n.tagName==='SELECT'?!!n.selectedOptions.length&&n.selectedOptions[0].value!=='':
           !!r.selectedSelector && visible(one(r.selectedSelector));
+        if(f.kind==='choice'&&n.tagName!=='SELECT'){const marker=one(r.selectedSelector);if(!marker||['INPUT','TEXTAREA'].includes(marker.tagName)||marker.isContentEditable)o.selected=false;}
       }
     }
     fields[f.id]=o;
   }
   const groups={};
-  for(const g of spec.groups||[])groups[g.id]=[...document.querySelectorAll(g.selector)].filter(visible).length;
+  for(const g of spec.groups||[])groups[g.id]=[...document.querySelectorAll(g.selector)].filter(n=>visible(n)&&(!g.containsSelector||!!one(g.containsSelector)&&n.contains(one(g.containsSelector)))).length;
   const sections=spec.sectionDiscovery?[...document.querySelectorAll(spec.sectionDiscovery.selector)].filter(visible).map(n=>{
     const root=spec.sectionDiscovery.parentContainer?n.parentElement:n;
     return {title:text(n.querySelector(spec.sectionDiscovery.titleSelector)),unexpanded:!!spec.sectionDiscovery.unexpandedSelector&&[...root.querySelectorAll(spec.sectionDiscovery.unexpandedSelector)].some(visible)};
@@ -57,17 +73,12 @@ export function controlDOM(spec){
  }
 
 
-  const diagnosticSelector = n => {
-    if(n.id && document.querySelectorAll('#'+CSS.escape(n.id)).length===1)return '#'+CSS.escape(n.id);
-    const parts=[];
-    for(let p=n;p&&p!==document.body;p=p.parentElement){let i=1;for(let s=p.previousElementSibling;s;s=s.previousElementSibling)if(s.tagName===p.tagName)i++;parts.unshift(p.tagName.toLowerCase()+':nth-of-type('+i+')');}
-    return 'body > '+parts.join(' > ');
-  };
   // Prefer semantic question identity. A structural path is retained only for
   // diagnostics; builders must not silently promote it to a reusable locator.
   const selector = n => {
     const unique = s => {try {const ns=document.querySelectorAll(s);return ns.length===1&&ns[0]===n;}catch{return false;}};
     if(n.id && unique('#'+CSS.escape(n.id)))return '#'+CSS.escape(n.id);
+    for(const attribute of ['name','data-testid','aria-label','placeholder']){const value=n.getAttribute(attribute);if(value){const candidate=n.tagName.toLowerCase()+'['+attribute+'='+JSON.stringify(value)+']';if(unique(candidate))return candidate;}}
     const question=n.closest('.ud-formily-item[id]');
     let anchor;
     if(question){
@@ -127,7 +138,9 @@ export function controlDOM(spec){
     .map(n=>({selector:selector(n),locatorStrategy:selector(n).startsWith('body > ')?'structural_diagnostic':'anchored_unique',tag:n.tagName.toLowerCase(),type:n.type||n.getAttribute('role')||'custom_question',label:[...(n.labels||[])].map(l=>l.textContent.trim()).join(' ')||n.closest('.atsx-form-item,[data-form-question]')?.querySelector('label')?.textContent.trim()||n.getAttribute('aria-label')||'',placeholder:n.getAttribute('placeholder'),required:!!n.required||n.getAttribute('aria-required')==='true'||!!n.closest('.atsx-form-item')?.querySelector('.atsx-form-item-required'),readonly:!!n.readOnly,disabled:!!n.disabled,accept:n.getAttribute('accept'),role:n.getAttribute('role'),options:n.tagName==='SELECT'?[...(n.options||[])].filter(o=>!o.disabled&&o.value!=='').map(o=>o.textContent.trim()):undefined}))
     .map(f=>({...f,userOnly:f.type==='password'||/otp|验证码|password|密码|token|captcha|身份证|护照号|银行卡/i.test(f.label+' '+f.selector)}))
     .map((f,i)=>{
-      const n=[...controls,...containers][i],root=n.closest('.ud-formily-item');if(!root)return f;
+      const n=[...controls,...containers][i];
+      if(n.type==='file'){const entry=uploadRoots().find(x=>x.input===n);if(entry)return {...f,observationSelector:f.selector,selector:uploadRef(entry),actionSelector:uploadRef(entry),label:entry.label,section:entry.label,locatorStrategy:'semantic_question',contextProvider:'.ant-upload',uploadContainerSelector:uploadRef(entry,'container'),filenameSelector:'.ant-upload-list-item-name',uploadedSelector:uploadRef(entry,'uploaded')};}
+      const root=n.closest('.ud-formily-item');if(!root)return f;
       const label=root.querySelector(':scope > .ud-formily-item-label')?.innerText?.trim();
       const group=n.closest('[id^="formily-item-"][id$="_list"]'),row=n.closest('.register-form-group-wrapper');
       return {...f,label:label?.replace(/[＊*\s]+$/gu,'')||f.label,required:f.required||!!label&&/[＊*]/u.test(label),readonly:f.readonly||f.type==='custom_question',contextProvider:'.ud-formily-item',questionSelector:selector(root),labelSelector:selector(root)+' > .ud-formily-item-label',selectedSelector:root.querySelector('.ud__select__selector')?selector(root)+' .ud__select__selector':null,multiple:n.getAttribute('aria-multiselectable')==='true'||!!root.querySelector('.ud__select--multiple'),group:group?.id?.replace('formily-item-','')||null,groupSelector:group?selector(group):null,rowSelector:row?selector(row):null,repeatIndex:group&&row?[...group.querySelectorAll('.register-form-group-wrapper')].indexOf(row):null,fieldKey:root.id?.replace('formily-item-','')||null,controlIndex:[...root.querySelectorAll('input,textarea,select,[role="combobox"]')].indexOf(n)};

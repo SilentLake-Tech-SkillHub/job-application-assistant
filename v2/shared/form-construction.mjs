@@ -1,3 +1,4 @@
+import {applyChoiceResolution} from './choice-resolution.mjs';
 import {createHash} from 'node:crypto';
 import {CONTROL_TYPES} from './control-registry.mjs';
 import {humanActionReason,classifyPending,templateConstructionIssues} from './field-policy.mjs';
@@ -8,7 +9,7 @@ export function mappingCandidates(controls,profile){
 }
 export function inferControl(c){
  if(c.contextProvider==='.atsx-form-item'){
-  const type={month:'month_picker',year:'year_picker',choice:'dropdown',radio_group:'radio',readonly:'readonly_text',school_text:'searchable_text'}[c.type];if(type)return type;
+  const type={month:'month_picker',year:'year_picker',choice:'dropdown',radio_group:'radio',readonly:'readonly_text',school_text:'dropdown'}[c.type];if(type)return type;
  }
  if(c.type==='password')return 'text';
  if(c.renderer==='phoenix_radio'||c.type==='radio')return 'radio';
@@ -26,7 +27,7 @@ export function inferControl(c){
 }
 function fieldFromControl(c,m,choice){
  const type=inferControl(c),contract=CONTROL_TYPES[type],human=humanActionReason({inventoryLabel:c.label,inventoryType:c.type});
- const f={id:'field-'+digest([c.selector,c.label]).slice(0,20),source:m?.factKey||'unmapped.pending',label:c.label||'未识别题目',required:!!c.required,inventorySelectors:c.inventorySelectors||[c.selector],inventoryLabel:c.label,inventoryType:c.type,read:{selector:c.selector,kind:'value'},actions:[],constructionBlockers:[]};
+ const f={id:'field-'+digest([c.selector,c.label]).slice(0,20),source:m?.factKey||'unmapped.pending',label:c.label||'未识别题目',required:!!c.required,inventorySelectors:c.inventorySelectors||[c.selector],inventoryLabel:c.label,inventoryType:c.type,inventoryReadonly:c.readonly===true||c.type==='readonly',inventoryDisabled:!!c.disabled,inventoryRenderer:c.renderer||null,read:{selector:c.selector,kind:'value'},actions:[],constructionBlockers:[]};
  if(!c.label)f.constructionBlockers.push('QUESTION_LABEL_NOT_CAPTURED');
  if(!m?.factKey||m.factKey.startsWith('unmapped.'))f.constructionBlockers.push('SEMANTIC_MAPPING_REQUIRED');
  if(!type){f.constructionBlockers.push('CONTROL_DRIVER_REQUIRED');return f;}
@@ -50,7 +51,7 @@ function fieldFromControl(c,m,choice){
    const method=framework==='.ant-form-item'?'ant_dropdown':'ud_dropdown';
    f.read.kind='text';f.read.selector=c.selectedSelector||c.questionSelector||c.selector;
    if(!human)f.actions=[{...action(method),labelSelector:c.labelSelector,options:options||[]}];
-  }else if(c.role==='combobox'&&c.selectedSelector){f.read.kind='text';f.actions=[{...action('dropdown'),options:options||[]}];}
+  }else if(c.role==='combobox'&&c.selectedSelector){f.read.kind='text';f.read.selector=c.selectedSelector;f.actions=[{...action('dropdown'),options:options||[]}];}
   else f.constructionBlockers.push('CONTROL_DRIVER_REQUIRED');
  }else if(f.kind==='date'){
   f.precision=type==='year_picker'?'year':type==='month_picker'?'month':'day';f.read.selectedSelector=c.selector;
@@ -79,7 +80,7 @@ export function buildFormTemplate({capture,profile,mappings=[],choices=[],page,t
  if(reaStructure&&(reaStructure.pageUrl!==capture.pageUrl||reaStructure.companyId!==capture.companyId))throw Error('REA_CONTROL_CAPTURE_SCOPE_MISMATCH');
  const groups=new Map();
  for(const c of capture.controls){const identity=c.type==='radio'&&c.questionSelector?c.questionSelector:c.selector;const prior=groups.get(identity);if(prior&&c.type!=='radio')throw Error('DUPLICATE_CAPTURED_SELECTOR');if(prior)prior.inventorySelectors.push(c.selector);else groups.set(identity,{...c,inventorySelectors:[c.selector]});}
- const fields=[...groups.values()].map(c=>fieldFromControl(c,mappings.find(m=>m.active!==false&&m.status!=='needs_semantic_mapping'&&c.inventorySelectors.includes(m.selector)),choices.find(x=>x.selector===c.selector)));
+ const fields=[...groups.values()].map(c=>applyChoiceResolution(fieldFromControl(c,mappings.find(m=>m.active!==false&&c.inventorySelectors.includes(m.selector)),choices.find(x=>x.selector===c.selector)),choices.find(x=>x.selector===c.selector),profile));
  const template={id:templateId,version,evidence:{sourceUrl:capture.pageUrl,observedAt:capture.observedAt,captureId:capture.captureId,...(reaStructure?{reaEvidenceId:reaStructure.reaEvidenceId,reaEvidenceHash:reaStructure.reaEvidenceHash}: {})},pages:[{...page,pathPrefix:page.pathPrefix||new URL(capture.pageUrl).pathname,fields}],coverage:{allControlsMapped:false,allDriversSupported:false,allConditionalBranchesVerified:false}};
  const blockers=templateConstructionIssues(template);
  if(reaStructure){

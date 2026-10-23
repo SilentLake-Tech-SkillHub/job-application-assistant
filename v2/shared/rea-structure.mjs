@@ -11,12 +11,13 @@ export function localReaEndpoint(value){
 }
 // Called only by an explicitly authorized internal construction operation.
 // The broker obtains targetId from its existing page, never from a guessed URL.
-export async function inspectRea({endpoint,targetId,pageUrl,command,execute=run}){
+export async function inspectRea({endpoint,targetId,pageUrl,allowedOrigins=[new URL(pageUrl).origin],command,execute=run}){
  localReaEndpoint(endpoint);
  const base=command||JSON.parse(process.env.RECRUITING_REA_COMMAND||'["npx","--offline","--yes","--package","rea-agents@6.7.0","rea"]');
  if(!Array.isArray(base)||!base.length||base.some(x=>typeof x!=='string'||!x))throw Error('REA_COMMAND_CONFIGURATION_INVALID');
  if(!targetId||new URL(pageUrl).protocol!=='https:')throw Error('REA_PAGE_BINDING_REQUIRED');
- const {stdout}=await execute(base[0],[...base.slice(1),'inspect-web-page',endpoint,targetId,'--allowed-origins',JSON.stringify([new URL(pageUrl).origin]),'--include-accessibility-text','--observation-ms','500','--format','json'],{timeout:30000,maxBuffer:32*1024*1024,encoding:'utf8'});
+ if(!allowedOrigins.includes(new URL(pageUrl).origin)||allowedOrigins.some(origin=>{try{const u=new URL(origin);return u.protocol!=='https:'||u.origin!==origin;}catch{return true;}}))throw Error('REA_SCRIPT_ORIGIN_SCOPE_INVALID');
+ const {stdout}=await execute(base[0],[...base.slice(1),'inspect-web-page',endpoint,targetId,...allowedOrigins.flatMap(origin=>['--allowed-origins',origin]),'--include-accessibility-text','--include-script-sources','--observation-ms','500','--format','json'],{timeout:120000,maxBuffer:64*1024*1024,encoding:'utf8'});
  let evidence;try{evidence=JSON.parse(stdout);}catch{throw Error('REA_COMPLETE_JSON_REQUIRED');}
  return evidence;
 }

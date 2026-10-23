@@ -19,7 +19,7 @@ def no_personal_data(content):
 
 def public_json_files(root):
     root = Path(root)
-    allowed = {'package.json', 'package-lock.json', 'catalog/entry-recipes.json'}
+    allowed = {'package.json', 'package-lock.json', 'catalog/entry-recipes.json', 'catalog/workflow-tools.json'}
     package = json.loads((root / 'package.json').read_text(encoding='utf-8'))
     assert set(package) <= {'name', 'version', 'private', 'type', 'files', 'scripts', 'dependencies'}
     assert package['name'] == 'job-application-suite-v2' and package['private'] is True
@@ -33,6 +33,15 @@ def public_json_files(root):
         text = json.dumps(recipe, ensure_ascii=False)
         assert not re.search(r'https?://', text), 'entry recipes must not hardcode domains'
     no_personal_data(json.dumps(recipes, ensure_ascii=False))
+    lifecycle = json.loads((root / 'catalog/workflow-tools.json').read_text(encoding='utf-8'))
+    assert set(lifecycle) == {'revision', 'inspections', 'stages'} and lifecycle['revision'] == 1
+    assert isinstance(lifecycle['inspections'], list) and isinstance(lifecycle['stages'], dict)
+    names = lifecycle['inspections'] + list(lifecycle['stages'])
+    assert len(names) == len(set(names)) and all(re.fullmatch(r'[a-z_]+', n) for n in names)
+    for phase, tools in lifecycle['stages'].values():
+        assert phase in {'construct', 'map', 'prepare', 'verify', 'route', 'login', 'closed', 'closeout', 'technical_block'}
+        assert isinstance(tools, list) and all(t in names for t in tools)
+    no_personal_data(json.dumps(lifecycle))
     assert not (root / 'catalog/companies.json').exists(), 'company catalog lives in the workspace, not the package'
     for file in (root / 'test/fixtures').glob('*.login.json'):
         c = json.loads(file.read_text(encoding='utf-8'))

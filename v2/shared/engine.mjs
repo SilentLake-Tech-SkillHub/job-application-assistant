@@ -132,7 +132,7 @@ export class Engine {
   }
   async preparePlan(task){
     const route=await this.formRoute(task);
-    if(route.route==='acquire'&&route.reason!=='COMPANY_FORM_ASSET_INCOMPLETE')return {...route,status:'needs_form_acquisition',readyForExecution:false};
+    if(route.route==='acquire')return {...route,status:'needs_form_acquisition',readyForExecution:false};
     const company=this.companyForTask(task);
     if(!company?.templateId)return {...route,status:'needs_form_acquisition',readyForExecution:false};
     if(new URL(task.pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
@@ -183,6 +183,7 @@ export class Engine {
       if(!task.planId||!task.planHash)throw Error('PREPARED_PLAN_REQUIRED');
       let prepared;try{prepared=await this.store.get('plans',task.planId);}catch{throw Error('PREPARED_PLAN_NOT_FOUND');}
       await assertPreparedPlan(prepared,template,task,authorization);
+      if((await this.formRoute(task)).route!=='reuse')throw Error('FORM_ASSET_NOT_SEALED');
       jobs.push({task,company,template,prepared});
     }
     const release=await this.acquireCompanies(jobs.map(j=>j.company));
@@ -195,6 +196,7 @@ export class Engine {
     for(const job of jobs){
       const current=this.companyForTask(job.task);
       if(!current?.templateId||current.templateId!==job.template.id||hash(await this.store.get('templates',current.templateId))!==job.task.templateHash)throw Error('TEMPLATE_VERSION_CHANGED');
+      if((await this.formRoute(job.task)).route!=='reuse')throw Error('FORM_ASSET_NOT_SEALED');
       if(this.resolveTask){
         const fresh=await this.resolveTask(job.task,job.template);
         await assertPreparedPlan(job.prepared,job.template,fresh,authorization);
@@ -241,6 +243,7 @@ export class Engine {
     if(new URL(task.pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
     const template=validateTemplate(await this.store.get('templates',company.templateId));
     if(task.templateHash!==hash(template))throw Error('TEMPLATE_VERSION_CHANGED');
+    if((await this.formRoute(task)).route!=='reuse')throw Error('FORM_ASSET_NOT_SEALED');
     const matches=template.pages.filter(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix));
     if(matches.length!==1)throw Error('AMBIGUOUS_VERIFICATION_PAGE');
     const plan=matches[0],page=await this.browser.existingPage(task.pageUrl);
@@ -255,7 +258,7 @@ export class Engine {
     const contractChanges=controlContractChanges(plan,inventory);
     if(contractChanges.length){result.status='needs_attention';result.controlContractChanges=contractChanges;}
     if(mappingError){result.status='needs_attention';result.mappingError=mappingError;}
-    const run={id:randomUUID(),operation:'verify_current',companyId:company.id,templateHash:hash(template),profileHash:task.profileHash,observationRunId,...result};
+    const run={id:randomUUID(),operation:'verify_current',companyId:company.id,roleId:task.roleId||null,pageUrl:task.pageUrl,templateHash:hash(template),profileHash:task.profileHash,observationRunId,...result};
     await this.store.put('runs',run.id,run);return run;
   }
   async runCompany({task,company,template,prepared},authorization) {

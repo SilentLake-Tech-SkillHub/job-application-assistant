@@ -81,9 +81,23 @@ export class CompanyBatch{
   if(!['running','waiting_for_user','ready_for_user_review','blocked'].includes(args.status))throw Error('INVALID_COMPANY_BATCH_STATUS');
   if(args.status==='ready_for_user_review'){
    if(!Array.isArray(args.runIds)||!args.runIds.length)throw Error('APPLICATION_RUN_EVIDENCE_REQUIRED');const runs=await Promise.all(args.runIds.map(id=>this.store.get('runs',id)));
-   for(const task of c.tasks)if(!runs.flatMap(r=>r.results||[]).some(r=>r.companyId===c.companyId&&r.pageUrl===(task.applyUrl||task.url)&&r.status==='verified'&&r.pageChecks?.length&&r.pageChecks.every(p=>p.verification?.status==='verified')))throw Error('FULL_ROLE_VERIFICATION_REQUIRED');
+   for(const task of c.tasks){let state;try{state=await this.queues.read(task.taskId);}catch{}
+    if(state?.status!=='ready_for_user_review'||!state.verifyRunId)throw Error('FULL_ROLE_VERIFICATION_REQUIRED');
+    const expected=state.applicationUrl||state.returnUrl||task.applyUrl||task.url,verify=await this.store.get('runs',state.verifyRunId);
+    if(verify.operation!=='verify_current'||verify.companyId!==c.companyId||verify.pageUrl!==expected||verify.status!=='verified'||!verify.checks?.length||!verify.checks.every(check=>['match','confirmed_omission'].includes(check.status))||!runs.some(run=>run.id===state.verifyRunId||run.id===state.fillRunId))throw Error('FULL_ROLE_VERIFICATION_REQUIRED');
+   }
   }
-  if(args.status==='blocked'&&!args.reason?.trim())throw Error('BLOCK_REASON_REQUIRED');Object.assign(c,{status:args.status,reason:args.reason||null,runIds:args.runIds||[],updatedAt:new Date(this.clock()).toISOString(),leaseExpiresAt:new Date(this.clock()+30*60*1000).toISOString()});b.revision++;await this.store.put('runs',b.id,b);if(c.status==='ready_for_user_review'&&!b.companies.some(x=>x.loginScope===c.loginScope&&active.has(x.status))){const owners=await this.owners();delete owners[c.loginScope];await this.store.put('runs','company-channel-owners',owners);}return {companyId:c.companyId,channel:c.channel,status:c.status,submission:'not_performed'};
+  if(args.status==='waiting_for_user'){
+   let userWait=false;for(const task of c.tasks){let state;try{state=await this.queues.read(task.taskId);}catch{}
+    if(state?.status==='needs_login'&&state.loginPlan)userWait=true;
+    if(state?.verifyRunId){const run=await this.store.get('runs',state.verifyRunId),pending=(run.checks||[]).filter(check=>!['match','confirmed_omission'].includes(check.status));if(run.companyId===c.companyId&&pending.length&&pending.every(check=>['needs_user','missing_input'].includes(check.status)))userWait=true;}
+   }if(!userWait)throw Error('USER_WAIT_EVIDENCE_REQUIRED');
+  }
+  if(args.status==='blocked'){
+   const receipts=await Promise.all((args.runIds||[]).map(id=>this.store.get('runs',id)));
+   if(!receipts.some(receipt=>receipt.status==='blocked_for_supervisor'&&receipt.continuation?.handoffVerified===true&&(!receipt.companyId||receipt.companyId===c.companyId)))throw Error('VERIFIED_BLOCK_HANDOFF_REQUIRED');
+  }
+  if(args.status==='blocked'&&!args.reason?.trim())throw Error('BLOCK_REASON_REQUIRED');Object.assign(c,{status:args.status,reason:args.reason||null,runIds:args.runIds||[],updatedAt:new Date(this.clock()).toISOString(),leaseExpiresAt:new Date(this.clock()+30*60*1000).toISOString()});b.revision++;await this.store.put('runs',b.id,b);if(c.status==='ready_for_user_review'&&!b.companies.some(x=>x.loginScope===c.loginScope&&active.has(x.status))){const owners=await this.owners();delete owners[c.loginScope];await this.store.put('runs','company-channel-owners',owners);}const remainingAgentWork=b.companies.filter(company=>['pending','dispatched','running'].includes(company.status)).length;return {companyId:c.companyId,channel:c.channel,status:c.status,remainingAgentWork,batchPreparationComplete:b.companies.every(company=>company.status==='ready_for_user_review'),continuation:remainingAgentWork?{state:'prepare',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['company_batch_take','workflow_advance']}:c.status==='blocked'?{state:'technical_block',owner:'supervisor',requiresUser:false,shouldContinue:false,handoffVerified:true,nextTools:[]}:{state:c.status==='waiting_for_user'?'user_input':'review',owner:'user',requiresUser:true,shouldContinue:false,nextTools:[]},submission:'not_performed'};
  });}
  async status(args){const b=await this.get(args);return {batchId:b.id,revision:b.revision,companiesPerChannel:b.companiesPerChannel,channels:b.channels,companies:b.companies.map(({leaseToken,tasks,...c})=>({...c,roleCount:tasks.length})),submission:'not_performed'};}
 }

@@ -1,5 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';import {fileURLToPath} from 'node:url';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
+import {Store,hash} from '../shared/engine.mjs';
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 test('actual application MCP reports new runtime and missing company form routes offline to acquisition', {timeout:10000},async()=>{
  const d=await mkdtemp(path.join(os.tmpdir(),'application-protocol-'));const profile=path.join(d,'profile.json');await writeFile(profile,JSON.stringify({schemaVersion:1,facts:{},sources:{},entities:{}}));
@@ -10,12 +11,18 @@ test('actual application MCP reports new runtime and missing company form routes
  try{await c.connect(new StdioClientTransport({command:process.execPath,args:[path.join(root,'application/server.mjs')],cwd:d,env:{PATH:process.env.PATH,RECRUITING_HANDOFF_DIR:handoff,RECRUITING_PROFILE_JSON:profile,RECRUITING_PRIVATE_DIR:path.join(d,'application'),RECRUITING_ROLE_QUEUE_DIR:path.join(d,'queue'),RECRUITING_BROWSER_SOCKET:path.join(d,'absent.sock')},stderr:'pipe'}));
  const names=(await c.listTools()).tools.map(t=>t.name);for(const name of ['runtime_info','workflow_next','template_rebind_role','application_closeout','capture_form_definition'])assert.ok(names.includes(name));
  const call=async(name,args={})=>{const r=await c.callTool({name,arguments:args},undefined,{timeout:3000}),data=JSON.parse(r.content[0].text);assert.notEqual(r.isError,true,`${name}: ${data.error||'MCP error'}`);return data;};
- const info=await call('runtime_info');assert.equal(info.version,'2.0.0-alpha.7');assert.equal(info.compilerVersion,3);
- const unknown=await c.callTool({name:'workflow_next',arguments:{companyId:'absent-company',pageUrl}},undefined,{timeout:3000});assert.equal(unknown.isError,true);assert.equal(JSON.parse(unknown.content[0].text).error,'COMPANY_ORIGIN_MISMATCH');
- const route=await call('workflow_next',{companyId,pageUrl});assert.equal(route.route,'acquire');assert.equal(route.browserAccess,false);assert.ok(route.nextTools.includes('capture_controls'));
+ const info=await call('runtime_info');assert.equal(info.version,'2.0.0-alpha.7');assert.equal(info.compilerVersion,3);assert.equal(info.pipelineRevision,'rea-contract-3');
+ const unknown=await c.callTool({name:'workflow_next',arguments:{companyId:'absent-company',pageUrl}},undefined,{timeout:3000});assert.equal(unknown.isError,true);const failure=JSON.parse(unknown.content[0].text);assert.equal(failure.error,'COMPANY_ORIGIN_MISMATCH');assert.equal(failure.continuation.owner,'agent');assert.ok(failure.failureEvidenceId);
+ const route=await call('workflow_next',{companyId,pageUrl});assert.equal(route.workflowContract.tracked,true);assert.equal(route.continuation.shouldContinue,true);assert.equal(route.completion.complete,false);assert.equal(route.route,'acquire');assert.equal(route.browserAccess,false);assert.ok(route.nextTools.includes('capture_controls'));
  const template={id:'synthetic-import',version:1,evidence:{sourceUrl:pageUrl,observedAt:'synthetic'},coverage:{allControlsMapped:true,allConditionalBranchesVerified:true,allDriversSupported:true,proof:{runId:'model-authored'}},pages:[{pathPrefix:new URL(pageUrl).pathname,readySelector:'#form',roleSelector:'h1',roleTitle:'Synthetic',sections:[{title:'Basics'}],sectionDiscovery:{selector:'section',titleSelector:'h2'},fields:[{id:'name',label:'Name',source:'name',kind:'text',required:false,control:{type:'text',valueType:'string',readbackType:'string'},read:{kind:'value',selector:'#name'},actions:[{method:'fill',selector:'#name'}]}]}]};
  await call('template_register',{companyId,template});
  const gated=await call('workflow_next',{companyId,pageUrl});assert.equal(gated.route,'acquire');assert.equal(gated.reason,'COMPANY_FORM_ASSET_INCOMPLETE');assert.equal(gated.blockers.length,3);
-
+ const privateStore=new Store(path.join(d,'application'));
+ await privateStore.put('runs','test-draft',{companyId,template,readyToRegister:true,blockers:[]});
+ const draftResult=await call('template_register',{companyId,draftId:'test-draft',draftHash:hash(template)});
+ assert.equal(draftResult.templateId,template.id);assert.equal(draftResult.status,'captured_not_live_verified');
+ for(const args of [{companyId,draftId:'test-draft',draftHash:'0'.repeat(64)},{companyId,template,draftId:'test-draft',draftHash:hash(template)},{companyId}]){
+  const rejected=await c.callTool({name:'template_register',arguments:args},undefined,{timeout:3000});assert.equal(rejected.isError,true);
+ }
  }finally{await c.close();await rm(d,{recursive:true,force:true});}
 });

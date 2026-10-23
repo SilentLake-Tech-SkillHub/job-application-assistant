@@ -5,11 +5,11 @@
 ## 首次建库或结构变化
 
 1. 保留已确认岗位、原页面和账号。内部建库调用 `capture_rea_structure`，显式传入原 `pageId`、`pageUrl` 与建库授权。REA 仅被动观察当前宿主已有目标，不启动或切换浏览器。宿主无此能力时返回 `REA_HOST_CAPABILITY_REQUIRED`，不能改用另一个浏览器冒充原页。
-2. 该调用保存 REA 的结构证据，并在同一页面执行实时 `capture_controls`。两次观测必须同目标、同页面且相邻。REA 的 AX 节点编号不是 CSS 选择器；有歧义的结构必须通过实际浏览器控件确认。未对应的交互节点保留在 `uncorrelatedControls`，在建库中逐项关联到实际选择器，或有依据地说明它是表单外导航/重复无障碍节点。不能静默丢弃。
-3. 用 `form_mapping_candidates` 读已有原子事实候选。候选是提示，不是已完成映射；同名学校、经历、起止日期必须带栏目、记录和控件语义确认，再调用 `profile_map_questions`。在个人主档已有的答案不得再问用户。
+2. 该入口在原页面一次归集 CDP DOMSnapshot（定位属性、父子关系、backendNodeId、布局矩形）、原生 AX 树、已加载脚本来源和 REA 脚本正文，再执行同页控件规范化。完整数据保存在同一固定私有结构资产中，只向模型返回计数、Hash和缺口。多个表单分别识别，标签允许中间包装层；Ant 清单与普通 DOM 清单交叉去重，附件和表单外输入不能消失。两次观测必须同目标、同页面且相邻。REA 的 AX 节点编号不是 CSS 选择器；有歧义的结构必须通过实际浏览器控件确认。未对应的交互节点保留在 `uncorrelatedControls`，在建库中逐项关联到实际选择器，或有依据地说明它是表单外导航/重复无障碍节点。不能静默丢弃。
+3. 用 `form_mapping_candidates` 读已有原子事实候选；需要业务定义线索时，用 `form_script_search` 在已捕获的私有脚本中查字段、校验及依赖，不把整份脚本塞进模型。候选是提示，不是已完成映射；同名学校、经历、起止日期必须带栏目、记录和控件语义确认，再调用 `profile_map_questions`。在个人主档已有的答案不得再问用户。
 4. 对选择器、选项、条件和重复栏目做增量采集。`capture_choice_options` 的证据绑定本次 capture；搜索结果、当前可见结果和完整菜单分别标记。日期精度、上传网站回显、学校/专业联动必须有真实控件证据。
 5. 用 `form_build_template` 生成统一模板，必须绑定本次 REA 的 `structureId`。普通文本、原生选择/日期、Ant、UD 和经典飞书使用共享驱动。尚不支持的控件、未采到的选项、未确定的映射都返回 `blockers`，不会被改成 `userOnly` 或用“待补充”伪装为选项。模板草案保存于私有运行目录固定键并覆盖更新。
-6. 无建库缺口后 `template_register → probe_conditions → template_finalize`。生成模板不等于现场验证完成，REA 证据也不等于填写成功。
+6. `form_build_template` 默认只返回缺口、计数及 `draftId/draftHash`，完整模板留在固定私有草稿；无建库缺口后直接用该引用 `template_register({companyId,draftId,draftHash}) → probe_conditions → template_finalize`。注册会重新核对公司归属、模板Hash及缺口，禁止模型把大模板读出后再次抄回。需要诊断整份模板时才指定 `compact:false`。生成模板不等于现场验证完成，REA 证据也不等于填写成功。
 
 ## 已建库公司的复用
 
@@ -30,7 +30,7 @@
 
 模型不得把 `needs_attention` 一律当作回合完成；先看责任类型。仍有 Agent 可处理工作时继续调用，不能要求用户反复回复“继续”。真实不可解决的技术阻塞需说明具体原因；不因追求不停顿而无限重试、臆造答案或绕过门禁。
 
-已启用对话的 `PostToolUse` 保存固定的 continuation 路由，`Stop` 对同回合未处理的 Agent 步骤提醒续跑。相同停点最多阻断一次，防止不可解决的故障造成无限循环；新回合、其它对话、真实用户等待及审阅不受影响。宿主必须加载对应事件，单元测试不代表驻留 DSH 已重载 Hook。
+已启用对话的 `PostToolUse` 保存固定的 continuation 路由，`Stop` 对同回合未处理的 Agent 步骤提醒续跑。尚有 Agent 待办时每次 Stop 都阻断。真实技术故障必须通过 `workflow_handoff` 引用已落盘 MCP 错误/驱动缺口，由组件核实后交给监督者；交接仍为未完成，不可写成审阅就绪。新回合、其它对话及有证据的用户等待按各自作用域处理。宿主必须加载对应事件，单元测试不代表驻留 DSH 已重载 Hook。
 
 ## 统计和独立核验
 
@@ -40,6 +40,16 @@
 
 ## REA 宿主接线
 
-受控浏览器宿主通过已连接页面的 `Target.getTargetInfo` 获取真实 targetId，调用 REA 的 `inspect-web-page`。命令只用参数数组，不使用 shell。默认使用本机缓存的 `rea-agents@6.7.0`；可用 `RECRUITING_REA_COMMAND` 指定已安装命令的 JSON argv 数组。调用固定关闭脚本源、存储键和控制台正文采集，具有输出大小和时间上限。
+受控浏览器宿主通过已连接页面的 `Target.getTargetInfo` 获取真实 targetId，调用 REA 的 `inspect-web-page --include-script-sources`。允许来源从该页实际加载的 Script 资源树提取，覆盖已观察到的 CDN；不猜测来源或请求未加载模块。脚本正文、DOM属性与布局仅留在私有固定资产，脚本内容Hash与字节数会核验，结果报告已包含、已排除及限制；不能把策略过滤的采集宣称为网站所有脚本。命令只用参数数组，不使用 shell。默认使用本机缓存的 `rea-agents@6.7.0`；可用 `RECRUITING_REA_COMMAND` 指定已安装命令的 JSON argv 数组。存储键和控制台正文不采集，具有输出大小和时间上限。正常填写复用封存资产，不重复全量采集。DOM读取器按源码修改时间加载，修正标签/层级规则不需要重开浏览器。
 
 REA 端点来自该宿主的 `RECRUITING_REA_ENDPOINT` 或既有 `RECRUITING_BROWSER_CDP_PORT`，只允许本机端点。没有端点就报配置缺口，不为取得端点重开浏览器。内置浏览器使用 `startHostBrowserBridge({reaInspect})` 注入宿主针对原 tab 的被动采集能力；未提供时明确阻塞。配置改动和代码测试均不证明驻留宿主已重载，需读取实际运行能力并现场核验。
+
+## 强制存储与工具契约
+
+每个字段的内容来源、控件类型、定位、依赖、完整动作与独立读回必须同时存在。采集即登记控件证据，构建即覆盖保存完整草案及主档 `companyForms.executionContract.fields`，包括阻塞项；注册后读回模板和主档并逐字段核对。缺动作、未知语义、把交互框当只读文本或普通 userOnly 都无法注册及封存。封存Hash绑定模板内容及实际条件探测回执；改模板后不能沿用旧证据。路由、预检、填写与完成记录逐层检查同一契约。
+
+两个 MCP 的公共工具统一经 `registerWorkflowTool` 注册。新增工具必须声明自己是纯查询或哪个工作流阶段，否则启动失败；阶段工具统一返回 `workflowContract`、`continuation` 和 `completion`。Hook 对实际启用会话动态消费这些元数据，不依赖易遗漏的固定工具名单。DSH 中须由当前宿主调用作用域 enable 入口，启用后验证真实 PostToolUse/Stop；未启用的其它会话保持独立。
+
+## 真实选项匹配和提交选择
+
+`capture_choice_options` 先取真实候选并恢复页面。`form_resolve_choices` 对同一事实的已确认别名（学校中英文、缩写）以及主档明确批准的专业映射做精确规范化匹配；其它模糊结果只排序，Agent 必须给语义等价证据才可选择捕获列表中的实际选项。原始个人事实不改写，映射、选项Hash和搜索词覆盖保存在私有选择资产，构建时一起固化。来源或列表变化则旧映射失效。运行时搜索实际标签、点击唯一真实选项、失焦，再独立读已选状态；INPUT 的搜索文本本身永远不能作为选择完成证据。无对应选项时继续采集官网“其他/添加”分支，不能硬填不存在的学校或专业。

@@ -51,7 +51,7 @@ test('REA rejects stale, cross-target, partial and changed-page evidence',()=>{
 });
 test('REA invocation is a bounded argument array, captures no storage/scripts, and rejects remote endpoints',async()=>{
  let call;await inspectRea({endpoint:'http://127.0.0.1:9222',targetId:'target',pageUrl:'https://alpha.example/form',command:['node','/installed/rea.mjs'],execute:async(...args)=>{call=args;return {stdout:JSON.stringify(evidence())};}});
- assert.equal(call[0],'node');assert.ok(call[1].includes('--include-accessibility-text'));assert.equal(call[1].includes('--include-storage-keys'),false);assert.equal(call[2].shell,undefined);
+ assert.equal(call[0],'node');assert.ok(call[1].includes('--include-accessibility-text'));assert.ok(call[1].includes('--include-script-sources'));assert.equal(call[1].includes('--include-storage-keys'),false);assert.equal(call[2].shell,undefined);
  await assert.rejects(inspectRea({endpoint:'https://remote.example',targetId:'target',pageUrl:'https://alpha.example/form'}),/LOCAL_ENDPOINT/);
 });
 test('continuation keeps technical work with the agent and distinguishes real user decisions',async()=>{

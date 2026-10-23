@@ -18,13 +18,31 @@ class WorkflowHookTest(unittest.TestCase):
  def test_receipt_from_another_turn_never_releases_mutation(self):
   self.invoke(hook_event_name='UserPromptSubmit');self.assertEqual(self.invoke(turn_id='other').returncode,2)
 
- def test_agent_work_prompts_continuation_once_without_affecting_other_turns(self):
+ def test_agent_work_cannot_stop_after_ignoring_one_reminder(self):
   response={'continuation':{'state':'map','owner':'agent','requiresUser':False,'shouldContinue':True}}
   self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__workflow_next',tool_response=response)
   self.assertEqual(json.loads(self.invoke(hook_event_name='Stop',session_id='other').stdout),{})
   self.assertEqual(json.loads(self.invoke(hook_event_name='Stop',turn_id='other').stdout),{})
   self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout)['decision'],'block')
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout)['decision'],'block')
+  self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__workflow_handoff',tool_response={'continuation':{'state':'technical_block','owner':'supervisor','requiresUser':False,'shouldContinue':False,'handoffVerified':True}})
   self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout),{})
+
+ def test_declared_new_stage_is_tracked_with_dsh_hyphenated_namespace(self):
+  response={'workflowContract':{'revision':1,'tracked':True},'continuation':{'state':'construct','owner':'agent','shouldContinue':True}}
+  self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting-application-v2__future_stage',tool_response={'content':[{'type':'text','text':json.dumps(response)}]})
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout)['decision'],'block')
+
+ def test_sdk_argument_failure_cannot_leave_enabled_workflow_without_pending_state(self):
+  self.invoke(hook_event_name='UserPromptSubmit')
+  self.invoke(tool_name='mcp__recruiting-application-v2__form_build_template')
+  self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting-application-v2__form_build_template',tool_response={'isError':True,'content':[{'type':'text','text':'Invalid arguments'}]})
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout)['decision'],'block')
+
+ def test_actual_dsh_error_text_prefix_preserves_technical_continuation(self):
+  response={'workflowContract':{'revision':1,'tracked':True},'continuation':{'state':'technical_block','owner':'agent','shouldContinue':True}}
+  self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting-application-v2__capture_choice_options',tool_response='Error: '+json.dumps(response))
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout)['decision'],'block')
 
  def test_real_user_wait_and_review_allow_stop(self):
   for state in ['user_input','review']:
