@@ -16,14 +16,26 @@ export function fieldConstructionIssues(field) {
  const issues=[];
  if(/^education\.[^.]+\.major\.(canonical|application)$/.test(field.source||''))issues.push('MAJOR_REAL_SOURCE_REQUIRES_REBUILD');
  if(field.userOnly&&!humanActionReason(field))issues.push('ORDINARY_FIELD_MARKED_USER_ONLY');
- if(['school_text','choice','combobox','radio_group'].includes(field.inventoryType)&&field.kind==='text')issues.push('INTERACTIVE_WIDGET_REQUIRES_SELECTION_CONTRACT');
+ if(['school_text','choice','combobox','radio_group'].includes(field.inventoryType)&&field.kind==='text'&&field.control?.type!=='searchable_text')issues.push('INTERACTIVE_WIDGET_REQUIRES_SELECTION_CONTRACT');
+ if(field.control?.type==='searchable_text'&&!field.userOnly&&(!field.actions?.some(a=>a.method==='phoenix_autocomplete')||field.actions.some(a=>a.method==='fill')))issues.push('SEARCHABLE_TEXT_COMMIT_CONTRACT_REQUIRED');
  if(field.readonly&&field.inventoryReadonly!==true&&field.inventoryDisabled!==true&&field.inventoryType!=='readonly')issues.push('READONLY_STATE_NOT_CAPTURED');
  if(field.constructionBlockers?.length)issues.push(...field.constructionBlockers);
+ if(field.choiceGoalRequired===true&&!field.choiceGoal)issues.push('CHOICE_GOAL_REQUIRED');
+ if(field.choiceGoal&&field.choiceGoal.status!=='resolved')issues.push('CHOICE_GOAL_INCOMPLETE');
  if(field.control?.options?.some(x=>/^(待补充|默认选项|暂无数据|placeholder)$/i.test(x)))issues.push('PLACEHOLDER_OPTIONS_NOT_EVIDENCE');
  return [...new Set(issues)];
 }
 export function templateConstructionIssues(template) {
- return [...(template.acquisitionBlockers||[]),(template.pages||[]).flatMap(p=>(p.fields||[]).flatMap(f=>fieldConstructionIssues(f).map(reason=>({id:f.id,label:f.inventoryLabel||f.label,reason}))))].flat();
+ return [...(template.acquisitionBlockers||[]),(template.pages||[]).flatMap(p=>(p.fields||[]).flatMap(f=>{
+  const issues=fieldConstructionIssues(f),goal=f.choiceGoal;
+  if(template.evidence?.choiceGoalContract===1&&!f.userOnly&&!f.readonly&&['dropdown','radio','multiselect','searchable_text'].includes(f.control?.type)){
+   if(!goal&&(f.choiceGoalRequired===true||f.choiceResolution||f.enumMap))issues.push('CHOICE_GOAL_REQUIRED');
+   if(goal&&(goal.fieldId!==f.id||goal.factKey!==f.source||goal.captureId!==template.evidence.captureId||
+      typeof goal.choicesId!=='string'||!goal.choicesId.trim()||typeof goal.sourceHash!=='string'||!/^[a-f0-9]{64}$/.test(goal.sourceHash)||
+      !f.inventorySelectors?.includes(goal.selector)||goal.executionVerified!==false))issues.push('CHOICE_GOAL_BINDING_INVALID');
+  }
+  return [...new Set(issues)].map(reason=>({id:f.id,label:f.inventoryLabel||f.label,reason}));
+ }))].flat();
 }
 export function classifyPending(field,profile) {
  const issues=fieldConstructionIssues(field);

@@ -3,6 +3,7 @@ import http from 'node:http';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {acquireLease,leasePath,defaultLeaseRoot} from '../shared/leases.mjs';
+import {genericSourceManifest} from '../shared/runtime-identity.mjs';
 const mode=process.argv[2];if(!['login','application'].includes(mode))throw Error('SELECT_LOGIN_OR_APPLICATION_MCP');
 const browserMode=process.env.RECRUITING_BROWSER_MODE||'managed';
 if(!['managed','cdp'].includes(browserMode))throw Error('INVALID_BROWSER_MODE');
@@ -34,4 +35,5 @@ try{
   if(!iabStatus||iabStatus.protocolVersion!==4||iabStatus.mode!=='iab')throw Error('IAB_EXECUTOR_CHANNEL_MISMATCH');
  }
 }finally{await release();}
+process.env.RECRUITING_WORKER_SOURCE_SHA256=(await genericSourceManifest()).sourceFingerprint;
 await import(mode==='login'?'../login/server.mjs':'../application/server.mjs');

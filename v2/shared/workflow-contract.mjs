@@ -38,7 +38,7 @@ export function workflowEnvelope(data){
   state='repair';nextTools=['run_status','form_template_audit','workflow_next'];
  }
  else if(data.readyToRegister!==undefined)nextTools=data.readyToRegister?['template_register']:data.nextTools||['form_mapping_candidates','capture_choice_options','form_build_template'];
- else if(data.choicesId)nextTools=['form_build_template'];
+ else if(data.choicesId)nextTools=data.nextTools||['form_build_template'];
  else if(data.captureId)nextTools=data.nextTools||['form_mapping_candidates','capture_choice_options','form_build_template'];
  else if(data.status==='captured_not_live_verified')nextTools=['probe_conditions','template_finalize'];
  else if(data.status==='asset_sealed_require_profile_preflight'){nextTools=['prepare_plan'];state='prepare';}

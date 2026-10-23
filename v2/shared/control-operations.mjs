@@ -36,7 +36,8 @@ async function assertValue(l,value,{deferRedacted=false}={}){
 async function performChoice(adapter,action,value,family){
  const verifyOnly=action.method.endsWith('_verify');
  const page=adapter.page,l=await locateControl(page,action);
- if(await l.evaluate(n=>n.getAttribute('role'))!=='combobox')throw Error('CHOICE_COMBOBOX_REQUIRED');
+ if(family==='phoenix'){if(!await l.evaluate(n=>n.classList.contains('phoenix-select')))throw Error('PHOENIX_SELECT_CAPTURE_REQUIRED');}
+ else if(await l.evaluate(n=>n.getAttribute('role'))!=='combobox')throw Error('CHOICE_COMBOBOX_REQUIRED');
  const root=action.labelSelector?.replace(/ > \.ud-formily-item-label$/,'');
  let trigger=l;
  if(family==='ud'){
@@ -54,7 +55,7 @@ async function performChoice(adapter,action,value,family){
  const expanded=await l.evaluate(n=>n.getAttribute('aria-expanded'));
  if(expanded!=='true')await trigger.click({timeout:10000});
  try{
-  let menus=page.locator(action.menuSelector||(family==='ud'?'.ud__select__list':family==='ant'?'.ant-select-dropdown':'[role="listbox"]')).filter({visible:true});
+  let menus=page.locator(action.menuSelector||(family==='phoenix'?'.common-unmodeled-layer:has(.phoenix-selectList)':family==='ud'?'.ud__select__list':family==='ant'?'.ant-select-dropdown':'[role="listbox"]')).filter({visible:true});
   const owned=await l.evaluate(n=>n.getAttribute('aria-controls')||n.getAttribute('aria-owns'));
   if(owned){
    const id='[id='+JSON.stringify(owned)+']';
@@ -70,7 +71,7 @@ async function performChoice(adapter,action,value,family){
   const searchable=!!search;
   if(searchable){initialQuery=await search.evaluate(n=>n.value);if(action.query||!action.method.endsWith('_inspect')){await search.fill(action.query||String(value),{timeout:10000});await assertValue(search,action.query||String(value));queryApplied=true;}}
   const tree=family==='ud'&&await menus.evaluate(n=>!!n.classList?.contains('ud__treeSelect__overlay')||!!n.querySelector?.('.ud__tree'));
-  let optionSelector=tree?UD_TREE_LEAF_LABEL:family==='ud'?'.ud__select__list__item':family==='ant'?'.ant-select-item-option, .ant-select-dropdown-menu-item':'[role="option"]';
+  let optionSelector=tree?UD_TREE_LEAF_LABEL:family==='phoenix'?'.phoenix-selectList__listItem':family==='ud'?'.ud__select__list__item':family==='ant'?'.ant-select-item-option, .ant-select-dropdown-menu-item':'[role="option"]';
   // Prefer actual renderer rows; the hidden rc-select ARIA mirror is not a click target.
   if(family==='ant'&&await menus.locator(optionSelector).filter({visible:true}).count()===0)optionSelector='[role="option"]';
   const options=menus.locator(optionSelector).filter({visible:true});
@@ -140,6 +141,21 @@ export async function performControl(adapter,action,value,files={}){
 
     if(!CONTROL_METHODS[action.method]){const url=new URL('./control-registry.mjs',import.meta.url);url.searchParams.set('revision',String((await stat(url)).mtimeMs));if(!(await import(url.href)).CONTROL_METHODS[action.method])throw Error('UNKNOWN_ACTION');}
     if(action.method==='capture_wecruit_schema')return captureWecruitSchema(adapter.page,action);
+    if(['phoenix_autocomplete','phoenix_autocomplete_inspect','phoenix_autocomplete_verify'].includes(action.method)){
+      if(action.method==='phoenix_autocomplete')await adapter.assertSingleEditor();
+      action=await adapter.resolveSpec(action);const url=new URL('./phoenix-autocomplete.mjs',import.meta.url);url.searchParams.set('revision',String((await stat(url)).mtimeMs));return (await import(url.href)).performPhoenixAutocomplete(adapter,action,value);
+    }
+    if(action.method==='phoenix_date'){
+      if(action.operation!=='inspect')await adapter.assertSingleEditor();
+      action=await adapter.resolveSpec(action);const url=new URL('./phoenix-date.mjs',import.meta.url);url.searchParams.set('revision',String((await stat(url)).mtimeMs));return (await import(url.href)).performPhoenixDate(adapter,action,value);
+    }
+    if(action.method==='phoenix_radio'){
+      await adapter.assertSingleEditor();
+      if(!action.options?.includes(String(value)))throw Error('UNSUPPORTED_CHOICE_NO_FALLBACK');
+      action=await adapter.resolveSpec(action);const root=await locateControl(adapter.page,action),option=root.locator('.phoenix-radio').filter({hasText:exact(value)});
+      if(await option.count()!==1)throw Error('CHOICE_NOT_UNIQUE_OR_NOT_PRESENT');
+      await option.click({timeout:10000});await waitCommit(()=>option.evaluate(n=>/(?:--|__)checked(?:\s|$)/.test(n.className)||n.getAttribute('aria-checked')==='true'),true);return {performed:true};
+    }
     if(!['wait','dropdown_inspect','ant_dropdown_inspect','ud_dropdown_inspect','ant_dropdown_verify','ud_dropdown_verify','dropdown_verify'].includes(action.method))await adapter.assertSingleEditor();
     if(action.method==='ant_day'){
       const url=new URL('./ant-date.mjs',import.meta.url);url.searchParams.set('revision',String((await stat(url)).mtimeMs));
@@ -169,6 +185,7 @@ export async function performControl(adapter,action,value,files={}){
     const l=await locateControl(adapter.page,action);
     const meta=await l.evaluate(n=>({tag:n.tagName,type:n.type||n.getAttribute('type'),role:n.getAttribute('role'),label:n.getAttribute('aria-label')||n.querySelector(':scope > .ant-form-item-label')?.innerText?.replace(/[＊*\s:：]+$/gu,'').trim()||n.textContent?.trim(),readonly:n.readOnly}));
     if(['ant_dropdown','ant_dropdown_inspect','ant_dropdown_verify'].includes(action.method))return performChoice(adapter,action,value,'ant');
+    if(['phoenix_dropdown','phoenix_dropdown_inspect','phoenix_dropdown_verify'].includes(action.method))return performChoice(adapter,action,value,'phoenix');
     if(['ud_dropdown','ud_dropdown_inspect','ud_dropdown_verify'].includes(action.method))return performChoice(adapter,action,value,'ud');
     if(action.method==='native_date'){
       const precision=meta.type==='date'?'day':meta.type==='month'?'month':null;
@@ -189,7 +206,18 @@ export async function performControl(adapter,action,value,files={}){
       if(action.inputMode==='keyboard'){await l.fill('',{timeout:10000});await l.pressSequentially(String(value),{timeout:10000});}else await l.fill(String(value),{timeout:10000});if(action.selector==='.ant-calendar-input')await l.press('Enter');await l.press('Tab');return assertValue(l,String(value),{deferRedacted:true});
     }
     if(action.method==='select_multiple'){if(meta.tag!=='SELECT'||!await l.evaluate(n=>n.multiple)||!Array.isArray(value)||value.some(v=>!action.options?.includes(v)))throw Error('NATIVE_MULTISELECT_REQUIRED');await l.selectOption(value.map(label=>({label})));await l.press('Tab');await waitCommit(()=>l.evaluate(n=>[...n.selectedOptions].map(o=>o.textContent.trim())),value);return;}
-    if(action.method==='select'){if(meta.tag!=='SELECT')throw Error('NATIVE_SELECT_REQUIRED');await l.selectOption({label:String(value)});await l.press('Tab');await waitCommit(()=>l.evaluate(n=>n.selectedOptions[0]?.textContent?.trim()),String(value));return;}
+    if(action.method==='select'){
+      if(meta.tag!=='SELECT'||await l.evaluate(n=>!!n.multiple))throw Error('NATIVE_SELECT_REQUIRED');
+      const label=String(value),records=await l.evaluate(n=>[...(n.options||[])].map(o=>({label:o.textContent.trim(),value:o.value,disabled:!!o.disabled||!!o.closest?.('optgroup')?.disabled}))),matches=records.filter(o=>o.label===label);
+      if(matches.length!==1)throw Error('CHOICE_NOT_UNIQUE_OR_NOT_PRESENT');
+      const candidate=matches[0];if(candidate.disabled)throw Error('CHOICE_OPTION_DISABLED');
+      if(action.options&&!action.options.includes(label))throw Error('UNSUPPORTED_CHOICE_NO_FALLBACK');
+      if(action.expectedOptionValue!=null&&candidate.value!==action.expectedOptionValue)throw Error('CHOICE_OPTION_VALUE_CHANGED');
+      if(candidate.value!=null&&records.filter(o=>o.value===candidate.value).length!==1)throw Error('CHOICE_OPTION_VALUE_NOT_UNIQUE');
+      await l.selectOption(candidate.value!=null?{value:candidate.value}:{label});await l.press('Tab');
+      await waitCommit(()=>l.evaluate(n=>{const selected=[...n.selectedOptions];if(selected.length!==1)return null;const o=selected[0];return {label:o.textContent.trim(),value:o.value??null,disabled:!!o.disabled||!!o.closest?.('optgroup')?.disabled};}),{label,value:candidate.value??null,disabled:false});
+      return {performed:true,optionLabel:label,optionValue:candidate.value??null};
+    }
     if(['dropdown','dropdown_inspect','dropdown_verify'].includes(action.method))return performChoice(adapter,action,value,'aria');
     if(action.method==='radio'){
       if(!action.options?.includes(String(value)))throw Error('UNSUPPORTED_CHOICE_NO_FALLBACK');

@@ -1,3 +1,5 @@
+import {runtimeIdentity} from '../shared/runtime-identity.mjs';
+const residentRuntime=await runtimeIdentity('login');
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import {z} from 'zod';
@@ -35,7 +37,7 @@ const location={companyId:z.string(),pageUrl:z.string().url()};
 const plan={planId:z.string().uuid(),planHash:z.string().length(64)};
 const authorization=z.object({login:z.literal(true),evidence:z.string().min(1)});
 const queueTask={queueId:z.string().uuid(),queueHash:z.string().length(64),taskId:z.string().uuid()};
-registerTool('runtime_info',{description:'只读当前登录MCP实际版本，不连接或重启浏览器。',annotations:{readOnlyHint:true}},wrap(()=>({version:packageInfo.version,capabilities:['role_queue_import','role_open','role_resume','role_enter_application','human_verification','user_operated_session_identity'],browserAccess:false})));
+registerTool('runtime_info',{description:'只读当前登录MCP实际版本，不连接或重启浏览器。',annotations:{readOnlyHint:true}},wrap(()=>({runtime:residentRuntime,version:packageInfo.version,capabilities:['role_queue_import','role_open','role_resume','role_enter_application','human_verification','user_operated_session_identity'],browserAccess:false})));
 registerTool('role_queue_import',{description:'读取用户正向评审确认后的 岗位交接/投递批次.json（不接受旧公司方案文件或对象），按用户次序和直达链接冻结队列；不处理Excel。',inputSchema:{rolesFile:z.string().optional(),companyPlan:z.record(z.unknown()).optional(),companyOrder:z.array(z.string()).optional(),parallelRoles:z.boolean().optional(),authorizationRef:z.string().optional()}},wrap(a=>queues.import(a)));
 registerTool('role_open',{description:'按冻结队列顺序直接打开岗位；需要登录时返回绑定原岗位的登录计划，不从公司首页选岗。',inputSchema:queueTask},wrap(a=>flow.open(a)));
 registerTool('role_resume',{description:'用户完成登录后，返回原岗位原标签并核对账号、岗位标题和完整URL；不填写或提交。',inputSchema:queueTask},wrap(a=>flow.resume(a)));

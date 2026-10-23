@@ -43,7 +43,7 @@ export function resolveObservedChoice({profile,factKey,choice,selectedOption,evi
  return {...(choice.choicesId?{choicesId:choice.choicesId,captureId:choice.captureId,selector:choice.selector}:{}),optionValue:observed[0]?.value??null,optionValueAttribute:observed[0]?.valueAttribute??null,factKey,majorPolicyHash:majorPolicyHash(profile,factKey),sourceValue:profile.facts[factKey]?.value,selectedOption:option,optionsHash:optionHash(choice),method:automatic?'known_alias':'agent_semantic_review',evidence:automatic?'same confirmed fact or approved profile alias':evidence,query:choice.optionQueries?.[option]||option};
 }
 export function applyChoiceResolution(field,choice,profile){
- if(!choice?.options?.length||!['dropdown','radio','multiselect'].includes(field.control?.type))return field;
+ if(!choice?.options?.length||!['dropdown','radio','multiselect','searchable_text'].includes(field.control?.type))return field;
  if(field.control.type==='multiselect'){const fact=profile.facts[field.source];if(fact?.status==='known'&&(!Array.isArray(fact.value)||fact.value.some(v=>!choice.options.includes(v))))field.constructionBlockers.push('MULTISELECT_ARRAY_SOURCE_REQUIRES_OBSERVED_LABELS');return field;}
  let resolution=choice.resolutions?.[field.source];
  if(resolution&&majorPolicyHash(profile,field.source)!==null&&resolution.majorPolicyHash!==majorPolicyHash(profile,field.source))throw Error('CHOICE_RESOLUTION_STALE');
@@ -68,7 +68,7 @@ export function mergeObservedChoices(previous=[],updates=[]){
 
 export async function assertStoredChoiceResolutions(template,{store,companyId,profile}){
  for(const f of template.pages.flatMap(p=>p.fields)){
-  if(f.kind!=='choice'||(!f.enumMap&&!f.actions?.some(a=>a.optionTextMap)))continue;
+  if(f.kind!=='choice'&&f.control?.type!=='searchable_text'||(!f.enumMap&&!f.actions?.some(a=>a.optionTextMap)))continue;
   const r=f.choiceResolution;if(!r?.choicesId||!r.captureId||!r.selector)throw Error('STORED_CHOICE_CONFIRMATION_REQUIRED');
   const asset=await store.get('runs',r.choicesId),choice=asset.choices?.find(c=>c.selector===r.selector);
   const locked=f.readonly&&f.lockedControl&&lockedChoice(choice)&&f.lockedControl.value===choice.lockedControl.value;

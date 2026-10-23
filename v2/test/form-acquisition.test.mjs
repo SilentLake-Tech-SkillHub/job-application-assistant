@@ -11,6 +11,11 @@ test('same-page observed framework chooses the collector without an agent flag; 
  await assert.rejects(detectedAcquisitionPlan(page,{},'feishu'),/EVIDENCE_MISMATCH/);
  await assert.rejects(detectedAcquisitionPlan({observe:async()=>({groups:{ant:1,feishu:1}})},{}),/AMBIGUOUS/);
 });
+test('a Phoenix form rejects a guessed Feishu collector before empty capture can be persisted',async()=>{
+ const page={observe:async()=>({groups:{ant:0,feishu:0,phoenix:12}})};
+ assert.equal((await detectedAcquisitionPlan(page,{})).provider,'phoenix');
+ await assert.rejects(detectedAcquisitionPlan(page,{},'feishu'),/PROVIDER_EVIDENCE_MISMATCH/);
+});
 test('unchanged captures keep evidence identity; company, page, provider and control changes invalidate it',()=>{
  const controls=[{selector:'#a',required:true}],id=captureContentId('sample','https://a.test/form','ant',controls,hash);
  assert.equal(id,captureContentId('sample','https://a.test/form','ant',structuredClone(controls),hash));

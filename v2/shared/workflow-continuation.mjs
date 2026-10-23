@@ -1,7 +1,7 @@
 import {classifyPending} from './field-policy.mjs';
 export function continuationFor({route,plan,verification,template,profile,error}={}){
  if(error)return {state:'technical_block',owner:'agent',requiresUser:false,shouldContinue:true,continueWithOtherCompanies:true,reason:error,nextTools:['run_status','form_template_audit'],retry:'only_after_evidence_or_inputs_change'};
- if(route?.route==='acquire'||plan?.constructionBlockers?.length)return {state:'construct',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['capture_rea_structure','capture_controls','form_mapping_candidates','capture_choice_options','form_build_template','template_register','probe_conditions','template_finalize'],retry:'only_changed_missing_parts'};
+ if(route?.route==='acquire'||plan?.constructionBlockers?.length)return {state:'construct',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['capture_rea_structure','capture_controls','form_mapping_candidates','form_search_choices','capture_choice_options','form_build_template','template_register','probe_conditions','template_finalize'],retry:'only_changed_missing_parts'};
  const fields=template?.pages?.flatMap(p=>p.fields)||[],pending=fields.map(f=>({id:f.id,...classifyPending(f,profile)}));
  if(pending.some(x=>x.kind==='mapping'))return {state:'map',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['form_mapping_candidates','profile_map_questions','form_build_template']};
  if(verification){

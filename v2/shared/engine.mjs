@@ -1,3 +1,4 @@
+import {saveSearchableCommit,verifySearchableCommits,attachSearchableCommits} from './searchable-commit.mjs';
 import {verifyDropdownSelections,attachChoiceProofs} from './choice-verification.mjs';
 import {verifyDateRanges,attachDateRangeProofs} from './date-range-verification.mjs';
 import {attachProfileFillProofs} from './profile-fill-authorization.mjs';
@@ -35,7 +36,7 @@ export function validateTemplate(t) {
     if(!p.sections?.length||!p.sectionDiscovery?.selector||!p.sectionDiscovery?.titleSelector)throw Error('SECTION_COVERAGE_PLAN_REQUIRED');
     if(p.sections.some(section=>typeof section?.title!=='string'||!section.title.trim()))throw Error('SECTION_TITLES_REQUIRED');
     for(const g of p.groups||[])if(!idOK(g.id)||!g.selector||!Number.isInteger(g.count)||g.count<0)throw Error('INVALID_REPEAT_GROUP');
-    if(p.provider&&!['feishu','ant'].includes(p.provider))throw Error('UNKNOWN_PROVIDER');
+    if(p.provider&&!['feishu','ant','phoenix'].includes(p.provider))throw Error('UNKNOWN_PROVIDER');
     for (const f of p.fields) {
       if (!idOK(f.id) || fields.has(f.id)) throw Error('DUPLICATE_OR_INVALID_FIELD');
       fields.add(f.id);
@@ -259,8 +260,8 @@ export class Engine {
     try{if(this.onInventory)await this.onInventory(company.id,task.pageUrl,inventory,plan);}catch(e){mappingError=/^[A-Z_]+$/.test(e.message)?e.message:'PROFILE_REGISTRATION_FAILED';}
     const choiceProofs=await verifyDropdownSelections(page,plan,task);
     const dateProofs=await verifyDateRanges(page,plan,task);
-    const profileProofs=await this.profileProofs(task,template,page);
-    const observation=attachProfileFillProofs(attachDateRangeProofs(attachChoiceProofs(attachInventory(await page.observe(plan),plan,inventory),choiceProofs),dateProofs),profileProofs),observationRunId=randomUUID();
+    const profileProofs=await this.profileProofs(task,template,page),searchableProofs=await verifySearchableCommits({store:this.store,page,plan,task});
+    const observation=attachSearchableCommits(attachProfileFillProofs(attachDateRangeProofs(attachChoiceProofs(attachInventory(await page.observe(plan),plan,inventory),choiceProofs),dateProofs),profileProofs),searchableProofs),observationRunId=randomUUID();
     await this.store.put('runs',observationRunId,{operation:'live_observation',companyId:company.id,observation});
     const result=verifyForm(compileExpected(plan,task),observation);
     const contractChanges=controlContractChanges(plan,inventory);
@@ -314,13 +315,14 @@ export class Engine {
           activeField={id:f.id,source:f.source,kind:f.kind,label:f.label};
           if(f.when&&!initial.fields[f.id]?.present)await page.wait(f.read.presenceSelector||f.read.selector);
           const current=initial.fields[f.id];
-          if(current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'&&(!['choice','date'].includes(f.kind)||current.selected===true)){
+          if(f.control?.type!=='searchable_text'&&current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'&&(!['choice','date'].includes(f.kind)||current.selected===true)){
             if(f.control?.type==='dropdown'&&!f.read.nativeSelect){const proofs=await verifyDropdownSelections(page,{fields:[f]},task);if(proofs[f.id]?.status!=='verified')throw Error('EXISTING_CHOICE_NOT_VERIFIED');}
             (result.skippedMatchingFields??=[]).push(f.id);continue;
           }
           for(const action of f.actions||[]){
             await page.assertLocation(company.origin,plan.pathPrefix);
-            await page.act(action, f.value, prepared.files);
+            const actionResult=await page.act(action, f.value, prepared.files);
+            if(f.control?.type==='searchable_text')await saveSearchableCommit(this.store,task,f,actionResult);
           }
         }
         activeField=null;
@@ -334,8 +336,8 @@ export class Engine {
         if(controlContractChanges(plan,finalInventory).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
         const choiceProofs=await verifyDropdownSelections(page,plan,task);
         const dateProofs=await verifyDateRanges(page,plan,task);
-        const profileProofs=await this.profileProofs(task,template,page);
-        const observation=attachProfileFillProofs(attachDateRangeProofs(attachChoiceProofs(attachInventory(await page.observe(plan),plan,finalInventory),choiceProofs),dateProofs),profileProofs);
+        const profileProofs=await this.profileProofs(task,template,page),searchableProofs=await verifySearchableCommits({store:this.store,page,plan,task});
+        const observation=attachSearchableCommits(attachProfileFillProofs(attachDateRangeProofs(attachChoiceProofs(attachInventory(await page.observe(plan),plan,finalInventory),choiceProofs),dateProofs),profileProofs),searchableProofs);
         result.selectionProofs={...(result.selectionProofs||{}),...choiceProofs};
         const observationRunId=randomUUID();
         await this.store.put('runs',observationRunId,{operation:'live_observation',companyId:company.id,observation});

@@ -1,10 +1,11 @@
 import {resolveDateRepresentation} from './date-representation.mjs';
+import {assertChoiceGoalSources} from './choice-goal-contract.mjs';
 import {MATERIAL_SOURCES,materialKey,resolveMaterialValues} from './business-materials.mjs';
 import {majorFacts} from './major-policy.mjs';
 import {humanActionReason} from './field-policy.mjs';
 // Query-addressed editors can share a pathname while belonging to different jobs
 // or form schemas. Retain only observed non-secret identity parameters.
-export function formLocation(pageUrl){const u=new URL(pageUrl),keys=['pid','postId','tid','qTid','recruitType','jobId','positionId','formId'],q=new URLSearchParams();for(const key of keys)if(u.searchParams.has(key))q.set(key,u.searchParams.get(key));return u.origin+u.pathname+(q.size?'?'+q:'')+(u.hash.startsWith('#/')?u.hash.split('?')[0]:'');}
+export function formLocation(pageUrl){const u=new URL(pageUrl),keys=['pid','postId','tid','qTid','recruitType','jobId','jobAdId','positionId','formId'],q=new URLSearchParams();for(const key of keys)if(u.searchParams.has(key))q.set(key,u.searchParams.get(key));return u.origin+u.pathname+(q.size?'?'+q:'')+(u.hash.startsWith('#/')?u.hash.split('?')[0]:'');}
 import { readFile, writeFile, rename, mkdir, realpath, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -148,6 +149,7 @@ export function assertStoredExecutionContract(profile,companyId,template){
 }
 export function resolveProfile(profile, template, decisions={}, companyId, materialContext) {
   validateProfile(profile);
+  assertChoiceGoalSources(template,profile);
   if(companyId)assertStoredExecutionContract(profile,companyId,template);
   assertDefinitionMapped(profile,companyId,template);
   const material=materialContext?resolveMaterialValues(materialContext):null;

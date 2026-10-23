@@ -19,6 +19,9 @@ export function authorizedProfileContext(profile,template,{materialContext,compa
    const expected=type.enumMap?type.enumMap[typeFact.value]:typeFact.value;
    if(expected)documentTypeGuard={fieldId:type.id,read:type.read,expected,sourceHash:digest(typeFact)};
   }
+  if(!documentTypeGuard&&typeFact?.status==='known'&&/^(居民身份证|身份证|中国居民身份证)$/.test(typeFact.value)&&/^(居民身份证|身份证|中国居民身份证)$/.test(field.documentTypePrefix?.label||'')&&field.documentTypePrefix?.selector){
+   documentTypeGuard={fieldId:field.id+'-document-type',mode:'rendered_prefix',read:{selector:field.documentTypePrefix.selector,kind:'text'},expected:field.documentTypePrefix.label,sourceHash:digest(typeFact)};
+  }
   if(generic&&!documentTypeGuard)continue;
   const source='identity.idCard.number',fact=profile.facts?.[source];
   if(!supportedSources.has(source)||!policy.sensitiveSources?.includes(source)||fact?.status!=='known')continue;
@@ -37,7 +40,7 @@ export async function applyAuthorizedProfileFields({page,profile,template,scope,
  if(!current||!expected||current.contextHash!==expected.contextHash)throw Error('PROFILE_FILL_AUTHORIZATION_OR_SOURCE_CHANGED');
  const proofs={};
  for(const field of current.fields){
-  if(field.documentTypeGuard){const guard=field.documentTypeGuard,r=await page.observe({fields:[{id:guard.fieldId,kind:'choice',read:guard.read}]}),actual=r.fields?.[guard.fieldId];if(actual?.present!==true||actual.selected!==true||actual.value!==guard.expected||actual.errors?.length||guard.read.requireDisabled&&actual.disabled!==true)throw Error('PROFILE_DOCUMENT_TYPE_NOT_VERIFIED');}
+  if(field.documentTypeGuard){const guard=field.documentTypeGuard,r=await page.observe({fields:[{id:guard.fieldId,kind:guard.mode==='rendered_prefix'?'text':'choice',read:guard.read}]}),actual=r.fields?.[guard.fieldId];if(actual?.present!==true||guard.mode!=='rendered_prefix'&&actual.selected!==true||actual.value!==guard.expected||actual.errors?.length||guard.read.requireDisabled&&actual.disabled!==true)throw Error('PROFILE_DOCUMENT_TYPE_NOT_VERIFIED');}
   const value=profile.facts[field.source].value;
   const observe=async()=>{const r=await page.observe({fields:[{id:field.fieldId,kind:'text',sensitive:true,read:field.read}]});return r.fields?.[field.fieldId];};
   let first=await observe();

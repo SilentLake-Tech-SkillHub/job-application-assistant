@@ -53,17 +53,17 @@ test('ambiguous actions cannot use first to bypass uniqueness; visible duplicate
 });
 function fixture(family='ud',duplicate=false){
  let opened=false,selected='Original',checks=0;
- const node={tagName:'INPUT',type:'text',value:'',readOnly:false,textContent:'Original',getAttribute:k=>k==='role'?'combobox':null,querySelector:()=>null};
+ const node={classList:{contains:c=>family==='phoenix'&&c==='phoenix-select'},tagName:'INPUT',type:'text',value:'',readOnly:false,textContent:'Original',getAttribute:k=>k==='role'?'combobox':null,querySelector:()=>null};
  const single={fill:async value=>{node.value=value;},waitFor:async()=>{},count:async()=>1,innerText:async()=>selected,evaluate:async f=>f(node),press:async key=>{if(key==='Escape')opened=false;},click:async()=>{opened=true;},locator:()=>({count:async()=>0}),filter(){return this;}};
  const option={...single,evaluate:async f=>f({tagName:'DIV',textContent:'Other',hasAttribute:()=>false,getAttribute:k=>k==='aria-selected'?String(selected==='Other'):null}),click:async()=>{selected='Other';opened=false;checks++;}};
  const options={...single,allTextContents:async()=>duplicate?['Other','Other']:['Other','Other extended'],first:()=>single,waitFor:async()=>{},filter:o=>{if(o.visible)return options;assert.ok(o.hasText.test('Other'));assert.equal(o.hasText.test('Other extended'),false);return option;}};
  const menu={count:async()=>opened?1:0,waitFor:async()=>{},filter(){return this;},locator:()=>options,evaluate:async (f,args)=>f({querySelectorAll:()=>[],parentElement:null,clientHeight:100,scrollHeight:100},args)};
- const page={url:()=> 'https://fixture.test/form',locator:s=>s.endsWith(' > .ud-formily-item-label')?{...single,click:async()=>{opened=false;}}:s===('.ud__select__list')||s==='[role="listbox"]'?menu:s.includes('ant-select-open')?{count:async()=>0,filter(){return this;}}:single};
+ const page={url:()=> 'https://fixture.test/form',locator:s=>s.endsWith(' > .ud-formily-item-label')?{...single,click:async()=>{opened=false;}}:s===('.ud__select__list')||s==='[role="listbox"]'||s==='.common-unmodeled-layer:has(.phoenix-selectList)'?menu:s.includes('ant-select-open')?{count:async()=>0,filter(){return this;}}:single};
  return {page,state:()=>({opened,selected,checks})};
 }
-for(const family of ['ud','aria'])test(family+' dropdown scopes the visible menu and matches exact option text',async()=>{
+for(const family of ['ud','aria','phoenix'])test(family+' dropdown scopes the visible menu and matches exact option text',async()=>{
  const f=fixture(family),p=new PageAdapter(f.page,{listOpenPageUrls:async()=>[]});
- await p.act({method:family==='ud'?'ud_dropdown':'dropdown',selector:'#question',labelSelector:'#question > .ud-formily-item-label',options:['Other']},'Other',{});
+ await p.act({method:family==='ud'?'ud_dropdown':family==='phoenix'?'phoenix_dropdown':'dropdown',selector:'#question',labelSelector:'#question > .ud-formily-item-label',options:['Other']},'Other',{});
  assert.equal(f.state().selected,'Other');assert.equal(f.state().checks,1);
 });
 test('inspection preserves selection and duplicate visible options fail without a click',async()=>{

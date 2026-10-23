@@ -19,6 +19,7 @@
     "inspect_choice"
   ],
   "stages": {
+    "form_search_choices": ["construct", ["form_resolve_choices", "form_build_template"]],
     "role_submit": ["submit", ["application_closeout"]],
     "workflow_handoff": [
       "technical_block",

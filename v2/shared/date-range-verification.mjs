@@ -2,6 +2,8 @@ import {resolvedFieldValue} from './execution-plan.mjs';
 export async function verifyDateRanges(page,plan,task){
  const proofs={},done=new Set();
  for(const field of plan.fields||[]){
+  const custom=field.actions?.find(a=>a.method==='phoenix_date');
+  if(custom&&!field.userOnly){const value=resolvedFieldValue(field,task);if(value!=null){try{const result=await page.act({...custom,operation:'verify'},value,{});if(result.selectionVerified!==true)throw Error('DATE_SELECTION_PROOF_REQUIRED');proofs[field.id]={status:'verified',value,selectionVerified:true};}catch(error){proofs[field.id]={status:'failed',selectionVerified:false,reason:/^[A-Z_]+$/.test(error.message)?error.message:'DATE_SELECTION_VERIFICATION_FAILED'};}}continue;}
   const action=field.actions?.find(a=>a.method==='ant_day'&&a.rangePeerSelector);
   if(!action||field.userOnly||field.when&&task.values?.[field.when.source]!==field.when.equals||done.has(field.id))continue;
   const peer=plan.fields.find(p=>p.read.selector===action.rangePeerSelector),value=resolvedFieldValue(field,task),peerValue=peer&&resolvedFieldValue(peer,task);
@@ -14,4 +16,4 @@ export async function verifyDateRanges(page,plan,task){
  }
  return proofs;
 }
-export function attachDateRangeProofs(observation,proofs){for(const [id,proof]of Object.entries(proofs))if(observation.fields?.[id])observation.fields[id].dateRangeProof=proof;return observation;}
+export function attachDateRangeProofs(observation,proofs){for(const [id,proof]of Object.entries(proofs))if(observation.fields?.[id])observation.fields[id][proof.selectionVerified!==undefined?'dateSelectionProof':'dateRangeProof']=proof;return observation;}

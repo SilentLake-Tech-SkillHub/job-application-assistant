@@ -55,9 +55,11 @@ export function verifyForm(expected, observed, {now=Date.now(),maxAgeMs=60000}={
       check.reason=!empty?'UNSOURCED_VALUE_ON_PAGE':omit?'USER_RESOLVED_EMPTY_FIELD':'UNANSWERED_FIELD_REQUIRES_USER_RESPONSE';checks.push(check);continue;
     }
     if(actual.errors?.length){check.status='invalid';check.reason='FIELD_VALIDATION_ERROR';checks.push(check);continue;}
+    if(field.searchableCommitRequired&&(actual.searchableCommitProof?.status!=='verified'||actual.searchableCommitProof.label!==actual.value||actual.searchableCommitProof.blurConfirmed!==true||actual.searchableCommitProof.readbackStable!==true||!(actual.searchableCommitProof.optionClicked===true||actual.searchableCommitProof.mode==='explicit_custom_value'))){check.status='mismatch';check.reason=actual.searchableCommitProof?.reason||'SEARCHABLE_COMMIT_ACTION_PROOF_REQUIRED';checks.push(check);continue;}
     if(field.kind==='choice' && actual.selected!==true){check.status='mismatch';check.reason='DISPLAY_TEXT_WITHOUT_SELECTED_OPTION';checks.push(check);continue;}
     if(field.selectionVerificationRequired&&(actual.selectionProof?.status!=='verified'||actual.selectionProof?.reopenedOptionSelected!==true||actual.selectionProof?.blurConfirmed!==true||actual.selectionProof?.label!==actual.value||field.choiceValue!=null&&actual.selectionProof?.value!==field.choiceValue)){check.status='mismatch';check.reason=actual.selectionProof?.reason||'CHOICE_SELECTION_PROOF_REQUIRED';checks.push(check);continue;}
     if(field.kind==='date'){
+      if(field.dateSelectionProofRequired&&(actual.dateSelectionProof?.status!=='verified'||actual.dateSelectionProof.selectionVerified!==true||actual.dateSelectionProof.value!==field.value)){check.status='mismatch';check.reason=actual.dateSelectionProof?.reason||'DATE_SELECTION_PROOF_REQUIRED';checks.push(check);continue;}
       if(field.dateRangeProofRequired&&(actual.dateRangeProof?.status!=='verified'||actual.dateRangeProof.rangeVerified!==true||actual.dateRangeProof.value!==field.value)){check.status='mismatch';check.reason=actual.dateRangeProof?.reason||'DATE_RANGE_SELECTION_PROOF_REQUIRED';checks.push(check);continue;}
       const pattern=field.precision==='year'?/^\d{4}$/:field.precision==='month'?/^\d{4}-\d{2}$/:/^\d{4}-\d{2}-\d{2}$/;
       const parts=String(actual.value).split('-').map(Number);
