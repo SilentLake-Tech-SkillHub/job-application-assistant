@@ -17,21 +17,36 @@ export function controlDOM(spec){
  const uploadComplete=root=>[...root.querySelectorAll('*')].some(n=>visible(n)&&/^(?:[\d.]+\s*(?:KB|MB|K|M)\s*[·|]\s*)?(?:已完成|上传成功|completed|uploaded|done)$/i.test(n.innerText?.trim()||''));
  const uploadRoots=()=>[...document.querySelectorAll('input[type="file"]')].flatMap(input=>{
   const phoenix=input.closest('.file-uploader__wrapper')?.closest('.form-item--phoenix');
-  if(phoenix&&visible(phoenix)){const label=phoenix.querySelector('.form-item__title .form-item__text')?.textContent?.trim();if(label&&phoenix.querySelectorAll('input[type="file"]').length===1)return [{input,root:phoenix,label}];}
-  if(!input.closest('.ant-upload'))return [];
-  for(let root=input.parentElement;root&&root!==document.body;root=root.parentElement){
+  if(phoenix&&visible(phoenix)){const label=phoenix.querySelector('.form-item__title .form-item__text')?.textContent?.trim();if(label&&phoenix.querySelectorAll('input[type="file"]').length===1)return [{input,root:phoenix,label,contextProvider:'.form-item--phoenix'}];}
+  if(input.closest('.ant-upload'))for(let root=input.parentElement;root&&root!==document.body;root=root.parentElement){
    if(root.querySelectorAll('input[type="file"]').length!==1)break;
    const names=fileCandidates(root).map(n=>n.innerText?.trim());
    const headings=[...root.querySelectorAll('h1,h2,h3,h4,[role="heading"]')].filter(h=>visible(h)&&!h.closest('.ant-upload,.ant-upload-list')&&!names.includes(h.innerText?.trim()));
-   const label=headings[0]?.innerText?.trim();if(label)return [{input,root,label}];
-  }return [];
+   const label=headings[0]?.innerText?.trim();if(label)return [{input,root,label,contextProvider:'.ant-upload'}];
+  }
+  // A standalone upload section can have an independent title beside its body.
+  // Only a real heading or explicit upload-field identity establishes the title.
+  for(let root=input.parentElement;root&&root!==document.body;root=root.parentElement){
+   if(root.querySelectorAll('input[type="file"]').length!==1)break;
+   const children=[...(root.children||[])].filter(visible);if(children.length!==2)continue;
+   const [title,body]=children;if(title.contains(input)||!body.contains(input))continue;
+   const heading=/^H[1-6]$/.test(title.tagName)||title.getAttribute('role')==='heading',semantic=/^special_field_[a-z0-9_]*(?:upload|attachment|file)[a-z0-9_]*$/i.test(title.id||'');
+   const label=String(title.innerText||title.textContent||'').trim();
+   if((heading||semantic)&&label&&label.length<=120&&!label.includes('\n')&&!/\.(?:pdf|docx?|png|jpe?g)$/i.test(label)&&!title.querySelector('input,textarea,select'))return [{input,root,label,contextProvider:null,layout:'adjacent_title_unique_file'}];
+  }
+  return [];
  });
  const uploadRef=(entry,part='input')=>'uploadq:'+JSON.stringify({label:entry.label,occurrence:uploadRoots().filter(x=>x.label===entry.label).findIndex(x=>x.input===entry.input),part});
- const removeFor=row=>{const nodes=[...row.querySelectorAll('button,a,[role="button"],[role="img"],[title]')].filter(n=>visible(n)&&/^(删除文件|删除|移除|delete|remove|remove file)$/i.test((n.getAttribute('aria-label')||n.getAttribute('title')||n.innerText||'').trim())).map(n=>n.closest('button,a,[role="button"]')||n);return [...new Set(nodes)].length===1?nodes[0]:null;};
+ const removeFor=(row,textSpans=false)=>{const nodes=[...row.querySelectorAll('button,a,[role="button"],[role="img"],[title]'+(textSpans?',span':''))].filter(n=>visible(n)&&/^(删除文件|删除|移除|delete|remove|remove file)$/i.test((n.getAttribute('aria-label')||n.getAttribute('title')||n.innerText||'').trim())).map(n=>n.closest('button,a,[role="button"]')||n);return [...new Set(nodes)].length===1?nodes[0]:null;};
  const filenameSelector='.ant-upload-list-item-name,[class*="file-name"]';
- const uploadRows=entry=>fileCandidates(entry.root).map(name=>{let row=name.parentElement;while(row){if(fileCandidates(row).length!==1)break;if(removeFor(row)||uploadComplete(row))return {row,name};if(row===entry.root)break;row=row.parentElement;}const done=name.closest('.ant-upload-list-item-done');return done?{row:done,name}:null;}).filter(Boolean);
- const uploadItems=entry=>uploadRows(entry).map(({row,name})=>{const filename=name.innerText?.trim(),remove=removeFor(row);return {filename,removeSelector:remove&&filename?'uploadq:'+JSON.stringify({...JSON.parse(uploadRef(entry).slice(8)),part:'remove',filename}):null};});
- if(spec?.operation==='resolveUpload')return (spec.references||[]).map(reference=>{const ref=JSON.parse(reference.slice(8)),entry=uploadRoots().filter(x=>x.label===ref.label)[ref.occurrence];if(!entry)return null;const root=diagnosticSelector(entry.root);if(ref.part==='filenames')return uploadRows(entry).map(({name})=>diagnosticSelector(name)).join(',')||null;if(ref.part==='remove'){const rows=uploadRows(entry).filter(({name})=>name.innerText?.trim()===ref.filename);const remove=rows.length===1?removeFor(rows[0].row):null;return remove?diagnosticSelector(remove):null;}return ref.part==='container'?root:ref.part==='uploaded'?uploadRows(entry).length?root:null:diagnosticSelector(entry.input);});
+ const uploadPending=root=>[root,...root.querySelectorAll('*')].some(n=>visible(n)&&(n.getAttribute('aria-busy')==='true'||n.getAttribute('role')==='progressbar'||/^(?:正在上传|上传中|uploading)(?:[.。…\s]*|\s*\d+(?:\.\d+)?%)$/i.test(n.innerText?.trim()||'')));
+ const replaceFor=row=>{const nodes=[...row.querySelectorAll('button,a,[role="button"],span')].filter(n=>visible(n)&&/^(?:重新上传|替换文件|reupload|replace file)$/i.test(n.innerText?.trim()||''));return nodes.length===1?nodes[0]:null;};
+ const uploadRows=entry=>{
+  const standalone=entry.layout==='adjacent_title_unique_file';if(standalone&&uploadPending(entry.root))return [];
+  return fileCandidates(entry.root).map(name=>{let row=name.parentElement;while(row){if(fileCandidates(row).length!==1)break;if(removeFor(row,standalone)||(standalone?replaceFor(row):uploadComplete(row)))return {row,name};if(row===entry.root)break;row=row.parentElement;}if(standalone)return null;const done=name.closest('.ant-upload-list-item-done');return done?{row:done,name}:null;}).filter(Boolean);
+ };
+ const uploadItems=entry=>uploadRows(entry).map(({row,name})=>{const filename=name.innerText?.trim(),remove=removeFor(row,entry.layout==='adjacent_title_unique_file');return {filename,removeSelector:remove&&filename?'uploadq:'+JSON.stringify({...JSON.parse(uploadRef(entry).slice(8)),part:'remove',filename}):null};});
+ if(spec?.operation==='resolveUpload')return (spec.references||[]).map(reference=>{const ref=JSON.parse(reference.slice(8)),entry=uploadRoots().filter(x=>x.label===ref.label)[ref.occurrence];if(!entry)return null;const root=diagnosticSelector(entry.root);if(ref.part==='filenames')return uploadRows(entry).map(({name})=>diagnosticSelector(name)).join(',')||null;if(ref.part==='remove'){const rows=uploadRows(entry).filter(({name})=>name.innerText?.trim()===ref.filename);const remove=rows.length===1?removeFor(rows[0].row,entry.layout==='adjacent_title_unique_file'):null;return remove?diagnosticSelector(remove):null;}return ref.part==='container'?root:ref.part==='uploaded'?uploadRows(entry).length?root:null:diagnosticSelector(entry.input);});
  const eligible=n=>visible(n)||!!n&&['checkbox','radio'].includes(n.type)&&visible(n.closest('label'));
  // Phoenix question references are based on rendered section/label identity.
  // Structural selectors are produced only for the current operation.
@@ -202,7 +217,7 @@ export function controlDOM(spec){
     .map(f=>({...f,userOnly:f.type==='password'||/otp|验证码|password|密码|token|captcha|身份证|护照号|银行卡/i.test(f.label+' '+f.selector)}))
     .map((f,i)=>{
       const n=[...controls,...containers][i];
-      if(n.type==='file'){const entry=uploadRoots().find(x=>x.input===n);if(entry)return {...f,observationSelector:f.selector,selector:uploadRef(entry),actionSelector:uploadRef(entry),label:entry.label,section:entry.label,locatorStrategy:'semantic_question',contextProvider:'.ant-upload',uploadContainerSelector:uploadRef(entry,'container'),filenameSelector:uploadRef(entry,'filenames'),uploadedSelector:uploadRef(entry,'uploaded'),uploadedItems:uploadItems(entry)};}
+      if(n.type==='file'){const entry=uploadRoots().find(x=>x.input===n);if(entry)return {...f,observationSelector:f.selector,selector:uploadRef(entry),actionSelector:uploadRef(entry),label:entry.label,section:entry.label,locatorStrategy:'semantic_question',contextProvider:entry.contextProvider,uploadLayout:entry.layout||null,uploadContainerSelector:uploadRef(entry,'container'),filenameSelector:uploadRef(entry,'filenames'),uploadedSelector:uploadRef(entry,'uploaded'),uploadedItems:uploadItems(entry)};}
       const root=n.closest('.ud-formily-item');if(!root)return f;
       const label=root.querySelector(':scope > .ud-formily-item-label')?.innerText?.trim();
       const group=n.closest('[id^="formily-item-"][id$="_list"]'),row=n.closest('.register-form-group-wrapper');

@@ -1,4 +1,5 @@
 import {readRoleIdentity} from './role-identity.mjs';
+import {safeControlErrorDetails} from './control-error-details.mjs';
 import {executeTransition} from './entry-transition.mjs';
 import http from 'node:http';import {mkdir,chmod,lstat} from 'node:fs/promises';import path from 'node:path';
 import {READY_TIMEOUT_MS,matchEntryPath} from './entry-recipe.mjs';
@@ -101,7 +102,7 @@ export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,
  // an HTTP callback retaining a previous invocation is not a durable executor.
  const execute=(method,args)=>deferBrowserCalls&&method!=='status'?new Promise((resolve,reject)=>pending.push({method,args,resolve,reject})):dispatch(method,args);
  const pump=async()=>{const job=pending.shift();if(!job)return false;try{job.resolve(await dispatch(job.method,job.args));}catch(e){job.reject(e);}return true;};
- const server=http.createServer(async(req,res)=>{res.setHeader('content-type','application/json');if(req.url==='/health'){res.end(JSON.stringify({mode:'iab',protocolVersion:4,state:'connected'}));return;}if(req.method!=='POST'||req.url!=='/rpc'){res.writeHead(404).end('{}');return;}try{const chunks=[];let size=0;for await(const c of req){size+=c.length;if(size>8*1024*1024)throw Error('REQUEST_TOO_LARGE');chunks.push(c);}const {method,args={}}=JSON.parse(Buffer.concat(chunks));res.end(JSON.stringify({data:await execute(method,args)??null}));}catch(e){onError(e);res.end(JSON.stringify({error:/^[A-Z_]+$/.test(e.message)?e.message:'HOST_BROWSER_OPERATION_FAILED'}));}});
+ const server=http.createServer(async(req,res)=>{res.setHeader('content-type','application/json');if(req.url==='/health'){res.end(JSON.stringify({mode:'iab',protocolVersion:4,state:'connected'}));return;}if(req.method!=='POST'||req.url!=='/rpc'){res.writeHead(404).end('{}');return;}try{const chunks=[];let size=0;for await(const c of req){size+=c.length;if(size>8*1024*1024)throw Error('REQUEST_TOO_LARGE');chunks.push(c);}const {method,args={}}=JSON.parse(Buffer.concat(chunks));res.end(JSON.stringify({data:await execute(method,args)??null}));}catch(e){onError(e);const details=safeControlErrorDetails(e.details);res.end(JSON.stringify({error:/^[A-Z_]+$/.test(e.message)?e.message:'HOST_BROWSER_OPERATION_FAILED',...(details?{details}:{})}));}});
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(socketPath,resolve);});await chmod(socketPath,0o600);return {socketPath,server,mode:'iab',pump,pendingCount:()=>pending.length};
 }
 export async function withHostBrowserBridge(options,run){

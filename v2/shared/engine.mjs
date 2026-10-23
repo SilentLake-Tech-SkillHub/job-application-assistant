@@ -1,4 +1,5 @@
 import {saveSearchableCommit,verifySearchableCommits,attachSearchableCommits} from './searchable-commit.mjs';
+import {safeControlErrorDetails} from './control-error-details.mjs';
 import {verifyDropdownSelections,attachChoiceProofs} from './choice-verification.mjs';
 import {verifyDateRanges,attachDateRangeProofs} from './date-range-verification.mjs';
 import {attachProfileFillProofs} from './profile-fill-authorization.mjs';
@@ -130,10 +131,10 @@ export class Engine {
         Object.assign(run,await probeConditions({page,plan:matches[0],pageUrl:task.pageUrl,origin:company.origin,
           onInventory:async fields=>{if(!this.onInventory)throw Error('PROFILE_REQUIRED_FOR_NEW_QUESTIONS');await this.onInventory(company.id,task.pageUrl,fields,matches[0],{discoveryOnly:true});},
           checkpoint:async partial=>{Object.assign(run,partial);await this.store.put('runs',run.id,run);}}));
-      }catch(error){run.status='needs_attention';run.errorCode=/^[A-Z_]+$/.test(error.message)?error.message:'CONDITION_PROBE_FAILED';run.restoration??='not_started';}
+      }catch(error){run.status='needs_attention';run.errorCode=/^[A-Z_]+$/.test(error.message)?error.message:'CONDITION_PROBE_FAILED';const details=safeControlErrorDetails(error.details);if(details)run.errorDetails=details;run.restoration??='not_started';}
       finally{run.elapsedMs=Math.round(performance.now()-started);run.finishedAt=new Date().toISOString();await this.store.put('runs',run.id,run);}
       if(run.status==='verified')await this.store.put('templates',`${template.id}-conditions`,{templateHash:hash(template),runId:run.id,verifiedAt:new Date().toISOString(),branchCount:run.branches.length,scope:'declared_conditional_fields_and_captured_parent_options',restoration:run.restoration});
-      return {id:run.id,companyId:company.id,status:run.status,errorCode:run.errorCode||null,restoration:run.restoration,branchCount:run.branches?.length||0,branches:run.branches?.map(({source,value,status,newQuestions})=>({source,value,status,newQuestions})),submission:'not_performed',scope:'internal_declared_conditions_only'};
+      return {id:run.id,companyId:company.id,status:run.status,errorCode:run.errorCode||null,...(run.errorDetails?{errorDetails:run.errorDetails}:{}),restoration:run.restoration,branchCount:run.branches?.length||0,branches:run.branches?.map(({source,value,status,newQuestions})=>({source,value,status,newQuestions})),submission:'not_performed',scope:'internal_declared_conditions_only'};
     });
   }
   async preparePlan(task){
@@ -351,6 +352,7 @@ export class Engine {
       result.status=result.pageChecks.length===template.pages.length&&result.pageChecks.every(p=>p.verification?.status==='verified')?'verified':'needs_attention';
     }catch(error){
       result.errorCode=/^[A-Z_]+(?::[a-z0-9_-]+)?$/.test(error.message)?error.message:'BROWSER_OPERATION_FAILED';
+      const details=safeControlErrorDetails(error.details);if(details)result.errorDetails=details;
       if(activeField)result.failedField=activeField;
       if(activePage&&activePlan)try{
         const inventory=await liveControls(activePage,activePlan);

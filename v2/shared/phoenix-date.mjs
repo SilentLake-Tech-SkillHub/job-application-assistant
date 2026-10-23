@@ -1,4 +1,5 @@
 import {validDate} from './value-contract.mjs';
+import {readPhoenixSelectedValue} from './phoenix-selection.mjs';
 const popup='.common-unmodeled-layer:has(.phoenix-date-picker)';
 export function phoenixDayCellsDOM(panel){
  const visible=n=>n.getClientRects().length&&getComputedStyle(n).visibility!=='hidden';
@@ -51,7 +52,7 @@ export function phoenixInlineOngoingDOM(input){
 export async function performPhoenixDate(adapter,action,value){
  const trigger=adapter.page.locator(action.selector),label=adapter.page.locator(action.labelSelector);
  if(await trigger.count()!==1||await label.count()!==1)throw Error('PHOENIX_DATE_CAPTURE_REQUIRED');
- const read=async()=>(await trigger.innerText()).trim(),before=await read();
+ const read=()=>readPhoenixSelectedValue(trigger),before=await read();
  const inline=action.ongoingSelector?adapter.page.locator(action.ongoingSelector):null;
  const readInline=async()=>{if(!inline)return null;if(await inline.count()!==1)throw Error('PHOENIX_INLINE_ONGOING_NOT_UNIQUE');const state=await inline.evaluate(phoenixInlineOngoingDOM);if(!state.valid||state.label!=='至今')throw Error('PHOENIX_INLINE_ONGOING_EVIDENCE_CHANGED');return state;};
  const inlineBefore=await readInline();

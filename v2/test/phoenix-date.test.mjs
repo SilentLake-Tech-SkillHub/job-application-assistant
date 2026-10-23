@@ -7,7 +7,7 @@ function fixture({missingMarker=false,ongoing=false,precision='month',initial=''
  const locator=extra=>({count:async()=>1,filter(){return this;},waitFor:async()=>{},...extra}),pad=n=>String(n).padStart(2,'0');
  const node=(kind,chosen)=>({className:missingMarker?'phoenix-calendar-'+kind+'-panel-current-cell':kind==='day'?'phoenix-calendar-selected-day':'phoenix-calendar-'+kind+'-panel-selected-cell',getAttribute:()=>null,closest:()=>null});
  const choose=v=>{value=v;opened=false;writes++;};
- const trigger=locator({click:async()=>{opened=true;opens++;},innerText:async()=>value||'请选择'}),label=locator({click:async()=>{opened=false;}});
+ const trigger=locator({click:async()=>{opened=true;opens++;},innerText:async()=>value?value+'\n'+value:'请选择',locator:s=>{assert.equal(s,'.phoenix-select__content');return locator({innerText:async()=>value});}}),label=locator({click:async()=>{opened=false;}});
  const panel=locator({count:async()=>opened?1:0,innerText:async()=>year+'年 '+month+'月',evaluate:async()=>precision==='day'&&!missingHeader?Array.from({length:new Date(Date.UTC(year,month,0)).getUTCDate()},(_,i)=>({date:year+'-'+pad(month)+'-'+pad(i+1),selector:dayWithoutAttributes?'.phoenix-calendar-cell:not(.phoenix-calendar-last-month-cell):not(.phoenix-calendar-next-month-btn-day)':'[title="'+year+'-'+pad(month)+'-'+pad(i+1)+'"]',...(dayWithoutAttributes?{selectorRequiresText:true,dayLabel:String(i+1),headerYear:year,headerMonth:month}:{} )})):[],locator:selector=>{
   if(selector==='.phoenix-calendar-month-panel')return locator({count:async()=>precision==='month'?1:0});
   if(selector==='.phoenix-calendar-year-calendar')return locator({count:async()=>precision==='year'?1:0});

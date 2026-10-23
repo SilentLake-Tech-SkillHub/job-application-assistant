@@ -1,4 +1,5 @@
 import {installBrokerDiagnostics} from './broker-diagnostics.mjs';
+import {safeControlErrorDetails} from './control-error-details.mjs';
 // One private local socket owns one Chrome connection across MCP client restarts.
 // Managed Chrome by default; no REA, daily-profile attachment or automatic reconnect.
 import http from 'node:http';
@@ -52,7 +53,7 @@ const server=http.createServer(async(req,res)=>{
       if(method==='verificationInspect')data=await inspectVerification(page);
     }
     res.end(JSON.stringify({data:data??null}));
-  }catch(error){diagnostics.record('operation_error',error);res.end(JSON.stringify({error:code(error)}));}
+  }catch(error){diagnostics.record('operation_error',error);const details=safeControlErrorDetails(error.details);res.end(JSON.stringify({error:code(error),...(details?{details}:{})}));}
 });
 await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(socketPath,resolve);});await chmod(socketPath,0o600);
 console.log(JSON.stringify({status:'browser_host_ready',pid:process.pid,connectionAttempts:0,automaticRetries:0}));

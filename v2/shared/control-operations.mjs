@@ -1,3 +1,4 @@
+import {readPhoenixSelectedValue} from './phoenix-selection.mjs';
 import {choiceProofDOM,confirmChoiceEvidence} from './choice-proof.mjs';
 import {selectorAliasDOM} from './selector-aliases.mjs';
 import {validDate} from './value-contract.mjs';
@@ -51,7 +52,8 @@ async function performChoice(adapter,action,value,family){
   const parent=l.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " ant-select ")][1]');
   if(await parent.count()===1){const display=parent.locator('.ant-select-selector, .ant-select-selection').filter({visible:true});trigger=await display.count()===1?display:parent;}
  }
- const initial=(await trigger.innerText()).trim();let search=null,initialQuery,queryApplied=false;
+ const readSelected=()=>family==='phoenix'?readPhoenixSelectedValue(trigger):trigger.innerText().then(text=>text.trim());
+ const initial=await readSelected();let search=null,initialQuery,queryApplied=false;
  const expanded=await l.evaluate(n=>n.getAttribute('aria-expanded'));
  if(expanded!=='true')await trigger.click({timeout:10000});
  try{
@@ -88,7 +90,7 @@ async function performChoice(adapter,action,value,family){
   if(tree&&action.method.endsWith('_inspect')&&await options.count()===0){
    const treeEvidence=await menus.evaluate(treeChoiceDOM);
    if(queryApplied&&initialQuery!==undefined)await search.fill(initialQuery,{timeout:10000});await dismiss();await menus.waitFor({state:'hidden',timeout:3000});
-   return {options:[],tree:treeEvidence,renderer:'ud_tree_select',restored:(await trigger.innerText()).trim()===initial&&await menus.count()===0,searchable,queryApplied,scope:'rendered_tree_branches',coverage:{complete:false,reason:'no_rendered_leaf_options'},status:'branches_only'};
+   return {options:[],tree:treeEvidence,renderer:'ud_tree_select',restored:await readSelected()===initial&&await menus.count()===0,searchable,queryApplied,scope:'rendered_tree_branches',coverage:{complete:false,reason:'no_rendered_leaf_options'},status:'branches_only'};
   }
   const emptyEvidence=()=>menus.evaluate(n=>{
    const selectors='.ant-empty-description,.ant-select-item-empty,.ant-select-not-found,.ant-select-dropdown-menu-item-disabled,.ud__select__empty,[role="status"]';
@@ -101,7 +103,7 @@ async function performChoice(adapter,action,value,family){
   if(action.method.endsWith('_inspect')&&queryApplied&&await options.count()===0&&empty.length){
    if(initialQuery!==undefined)await search.fill(initialQuery,{timeout:10000});
    await dismiss();await menus.waitFor({state:'hidden',timeout:3000});
-   return {options:[],optionRecords:[],restored:(await trigger.innerText()).trim()===initial&&await menus.count()===0,searchable,queryApplied,scope:'exact_search_results',coverage:{complete:true,reason:'observed_no_results',emptyEvidence:empty},status:'captured_empty_search'};
+   return {options:[],optionRecords:[],restored:await readSelected()===initial&&await menus.count()===0,searchable,queryApplied,scope:'exact_search_results',coverage:{complete:true,reason:'observed_no_results',emptyEvidence:empty},status:'captured_empty_search'};
   }
   const optionText=action.optionTextMap?.[value]||String(value);
   const captured=await collectChoiceViews({read:()=>choiceViewport(menus,options,optionSelector),press:key=>(search||l).press(key),target:action.method.endsWith('_inspect')?undefined:optionText});
@@ -111,7 +113,7 @@ async function performChoice(adapter,action,value,family){
    if(queryApplied&&initialQuery!==undefined)await search.fill(initialQuery,{timeout:10000});
    await dismiss();
    await menus.waitFor({state:'hidden',timeout:3000});
-   const restored=(await trigger.innerText()).trim()===initial&&await menus.count()===0;
+   const restored=await readSelected()===initial&&await menus.count()===0;
    return {options:values,optionRecords:captured.optionRecords,restored,searchable,queryApplied,...(tree?{renderer:'ud_tree_select',tree:treeEvidence}:{}),scope:queryApplied&&action.query?'exact_search_results':tree?'rendered_tree_leaves':captured.complete?'all_menu_options':captured.steps?'partial_menu_options':'current_visible_menu',coverage:{complete:tree?false:captured.complete,reason:tree?'rendered_leaf_paths_only':captured.reason,keyboardSteps:captured.steps},status:'captured'};
   }
   if(action.optionTextMap&&(!action.observedOptionTexts?.includes(optionText)))throw Error('CHOICE_ALIAS_REQUIRES_CAPTURED_OPTION_TEXT');
@@ -125,7 +127,7 @@ async function performChoice(adapter,action,value,family){
   if(!verifyOnly)await option.click({timeout:10000});
   if(queryApplied&&initialQuery!==undefined&&verifyOnly)await search.fill(initialQuery,{timeout:10000});
   await dismiss();await menus.waitFor({state:'hidden',timeout:3000});
-  const blurredLabel=(await trigger.innerText()).trim();
+  const blurredLabel=await readSelected();
   if(blurredLabel!==optionText)throw Error('CHOICE_SELECTED_LABEL_MISMATCH');
   if(verifyOnly){const proof=confirmChoiceEvidence(candidate,candidate,{expectedLabel:optionText,blurredLabel});return {performed:false,selectionProof:proof,verification:'requires_independent_readback'};}
   // Reopen with no click on the option. Keyboard highlight or a search result

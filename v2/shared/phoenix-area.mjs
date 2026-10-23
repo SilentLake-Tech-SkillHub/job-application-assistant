@@ -1,3 +1,4 @@
+import {readPhoenixSelectedValue} from './phoenix-selection.mjs';
 const popup='.common-unmodeled-layer:has(.area-selector-container)';
 const exact=text=>new RegExp('^'+String(text).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$');
 const pause=()=>new Promise(resolve=>setTimeout(resolve,30));
@@ -59,7 +60,7 @@ export async function performPhoenixArea(adapter,action,value,{trigger,initial,d
  if(await menu.count()!==1)throw Error('AREA_MENU_NOT_UNIQUE');
  const button=text=>menu.locator('.area-footer-button .phoenix-button').filter({hasText:exact(text)});
  const cancel=async()=>{const control=button('取消');if(await control.count()!==1)throw Error('AREA_CANCEL_CONTROL_REQUIRED');await control.click({timeout:10000});await menu.waitFor({state:'hidden',timeout:5000});};
- const readDisplay=async()=>String(await trigger.innerText()).trim();
+ const readDisplay=()=>readPhoenixSelectedValue(trigger);
  const proofFor=async()=>{
   const selected=await menu.evaluate(areaSelectionDOM);assertAreaSelection(selected,String(value),action.expectedOptionValue);
   return {label:String(value),value:action.expectedOptionValue??null,valueAttribute:action.expectedOptionValue==null?null:'observed_option_identity',blurConfirmed:true,reopenedOptionSelected:true,valueCompared:action.expectedOptionValue!=null,selectedRegion:selected};
@@ -83,7 +84,9 @@ export async function performPhoenixArea(adapter,action,value,{trigger,initial,d
   if(action.expectedOptionValue!=null&&candidate.value!==action.expectedOptionValue)throw Error('CHOICE_OPTION_VALUE_CHANGED');
   const row=menu.locator('.area-data-container .area-item-container').filter({has:adapter.page.locator('.area-item-name').filter({hasText:exact(value)})});
   if(await row.count()!==1)throw Error('CHOICE_NOT_UNIQUE_OR_NOT_PRESENT');
-  await row.locator('.area-item-name').click({timeout:10000});
+  const selectIcon=row.locator('.area-item-name .icon-container').filter({visible:true});
+  if(await selectIcon.count()!==1)throw Error('AREA_SELECTION_ACTION_TARGET_REQUIRED');
+  await selectIcon.click({timeout:10000});
   for(;;){try{await proofFor();break;}catch(error){if(Date.now()>=end)throw error;await pause();}}
   const confirm=button('确定');if(await confirm.count()!==1)throw Error('AREA_CONFIRM_CONTROL_REQUIRED');
   await confirm.click({timeout:10000});await menu.waitFor({state:'hidden',timeout:5000});
@@ -117,7 +120,7 @@ export async function performPhoenixListPopup(adapter,action,value,{trigger,init
  if(await menu.count()!==1)throw Error('LIST_POPUP_NOT_UNIQUE');
  const button=text=>menu.locator('.phoenix-button').filter({hasText:exact(text)});
  const cancel=async()=>{const cancelButton=button('取消');if(await cancelButton.count()!==1)throw Error('LIST_POPUP_CANCEL_REQUIRED');await cancelButton.click({timeout:10000});await menu.waitFor({state:'hidden',timeout:5000});};
- const display=async()=>String(await trigger.innerText()).trim();
+ const display=()=>readPhoenixSelectedValue(trigger);
  const selectedProof=async()=>{const selected=await menu.evaluate(listPopupSelectionDOM);if(!selected.scopeValid)throw Error('LIST_POPUP_SELECTION_PANE_REQUIRED');assertAreaSelection(selected,String(value),action.expectedOptionValue);return {label:String(value),value:action.expectedOptionValue??null,valueAttribute:action.expectedOptionValue==null?null:'observed_option_identity',blurConfirmed:true,reopenedOptionSelected:true,valueCompared:action.expectedOptionValue!=null,selectedList:selected};};
  try{
   if(verify){const proof=await selectedProof();await cancel();if(await display()!==String(value))throw Error('CHOICE_SELECTED_LABEL_MISMATCH');return {performed:false,selectionProof:proof,verification:'requires_independent_readback'};}
@@ -136,7 +139,8 @@ export async function performPhoenixListPopup(adapter,action,value,{trigger,init
   const matches=records.filter(r=>r.label===String(value));if(matches.length!==1||!action.options?.includes(String(value)))throw Error('ACTUAL_CAPTURED_OPTION_REQUIRED');
   if(matches[0].disabled)throw Error('CHOICE_OPTION_DISABLED');if(action.expectedOptionValue!=null&&matches[0].value!==action.expectedOptionValue)throw Error('CHOICE_OPTION_VALUE_CHANGED');
   const row=menu.locator('.list-item-container').filter({hasText:exact(value)});if(await row.count()!==1)throw Error('CHOICE_NOT_UNIQUE_OR_NOT_PRESENT');
-  await row.click({timeout:10000});const end=Date.now()+6000;
+  const selectIcon=row.locator('.icon-container').filter({visible:true});if(await selectIcon.count()!==1)throw Error('LIST_SELECTION_ACTION_TARGET_REQUIRED');
+  await selectIcon.click({timeout:10000});const end=Date.now()+6000;
   for(;;){try{await selectedProof();break;}catch(error){if(Date.now()>=end)throw error;await pause();}}
   const confirm=button('确定');if(await confirm.count()!==1)throw Error('LIST_POPUP_CONFIRM_REQUIRED');await confirm.click({timeout:10000});await menu.waitFor({state:'hidden',timeout:5000});
   if(await display()!==String(value))throw Error('CHOICE_SELECTED_LABEL_MISMATCH');

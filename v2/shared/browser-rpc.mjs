@@ -1,4 +1,5 @@
 import {normalizePhoenixReference} from './control-dom.mjs';
+import {safeControlErrorDetails} from './control-error-details.mjs';
 import {sharedRecordKey} from './shared-record.mjs';
 import http from 'node:http';
 import {canonicalizeInventory,remapSpec} from './feishu-selectors.mjs';
@@ -13,7 +14,7 @@ export class BrokerBrowserAdapter {
         const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>{try{resolve(JSON.parse(Buffer.concat(chunks)));}catch{reject(Error('INVALID_BROWSER_HOST_RESPONSE'));}});
       });req.on('error',()=>reject(Error('BROWSER_HOST_NOT_AVAILABLE')));req.setTimeout(this.requestTimeoutMs,()=>req.destroy(Error('BROWSER_HOST_OPERATION_TIMEOUT')));req.end(data);
     });
-    if(result.error)throw Error(result.error);return result.data;
+    if(result.error){const error=Error(result.error),details=safeControlErrorDetails(result.details);if(details)error.details=details;throw error;}return result.data;
   }
   status(){return this.request('status');}
   tabs(){return this.request('tabs');}

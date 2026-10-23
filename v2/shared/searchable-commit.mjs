@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';import {resolvedFieldValue} from './execution-plan.mjs';
+import {safeControlErrorDetails} from './control-error-details.mjs';
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const key=(task,field)=>'searchable-'+hash({companyId:task.companyId,roleId:task.roleId,pageUrl:task.pageUrl,fieldId:field.id}).slice(0,40);
 const nonempty=value=>typeof value==='string'&&value.trim().length>0;
@@ -33,7 +34,7 @@ export async function verifySearchableCommits({store,page,plan,task}){
    const read=await page.act({...action,method:'phoenix_autocomplete_verify',expectedCommitMode:saved.proof.mode,...(saved.proof.optionValue!=null?{expectedOptionValue:saved.proof.optionValue}:{})},value,{});
    const current=assertCurrentProof(read,saved.proof.mode,value,saved.proof.optionValue);
    proofs[field.id]={status:'verified',mode:saved.proof.mode,label:value,optionValue:saved.proof.optionValue,optionClicked:saved.proof.optionClicked,blurConfirmed:true,readbackStable:true,...(saved.proof.mode==='explicit_custom_value'?{customAcceptance:current}:{currentSelection:current})};
-  }catch(error){proofs[field.id]={status:'failed',reason:/^[A-Z_]+$/.test(error.message)?error.message:'SEARCHABLE_COMMIT_NOT_VERIFIED'};}
+  }catch(error){const errorDetails=safeControlErrorDetails(error.details);proofs[field.id]={status:'failed',reason:/^[A-Z_]+$/.test(error.message)?error.message:'SEARCHABLE_COMMIT_NOT_VERIFIED',...(errorDetails?{errorDetails}:{})};}
  }
  return proofs;
 }

@@ -3,6 +3,7 @@ import {matchesRole} from './role-identity.mjs';
 import {humanActionReason,verificationSummary} from './field-policy.mjs';
 import { contentViolations } from './content-policy.mjs';
 import {isRedactedReadback,REDACTED_READBACK_REASON} from './readback-state.mjs';
+import {safeControlErrorDetails} from './control-error-details.mjs';
 /** Pure deterministic verification. Inputs: compiled expected values + CURRENT DOM observations.
  * Unknown/missing observations never become success. No model grading or fuzzy matching.
  * Persisted draft and final submission are separate evidence states.
@@ -55,7 +56,7 @@ export function verifyForm(expected, observed, {now=Date.now(),maxAgeMs=60000}={
       check.reason=!empty?'UNSOURCED_VALUE_ON_PAGE':omit?'USER_RESOLVED_EMPTY_FIELD':'UNANSWERED_FIELD_REQUIRES_USER_RESPONSE';checks.push(check);continue;
     }
     if(actual.errors?.length){check.status='invalid';check.reason='FIELD_VALIDATION_ERROR';checks.push(check);continue;}
-    if(field.searchableCommitRequired&&(actual.searchableCommitProof?.status!=='verified'||actual.searchableCommitProof.label!==actual.value||actual.searchableCommitProof.blurConfirmed!==true||actual.searchableCommitProof.readbackStable!==true||!(actual.searchableCommitProof.optionClicked===true||actual.searchableCommitProof.mode==='explicit_custom_value'))){check.status='mismatch';check.reason=actual.searchableCommitProof?.reason||'SEARCHABLE_COMMIT_ACTION_PROOF_REQUIRED';checks.push(check);continue;}
+    if(field.searchableCommitRequired&&(actual.searchableCommitProof?.status!=='verified'||actual.searchableCommitProof.label!==actual.value||actual.searchableCommitProof.blurConfirmed!==true||actual.searchableCommitProof.readbackStable!==true||!(actual.searchableCommitProof.optionClicked===true||actual.searchableCommitProof.mode==='explicit_custom_value'))){check.status='mismatch';check.reason=actual.searchableCommitProof?.reason||'SEARCHABLE_COMMIT_ACTION_PROOF_REQUIRED';const errorDetails=safeControlErrorDetails(actual.searchableCommitProof?.errorDetails);if(errorDetails)check.errorDetails=errorDetails;checks.push(check);continue;}
     if(field.kind==='choice' && actual.selected!==true){check.status='mismatch';check.reason='DISPLAY_TEXT_WITHOUT_SELECTED_OPTION';checks.push(check);continue;}
     if(field.selectionVerificationRequired&&(actual.selectionProof?.status!=='verified'||actual.selectionProof?.reopenedOptionSelected!==true||actual.selectionProof?.blurConfirmed!==true||actual.selectionProof?.label!==actual.value||field.choiceValue!=null&&actual.selectionProof?.value!==field.choiceValue)){check.status='mismatch';check.reason=actual.selectionProof?.reason||'CHOICE_SELECTION_PROOF_REQUIRED';checks.push(check);continue;}
     if(field.kind==='date'){
