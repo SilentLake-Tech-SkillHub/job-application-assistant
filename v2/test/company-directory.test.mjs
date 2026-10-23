@@ -24,6 +24,7 @@ const confirm=b=>({...b,state:'已交接',confirmation:{userQuote:'确认交接'
 
 test('python-compatible digest matches company_store.py content_sha',()=>{
  assert.equal(contentSha(batch()),'0bf980a8751bca9c2e360b843b0367ff8646714f8818842e87bbce24b03f4424');
+ assert.equal(contentSha({...batch(),progress:{processedOutcomeKeys:['company|role'],remainingRoleKeys:[]}}),contentSha(batch()));
  assert.equal(pyJson({b:[1,'中'],a:null}),'{"a": null, "b": [1, "中"]}');
 });
 

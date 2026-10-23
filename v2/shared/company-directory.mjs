@@ -71,7 +71,7 @@ export function pyJson(v){
  const keys=Object.keys(v).sort((a,b)=>{const x=[...a].map(c=>c.codePointAt(0)),y=[...b].map(c=>c.codePointAt(0));for(let i=0;i<Math.min(x.length,y.length);i++)if(x[i]!==y[i])return x[i]-y[i];return x.length-y.length;});
  return '{'+keys.map(k=>JSON.stringify(k)+': '+pyJson(v[k])).join(', ')+'}';
 }
-export const contentSha=batch=>{const {confirmation,state,updatedAt,...body}=batch;return createHash('sha256').update(pyJson(body),'utf8').digest('hex');};
+export const contentSha=batch=>{const {confirmation,state,updatedAt,progress,...body}=batch;return createHash('sha256').update(pyJson(body),'utf8').digest('hex');};
 
 // 投递输入只来自用户正向评审确认后的 投递批次.json；确认后内容被改动即拒绝。
 export async function readHandoffBatch({handoffDir=handoffDirFromEnv()}={}){
