@@ -1,3 +1,5 @@
+import {attachUploadContentProofs} from './upload-content-proof.mjs';
+import {uploadOriginKey,uploadOriginScope} from './upload-origin.mjs';
 import {isRecoverableControlReason} from './control-recovery.mjs';
 import {saveSearchableCommit,verifySearchableCommits,attachSearchableCommits} from './searchable-commit.mjs';
 import {assertMaterialDestinationsRemainAbsent} from './business-materials.mjs';
@@ -164,7 +166,7 @@ export class Engine {
     if(!template.pages.some(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix)))throw Error('PLAN_PAGE_NOT_COVERED');
     const plan=await compileExecutionPlan(template,task);
     await this.store.put('plans',plan.id,plan);
-    return {companyId:task.companyId,route:route.route,nextStage:route.nextStage,routeReason:route.reason,planId:plan.id,planHash:plan.planHash,templateHash:plan.templateHash,counts:plan.counts,allKnown:plan.allKnown,readyForExecution:plan.readyForExecution,constructionBlockers:plan.constructionBlockers,status:plan.constructionBlockers.length?'blocked_construction':plan.counts.needs_user?'needs_answers':plan.counts.user_only?'ready_with_user_steps':'ready',browserAccess:false,pending:plan.pages.flatMap(p=>p.fields).filter(f=>f.disposition==='needs_user').map(f=>({id:f.id,source:f.source,label:f.label,required:!!f.required}))};
+    return {companyId:task.companyId,route:route.route,nextStage:route.nextStage,routeReason:route.reason,planId:plan.id,planHash:plan.planHash,templateHash:plan.templateHash,counts:plan.counts,allKnown:plan.allKnown,readyForExecution:plan.readyForExecution,constructionBlockers:plan.constructionBlockers,status:plan.constructionBlockers.length?'blocked_construction':plan.counts.needs_user?'needs_answers':plan.counts.user_only?'ready_with_user_steps':'ready',browserAccess:false,pending:plan.pages.flatMap(p=>p.fields).filter(f=>f.disposition==='needs_user').map(f=>({id:f.id,source:f.source,label:f.label,required:!!f.required,...(task.sources?.[f.source]?.datePrecisionGap?{datePrecisionGap:task.sources[f.source].datePrecisionGap}:{})}))};
   }
   async coverage(ids) {
     return Promise.all(ids.map(async id => {
@@ -207,6 +209,7 @@ export class Engine {
       if(!task.planId||!task.planHash)throw Error('PREPARED_PLAN_REQUIRED');
       let prepared;try{prepared=await this.store.get('plans',task.planId);}catch{throw Error('PREPARED_PLAN_NOT_FOUND');}
       await assertPreparedPlan(prepared,template,task,authorization);
+      if(authorization.uploadFieldIds&&(new Set(authorization.uploadFieldIds).size!==authorization.uploadFieldIds.length||authorization.uploadFieldIds.some(id=>!prepared.pages.some(page=>page.fields.some(field=>field.id===id&&field.kind==='file'&&field.disposition==='fill')))))throw Error('UPLOAD_FIELD_SCOPE_INVALID');
       if((await this.formRoute(task)).route!=='reuse')throw Error('FORM_ASSET_NOT_SEALED');
       jobs.push({task,company,template,prepared});
     }
@@ -279,6 +282,7 @@ export class Engine {
     const dateProofs=await verifyDateRanges(page,plan,task);
     const profileProofs=await this.profileProofs(task,template,page),searchableProofs=await verifySearchableCommits({store:this.store,page,plan,task});
     const observation=attachSearchableCommits(attachProfileFillProofs(attachDateRangeProofs(attachChoiceProofs(attachInventory(await page.observe(plan),plan,inventory),choiceProofs),dateProofs),profileProofs),searchableProofs),observationRunId=randomUUID();
+    await attachUploadContentProofs(page,observation,plan,task,this.store);
     await this.store.put('runs',observationRunId,{operation:'live_observation',companyId:company.id,observation});
     const result=verifyForm(compileExpected(plan,task),observation);
     const contractChanges=controlContractChanges(plan,inventory);
@@ -314,9 +318,10 @@ export class Engine {
         const unavailable=frozenFields.filter(f=>!['inactive','omitted','user_only'].includes(f.disposition)&&!initial.fields[f.id]?.present&&!canActivate(f));
         if(unavailable.length)throw Error('PLANNED_FIELDS_MISSING_BEFORE_WRITE');
         // Upload first because parsing may replace the form; then create the planned records.
-        const uploads=frozenFields.filter(f=>f.kind==='file'&&f.disposition==='fill');
+        const uploads=frozenFields.filter(f=>f.kind==='file'&&f.disposition==='fill'&&(!authorization.uploadFieldIds||authorization.uploadFieldIds.includes(f.id)));
+        if(authorization.uploadFieldIds)result.uploadScopeHash=hash({planHash:prepared.planHash,fieldIds:authorization.uploadFieldIds});
         for(const f of uploads){
-          for(const action of f.actions)await page.act(action,f.value,prepared.files);
+          for(const action of f.actions){const result=await page.act(action,f.value,prepared.files);if(result?.uploadOrigin)await this.store.put('runs',uploadOriginKey(task,f),{...result.uploadOrigin,operation:'field_upload_origin',scopeHash:uploadOriginScope(task,f)});}
         }
         for(const f of frozenFields.filter(f=>f.prepareBeforeGroups&&f.disposition==='fill')){
           for(const action of f.actions||[])await page.act(action,f.value,prepared.files);
@@ -331,7 +336,7 @@ export class Engine {
         const fillFields=fillOrder?fillOrder.map(id=>frozenFields.find(f=>f.id===id)):frozenFields;
         const unverifiedSources=new Set();
         for(const f of fillFields){
-          if(f.disposition!=='fill'||uploads.includes(f)||f.prepareBeforeGroups)continue;
+          if(f.disposition!=='fill'||f.kind==='file'||f.prepareBeforeGroups)continue;
           activeField={id:f.id,source:f.source,kind:f.kind,label:f.label};
           if(f.when&&unverifiedSources.has(f.when.source)){
             unverifiedSources.add(f.source);(result.deferredControls??=[]).push({...activeField,status:'blocked_dependency',reason:'UNVERIFIED_CONTROL_DEPENDENCY',dependsOn:f.when.source});continue;
@@ -375,7 +380,8 @@ export class Engine {
         const observation=attachSearchableCommits(attachProfileFillProofs(attachDateRangeProofs(attachChoiceProofs(attachInventory(await page.observe(plan),plan,finalInventory),choiceProofs),dateProofs),profileProofs),searchableProofs);
         result.selectionProofs={...(result.selectionProofs||{}),...choiceProofs};
         const observationRunId=randomUUID();
-        await this.store.put('runs',observationRunId,{operation:'live_observation',companyId:company.id,observation});
+        await attachUploadContentProofs(page,observation,plan,task,this.store);
+    await this.store.put('runs',observationRunId,{operation:'live_observation',companyId:company.id,observation});
         (result.observationRunIds??=[]).push(observationRunId);
         const verification=verifyForm(compiled.expected,observation);
         result.pageChecks.at(-1).verification=verification;

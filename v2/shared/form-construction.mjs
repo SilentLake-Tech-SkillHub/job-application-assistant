@@ -102,6 +102,7 @@ function fieldFromControl(c,m,choice){
 export function buildFormTemplate({capture,profile,mappings=[],choices=[],page,templateId,version=1,reaStructure,reaReconciliation=[]}){
  if(!capture?.controls?.length||!capture.pageUrl||!capture.observedAt)throw Error('CURRENT_CONTROL_CAPTURE_REQUIRED');
  if(!page?.roleTitle||!page.readySelector||!page.sections?.length||!page.sectionDiscovery)throw Error('OBSERVED_PAGE_CONTRACT_REQUIRED');
+ if(page.roleIdentity&&readRoleIdentity(page.roleIdentity,capture.pageUrl)?.value!==page.roleIdentity.value)throw Error('OBSERVED_ROLE_IDENTITY_MISMATCH');
  if(reaStructure&&(reaStructure.pageUrl!==capture.pageUrl||reaStructure.companyId!==capture.companyId))throw Error('REA_CONTROL_CAPTURE_SCOPE_MISMATCH');
  if(page.provider&&capture.provider&&page.provider!==capture.provider)throw Error('FORM_PROVIDER_EVIDENCE_MISMATCH');
  page={...page,sections:page.sections.map(section=>typeof section==='string'?{title:section}:section),...(capture.provider?{provider:capture.provider}:{})};
@@ -129,13 +130,23 @@ export function buildFormTemplate({capture,profile,mappings=[],choices=[],page,t
   const goal=choiceGoals.goals.find(g=>g.fieldId===f.id);
   if(goal){f.choiceGoal=goal;f.choiceGoalRequired=true;}
   f.constructionBlockers.push(...choiceGoals.blockers.filter(b=>b.fieldId===f.id).map(b=>b.reason));
-  return applyChoiceResolution(f,choiceGoals.choices.find(c=>f.inventorySelectors.includes(c.selector)),profile);
+  // Preserve per-field diagnostics from goal validation. Applying an already
+  // rejected stale resolution again would throw away the field/next-call and
+  // leave the executor guessing which of many choices needs reconciliation.
+  return goal?.status==='blocked'?f:applyChoiceResolution(f,choiceGoals.choices.find(c=>f.inventorySelectors.includes(c.selector)),profile);
  });
  const template={id:templateId,version,evidence:{sourceUrl:capture.pageUrl,observedAt:capture.observedAt,captureId:capture.captureId,choiceGoalContract:1,...(reaStructure?{reaEvidenceId:reaStructure.reaEvidenceId,reaEvidenceHash:reaStructure.reaEvidenceHash}: {})},pages:[{...page,pathPrefix:page.pathPrefix||new URL(capture.pageUrl).pathname,fields}],coverage:{allControlsMapped:false,allDriversSupported:false,allConditionalBranchesVerified:false}};
  const blockers=templateConstructionIssues(template);
  if(reaStructure){
   const unresolved=reaStructure.uncorrelatedControls||[];
-  if(reaReconciliation.some(r=>!r.evidence?.trim()||!unresolved.some(n=>n.nodeId===r.nodeId)||r.selector&&!capture.controls.some(c=>c.selector===r.selector)||!r.selector&&!['outside_application_form','duplicate_accessibility_node'].includes(r.exclusion)))throw Error('REA_RECONCILIATION_EVIDENCE_REQUIRED');
+  if(reaReconciliation.some(r=>{
+   const node=unresolved.find(n=>n.nodeId===r.nodeId);
+   if(!r.evidence?.trim()||!node)return true;
+   if(r.selector)return !reaStructure.controls?.some(c=>c.selector===r.selector&&c.reaBindings?.some(binding=>binding.backendNodeId===node.backendNodeId));
+   if(r.exclusion==='outside_application_form')return !node.nativeDOM?.ancestors?.some(ancestor=>ancestor.tag==='nav'||ancestor.role==='navigation');
+   if(r.exclusion==='duplicate_accessibility_node')return !node.backendNodeId||!reaStructure.controls?.some(c=>c.reaBindings?.some(binding=>binding.backendNodeId===node.backendNodeId));
+   return true;
+  }))throw Error('REA_RECONCILIATION_EVIDENCE_REQUIRED');
   for(const n of unresolved)if(!reaReconciliation.some(r=>r.nodeId===n.nodeId))blockers.push({id:n.nodeId,label:n.label,reason:'REA_CONTROL_RECONCILIATION_REQUIRED'});
   template.evidence.reaReconciliation=reaReconciliation;
   template.acquisitionBlockers=blockers.filter(x=>x.reason==='REA_CONTROL_RECONCILIATION_REQUIRED');

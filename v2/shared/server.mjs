@@ -1,4 +1,5 @@
 import {runtimeIdentity} from './runtime-identity.mjs';
+import {assertAcquisitionChain,assertAcquiredStructure,assertCapturedAcquisition,recordAcquisitionChain} from './acquisition-chain.mjs';
 import {observeUserOperatedSession} from '../login/browser.mjs';
 import {safeControlErrorDetails} from './control-error-details.mjs';
 import {recordMaterialDestinationException,revokeMaterialDestinationException,withMaterialDispositions} from './material-disposition.mjs';
@@ -67,6 +68,7 @@ const profileFile=process.env.RECRUITING_PROFILE_JSON;
 const queues=profileFile?queueFromEnv(catalog.companies):null;
 const companyBatches=queues?new CompanyBatch({store,queues,catalog:catalog.companies}):null;
 async function resolveInputs(profile,template,decisions,companyId,task={}){
+ await assertAcquisitionChain(template,{store,companyId,profile});
  await assertStoredChoiceGoals(template,{store,companyId,profile});
  const rawMaterialContext=await confirmedMaterialContext({handoffDir:directory.handoffDir,companyId,roleId:task.roleId,pageUrl:task.pageUrl||template.evidence.sourceUrl,catalog:catalog.companies});
  const materialContext=withMaterialDispositions(profile,rawMaterialContext,{pageUrl:task.pageUrl||template.evidence.sourceUrl,templateHash:hash(template)});
@@ -164,16 +166,17 @@ registerTool('role_confirm_material_no_destination',{description:'仅在用户�
 // Expose the page contract to the agent in the tool schema. An opaque record
 // made ordinary construction gaps look like unexplained runtime failures.
 const constructionPage=z.object({
- roleTitle:z.string().min(1),roleSelector:z.string().min(1).optional(),rolePrefix:z.string().refine(value=>value.trim().length>0&&!/[\r\n\u2028\u2029]/u.test(value),'ROLE_PREFIX_CONTRACT_REQUIRED').optional(),roleIdentity:z.record(z.unknown()).optional(),
+ roleTitle:z.string().min(1),roleSelector:z.string().min(1).optional(),rolePrefix:z.string().refine(value=>value.trim().length>0&&!/[\r\n\u2028\u2029]/u.test(value),'ROLE_PREFIX_CONTRACT_REQUIRED').optional(),roleIdentity:z.object({source:z.enum(['query','hashQuery','path','hashPath']).default('query'),parameter:z.string().min(1),value:z.string().min(1),pattern:z.string().min(1).max(500).optional()}).strict().optional(),
  readySelector:z.string().min(1),provider:z.enum(['feishu','ant','phoenix']).optional(),
  sections:z.array(z.union([z.string().min(1),z.object({title:z.string().min(1)}).passthrough()])).min(1),
  sectionDiscovery:z.object({selector:z.string().min(1),titleSelector:z.string().min(1),selectors:z.array(z.string()).optional()}).passthrough()
 }).passthrough().superRefine((page,ctx)=>{if(page.rolePrefix!==undefined&&(typeof page.roleSelector!=='string'||!page.roleSelector.trim()))ctx.addIssue({code:z.ZodIssueCode.custom,path:['roleSelector'],message:'ROLE_PREFIX_CONTRACT_REQUIRED'});});
 registerTool('form_search_choices',{description:'通用控件目标闭环：只传已捕获字段引用，内核从该字段当前主档映射取真实值与已确认别名，逐次搜索、等实际候选或明确无结果、恢复页面并匹配。Agent不能传搜索词。唯一已知别名自动保存实际选项映射；模糊或歧义返回真实候选。只建库，不替代冻结后的填写及选中核验，不提交。',inputSchema:{companyId:z.string(),captureId:z.string(),selector:z.string()}},wrap(async a=>engine.withCompanyLease(a.companyId,async()=>{
  const capture=await store.get('runs',a.captureId);if(capture.companyId!==a.companyId)throw Error('CHOICE_CAPTURE_SCOPE_MISMATCH');
+ await assertCapturedAcquisition(store,{companyId:a.companyId,captureId:a.captureId});
  const field=capture.controls.find(c=>c.selector===a.selector);if(!field||!isChoiceControl(field))throw Error('ORDINARY_CAPTURED_CHOICE_REQUIRED');
  const id='choices-'+a.companyId+'-'+hash({pageUrl:capture.pageUrl,captureId:a.captureId}).slice(0,16);let prior=[];try{prior=(await store.get('runs',id)).choices||[];}catch(e){if(e.code!=='ENOENT')throw e;}
- const page=await browser.existingPage(capture.pageUrl),result=await discoverMappedChoice({profile:await loadProfile(profileFile),capture,selector:a.selector,prior,choicesId:id,inspect:(field,query)=>inspectCapturedChoice(page,capture,field,query)});
+ const result=await discoverMappedChoice({profile:await loadProfile(profileFile),capture,selector:a.selector,prior,choicesId:id,inspect:async(field,query)=>inspectCapturedChoice(await browser.existingPage(capture.pageUrl),capture,field,query)});
  await store.put('runs',id,{id,companyId:a.companyId,pageUrl:capture.pageUrl,captureId:a.captureId,choices:result.choices,readAt:new Date().toISOString()});
  const {choices,...summary}=result;return {choicesId:id,...summary,continuation:{state:'construct',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:result.resolution?['form_build_template']:['form_resolve_choices','form_build_template']},submission:'not_performed'};
 })),false);
@@ -194,10 +197,10 @@ registerTool('role_prepare_profile_fields',{description:'按私有主档的globa
   await store.put('runs',id,result);delete state.verifyRunId;delete state.verifiedAt;state.status='ready_to_fill';await queues.put(t.taskId,state);return result;
  });
 }));
-registerTool('runtime_info',{description:'只读返回当前实际运行版本与能力，识别旧安装端；不连接浏览器。',annotations:{readOnlyHint:true}},wrap(()=>({runtime:residentRuntime,version:packageInfo.version,compilerVersion:3,controlCapabilities:controlCapabilities(),pipelineRevision:'rea-contract-5',capabilities:['goal_bound_choice_search','retrieval_identity_separation','mandatory_choice_goals','current_autocomplete_entity_proof','global_profile_fill','profile_reference_only_freeze','captured_date_ranges','authorized_attachment_removal','locked_enum_presentation','canonical_live_inventory','scoped_material_preparation','external_material_mapping_gate','business_material_first','selector_identity_reconciliation','scoped_ongoing_asof','collector_mapping_guard','verified_user_decision_wait','readiness_presence','captured_date_options','major_real_first','disabled_selected_readback','empty_search_evidence','sourced_ongoing_dates','string_array_fact_ingestion','mandatory_role_materials','material_amendment_preserves_pages','business_required_referral','company_batch','form_route','workflow_next','role_bindings','frozen_plan','independent_readback','fixed_closeout','official_form_definition','semantic_question_locators','rea_form_structure','generic_form_construction','typed_continuation','explicit_construction_provider','rendered_choice_options','draft_reference_registration','mandatory_workflow_contract','persisted_field_contract','observed_choice_resolution','incremental_choice_evidence','choice_resolution_pending_diagnostics','field_bound_choice_audit','dropdown_reopen_selection_proof'],browserAccess:false}),false));
+registerTool('runtime_info',{description:'只读返回当前实际运行版本与能力，识别旧安装端；不连接浏览器。',annotations:{readOnlyHint:true}},wrap(()=>({runtime:residentRuntime,version:packageInfo.version,compilerVersion:3,controlCapabilities:controlCapabilities(),pipelineRevision:'rea-contract-6',capabilities:['mandatory_acquisition_chain','mcp_draft_only_registration','run_evidence_handoff','goal_bound_choice_search','retrieval_identity_separation','mandatory_choice_goals','current_autocomplete_entity_proof','global_profile_fill','profile_reference_only_freeze','captured_date_ranges','authorized_attachment_removal','locked_enum_presentation','canonical_live_inventory','scoped_material_preparation','external_material_mapping_gate','business_material_first','selector_identity_reconciliation','scoped_ongoing_asof','collector_mapping_guard','verified_user_decision_wait','readiness_presence','captured_date_options','major_real_first','disabled_selected_readback','empty_search_evidence','sourced_ongoing_dates','string_array_fact_ingestion','mandatory_role_materials','material_amendment_preserves_pages','business_required_referral','company_batch','form_route','workflow_next','role_bindings','frozen_plan','independent_readback','fixed_closeout','official_form_definition','semantic_question_locators','rea_form_structure','generic_form_construction','typed_continuation','explicit_construction_provider','rendered_choice_options','draft_reference_registration','mandatory_workflow_contract','persisted_field_contract','observed_choice_resolution','incremental_choice_evidence','choice_resolution_pending_diagnostics','field_bound_choice_audit','dropdown_reopen_selection_proof'],browserAccess:false}),false));
 registerTool('workflow_next',{description:'确定性调用路由：先判断公司资产，复用则离线映射与编译；缺失或失效才返回增量建库接口。只返回下一调用及真实阻塞，不替模型宣称完成。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),roleId:z.string().optional()},annotations:{readOnlyHint:true}},wrap(async task=>{
  const route=await engine.formRoute(task);
- if(route.route==='acquire'){let hasDefinitionRecipe=false;try{hasDefinitionRecipe=!!directory.definitionFile(task.companyId);}catch(e){if(e.message!=='UNKNOWN_COMPANY')throw e;}return {...route,definitionFirst:hasDefinitionRecipe,continuation:continuationFor({route}),nextTools:[...(hasDefinitionRecipe?['capture_form_definition']:[]),'capture_rea_structure','capture_controls','form_mapping_candidates','profile_map_questions','form_search_choices','capture_choice_options','form_build_template','template_register','probe_conditions','template_finalize','prepare_plan'],submission:'not_performed'};}
+ if(route.route==='acquire'){let hasDefinitionRecipe=false;try{hasDefinitionRecipe=!!directory.definitionFile(task.companyId);}catch(e){if(e.message!=='UNKNOWN_COMPANY')throw e;}return {...route,definitionFirst:hasDefinitionRecipe,continuation:continuationFor({route}),nextTools:[...(hasDefinitionRecipe?['capture_form_definition']:[]),'capture_rea_structure','form_mapping_candidates','profile_map_questions','form_search_choices','capture_choice_options','form_build_template','template_register','probe_conditions','template_finalize','prepare_plan'],submission:'not_performed'};}
  const profile=await loadProfile(profileFile),company=engine.companyForTask(task),template=await store.get('templates',company.templateId);
  try{assertQuestionsMapped(profile,task.companyId,task.pageUrl);}catch{return {...route,nextStage:'local_mapping',continuation:{state:'map',owner:'agent',requiresUser:false,shouldContinue:true},nextTools:['form_mapping_candidates','profile_map_questions'],submission:'not_performed'};}
  const plan=await engine.preparePlan({...task,templateHash:hash(template),...await resolveInputs(profile,template,{},task.companyId,task)});
@@ -207,6 +210,7 @@ registerTool('form_route',{description:'先做本地IF判断：公司已有覆�
 registerTool('capture_repeat_slots',{description:'内部建库：按已观察的重复栏目容器和添加按钮准备目标总条数的空白条目（count不是新增条数），不填写个人数据、不上传或提交；随后须重新采集全部字段。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),groupSelector:z.string().describe('只匹配该栏目每一条记录，不匹配其他栏目；可使用已观察标题绑定的phoenixq repeatRecords'),addSelector:z.string(),addLabel:z.string().optional(),count:z.number().int().min(1).max(20).describe('本栏目期望的最终总条数，不是新增条数'),authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1)})}},wrap(a=>engine.withCompanyLease(a.companyId,async()=>{const p=await browser.existingPage(a.pageUrl),before=await p.observe({fields:[],groups:[{id:'records',selector:a.groupSelector}]});const currentEntries=before.groups?.records;if(currentEntries>a.count){const error=Error('EXCESS_REPEAT_ENTRIES_REQUIRE_REVIEW');error.details={currentEntries,expectedEntries:a.count,countMeaning:'target_total_records',reason:'observed_selector_matches_more_records_than_target'};throw error;}await p.ensureGroups([{id:'construction-slots',selector:a.groupSelector,addSelector:a.addSelector,addLabel:a.addLabel,count:a.count}]);return {status:'slots_created_require_recapture',count:a.count,submission:'not_performed'};})),false);
 registerTool('capture_choice_options',{description:'内部建库：读取已采集单选/原生select的真实选项，对已采集的UD、Ant及ATS下拉逐个展开读取并恢复，不更改原选择；保存私有选项资产。selectors限定本次需补采的已捕获控件，不改变完整问题登记。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),captureId:z.string(),selectors:z.array(z.string()).min(1).optional(),searchQueries:z.record(z.string()).optional()}},wrap(args=>engine.withCompanyLease(args.companyId,async()=>{
  const capture=await store.get('runs',args.captureId);if(capture.companyId!==args.companyId||capture.pageUrl!==args.pageUrl)throw Error('CHOICE_CAPTURE_SCOPE_MISMATCH');
+ await assertCapturedAcquisition(store,{companyId:args.companyId,captureId:args.captureId,pageUrl:args.pageUrl});
  const checkpointId='choices-'+args.companyId+'-'+hash({pageUrl:args.pageUrl,captureId:args.captureId}).slice(0,16);let accumulated=[];try{const prior=await store.get('runs',checkpointId);if(prior.companyId===args.companyId&&prior.captureId===args.captureId)accumulated=prior.choices||[];}catch(e){if(e.code!=='ENOENT')throw e;}
  const page=await browser.existingPage(args.pageUrl),choices=[];if(capture.provider==='feishu')await page.inventory({provider:'feishu'});
  const candidates=capture.controls.filter(f=>isChoiceControl(f)||args.selectors?.includes(f.selector)&&isDateControl(f));
@@ -222,6 +226,7 @@ registerTool('capture_choice_options',{description:'内部建库：读取已采�
 })),false);
 registerTool('inspect_choice',{description:'按真实捕获字段直接核验下拉：分别读取搜索input值和已选span文字，打开绑定菜单采真实候选、实际值和选中标记，再恢复原状态。默认保存该字段的截图。只作核验，不点选候选、不填写或提交，不将搜索文字当成已选结果。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),captureId:z.string(),selector:z.string(),query:z.string().optional(),screenshot:z.boolean().default(true)},annotations:{readOnlyHint:true}},wrap(a=>engine.withCompanyLease(a.companyId,async()=>{
  const capture=await store.get('runs',a.captureId);if(capture.companyId!==a.companyId||capture.pageUrl!==a.pageUrl)throw Error('CHOICE_CAPTURE_SCOPE_MISMATCH');
+ await assertCapturedAcquisition(store,{companyId:a.companyId,captureId:a.captureId,pageUrl:a.pageUrl});
  const c=capture.controls.find(c=>c.selector===a.selector);if(!c||!isChoiceControl(c)||humanActionReason(c))throw Error('ORDINARY_CAPTURED_CHOICE_REQUIRED');
  const page=await browser.existingPage(a.pageUrl);if(capture.provider==='feishu')await page.inventory({provider:'feishu'});
  const plan={fields:[{id:'selected',read:{selector:c.selectedSelector||c.questionSelector||c.selector,kind:'text'}},{id:'search',read:{selector:c.actionSelector||c.selector,kind:'value'}}]};
@@ -232,6 +237,7 @@ registerTool('inspect_choice',{description:'按真实捕获字段直接核验下
 }),false));
 registerTool('form_resolve_choices',{description:'离线按已捕获真实选项进行别名与模糊候选匹配，结果覆盖保存到该次选项资产。已确认主档别名可自动映射；模糊结果只排序，不直接硬选。指定实际选项须提供语义等价证据，未知或歧义不得伪造用户答案。',inputSchema:{companyId:z.string(),choicesId:z.string(),resolutions:z.array(z.object({selector:z.string(),factKey:z.string(),selectedOption:z.string().optional(),evidence:z.string().optional()})).min(1)}},wrap(async a=>{
  const asset=await store.get('runs',a.choicesId);if(asset.companyId!==a.companyId)throw Error('CHOICE_CAPTURE_SCOPE_MISMATCH');
+ await assertCapturedAcquisition(store,{companyId:a.companyId,captureId:asset.captureId,pageUrl:asset.pageUrl});
  const profile=await loadProfile(profileFile),form=lookupCompanyForm(profile,a.companyId,asset.pageUrl).form;const results=[],pending=[];
  for(const item of a.resolutions){const choice=asset.choices.find(c=>c.selector===item.selector),mapping=Object.values(form?.mappings||{}).find(m=>m.selector===item.selector&&m.active!==false);
   if(!choice){pending.push({selector:item.selector,status:'needs_option_capture',nextTool:'capture_choice_options'});continue;}
@@ -273,7 +279,7 @@ async function prepareRole(args){
   await queues.put(t.taskId,state);
   return {status:state.status,taskId:t.taskId,companyId:t.companyId,roleTitle:t.title,pageUrl:state.returnUrl,fillRunId:fill.id,verifyRunId:verification.id,counts:verification.counts,summary:verification.summary,deferredControls:fill.results[0]?.deferredControls||[],continuation:continuationFor({verification,template,profile:await loadProfile(profileFile)}),fillElapsedMs:fill.elapsedMs,initialReadbackStatus:fill.status,exceptions:verification.checks.filter(x=>!['match','confirmed_omission'].includes(x.status)).map(({id,label,status,reason})=>({id,label,status,reason})),save:verification.save,submission:'not_performed'};
 }
-registerTool('role_prepare',{description:'从冻结岗位队列取目标；核对登录后已返回原岗位，离线编译全部字段后填写并独立核验。仅返回异常与计数，不提交。',inputSchema:{...queueTask,authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1),sensitiveFields:z.boolean().default(false),uploads:z.boolean().default(false),allowPartialPreparation:z.boolean().default(false)})}},wrap(prepareRole));
+registerTool('role_prepare',{description:'从冻结岗位队列取目标；核对登录后已返回原岗位，离线编译全部字段后填写并独立核验。仅返回异常与计数，不提交。',inputSchema:{...queueTask,authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1),sensitiveFields:z.boolean().default(false),uploads:z.boolean().default(false),allowPartialPreparation:z.boolean().default(false),uploadFieldIds:z.array(z.string().min(1)).min(1).max(10).optional()})}},wrap(prepareRole));
 registerTool('workflow_advance',{description:'连续推进已确认队列中多个公司，每家公司调用完整岗位准备和读回链；一家公司待用户不会停止其它公司。只执行已封存模板，不自动重试失败写入，不提交。',inputSchema:{tasks:z.array(z.object(queueTask)).min(1).max(20),concurrency:z.number().int().min(1).max(5).default(2),authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1),sensitiveFields:z.boolean().default(false),uploads:z.boolean().default(false),allowPartialPreparation:z.boolean().default(false)})}},wrap(async a=>{const identities=await Promise.all(a.tasks.map(t=>queues.task(t)));if(new Set(identities.map(x=>x.t.companyId)).size!==identities.length)throw Error('ONE_CURRENT_ROLE_PER_COMPANY_REQUIRED');return advanceCompanies(a.tasks,async task=>{
  const queued=await queues.task(task),state=await queues.read(queued.t.taskId),route=await engine.formRoute({companyId:queued.t.companyId,roleId:queued.t.roleId,pageUrl:state.returnUrl||queued.t.url});
  if(route.route==='acquire')return {status:'needs_form_acquisition',route,continuation:continuationFor({route})};
@@ -338,7 +344,7 @@ registerTool('browser_open',{description:'在共用的 MCP Chrome 中打开已�
   if(u.origin!==c.origin||!t.pages.some(p=>u.pathname.startsWith(p.pathPrefix)))throw Error('COMPANY_FORM_SCOPE_MISMATCH');
   return engine.withCompanyLease(companyId,()=>browser.request('openPage',{pageUrl}));
 }));
-registerTool('probe_conditions',{description:'仅内部建库维护：按已捕获的条件选项通过真实控件展开分支，强制登记新问题，恢复并核对原表单。不写个人事实、不上传、不提交；缺少探测授权或无法恢复原选择时拒绝。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),roleId:z.string().optional(),templateHash:z.string(),authorization:z.object({probe:z.literal(true),evidence:z.string().min(1)})}},wrap(({authorization,...task})=>engine.probeCompany(task,authorization)));
+registerTool('probe_conditions',{description:'仅内部建库维护：按已捕获的条件选项通过真实控件展开分支，强制登记新问题，恢复并核对原表单。不写个人事实、不上传、不提交；缺少探测授权或无法恢复原选择时拒绝。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),roleId:z.string().optional(),templateHash:z.string(),authorization:z.object({probe:z.literal(true),evidence:z.string().min(1)})}},wrap(async({authorization,...task})=>{const company=engine.companyForTask(task);if(!company?.templateId)throw Error('COMPANY_NOT_COVERED');await assertAcquisitionChain(await store.get('templates',company.templateId),{store,companyId:task.companyId});return engine.probeCompany(task,authorization);}));
 registerTool('capture_form_definition',{description:'内部建库：按公司已核实的官网模板读取接口获取全部栏目、隐藏条件问题和选项字典，强制登记个人JSON；不读取候选人答案，不填写、不提交。',inputSchema:{companyId:z.string(),pageUrl:z.string().url()}},wrap(args=>engine.withCompanyLease(args.companyId,async()=>{
  const company=catalog.companies.find(c=>c.id===args.companyId);if(!company||new URL(args.pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
  const recipeFile=directory.definitionFile(args.companyId);if(!recipeFile)throw Error('FORM_DEFINITION_NOT_CONFIGURED');const recipe=JSON.parse(await readFile(recipeFile,'utf8'));
@@ -401,11 +407,14 @@ registerTool('capture_rea_structure',{description:'内部建库：REA只读采�
  const capture=await captureCompanyControls({companyId:a.companyId,pageUrl:a.pageUrl,pageId:a.pageId,provider:a.provider});
  const joined=bindStructureControls(structure,capture),id='form-structure-'+a.companyId+'-'+hash(a.pageUrl).slice(0,16);
  const scripts=scriptCoverage(result.evidence);
- await store.put('runs',id,{...joined,structure,nativeStructure:result.nativeStructure||null,scriptInventory:result.evidence.normalized_result.scripts||null,scriptCoverage:scripts,operation:'rea_form_structure',observedAt:structure.observedAt});
+ const asset={...joined,controlCaptureHash:hash(capture),structure,rawEvidence:result.evidence,nativeStructure:result.nativeStructure||null,scriptInventory:result.evidence.normalized_result.scripts||null,scriptCoverage:scripts,operation:'rea_form_structure',observedAt:structure.observedAt};
+ assertAcquiredStructure(asset,capture,a.companyId);
+ await store.put('runs',id,asset);
  return {structureId:id,captureId:capture.captureId,controls:joined.controls.length,reaEvidenceId:structure.evidenceId,nativeStructure:result.nativeStructure?{documents:result.nativeStructure.documents.length,nodes:result.nativeStructure.documents.reduce((n,d)=>n+d.nodes.length,0),structureHash:result.nativeStructure.structureHash}:null,scripts,limitations:structure.limitations,nextTools:['form_mapping_candidates','capture_choice_options','form_build_template'],submission:'not_performed'};
 })));
 registerTool('form_mapping_candidates',{description:'离线给每个已捕获问题列出个人主档语义候选；同名重复记录或多候选不自动选择，不向用户重复询问已知事实。',inputSchema:{companyId:z.string(),captureId:z.string()}},wrap(async a=>{
  const capture=await store.get('runs',a.captureId);if(capture.companyId!==a.companyId)throw Error('CAPTURE_COMPANY_MISMATCH');
+ await assertCapturedAcquisition(store,{companyId:a.companyId,captureId:a.captureId});
  const profile=await loadProfile(profileFile),form=lookupCompanyForm(profile,a.companyId,capture.pageUrl).form;
  return {captureId:a.captureId,candidates:mappingCandidates(capture.controls,profile).map(c=>{const entry=Object.entries(form?.mappings||{}).find(([,m])=>m.selector===c.selector&&m.active!==false);return {...c,questionId:entry?.[0]||null,currentFactKey:entry?.[1]?.factKey||null};}),nextTools:['profile_map_questions','form_search_choices','form_build_template'],requiresUser:false};
 }));
@@ -428,6 +437,7 @@ registerTool('form_build_template',{description:'统一控件合集按真实采�
  if(reaStructure.operation!=='rea_form_structure'||reaStructure.structure?.provider!=='rea'||reaStructure.reaEvidenceHash!==reaStructure.structure.evidenceHash)throw Error('REA_STRUCTURE_EVIDENCE_REQUIRED');
  if(reaStructure&&reaStructure.captureId!==capture.captureId)throw Error('REA_CONTROL_CAPTURE_SCOPE_MISMATCH');
  const built=buildFormTemplate({capture,profile,mappings:Object.values(form.mappings),choices,page:a.page,templateId:a.templateId,version:a.version,reaStructure,reaReconciliation:a.reaReconciliation});
+ await recordAcquisitionChain(store,{companyId:a.companyId,structureId:a.structureId,structure:reaStructure,capture,template:built.template});
  for(const id of new Set(built.choices.map(c=>c.choicesId).filter(Boolean)))await store.update('runs',id,asset=>({...asset,choices:asset.choices.map(choice=>{const updated=built.choices.find(c=>c.choicesId===id&&c.selector===choice.selector);return updated?{...choice,...(updated.resolutions?{resolutions:updated.resolutions}:{}),...(updated.goal?{goal:updated.goal}:{})}:choice;})}));
  await updateProfile(profileFile,p=>registerTemplateContract(p,{companyId:a.companyId,template:built.template,templateHash:hash(built.template),stage:'construction'}));
  const draftId='form-draft-'+a.companyId+'-'+hash(capture.pageUrl).slice(0,16);await store.put('runs',draftId,{...built,companyId:a.companyId,captureId});
@@ -440,6 +450,7 @@ registerTool('form_template_audit',{description:'只读逐字段区分技术建�
 }));
 registerTool('template_finalize',{description:'只接受匹配当前资产Hash、全部声明分支通过并恢复的真实探测回执；代码检查实际控件覆盖和类型后封存公司资产。不把资料缺失或页面填写当作完成。',inputSchema:{companyId:z.string(),roleId:z.string().optional(),templateHash:z.string(),probeRunId:z.string().uuid()}},wrap(args=>engine.withCompanyLease(args.companyId,async()=>{
  const c=engine.companyForTask(args),t=await store.get('templates',c.templateId);if(hash(t)!==args.templateHash)throw Error('TEMPLATE_VERSION_CHANGED');
+ await assertAcquisitionChain(t,{store,companyId:args.companyId});
  const probe=await reconcileSelectorMappings(args.companyId,t,await store.get('runs',args.probeRunId));await updateProfile(profileFile,p=>retireLegacyQuestionMappings(p,{companyId:args.companyId,template:t,probe}));const profile=await loadProfile(profileFile);assertQuestionsMapped(profile,args.companyId,t.evidence.sourceUrl);assertDefinitionMapped(profile,args.companyId,t);
  const channel=await browser.channel({pageUrl:t.evidence.sourceUrl});const sealed=sealFormTemplate(t,probe,{companyId:args.companyId,profileMapped:true,channel});validateTemplate(sealed);
  await updateProfile(profileFile,p=>registerTemplateContract(p,{companyId:args.companyId,template:sealed,templateHash:hash(sealed)}));await store.put('templates',sealed.id,sealed);
@@ -461,11 +472,13 @@ registerTool('template_rebind_role',{description:'建库阶段离线复用同公
   return {templateId:result.template.id,templateHash:hash(result.template),status:'rebound_require_construction_probe',nextTools:['capture_controls','probe_conditions','template_finalize','prepare_plan'],requiresLiveVerification:true,browserAccess:false};
  });
 }));
-registerTool('template_register',{description:'持久化已采集并确定的操作方案。优先传form_build_template返回的draftId和draftHash，MCP核对归属、缺口与Hash后直接读取完整草稿，无须模型抄写模板；也兼容inline template，两种输入互斥。不把建库等同于实测通过。',inputSchema:{companyId:z.string(),roleId:z.string().optional(),template:z.record(z.unknown()).optional(),draftId:z.string().optional(),draftHash:z.string().length(64).optional()}},wrap(async ({companyId,roleId,template,draftId,draftHash})=>engine.withCompanyLease(companyId,async()=>{
+registerTool('template_register',{description:'持久化已采集并确定的操作方案。只接受form_build_template返回的draftId和draftHash，MCP核对归属、缺口与Hash后直接读取完整草稿，无须模型抄写模板；拒绝inline template及缺完整采集建库回执的导入。不把建库等同于实测通过。',inputSchema:{companyId:z.string(),roleId:z.string().optional(),template:z.record(z.unknown()).optional(),draftId:z.string().optional(),draftHash:z.string().length(64).optional()}},wrap(async ({companyId,roleId,template,draftId,draftHash})=>engine.withCompanyLease(companyId,async()=>{
   const c=catalog.companies.find(c=>c.id===companyId);if(!c)throw Error('UNKNOWN_COMPANY');
   if(template&&(draftId||draftHash)||!template&&!draftId||draftId&&!draftHash||draftHash&&!draftId)throw Error('EXACTLY_ONE_TEMPLATE_INPUT_REQUIRED');
+  if(template)throw Error('MCP_BUILT_DRAFT_REQUIRED');
   if(draftId)template=templateFromDraft(await store.get('runs',draftId),{companyId,draftHash},hash);
   template=canonicalControlSpec(template);validateTemplate(template);if(new URL(template.evidence.sourceUrl).origin!==c.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
+  await assertAcquisitionChain(template,{store,companyId,profile:await loadProfile(profileFile)});
   const t=unsealedTemplate(template);
   await assertStoredChoiceGoals(t,{store,companyId,profile:await loadProfile(profileFile),required:true});
   await assertStoredChoiceResolutions(t,{store,companyId,profile:await loadProfile(profileFile)});
@@ -517,7 +530,7 @@ registerTool('profile_record_answers',{description:'将用户本轮明确回答�
   if(!profileFile)throw Error('PROFILE_REQUIRED_FOR_NEW_QUESTIONS');return updateProfile(profileFile,p=>recordProfileAnswers(p,args));
 }));
 registerTool('profile_map_questions',{description:'内部建库：优先将已捕获问题映射到主档既有原子事实；确认是新增语义时可define登记类型及名称，答案保持missing，不推断个人取值；保留新问题定义与映射证据，不允许改写用户本人操作项。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),evidence:z.string().min(1),mappings:z.array(z.object({questionId:z.string(),factKey:z.string(),define:z.object({label:z.string().min(1),canonicalType:z.enum(['string','number','boolean','string[]']),precision:z.enum(['year','month','day']).optional()}).optional()})).min(1)}},wrap(async args=>{
-  if(!profileFile)throw Error('PROFILE_REQUIRED_FOR_NEW_QUESTIONS');return updateProfile(profileFile,p=>mapProfileQuestions(p,args));
+  if(!profileFile)throw Error('PROFILE_REQUIRED_FOR_NEW_QUESTIONS');await assertCapturedAcquisition(store,{companyId:args.companyId,pageUrl:args.pageUrl});return updateProfile(profileFile,p=>mapProfileQuestions(p,args));
 }));
 registerTool('verify_current',{description:'代码直接读取当前页面并核对个人JSON、选中状态、日期、重复条数、上传和错误；强制登记新增问题，保存差异报告，不填写或提交。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),roleId:z.string().optional(),templateHash:z.string(),decisions:z.record(z.unknown()).optional()}},wrap(async task=>{
   if(!profileFile)throw Error('PROFILE_REQUIRED_FOR_NEW_QUESTIONS');

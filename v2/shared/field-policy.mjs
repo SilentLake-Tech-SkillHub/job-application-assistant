@@ -1,4 +1,5 @@
 import {MATERIAL_SOURCES} from './business-materials.mjs';
+import {resolveDateFact,datePrecisionGap} from './date-fact-resolution.mjs';
 import {projectDateValue,validDate} from './value-contract.mjs';
 // Technical construction gaps are not human-only actions.
 export function humanActionReason(field) {
@@ -45,10 +46,11 @@ export function classifyPending(field,profile) {
  if(field.source?.startsWith('unmapped.'))return {kind:'mapping',reason:'SEMANTIC_MAPPING_REQUIRED',owner:'agent'};
  if(Object.values(MATERIAL_SOURCES).includes(field.source))return {kind:'ready',owner:'agent',resolution:'confirmed_role_material_required_at_preflight'};
  if(field.ongoingSource&&profile?.facts?.[field.ongoingSource]?.status==='known'&&profile.facts[field.ongoingSource].value===true)return {kind:'ready',owner:'agent',resolution:'sourced_same_record_ongoing'};
- const fact=profile?.facts?.[field.source];
+ const fact=field.kind==='date'?resolveDateFact(profile,field.source).fact:profile?.facts?.[field.source];
  if(!fact||fact.status==='missing')return {kind:'answer',reason:'CANONICAL_ANSWER_MISSING',owner:'user'};
  if(fact.status==='conflict')return {kind:'answer',reason:'CANONICAL_ANSWER_CONFLICT',owner:'user'};
  if(field.kind==='date'&&fact.status==='known'){
+  const gap=datePrecisionGap(profile,field.source,field.precision);if(gap){const {sourcePrecision,requiredPrecision,missingComponents}=gap;return {kind:'answer',reason:'DATE_SOURCE_PRECISION_INSUFFICIENT',owner:'user',sourcePrecision,requiredPrecision,missingComponents,...(gap.derivedFrom.some(source=>source!==field.source)?{knownDateEvidence:gap}:{})};}
   const units=['year','month','day'],sourcePrecision=units.find(precision=>validDate(fact.value,precision)),requiredPrecision=field.precision;
   if(sourcePrecision&&units.includes(requiredPrecision)&&!validDate(projectDateValue(fact.value,requiredPrecision),requiredPrecision)&&units.indexOf(sourcePrecision)<units.indexOf(requiredPrecision))return {kind:'answer',reason:'DATE_SOURCE_PRECISION_INSUFFICIENT',owner:'user',sourcePrecision,requiredPrecision,missingComponents:units.slice(units.indexOf(sourcePrecision)+1,units.indexOf(requiredPrecision)+1)};
  }

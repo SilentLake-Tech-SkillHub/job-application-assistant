@@ -2,6 +2,21 @@ import {annotateRecoveredControl} from './control-recovery.mjs';
 import {validDate} from './value-contract.mjs';
 import {readPhoenixSelectedValue} from './phoenix-selection.mjs';
 const popup='.common-unmodeled-layer:has(.phoenix-date-picker)';
+// Phoenix keeps the exiting calendar mounted during its close animation. A
+// strict locator.waitFor() can throw immediately when the next calendar and
+// that exiting panel are both visible. Wait for the lifecycle boundary without
+// clicking again or choosing one panel by DOM order.
+export async function waitForPhoenixDatePanel(page,{closed=false,timeoutMs=3000,sleep=ms=>new Promise(r=>setTimeout(r,ms))}={}){
+ const panel=page.locator(popup).filter({visible:true}),end=Date.now()+timeoutMs;
+ let count;
+ do{
+  count=await panel.count();
+  if(closed?count===0:count===1)return panel;
+  if(Date.now()>=end)break;
+  await sleep(20);
+ }while(true);
+ throw Error(closed?'PHOENIX_DATE_MENU_NOT_CLOSED':count>1?'DATE_MENU_NOT_UNIQUE':'PHOENIX_DATE_MENU_NOT_OPENED');
+}
 export function phoenixDayCellsDOM(panel){
  const visible=n=>n.getClientRects().length&&getComputedStyle(n).visibility!=='hidden';
  const selected=n=>n.getAttribute('aria-selected')==='true'||String(n.className).split(/\s+/).some(c=>/^(?:phoenix-calendar-selected-day|phoenix-calendar-selected-date)$/.test(c));
@@ -68,8 +83,8 @@ export async function performPhoenixDate(adapter,action,value){
   }
   if(inlineBefore.checked){if(action.operation==='verify')throw Error('PHOENIX_ONGOING_STILL_SELECTED');if(inlineBefore.disabled)throw Error('PHOENIX_INLINE_ONGOING_DISABLED');await inline.setChecked(false);if((await readInline()).checked)throw Error('PHOENIX_ONGOING_STILL_SELECTED');}
  }
- const close=async()=>{await label.click({timeout:10000});};
- const open=async()=>{await trigger.click({timeout:10000});const p=adapter.page.locator(popup).filter({visible:true});await p.waitFor({state:'visible',timeout:3000});if(await p.count()!==1)throw Error('DATE_MENU_NOT_UNIQUE');return p;};
+ const close=async()=>{await label.click({timeout:10000});await waitForPhoenixDatePanel(adapter.page,{closed:true});};
+ const open=async()=>{await trigger.click({timeout:10000});return waitForPhoenixDatePanel(adapter.page);};
  const inspect=async panel=>{
   const month=panel.locator('.phoenix-calendar-month-panel').filter({visible:true}),year=panel.locator('.phoenix-calendar-year-calendar').filter({visible:true}),special=panel.locator('.phoenix-date-picker-special-text input').filter({visible:true}),check=panel.locator('.phoenix-date-picker-special-check input[type="checkbox"]');
   const ongoing=await special.count()===1&&await check.count()===1&&await special.inputValue()==='至今'?'至今':null;
@@ -83,7 +98,7 @@ export async function performPhoenixDate(adapter,action,value){
  let panel;
  try{
   panel=await open();const options=await inspect(panel);if(inline)options.inlineOngoing={label:'至今',selected:(await readInline()).checked,source:'captured_inline_checkbox'};
-  if(action.operation==='inspect'){await close();await panel.waitFor({state:'hidden',timeout:3000});return {status:'captured_date_options',options:[],dateOptions:options,restored:await read()===before&&(!inline||(await readInline()).checked===inlineBefore.checked)};}
+  if(action.operation==='inspect'){await close();return {status:'captured_date_options',options:[],dateOptions:options,restored:await read()===before&&(!inline||(await readInline()).checked===inlineBefore.checked)};}
   if(!options.precision)throw Error('PHOENIX_DATE_PRECISION_NOT_SUPPORTED');
   if(action.precision&&action.precision!==options.precision)throw Error('PHOENIX_DATE_PRECISION_CHANGED');
   if(value==='至今'){

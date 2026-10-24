@@ -53,7 +53,7 @@ export function verifyForm(expected, observed, {now=Date.now(),maxAgeMs=60000}={
       const empty=actual.value===null||actual.value===undefined||actual.value===''||(Array.isArray(actual.value)&&!actual.value.length);
       const omit=!field.required && empty && ['confirmed_absent','user_declined','not_applicable'].includes(field.omission?.kind) && typeof field.omission?.evidence==='string' && field.omission.evidence.trim().length>0;
       check.status=field.required?'missing_input':!empty?'mismatch':omit?'confirmed_omission':'needs_user';
-      check.reason=!empty?'UNSOURCED_VALUE_ON_PAGE':omit?'USER_RESOLVED_EMPTY_FIELD':'UNANSWERED_FIELD_REQUIRES_USER_RESPONSE';checks.push(check);continue;
+      check.reason=!empty?'UNSOURCED_VALUE_ON_PAGE':omit?'USER_RESOLVED_EMPTY_FIELD':field.datePrecisionGap?'DATE_SOURCE_PRECISION_INSUFFICIENT':'UNANSWERED_FIELD_REQUIRES_USER_RESPONSE';if(field.datePrecisionGap)check.datePrecisionGap=field.datePrecisionGap;checks.push(check);continue;
     }
     if(actual.errors?.length){check.status='invalid';check.reason='FIELD_VALIDATION_ERROR';checks.push(check);continue;}
     if(field.searchableCommitRequired&&(actual.searchableCommitProof?.status!=='verified'||actual.searchableCommitProof.label!==actual.value||actual.searchableCommitProof.blurConfirmed!==true||actual.searchableCommitProof.readbackStable!==true||!(actual.searchableCommitProof.optionClicked===true||actual.searchableCommitProof.mode==='explicit_custom_value'))){check.status='mismatch';check.reason=actual.searchableCommitProof?.reason||'SEARCHABLE_COMMIT_ACTION_PROOF_REQUIRED';const errorDetails=safeControlErrorDetails(actual.searchableCommitProof?.errorDetails);if(errorDetails)check.errorDetails=errorDetails;checks.push(check);continue;}
@@ -71,8 +71,10 @@ export function verifyForm(expected, observed, {now=Date.now(),maxAgeMs=60000}={
     if(field.kind==='file' && actual.uploadState!=='site_rendered_uploaded'){
       check.reason='UPLOAD_NOT_CONFIRMED_BY_SITE';checks.push(check);continue;
     }
-    check.status=equal(actual.value,field.value)?'match':'mismatch';
-    if(check.status==='mismatch')check.reason='VALUE_DIFFERS';
+    const content=actual.uploadContentProof,renamedFile=field.kind==='file'&&content?.status==='verified'&&(content.kind==='downloaded_content_sha256'&&content.actualSha256===field.fileSourceSha256?.[0]||content.kind==='source_upload_artifact_identity'&&content.uploadOriginMatched===true)&&field.fileSourceSha256?.length===1&&content.expectedSha256===field.fileSourceSha256[0]&&actual.value?.length===1&&content.observedFilename===actual.value[0];
+    check.status=equal(actual.value,field.value)||renamedFile?'match':'mismatch';
+    if(renamedFile)check.evidence=content.kind;
+    if(check.status==='mismatch')check.reason=field.kind==='file'&&content?.status==='unverified'?content.reason:field.kind==='file'&&content?.status==='mismatch'?'UPLOAD_CONTENT_DIFFERS_FROM_SOURCE':'VALUE_DIFFERS';
     if(!field.sensitive){check.expected=field.value;check.actual=actual.value;}
     checks.push(check);
   }

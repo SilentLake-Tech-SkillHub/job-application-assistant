@@ -38,7 +38,7 @@ function listFixture({selected='',ids=false,badSelectedLabel=false,duplicate=fal
  const search=chain({count:async()=>1,inputValue:async()=>query,fill:async v=>{query=v;}});
  const rows=()=>[{label:'Example Industry',value:ids?'option-a':null,valueAttribute:ids?'data-id':null,disabled:false}];
  const button=kind=>chain({count:async()=>1,click:async()=>{if(kind==='确定'){current=draft;confirms++;}else{draft=current;cancels++;}opened=false;}});
- const menu=chain({count:async()=>opened?1:0,waitFor:async()=>{},getByRole:(_,{name})=>button(name),evaluate:async fn=>fn.name==='listPopupOptionsDOM'?rows():{count:draft?1:0,text:badSelectedLabel?draft+' extra':draft,empty:!draft,values:draft&&ids?['option-a']:[],scopeValid:true},locator:s=>s==='input[placeholder="搜索"]'?search:s==='.phoenix-button'?{filter:({hasText})=>button(hasText.test('确定')?'确定':'取消')}:chain({count:async()=>duplicate?2:1,click:async()=>{navigationClicks++;},locator:s=>s==='.icon-container'?chain({count:async()=>iconCount,click:async()=>{draft='Example Industry';writes++;}}):chain({count:async()=>0,click:async()=>{navigationClicks++;}})})});
+ const menu=chain({count:async()=>opened?1:0,waitFor:async()=>{},getByRole:(_,{name})=>button(name),evaluate:async fn=>fn.name==='listPopupOptionsDOM'?rows():{count:draft?1:0,text:badSelectedLabel?draft+' extra':draft,empty:!draft,values:draft&&ids?['option-a']:[],scopeValid:true},locator:s=>s==='input[placeholder="搜索"]'?search:s==='.phoenix-button'?{filter:({hasText})=>button(hasText.test('确定')?'确定':'取消')}:chain({count:async()=>duplicate?2:1,click:async()=>{navigationClicks++;},locator:s=>s===':scope > .icon-container > svg.RadioUnchecked, :scope > .icon-container > svg.RadioChecked'?chain({count:async()=>iconCount,click:async()=>{draft='Example Industry';writes++;}}):chain({count:async()=>0,click:async()=>{navigationClicks++;}})})});
  const trigger={innerText:async()=>current?current+'\n'+current:'请选择',locator:s=>{assert.equal(s,'.phoenix-select__content');return {count:async()=>1,innerText:async()=>current};},click:async()=>{opened=true;draft=current;}};
  return {adapter:{page:{locator:()=>menu}},trigger,state:()=>({opened,current,draft,writes,confirms,cancels,navigationClicks})};
 }
@@ -54,7 +54,7 @@ test('list popup independent verification never selects or repairs a missing cho
 });
 test('list popup reads one right pane with actual count, limit and selected-container nodes',()=>{
  const header={innerText:'1/'},limit={innerText:'1'},item={getAttribute:a=>a==='data-id'?'option-a':null};
- const container={innerText:'Example Industry',querySelector:()=>null,querySelectorAll:()=>[item]};
+ const container={innerText:'Example Industry',querySelector:()=>null,querySelectorAll:s=>s==='[data-value],[data-id]'?[item]:[]};
  const pane={getClientRects:()=>[{}],querySelectorAll:s=>s==='.select-data-num-text'?[header]:s==='.select-data-num-limit'?[limit]:s==='.select-data-container'?[container]:[]},root={querySelectorAll:()=>[pane]};
  const read=()=>vm.runInNewContext('('+listPopupSelectionDOM.toString()+')(root)',{root,getComputedStyle:()=>({visibility:'visible'})});const proof=read();assertAreaSelection(proof,'Example Industry','option-a');
  limit.innerText='40';assert.equal(read().limit,40);assertAreaSelection(read(),'Example Industry','option-a');

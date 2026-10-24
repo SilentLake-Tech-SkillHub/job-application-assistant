@@ -1,4 +1,5 @@
 import {resolveDateRepresentation} from './date-representation.mjs';
+import {resolveDateFact,datePrecisionGap} from './date-fact-resolution.mjs';
 import {assertChoiceGoalSources} from './choice-goal-contract.mjs';
 import {MATERIAL_SOURCES,materialKey,resolveMaterialValues} from './business-materials.mjs';
 import {majorFacts} from './major-policy.mjs';
@@ -154,13 +155,15 @@ export function resolveProfile(profile, template, decisions={}, companyId, mater
   assertDefinitionMapped(profile,companyId,template);
   const material=materialContext?resolveMaterialValues(materialContext):null;
   const dateRepresentations={},values={...material?.values},missing=[],sources={...material?.sources},omissions={...decisions.omissions};
-  const factValue=key=>{
+  const factValue=(key,field)=>{
     if(/^education\.[^.]+\.major\.(canonical|application)$/.test(key)&&majorFacts(profile,key)?.real)throw Error('MAJOR_REAL_SOURCE_REQUIRES_REBUILD');
     if(Object.values(MATERIAL_SOURCES).includes(key)){if(!material)throw Error('CONFIRMED_MATERIAL_CONTEXT_REQUIRED');return material.values[key];}
-    const f=profile.facts[key];
+    const date=field?.kind==='date'?resolveDateFact(profile,key):null,f=date?date.fact:profile.facts[key];
+    const dateGap=date?datePrecisionGap(profile,key,field.precision):null;
+    if(dateGap){missing.push(key);sources[key]={sourceIds:f.sourceIds,precision:f.precision||dateGap.sourcePrecision,datePrecisionGap:dateGap};return undefined;}
     if(f?.status==='not_applicable'&&f.omission&&profile.sources[f.omission.evidence])return undefined;
     if(!f||f.status!=='known'){missing.push(key);return undefined;}
-    sources[key]={sourceIds:f.sourceIds,precision:f.precision||null};
+    sources[key]={sourceIds:f.sourceIds,precision:f.precision||null,...(date?{derivedFrom:date.derivedFrom,dateNormalization:f.dateNormalization||null}: {})};
     return f.value;
   };
   for(const field of template.pages.flatMap(p=>p.fields)){
@@ -179,7 +182,7 @@ export function resolveProfile(profile, template, decisions={}, companyId, mater
     if(field.compose){
       const parts=field.compose.sources.map(key=>field.compose.optionalSources?.includes(key)&&profile.facts[key]?.status!=='known'?'':factValue(key));
       if(parts.every(v=>v!==undefined))values[field.source]=parts.filter(v=>v!=='').join(field.compose.separator??'\n');
-    }else values[field.source]=factValue(field.source);
+    }else values[field.source]=factValue(field.source,field);
   }
   return {values,dateRepresentations,missing:[...new Set(missing)],sources,...(material?{materialContext}:{}),profileHash:hash(profile),files:profile.files||{},omissions,contentPolicy:resolveContentPolicy(profile,companyId)};
 }
@@ -190,10 +193,11 @@ export function profileStatus(profile,companyId,pageUrl) {
   return {profileHash:hash(profile),forms:forms.map(([pageKey,form])=>({pageKey,companyId:form.companyId,pageUrl:form.pageUrl,
     questions:Object.entries(form.mappings).map(([questionId,m])=>{const f=profile.facts[m.factKey],d=profile.fieldRegistry?.[m.factKey];
       const contract=form.executionContract?.fields?.find(x=>x.source===m.factKey&&x.inventorySelectors?.includes(m.selector));
+      const resolvedDate=contract?.kind==='date'?resolveDateFact(profile,m.factKey):null,dateGap=resolvedDate?datePrecisionGap(profile,m.factKey,contract.precision):null;
       const ongoing=contract?.ongoingSource&&profile.facts[contract.ongoingSource];
       const derived=ongoing?.status==='known'&&ongoing.value===true;
       return {questionId,selector:m.selector,factKey:m.factKey,label:d?.label||d?.semanticKey||null,mappingStatus:m.status,
-        answerStatus:Object.values(MATERIAL_SOURCES).includes(m.factKey)?'role_material':derived?'known':f?.status||'missing',factStatus:Object.values(MATERIAL_SOURCES).includes(m.factKey)?'external_source':f?.status||'missing',...(derived?{resolution:{kind:'ongoing',source:contract.ongoingSource,sourceIds:ongoing.sourceIds}}:{}),required:!!m.required,active:m.active!==false,coverageRequired:!!m.coverageRequired,userOnly:m.status==='user_only',omission:f?.omission||null};})}))};
+        answerStatus:Object.values(MATERIAL_SOURCES).includes(m.factKey)?'role_material':dateGap?'precision_incomplete':derived||resolvedDate?.fact?.status==='known'?'known':f?.status||'missing',factStatus:Object.values(MATERIAL_SOURCES).includes(m.factKey)?'external_source':f?.status||'missing',...(dateGap?{datePrecisionGap:dateGap}:{}),...(derived?{resolution:{kind:'ongoing',source:contract.ongoingSource,sourceIds:ongoing.sourceIds}}:{}),required:!!m.required,active:m.active!==false,coverageRequired:!!m.coverageRequired,userOnly:m.status==='user_only',omission:f?.omission||null};})}))};
 }
 
 export function recordProfileAnswers(profile,{answers,evidence,recordedAt=new Date().toISOString()}) {

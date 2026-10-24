@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';
-import {performPhoenixDate,phoenixDayCellsDOM,phoenixInlineOngoingDOM} from '../shared/phoenix-date.mjs';
+import {performPhoenixDate,phoenixDayCellsDOM,phoenixInlineOngoingDOM,waitForPhoenixDatePanel} from '../shared/phoenix-date.mjs';
 import {buildFormTemplate} from '../shared/form-construction.mjs';import {validateTemplate} from '../shared/engine.mjs';
 import {verifyDateRanges} from '../shared/date-range-verification.mjs';
 function fixture({missingMarker=false,ongoing=false,precision='month',initial='',dayWithoutAttributes=false,duplicateDay=false,missingHeader=false}={}){
@@ -28,6 +28,17 @@ function fixture({missingMarker=false,ongoing=false,precision='month',initial=''
 }
 test('Phoenix date discovery reads actual precision and restores without changing a value',async()=>{
  for(const precision of ['month','day','year']){const f=fixture({precision}),r=await performPhoenixDate(f.adapter,{selector:'#date',labelSelector:'#label',operation:'inspect'});assert.equal(r.dateOptions.precision,precision);assert.equal(r.restored,true);assert.equal(f.state().writes,0);}
+});
+test('calendar transition waits for uniqueness and complete dismissal without strict locator races or repeat clicks',async()=>{
+ for(const [closed,counts] of [[false,[2,2,1]],[true,[2,1,0]]]){
+  let reads=0,sleeps=0;const panel={filter(){return this;},count:async()=>counts[Math.min(reads++,counts.length-1)],waitFor:async()=>{throw Error('STRICT_LOCATOR_MUST_NOT_RUN');}};
+  const result=await waitForPhoenixDatePanel({locator:()=>panel},{closed,sleep:async()=>{sleeps++;}});
+  assert.equal(result,panel);assert.equal(reads,3);assert.equal(sleeps,2);
+ }
+ for(const [closed,count,reason] of [[false,2,'DATE_MENU_NOT_UNIQUE'],[false,0,'PHOENIX_DATE_MENU_NOT_OPENED'],[true,1,'PHOENIX_DATE_MENU_NOT_CLOSED']]){
+  const panel={filter(){return this;},count:async()=>count};
+  await assert.rejects(waitForPhoenixDatePanel({locator:()=>panel},{closed,timeoutMs:0}),new RegExp(reason));
+ }
 });
 test('Phoenix month selection navigates actual year and independently reopens selected month',async()=>{const f=fixture(),r=await performPhoenixDate(f.adapter,{selector:'#date',labelSelector:'#label'},'2027-08');assert.equal(r.selectionVerified,true);assert.deepEqual(f.state(),{year:2027,month:8,value:'2027-08',opened:false,writes:1});});
 test('matching date text and today marker cannot substitute for actual selected state',async()=>{

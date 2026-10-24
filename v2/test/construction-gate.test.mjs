@@ -13,7 +13,7 @@ async function fixture(fn){
  const companies=[{id:'a',origin:'https://a.example.com',templateId:'form-a'},{id:'b',origin:'https://b.example.com',templateId:'form-b'}];
  const browser={existingPage:async()=>{browserAccesses++;throw Error('UNEXPECTED_BROWSER_ACCESS');}};
  const engine=new Engine({store,companies,browser,leaseRoot:path.join(root,'leases')});
- const task=async(index,coverage,values={name:'Synthetic'})=>{const c=companies[index];let t=template(c.templateId,c.origin,coverage);if(!coverage){const observed=observedSeal(t,c.id);t=observed.template;await store.put('runs',observed.probe.id,observed.probe);}await store.put('templates',t.id,t);const args={companyId:c.id,pageUrl:c.origin+'/form',templateHash:hash(t),values};const plan=await engine.preparePlan(args);return {...args,planId:plan.planId,planHash:plan.planHash,compiled:plan};};
+ const task=async(index,coverage,values={name:'Synthetic'})=>{const c=companies[index];let t=template(c.templateId,c.origin,coverage);if(!coverage){const observed=observedSeal(t,c.id);t=observed.template;await observed.persist(store);await store.put('runs',observed.probe.id,observed.probe);}await store.put('templates',t.id,t);const args={companyId:c.id,pageUrl:c.origin+'/form',templateHash:hash(t),values};const plan=await engine.preparePlan(args);return {...args,planId:plan.planId,planHash:plan.planHash,compiled:plan};};
  try{await fn({engine,task,accesses:()=>browserAccesses});}finally{await rm(root,{recursive:true,force:true});}
 }
 test('one incomplete company blocks the batch before any company touches a browser',()=>fixture(async({engine,task,accesses})=>{
@@ -32,6 +32,10 @@ test('partial answer authority cannot override an unsupported driver or unknown 
 test('an unanswered field cannot become execution ready merely because a plan was compiled',()=>fixture(async({engine,task,accesses})=>{
  const a=await task(0,undefined,{});assert.equal(a.compiled.status,'needs_answers');assert.equal(a.compiled.readyForExecution,false);
  await assert.rejects(engine.prepare({tasks:[a],authorization:{prepare:true,evidence:'synthetic'}}),/PROFILE_PREPARATION_INCOMPLETE/);assert.equal(accesses(),0);
+}));
+test('an upload retry scope cannot include ordinary or unknown fields, before any browser access',()=>fixture(async({engine,task,accesses})=>{
+ const a=await task(0);for(const uploadFieldIds of [['name'],['unknown'],['name','name']])await assert.rejects(engine.prepare({tasks:[a],authorization:{prepare:true,uploads:true,evidence:'retry approved material',uploadFieldIds}}),/UPLOAD_FIELD_SCOPE_INVALID/);
+ assert.equal(accesses(),0);
 }));
 
 test('saved page-global positional locators are blocked even with partial preparation authority',async()=>{

@@ -59,3 +59,13 @@ class WorkflowHookTest(unittest.TestCase):
   self.invoke(hook_event_name='UserPromptSubmit')
   r=self.invoke(tool_name='mcp__recruiting_form__batch_prepare');self.assertEqual(r.returncode,2);self.assertIn('V2_RUNTIME_REQUIRED',r.stderr)
   self.assertEqual(self.invoke(tool_name='mcp__recruiting_form__batch_prepare',session_id='other').returncode,0)
+
+ def test_dsh_executor_cannot_use_external_browser_shell_or_runtime_file_edits(self):
+  self.scope.write_text(json.dumps({'session_ids':['session-executor']}))
+  self.invoke(session_id='session-executor',hook_event_name='UserPromptSubmit')
+  for tool,args in [('Bash',{'command':'node /tmp/fill.mjs'}),('mcp__playwright__browser_evaluate',{'function':'() => 1'}),('apply_patch',{'patch':'x'}),('read_file',{'path':str(self.root/'private.json')})]:
+   result=self.invoke(session_id='session-executor',tool_name=tool,tool_input=args)
+   self.assertEqual(result.returncode,2,result.stdout);self.assertIn('EXECUTOR_MCP_ONLY',result.stderr)
+  self.assertEqual(self.invoke(session_id='session-executor',tool_name='read_file',tool_input={'path':str(ROOT/'SKILL.md')}).returncode,0)
+  self.assertEqual(self.invoke(session_id='session-executor',tool_name='mcp__recruiting-application-v2__role_prepare').returncode,0)
+  self.assertEqual(self.invoke(session_id='maintainer',tool_name='apply_patch').returncode,0)

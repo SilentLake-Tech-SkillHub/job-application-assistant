@@ -48,7 +48,7 @@ test('submission is recorded only for a role filled from a sealed company templa
  const taskId='11111111-1111-4111-8111-111111111111';
  await writeFile(path.join(qdir,'q1.json'),JSON.stringify({id:'q1',batchId:'B1',tasks:[{taskId,companyId:'jia',roleId:'123456'}]}));
  await assert.rejects(check(),/SUBMISSION_REQUIRES_VERIFIED_TEMPLATE_FILL/);  // 没有 MCP 填写核验记录（手工填写）
- const fixture=sealedFixture(),template=fixture.template;await store.put('templates','jia-formal',template);await store.put('runs',fixture.probe.id,fixture.probe);
+ const fixture=sealedFixture(),template=fixture.template;await store.put('templates','jia-formal',template);await fixture.persist(store);await store.put('runs',fixture.probe.id,fixture.probe);
  const runId='22222222-2222-4222-8222-222222222222';
  await store.put('runs',runId,{id:runId,operation:'verify_current',status:'needs_attention',templateHash:hash(template)});
  await writeFile(path.join(qdir,taskId+'.json'),JSON.stringify({status:'ready_for_user_review',verifyRunId:runId}));

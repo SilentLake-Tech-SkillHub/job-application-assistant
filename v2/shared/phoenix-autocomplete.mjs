@@ -61,9 +61,29 @@ export async function performPhoenixAutocomplete(adapter,action,value){
   });
  };
  if(verify)return currentProof(action.expectedCommitMode||'actual_option_click',String(value),action.expectedOptionValue,true);
- // Replacing a nonempty input can clear its bound dictionary entity. Until a
- // generic restoration driver exists, reject before any focus or mutation.
- if(inspect&&(before!==''||await websiteId()))throw Error('AUTOCOMPLETE_INSPECTION_NONEMPTY_REQUIRES_RESTORE');
+ // Existing text/entity must never be cleared just to acquire options. Open
+ // the existing menu passively, read actual candidates, and prove that blur
+ // preserved both the original text and exposed entity identity. This does
+ // not claim that a requested search was applied or a selection was made.
+ if(inspect&&(before!==''||await websiteId())){
+  const originalId=await websiteId(),originalWarning=await warning();
+  if(!before||await menu.count()!==0)throw Error('AUTOCOMPLETE_INSPECTION_NONEMPTY_REQUIRES_RESTORE');
+  let records=[];
+  try{
+   await input.click({timeout:10000});
+   const deadline=Date.now()+1500;
+   do{if(await menu.count()===1)records=await menu.evaluate(choiceProofDOM,{operation:'options',selector:item});if(records.length||Date.now()>=deadline)break;await new Promise(resolve=>setTimeout(resolve,30));}while(true);
+  }finally{
+   await close();
+   const first={value:await read(),id:await websiteId(),warning:await warning()};
+   await new Promise(resolve=>setTimeout(resolve,90));
+   const second={value:await read(),id:await websiteId(),warning:await warning()};
+   const expected={value:before,id:originalId,warning:originalWarning};
+   if(await menu.count()!==0||JSON.stringify(first)!==JSON.stringify(expected)||JSON.stringify(second)!==JSON.stringify(expected))throw Error('AUTOCOMPLETE_INSPECTION_NOT_RESTORED');
+  }
+  if(!records.length)throw Error('AUTOCOMPLETE_PASSIVE_OPTIONS_NOT_AVAILABLE');
+  return {options:records.map(record=>record.label),optionRecords:records,status:'captured',restored:true,restorationProof:{kind:'original_nonempty_unchanged',valueHash:createHash('sha256').update(before).digest('hex'),entityUnchanged:true},queryApplied:false,searchable:true,scope:'current_rendered_candidates',coverage:{complete:false,reason:'passive_existing_value_menu'},executionVerified:false};
+ }
  const restoreEmpty=async()=>{await input.fill('',{timeout:10000});await close();await waitValue('');if(await websiteId()||await read()!=='')throw Error('AUTOCOMPLETE_INSPECTION_NOT_RESTORED');return true;};
  const query=action.query||String(value||'');if(!query)throw Error('AUTOCOMPLETE_QUERY_REQUIRED');
  let queryApplied=false;

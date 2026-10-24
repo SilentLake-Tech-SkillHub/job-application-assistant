@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import time
 import uuid
+import shlex
 
 ROOT = Path(os.environ['RECRUITING_WORKSPACE_ROOT']).resolve()
 POLICY = Path(os.environ['RECRUITING_WORKFLOW_POLICY'])
@@ -23,6 +24,49 @@ CONTINUATION_TOOLS = set(LIFECYCLE['stages']) | LEGACY_CONTINUATION_TOOLS
 
 def recruiting_tool(tool):
     return 'recruiting_application_v2' in tool.replace('-', '_') or 'recruiting_login_v2' in tool.replace('-', '_')
+
+
+def executor_boundary(event):
+    """Enabled execution sessions may operate websites only through this MCP.
+
+    Read-only Skill/source loading remains available. Shell programs, browser
+    tools and file writes cannot become an alternative application engine.
+    Maintenance conversations are deliberately outside this execution scope.
+    """
+    session = event.get('session_id', '')
+    if not (session.startswith('session-') or session == os.environ.get('DSH_SESSION_ID')):
+        return
+    tool = event.get('tool_name', '')
+    if recruiting_tool(tool):
+        return
+    args = event.get('tool_input') or event.get('arguments') or {}
+    if isinstance(args, str):
+        try: args = json.loads(args)
+        except ValueError: args = {}
+    kind = tool.split('__')[-1].lower()
+    if kind in {'read', 'read_file', 'readfile'}:
+        value = next((args.get(key) for key in ('filePath', 'file_path', 'path') if args.get(key)), None)
+        if value:
+            target = Path(value)
+            if not target.is_absolute(): target = ROOT / target
+            target = target.resolve()
+            package = Path(__file__).resolve().parents[1]
+            if (target == ROOT / 'AGENTS.md' or
+                    target == ROOT / '产品管理/求职目标.json' or
+                    target == ROOT / '产品管理/求职配置.md' or
+                    target == ROOT / '产品管理/MCP固定执行指令.md' or
+                    target.suffix in {'.md', '.py', '.mjs', '.json'} and package in target.parents):
+                return
+    if kind in {'bash', 'exec_command', 'execute', 'shell'}:
+        command = args.get('command', args.get('cmd', ''))
+        try: parts = shlex.split(command)
+        except ValueError: parts = []
+        bootstrap = Path(__file__).resolve().with_name('conversation_scope.py')
+        if (len(parts) >= 3 and Path(parts[0]).name in {'python3', 'python'} and
+                Path(parts[1]).resolve() == bootstrap and parts[2] == 'enable' and
+                not any(character in command for character in ('\n', '\r', ';', '|', '&', '`', '$', '>', '<'))):
+            return
+    raise ValueError('EXECUTOR_MCP_ONLY: 网站采集、映射、建库、填写、读回只允许 recruiting-login-v2 / recruiting-application-v2；插件缺陷请 workflow_handoff，禁止浏览器工具、脚本或直接修改运行资产替代插件')
 
 
 def emit(value):
@@ -142,6 +186,8 @@ def handle(event):
     name = event.get('hook_event_name')
     if name not in INJECT | {'PreToolUse', 'PostToolUse', 'Stop'}:
         return {}
+    if name == 'PreToolUse':
+        executor_boundary(event)
     if name in {'PostToolUse', 'Stop'}:
         return handle_continuation(event)
     tool = event.get('tool_name', '')

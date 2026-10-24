@@ -157,6 +157,9 @@ async function performAntMulti(adapter,action,value){
 export async function performControl(adapter,action,value,files={}){
 
     if(!CONTROL_METHODS[action.method]){const url=new URL('./control-registry.mjs',import.meta.url);url.searchParams.set('revision',String((await stat(url)).mtimeMs));if(!(await import(url.href)).CONTROL_METHODS[action.method])throw Error('UNKNOWN_ACTION');}
+    if(action.method==='verify_uploaded_file'){
+      const url=new URL('./upload-content-proof.mjs',import.meta.url);url.searchParams.set('revision',String((await stat(url)).mtimeMs));return (await import(url.href)).verifyUploadedContent(adapter,action);
+    }
     if(action.method==='capture_wecruit_schema')return captureWecruitSchema(adapter.page,action);
     if(['phoenix_autocomplete','phoenix_autocomplete_inspect','phoenix_autocomplete_verify'].includes(action.method)){
       if(action.method==='phoenix_autocomplete')await adapter.assertSingleEditor();
@@ -266,9 +269,10 @@ export async function performControl(adapter,action,value,files={}){
         if(!path.isAbsolute(file)||!(await stat(file)).isFile())throw Error('INVALID_FILE_REFERENCE');
         if(!asset.sha256?.[index]||createHash('sha256').update(await readFile(file)).digest('hex')!==asset.sha256[index])throw Error('UPLOAD_FILE_HASH_MISMATCH');
       }
-      await l.setInputFiles(asset.paths);
+      const originUrl=new URL('./upload-origin.mjs',import.meta.url);originUrl.searchParams.set('revision',String((await stat(originUrl)).mtimeMs));
+      const uploadOrigin=await (await import(originUrl.href)).uploadWithOrigin(adapter.page,l,asset,await Promise.all(asset.paths.map(file=>readFile(file))));
       if(action.successSelector)await adapter.page.locator(action.successSelector).waitFor({state:'visible',timeout:30000});
-      return;
+      return {uploadOrigin};
     }
     throw Error('UNKNOWN_ACTION');
 

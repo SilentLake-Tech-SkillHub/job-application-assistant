@@ -43,6 +43,12 @@ test('unsupported controls and uncaptured options become construction work, neve
  assert.equal(b.readyToRegister,false);assert.ok(b.blockers.some(x=>x.reason==='CONTROL_DRIVER_REQUIRED'));assert.ok(b.blockers.some(x=>x.reason==='OPTIONS_NOT_CAPTURED'));
  assert.ok(b.template.pages[0].fields.every(f=>!f.userOnly));assert.throws(()=>validateTemplate(b.template),/CONSTRUCTION_GAPS/);
 });
+test('a stale choice returns its captured field and next action instead of aborting the whole builder',()=>{
+ const c=capture('stale','.ant-form-item'),choices=observedChoices(c);choices[0].resolutions={gender:{factKey:'gender',sourceValue:'女',selectedOption:'女',optionsHash:'old-options'}};
+ const built=buildFormTemplate({capture:c,profile,mappings,choices,page,templateId:'stale'});
+ assert.equal(built.readyToRegister,false);assert.ok(built.blockers.some(blocker=>blocker.reason==='CHOICE_RESOLUTION_STALE'));
+ const next=built.nextGoals.find(goal=>goal.reason==='CHOICE_RESOLUTION_STALE');assert.equal(next.selector,'#gender');assert.equal(next.factKey,'gender');assert.equal(next.nextTool,'capture_choice_options');
+});
 test('ordinary userOnly cannot bypass routing or preflight even with known answers and forged coverage',async()=>{
  const c=capture('alpha','.ant-form-item'),b=buildFormTemplate({capture:c,profile,mappings,choices:observedChoices(c),page,templateId:'alpha'});const t=b.template;
  t.pages[0].fields[1].userOnly=true;t.pages[0].fields[1].actions=[];t.coverage={allControlsMapped:true,allDriversSupported:true,allConditionalBranchesVerified:true};
@@ -110,7 +116,10 @@ test('REA-only controls cannot disappear from template coverage without explicit
  const args={capture:c,profile,mappings,choices:observedChoices(c),page,templateId:'alpha',reaStructure:rea};
  const blocked=buildFormTemplate(args);assert.equal(blocked.readyToRegister,false);assert.throws(()=>validateTemplate(blocked.template),/CONSTRUCTION_GAPS/);
  assert.throws(()=>buildFormTemplate({...args,reaReconciliation:[{nodeId:'unseen',selector:'#invented',evidence:'not actually captured'}]}),/RECONCILIATION_EVIDENCE/);
- const ok=buildFormTemplate({...args,reaReconciliation:[{nodeId:'unseen',exclusion:'outside_application_form',evidence:'Observed header search input outside the application form'}]});assert.equal(ok.readyToRegister,true);
+ const reconciliation=[{nodeId:'unseen',exclusion:'outside_application_form',evidence:'Observed header search input outside the application form'}];
+ assert.throws(()=>buildFormTemplate({...args,reaReconciliation:reconciliation}),/RECONCILIATION_EVIDENCE/);
+ rea.uncorrelatedControls[0].nativeDOM={ancestors:[{tag:'nav',role:'navigation'}]};
+ const ok=buildFormTemplate({...args,reaReconciliation:reconciliation});assert.equal(ok.readyToRegister,true);
 });
 test('two dates sharing one range label keep their independent captured control identity',()=>{
  const c=capture('dates','.ant-form-item');c.controls=[0,1].map(i=>({selector:'#range-'+i,label:'起止时间',contextProvider:'.ant-form-item',renderer:'ant_date',type:'text',tag:'input',readonly:true,controlIndex:i,required:true}));

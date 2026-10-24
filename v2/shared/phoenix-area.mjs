@@ -109,13 +109,20 @@ export function listPopupOptionsDOM(root){
  }).filter(row=>row.label);
 }
 export function listPopupSelectionDOM(root){
- const panes=[...root.querySelectorAll('.right-container')].filter(n=>n.getClientRects().length&&getComputedStyle(n).visibility!=='hidden');
+ const visible=n=>n.getClientRects().length&&getComputedStyle(n).visibility!=='hidden';
+ const panes=[...root.querySelectorAll('.right-container')].filter(visible);
  if(panes.length!==1)return {count:null,text:'',empty:true,values:[],scopeValid:false};
  const pane=panes[0],headers=pane.querySelectorAll('.select-data-num-text'),limits=pane.querySelectorAll('.select-data-num-limit'),containers=pane.querySelectorAll('.select-data-container');
  if(headers.length!==1||limits.length!==1||containers.length!==1)return {count:null,text:'',empty:true,values:[],scopeValid:false};
  const count=String(headers[0].innerText||headers[0].textContent||'').trim().match(/^(\d+)\s*\/$/),limit=String(limits[0].innerText||limits[0].textContent||'').trim(),container=containers[0];
  if(!count||!/^\d+$/.test(limit)||Number(limit)<1||Number(count[1])>Number(limit))return {count:null,text:'',empty:true,values:[],scopeValid:false};
- return {count:Number(count[1]),limit:Number(limit),text:String(container.innerText||'').trim(),empty:Number(count[1])===0||!!container.querySelector('.select-data-empty'),values:[...container.querySelectorAll('[data-value],[data-id]')].map(n=>n.getAttribute('data-value')||n.getAttribute('data-id')),scopeValid:true};
+ const leaves=[...container.querySelectorAll('.item-text-label,.select-text-label')].filter(visible),paths=[...container.querySelectorAll('.item-text-fullname,.full-label')].filter(visible);
+ if(leaves.length>1||paths.length>1)return {count:Number(count[1]),text:'',empty:false,values:[],scopeValid:false};
+ const values=[...new Set([container,...container.querySelectorAll('[data-value],[data-id]')].flatMap(n=>['data-value','data-id'].map(a=>n.getAttribute?.(a)).filter(v=>v!=null&&String(v).trim())))];
+ const classic=leaves[0]?.matches?.('.select-text-label'),leafText=classic?[...leaves[0].childNodes].filter(node=>node.nodeType===3).map(node=>node.textContent).join('').trim():leaves[0]?.innerText?.trim();
+ const rawPath=paths[0]?.innerText?.trim()||null,classicPath=paths[0]?.matches?.('.full-label');
+ if(classic&&(!leafText||classicPath&&!/^\(.+\)$/.test(rawPath)))return {count:Number(count[1]),text:'',empty:false,values:[],scopeValid:false};
+ return {count:Number(count[1]),limit:Number(limit),text:leafText||String(container.innerText||'').trim(),path:classicPath?rawPath.slice(1,-1):rawPath,empty:Number(count[1])===0||!!container.querySelector('.select-data-empty'),values,scopeValid:true};
 }
 // Single-choice panels with a left list and a separate confirmed selection pane.
 export async function performPhoenixListPopup(adapter,action,value,{trigger,initial,dismiss}={}){
@@ -143,7 +150,7 @@ export async function performPhoenixListPopup(adapter,action,value,{trigger,init
   const matches=records.filter(r=>r.label===String(value));if(matches.length!==1||!action.options?.includes(String(value)))throw Error('ACTUAL_CAPTURED_OPTION_REQUIRED');
   if(matches[0].disabled)throw Error('CHOICE_OPTION_DISABLED');if(action.expectedOptionValue!=null&&matches[0].value!==action.expectedOptionValue)throw Error('CHOICE_OPTION_VALUE_CHANGED');
   const row=menu.locator('.list-item-container').filter({hasText:exact(value)});if(await row.count()!==1)throw Error('CHOICE_NOT_UNIQUE_OR_NOT_PRESENT');
-  const selectIcon=row.locator('.icon-container').filter({visible:true});if(await selectIcon.count()!==1)throw Error('LIST_SELECTION_ACTION_TARGET_REQUIRED');
+  const selectIcon=row.locator(':scope > .icon-container > svg.RadioUnchecked, :scope > .icon-container > svg.RadioChecked').filter({visible:true});if(await selectIcon.count()!==1)throw Error('LIST_SELECTION_ACTION_TARGET_REQUIRED');
   await selectIcon.click({timeout:10000});const end=Date.now()+6000;
   for(;;){try{await selectedProof();break;}catch(error){if(Date.now()>=end)throw error;await pause();}}
   const confirm=button('确定');if(await confirm.count()!==1)throw Error('LIST_POPUP_CONFIRM_REQUIRED');await confirm.click({timeout:10000});await menu.waitFor({state:'hidden',timeout:5000});

@@ -1,4 +1,5 @@
 import {assertStoredChoiceResolutions} from './choice-resolution.mjs';
+import {assertAcquisitionChain} from './acquisition-chain.mjs';
 // 公司表单资产：申请页链接写回公司文件夹、记录“已投递”前核对表单模板与核验记录、按批次汇报资产缺口。
 // 申请页链接存 岗位交接/公司/<地区>/<公司>/公司.json 的 roles[].投递链接（按官方岗位ID），下批直接从申请页进入；
 // 表单模板存投递组件私有目录 templates（按公司/岗位绑定）。
@@ -27,7 +28,7 @@ function boundTemplateId(catalog,companyId,roleId){
  const c=catalog.find(x=>x.id===companyId);return c?.roleTemplates?.[roleId]||c?.templateId||null;
 }
 const sealed=t=>{try{return !!(t?.coverage?.allConditionalBranchesVerified&&t.coverage.allControlsMapped&&t.coverage.allDriversSupported&&assertSealContract(t));}catch{return false;}};
-async function storedSeal(store,template,companyId){if(!sealed(template))return false;try{assertSealContract(template,await store.get('runs',template.coverage.proof.runId),companyId);await assertStoredChoiceResolutions(template,{store,companyId});return true;}catch{return false;}}
+async function storedSeal(store,template,companyId){if(!sealed(template))return false;try{await assertAcquisitionChain(template,{store,companyId});assertSealContract(template,await store.get('runs',template.coverage.proof.runId),companyId);await assertStoredChoiceResolutions(template,{store,companyId});return true;}catch{return false;}}
 
 // 记录“已投递”前：本岗位必须在本批队列里由 MCP 按已封存的公司表单模板填写，并有通过的独立核验记录。
 // 手工在浏览器里填完提交的岗位，没有这条记录，拒绝记录为已投递。
