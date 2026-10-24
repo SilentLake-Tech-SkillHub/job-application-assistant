@@ -1,3 +1,4 @@
+import {annotateRecoveredControl} from './control-recovery.mjs';
 import {choiceProofDOM} from './choice-proof.mjs';
 import {createHash} from 'node:crypto';
 const popup='.common-unmodeled-layer:has(.phoenix-selectList)',item='.phoenix-selectList__listItem';
@@ -20,6 +21,7 @@ export async function waitForAutocompleteCandidate({read,query,expectedLabel,exp
  }
 }
 export async function performPhoenixAutocomplete(adapter,action,value){
+ const originalPage=adapter.page.url?.();
  const input=adapter.page.locator(action.selector),label=adapter.page.locator(action.labelSelector);
  if(await input.count()!==1||await label.count()!==1||!await input.evaluate(n=>n.tagName==='INPUT'&&!!n.closest('.phoenix-auto-complete-container')))throw Error('PHOENIX_AUTOCOMPLETE_CAPTURE_REQUIRED');
  const read=()=>input.inputValue(),warning=()=>input.evaluate(n=>{const root=n.closest('.form-item--phoenix'),text=root?.innerText||'';return /没有搜索到.{0,20}将使用.{0,20}输入/.test(text)?text.split('\n').find(s=>s.includes('没有搜索到')):null;});
@@ -106,5 +108,5 @@ export async function performPhoenixAutocomplete(adapter,action,value){
   else throw Error('UNSUPPORTED_CHOICE_NO_FALLBACK');
   const current=await currentProof(proof.mode,String(value),proof.optionValue);
   return {searchableCommit:{...proof,...current},verification:'requires_independent_readback'};
- }catch(error){if(inspect){try{await restoreEmpty();}catch{throw Error('AUTOCOMPLETE_INSPECTION_NOT_RESTORED');}}throw error;}
+ }catch(error){if(inspect){try{await restoreEmpty();}catch{throw Error('AUTOCOMPLETE_INSPECTION_NOT_RESTORED');}throw error;}await close().catch(()=>{});if(error.details?.phase==='independent_verify')throw error;throw await annotateRecoveredControl(error,{before,expected:String(value),read,isClosed:async()=>await menu.count()===0,samePage:async()=>typeof originalPage==='string'&&adapter.page.url()===originalPage});}
 }

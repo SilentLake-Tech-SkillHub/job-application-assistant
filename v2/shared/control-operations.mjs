@@ -1,3 +1,4 @@
+import {annotateRecoveredControl} from './control-recovery.mjs';
 import {readPhoenixSelectedValue,readPhoenixSelectedDisplay,confirmPhoenixSelectedDisplay} from './phoenix-selection.mjs';
 import {choiceProofDOM,confirmChoiceEvidence} from './choice-proof.mjs';
 import {selectorAliasDOM} from './selector-aliases.mjs';
@@ -36,7 +37,7 @@ async function assertValue(l,value,{deferRedacted=false}={}){
 }
 async function performChoice(adapter,action,value,family){
  const verifyOnly=action.method.endsWith('_verify');
- const page=adapter.page,l=await locateControl(page,action);
+ const page=adapter.page,originalPage=page.url?.(),l=await locateControl(page,action);
  if(family==='phoenix'){if(!await l.evaluate(n=>n.classList.contains('phoenix-select')))throw Error('PHOENIX_SELECT_CAPTURE_REQUIRED');}
  else if(await l.evaluate(n=>n.getAttribute('role'))!=='combobox')throw Error('CHOICE_COMBOBOX_REQUIRED');
  const root=action.labelSelector?.replace(/ > \.ud-formily-item-label$/,'');
@@ -139,7 +140,7 @@ async function performChoice(adapter,action,value,family){
   }
   const proof=confirmChoiceEvidence(candidate,{...checked.selectionProof,selected:checked.selectionProof.reopenedOptionSelected},{expectedLabel:optionText,blurredLabel});
   return {performed:true,selectionProof:proof,verification:'requires_independent_readback'};
- }catch(e){if(queryApplied&&search&&initialQuery!==undefined)await search.fill(initialQuery,{timeout:10000}).catch(()=>{});await dismiss().catch(()=>{});throw e;}
+ }catch(e){if(queryApplied&&search&&initialQuery!==undefined)await search.fill(initialQuery,{timeout:10000}).catch(()=>{});await dismiss().catch(()=>{});if(family!=='phoenix'||action.method.endsWith('_inspect'))throw e;throw await annotateRecoveredControl(e,{before:initial,expected:String(value),read:readSelected,isClosed:async()=>await page.locator('.common-unmodeled-layer').filter({visible:true}).count()===0,samePage:async()=>typeof originalPage==='string'&&page.url()===originalPage});}
 }
 async function performAntMulti(adapter,action,value){
  if(!Array.isArray(value)||new Set(value).size!==value.length||value.some(v=>!action.options?.includes(v)))throw Error('CAPTURED_MULTISELECT_VALUES_REQUIRED');

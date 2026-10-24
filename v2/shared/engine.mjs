@@ -1,3 +1,4 @@
+import {isRecoverableControlReason} from './control-recovery.mjs';
 import {saveSearchableCommit,verifySearchableCommits,attachSearchableCommits} from './searchable-commit.mjs';
 import {assertMaterialDestinationsRemainAbsent} from './business-materials.mjs';
 import {safeControlErrorDetails} from './control-error-details.mjs';
@@ -30,6 +31,14 @@ export function canContinueAfterUnverifiedSelection(error,field){
  if(error?.message!=='AUTOCOMPLETE_CURRENT_SELECTION_PROOF_REQUIRED'||field.control?.type!=='searchable_text'||field.kind!=='text'||field.userOnly||field.sensitive||typeof field.value!=='string'||!field.value.trim()||field.actions?.length!==1||field.actions[0].method!=='phoenix_autocomplete')return false;
  const details=safeControlErrorDetails(error.details),expected=createHash('sha256').update(field.value).digest('hex');
  return details?.phase==='independent_verify'&&details.valueMatches===true&&details.readbackAvailable===true&&details.expectedValueHash===expected&&details.observedValueHash===expected;
+}
+export function canContinueAfterRecoveredControl(error,field){
+ if(field.userOnly||field.sensitive||typeof field.value!=='string'||!field.value.trim()||field.actions?.length!==1)return false;
+ const allowed={date:['phoenix_date'],choice:['phoenix_dropdown'],text:['phoenix_autocomplete']};
+ if(!allowed[field.kind]?.includes(field.actions[0].method))return false;
+ if(!isRecoverableControlReason(error?.message))return false;
+ const d=safeControlErrorDetails(error.details),expected=createHash('sha256').update(field.value).digest('hex');
+ return d?.phase==='restored_control_failure'&&d.expectedValueHash===expected&&d.readbackAvailable===true&&d.popupClosed===true&&d.stableReadback===true&&d.pageUnchanged===true&&(d.valueMatches===true&&d.observedValueHash===expected||d.unchangedFromBefore===true&&d.observedValueHash===d.originalValueHash);
 }
 export function validateTemplate(t) {
   if(templateConstructionIssues(t).length)throw Error('FORM_CONSTRUCTION_GAPS_REQUIRE_REPAIR');
@@ -330,11 +339,11 @@ export class Engine {
           if(prepared.materialCoverage?.exceptions?.length)assertMaterialDestinationsRemainAbsent(prepared.materialCoverage,await inventory());
           if(f.when&&!initial.fields[f.id]?.present)await page.wait(f.read.presenceSelector||f.read.selector);
           const current=initial.fields[f.id];
+          try{
           if(f.control?.type!=='searchable_text'&&current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'&&(!['choice','date'].includes(f.kind)||current.selected===true)){
-            if(f.control?.type==='dropdown'&&!f.read.nativeSelect){const proofs=await verifyDropdownSelections(page,{fields:[f]},task);if(proofs[f.id]?.status!=='verified')throw Error('EXISTING_CHOICE_NOT_VERIFIED');}
+            if(f.control?.type==='dropdown'&&!f.read.nativeSelect){const proofs=await verifyDropdownSelections(page,{fields:[f]},task);if(proofs[f.id]?.status!=='verified'){const proof=proofs[f.id],details=safeControlErrorDetails(proof?.errorDetails),error=Error(details?.phase==='restored_control_failure'?proof.reason:'EXISTING_CHOICE_NOT_VERIFIED');error.details=details;throw error;}}
             (result.skippedMatchingFields??=[]).push(f.id);continue;
           }
-          try{
             for(const action of f.actions||[]){
               await page.assertLocation(company.origin,plan.pathPrefix);
               const actionResult=await page.act(action, f.value, prepared.files);
@@ -345,7 +354,7 @@ export class Engine {
             // progress, not a selected-entity proof. Preserve the failed proof,
             // skip dependent controls, and continue only independent fields.
             // The full independent verifier still prevents review/completion.
-            if(!canContinueAfterUnverifiedSelection(error,f))throw error;
+            if(!canContinueAfterUnverifiedSelection(error,f)&&!canContinueAfterRecoveredControl(error,f))throw error;
             unverifiedSources.add(f.source);(result.deferredControls??=[]).push({...activeField,status:'unverified',reason:error.message,errorDetails:safeControlErrorDetails(error.details)});
           }
         }

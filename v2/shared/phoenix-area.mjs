@@ -1,3 +1,4 @@
+import {annotateRecoveredControl} from './control-recovery.mjs';
 import {readPhoenixSelectedValue} from './phoenix-selection.mjs';
 const popup='.common-unmodeled-layer:has(.area-selector-container)';
 export const exactRenderedText=text=>new RegExp('^'+String(text).split(/(\s+)/).map(part=>/^\s+$/.test(part)?(/[\r\n]/.test(part)?'\\s*':'\\s+'):part.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('')+'$');
@@ -57,6 +58,7 @@ export async function waitForAreaResults({read,query=null,baseline=null,now=Date
  }
 }
 export async function performPhoenixArea(adapter,action,value,{trigger,initial,dismiss}={}){
+ const originalPage=adapter.page.url?.();
  const menu=adapter.page.locator(popup).filter({visible:true}),inspect=action.method.endsWith('_inspect'),verify=action.method.endsWith('_verify');
  if(await menu.count()!==1)throw Error('AREA_MENU_NOT_UNIQUE');
  const button=text=>menu.locator('.area-footer-button .phoenix-button').filter({hasText:exact(text)});
@@ -95,7 +97,7 @@ export async function performPhoenixArea(adapter,action,value,{trigger,initial,d
   await trigger.click({timeout:10000});await menu.waitFor({state:'visible',timeout:5000});
   const verified=await performPhoenixArea(adapter,{...action,method:action.method+'_verify'},value,{trigger,initial:String(value),dismiss});
   return {...verified,performed:true};
- }catch(error){if(await menu.count())await cancel().catch(()=>{});await dismiss?.().catch(()=>{});throw error;}
+ }catch(error){if(await menu.count())await cancel().catch(()=>{});await dismiss?.().catch(()=>{});throw await annotateRecoveredControl(error,{before:initial,expected:String(value),read:()=>readPhoenixSelectedValue(trigger),isClosed:async()=>await menu.count()===0,samePage:async()=>typeof originalPage==='string'&&adapter.page.url()===originalPage});}
 }
 
 const listPopup='.common-unmodeled-layer:has(.list-item-container)';
@@ -117,6 +119,7 @@ export function listPopupSelectionDOM(root){
 }
 // Single-choice panels with a left list and a separate confirmed selection pane.
 export async function performPhoenixListPopup(adapter,action,value,{trigger,initial,dismiss}={}){
+ const originalPage=adapter.page.url?.();
  const menu=adapter.page.locator(listPopup).filter({visible:true}),inspect=action.method.endsWith('_inspect'),verify=action.method.endsWith('_verify');
  if(await menu.count()!==1)throw Error('LIST_POPUP_NOT_UNIQUE');
  const button=text=>menu.locator('.phoenix-button').filter({hasText:exact(text)});
@@ -147,5 +150,5 @@ export async function performPhoenixListPopup(adapter,action,value,{trigger,init
   if(await display()!==String(value))throw Error('CHOICE_SELECTED_LABEL_MISMATCH');
   await trigger.click({timeout:10000});await menu.waitFor({state:'visible',timeout:5000});
   const verified=await performPhoenixListPopup(adapter,{...action,method:action.method+'_verify'},value,{trigger,initial:String(value),dismiss});return {...verified,performed:true};
- }catch(error){if(await menu.count())await cancel().catch(()=>{});await dismiss?.().catch(()=>{});throw error;}
+ }catch(error){if(await menu.count())await cancel().catch(()=>{});await dismiss?.().catch(()=>{});throw await annotateRecoveredControl(error,{before:initial,expected:String(value),read:()=>readPhoenixSelectedValue(trigger),isClosed:async()=>await menu.count()===0,samePage:async()=>typeof originalPage==='string'&&adapter.page.url()===originalPage});}
 }

@@ -1,3 +1,4 @@
+import {annotateRecoveredControl} from './control-recovery.mjs';
 import {validDate} from './value-contract.mjs';
 import {readPhoenixSelectedValue} from './phoenix-selection.mjs';
 const popup='.common-unmodeled-layer:has(.phoenix-date-picker)';
@@ -50,6 +51,7 @@ export function phoenixInlineOngoingDOM(input){
 }
 
 export async function performPhoenixDate(adapter,action,value){
+ const originalPage=adapter.page.url?.();
  const trigger=adapter.page.locator(action.selector),label=adapter.page.locator(action.labelSelector);
  if(await trigger.count()!==1||await label.count()!==1)throw Error('PHOENIX_DATE_CAPTURE_REQUIRED');
  const read=()=>readPhoenixSelectedValue(trigger),before=await read();
@@ -129,5 +131,5 @@ export async function performPhoenixDate(adapter,action,value){
   if(inline&&(await readInline()).checked)throw Error('PHOENIX_ONGOING_STILL_SELECTED');
   if(action.operation!=='verify')return performPhoenixDate(adapter,{...action,precision:options.precision,operation:'verify'},value);
   return {committed:true,precision:options.precision,selectionVerified:true,value,...(inline?{ongoingChecked:false,ongoingSource:'captured_inline_checkbox'}:{})};
- }catch(error){await close().catch(()=>{});throw error;}
+ }catch(error){await close().catch(()=>{});if(inline){try{const current=await readInline();if(current.checked!==inlineBefore.checked&&!current.disabled)await inline.setChecked(inlineBefore.checked);}catch{}}throw await annotateRecoveredControl(error,{before,expected:String(value),read,isClosed:async()=>await adapter.page.locator(popup).filter({visible:true}).count()===0,samePage:async()=>typeof originalPage==='string'&&adapter.page.url()===originalPage,auxiliaryRestored:async()=>!inline||(await readInline()).checked===inlineBefore.checked});}
 }
