@@ -19,6 +19,7 @@
     "inspect_choice"
   ],
   "stages": {
+    "login_open_identity": ["login", ["login_inspect", "role_resume"]],
     "role_confirm_material_no_destination": ["prepare", ["prepare_plan", "role_prepare"]],
     "form_search_choices": ["construct", ["form_resolve_choices", "form_build_template"]],
     "role_submit": ["submit", ["application_closeout"]],

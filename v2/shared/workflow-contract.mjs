@@ -23,6 +23,7 @@ export function contractAuditSummary(audit){const {fields,ready,...summary}=audi
 // also consumed by the host Hook; nextTools alone is not a lifecycle contract.
 export function workflowEnvelope(data){
  if(!data||typeof data!=='object')return data;
+ if(data.error==='ACCOUNT_PROOF_PAGE_NOT_OPEN')return {...data,completion:{complete:false,status:'identity_page_required',scope:'preparation'},continuation:{state:'login',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['login_open_identity','login_inspect','role_resume'],reason:data.error,retry:'only_after_identity_page_opened'}};
  if(data.continuation){const review=data.continuation.state==='review'&&['verified','ready_for_user_review'].includes(data.status);return {...data,completion:data.completion||{complete:review,status:review?'ready_for_review':data.continuation.requiresUser?'waiting_for_user':'in_progress',scope:'preparation'}};}
  let nextTools,state='construct';
  if(data.error)nextTools=['form_template_audit','workflow_next'];

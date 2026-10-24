@@ -1,4 +1,5 @@
 import {runtimeIdentity} from './runtime-identity.mjs';
+import {observeUserOperatedSession} from '../login/browser.mjs';
 import {safeControlErrorDetails} from './control-error-details.mjs';
 import {recordMaterialDestinationException,revokeMaterialDestinationException,withMaterialDispositions} from './material-disposition.mjs';
 const residentRuntime=await runtimeIdentity('application');
@@ -85,7 +86,7 @@ async function boundRole(args){
     if(snapshot.pageUrl!==state.returnUrl)throw Error('ROLE_OR_ACCOUNT_CHANGED_BEFORE_FILL');
     await bindRoleTitleProof(browser,plan,state.pageId,snapshot);
   }
-  if(login.loginMethod==='user_operated'){const accountPage=await browser.existingPage(login.account.pageUrl),account=await accountPage.observe({fields:[{id:'account',read:{selector:login.account.selector,kind:'text'}}]});snapshot.account=account.fields.account?.value;snapshot.loginFormPresent=!account.fields.account?.present;}
+  if(login.loginMethod==='user_operated'){const identity=await observeUserOperatedSession(browser,login,snapshot.pageUrl,{currentSnapshot:snapshot});snapshot.account=identity.account;snapshot.loginFormPresent=identity.form;}
   if(snapshot.pageUrl!==state.returnUrl||!matchesRole(plan,snapshot)||snapshot.loginFormPresent||!matchesAccount(snapshot.account,resolveAccount(await loadProfile(profileFile),login)))throw Error('ROLE_OR_ACCOUNT_CHANGED_BEFORE_FILL');
   return {q,t,state,template};
 }

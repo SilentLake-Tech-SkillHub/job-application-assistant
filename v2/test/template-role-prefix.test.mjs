@@ -7,6 +7,7 @@ import {matchesRole,bindRoleTitleProof} from '../shared/role-identity.mjs';
 import {compileExpected} from '../shared/observation.mjs';
 import {validateTemplate} from '../shared/engine.mjs';
 import {verifyForm} from '../shared/verifier.mjs';
+import {observeUserOperatedSession} from '../login/browser.mjs';
 
 const url='https://fixture.test/form?id=actual';
 const node=innerText=>({innerText,tagName:'SPAN',getClientRects:()=>[{}]});
@@ -48,15 +49,17 @@ test('prefix contracts require a literal single-line prefix and a real selector'
 test('bound role reads prefix proof from the exact original page without replacing account or ID',async()=>{
  const source=await readFile(new URL('../shared/server.mjs',import.meta.url),'utf8');
  const body=source.slice(source.indexOf('async function boundRole(args){'),source.indexOf('async function reconcileSelectorMappings'));
- async function run({prefix=true,snapshotId='actual',account='User',proofUrl=url,proofSource='live_dom'}={}){
+ async function run({prefix=true,snapshotId='actual',account='User',proofUrl=url,proofSource='live_dom',userOperated=false}={}){
   const plan={...page};if(!prefix)delete plan.rolePrefix;const calls=[];
   const snapshot={pageUrl:url,roleTitle:prefix?'Applying for: Product':'Product',roleIdentity:{parameter:'id',value:snapshotId},account,loginFormPresent:false};
   const state={pageId:'chrome:original',returnUrl:url};
-  const context={queues:{task:async()=>({q:{},t:{taskId:'task',companyId:'fixture',roleId:'job',title:'Product'}}),read:async()=>state},assertBoundRoleState:()=>{},catalog:{companies:[{id:'fixture',templateId:'form'}]},store:{get:async()=>({pages:[plan]})},directory:{loginFile:()=>'/fixture/login.json'},readFile:async()=>JSON.stringify({account:{selector:'#account'}}),browser:{request:async()=>snapshot,existingPage:async(...args)=>{calls.push(args);return {observe:async spec=>{assert.deepEqual(Object.keys(spec).sort(),['fields','rolePrefix','roleSelector']);return {source:proofSource,pageUrl:proofUrl,rawRoleTitle:'Applying for: Product',roleTitle:'Product',prefixApplied:true,account:'Evil',roleIdentity:{parameter:'id',value:'evil'}};}};}},matchesRole,loadProfile:async()=>({}),profileFile:'fixture',resolveAccount:()=>{},matchesAccount:value=>value==='User'};
-  const execute=vm.runInNewContext(body+';boundRole',{...context,URL,bindRoleTitleProof});
+  const context={queues:{task:async()=>({q:{},t:{taskId:'task',companyId:'fixture',roleId:'job',title:'Product'}}),read:async()=>state},assertBoundRoleState:()=>{},catalog:{companies:[{id:'fixture',templateId:'form'}]},store:{get:async()=>({pages:[plan]})},directory:{loginFile:()=>'/fixture/login.json'},readFile:async()=>JSON.stringify({...(userOperated?{loginMethod:'user_operated',origin:'https://fixture.test'}:{}),account:{selector:'#account',pageUrl:'https://fixture.test/account'}}),browser:{request:async()=>snapshot,existingPage:async(...args)=>{calls.push(args);if(args[0]!==url)throw Error('PROOF_PAGE_MUST_NOT_OVERRIDE_CURRENT_ACCOUNT');return {observe:async spec=>{assert.deepEqual(Object.keys(spec).sort(),['fields','rolePrefix','roleSelector']);return {source:proofSource,pageUrl:proofUrl,rawRoleTitle:'Applying for: Product',roleTitle:'Product',prefixApplied:true,account:'Evil',roleIdentity:{parameter:'id',value:'evil'}};}};}},matchesRole,loadProfile:async()=>({}),profileFile:'fixture',resolveAccount:()=>{},matchesAccount:value=>value==='User'};
+  const execute=vm.runInNewContext(body+';boundRole',{...context,URL,bindRoleTitleProof,observeUserOperatedSession});
   const result=await execute({});return {result,calls};
  }
  const good=await run();assert.equal(good.calls[0][0],url);assert.equal(good.calls[0][1].pageId,'chrome:original');assert.equal(good.calls[0][1].readOnly,true);
  assert.equal((await run({prefix:false})).calls.length,0);
+ assert.equal((await run({userOperated:true})).calls.length,1);
+ await assert.rejects(run({userOperated:true,account:'Other'}),/ROLE_OR_ACCOUNT_CHANGED_BEFORE_FILL/);
  for(const options of [{snapshotId:'wrong'},{account:'Other'},{proofUrl:'https://fixture.test/other'},{proofSource:'model'}])await assert.rejects(run(options),/ROLE_OR_ACCOUNT_CHANGED_BEFORE_FILL|ROLE_TITLE_OBSERVATION_SCOPE_CHANGED/);
 });

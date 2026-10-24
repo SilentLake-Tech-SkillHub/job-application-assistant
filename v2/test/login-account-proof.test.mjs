@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {LoginBrowser} from '../login/browser.mjs';
+import {LoginBrowser,observeUserOperatedSession} from '../login/browser.mjs';
 import {matchesAccount,resolveAccount} from '../login/contracts.mjs';
 const origin='https://example.test',roleUrl=origin+'/form?job=example',proofUrl=origin+'/account';
 const company=()=>({origin,loginMethod:'user_operated',account:{selector:'.actual-account',source:'account',mask:'exact',pageUrl:proofUrl}});
@@ -55,4 +55,17 @@ test('a same-origin request cannot accept an account observed after a cross-orig
   const f=fixture({[roleUrl]:fallback?observed(roleUrl,null):observed('https://other.test/form','expected-person'),[proofUrl]:observed('https://other.test/account','expected-person')});
   await assert.rejects(f.browser.observe(company(),roleUrl),/LOGIN_PAGE_SCOPE_MISMATCH/);
  }
+});
+test('bound-page snapshots use the current actual account without looking up a proof tab',async()=>{
+ const broker={existingPage:async()=>{throw Error('PROOF_PAGE_MUST_NOT_BE_READ');}};
+ for(const account of ['expected-person','wrong-person']){
+  const r=await observeUserOperatedSession(broker,company(),roleUrl,{currentSnapshot:{pageUrl:roleUrl,account,loginFormPresent:false,readAt:'current'}});
+  assert.equal(r.account,account);assert.equal(r.identityPageUrl,roleUrl);assert.equal(r.form,false);
+ }
+ const blocked=await observeUserOperatedSession(broker,company(),roleUrl,{currentSnapshot:{pageUrl:roleUrl,account:'expected-person',loginFormPresent:true}});assert.equal(blocked.form,true);
+});
+test('a missing account in a bound snapshot uses only the declared existing same-origin proof',async()=>{
+ const f=fixture({[proofUrl]:observed(proofUrl,'expected-person')});
+ const r=await observeUserOperatedSession(f.browser.broker,company(),roleUrl,{currentSnapshot:{pageUrl:roleUrl,account:null,loginFormPresent:false}});assert.deepEqual(f.reads,[proofUrl]);assert.equal(r.account,'expected-person');
+ const absent=fixture({});await assert.rejects(observeUserOperatedSession(absent.browser.broker,company(),roleUrl,{currentSnapshot:{pageUrl:roleUrl,account:null}}),/ACCOUNT_PROOF_PAGE_NOT_OPEN/);
 });

@@ -11,6 +11,8 @@ test('new company entry reaches its browser without requiring an application tem
  batch.confirmation={userQuote:'synthetic',confirmedAt:'t',contentSha256:contentSha(batch)};await writeFile(path.join(handoff,'投递批次.json'),JSON.stringify(batch));
  try{
   await c.connect(new StdioClientTransport({command:process.execPath,args:[path.join(root,'login/server.mjs')],env:{PATH:process.env.PATH,RECRUITING_PROFILE_JSON:profile,RECRUITING_PRIVATE_DIR:path.join(d,'application'),RECRUITING_LOGIN_PRIVATE_DIR:path.join(d,'login'),RECRUITING_BROWSER_SOCKET:path.join(d,'absent.sock'),RECRUITING_HANDOFF_DIR:handoff},stderr:'ignore'}));
+  assert.ok((await c.listTools()).tools.some(t=>t.name==='login_open_identity'));
+  const identity=await c.callTool({name:'login_open_identity',arguments:{companyId:'insta360'}});assert.equal(JSON.parse(identity.content[0].text).error,'USER_OPERATED_SESSION_IDENTITY_REQUIRED');
   const legacy=await c.callTool({name:'role_queue_import',arguments:{companyPlan:{schemaVersion:1}}});assert.equal(JSON.parse(legacy.content[0].text).error,'HANDOFF_BATCH_REQUIRED');
   const queue=await c.callTool({name:'role_queue_import',arguments:{}});
   await mkdir(path.join(d,'application','templates'),{recursive:true});await writeFile(path.join(d,'application','templates','company-bindings.json'),JSON.stringify({anker:'other-company-form'}));

@@ -1,4 +1,4 @@
-import {readPhoenixSelectedValue} from './phoenix-selection.mjs';
+import {readPhoenixSelectedValue,readPhoenixSelectedDisplay,confirmPhoenixSelectedDisplay} from './phoenix-selection.mjs';
 import {choiceProofDOM,confirmChoiceEvidence} from './choice-proof.mjs';
 import {selectorAliasDOM} from './selector-aliases.mjs';
 import {validDate} from './value-contract.mjs';
@@ -129,10 +129,14 @@ async function performChoice(adapter,action,value,family){
   await dismiss();await menus.waitFor({state:'hidden',timeout:3000});
   const blurredLabel=await readSelected();
   if(blurredLabel!==optionText)throw Error('CHOICE_SELECTED_LABEL_MISMATCH');
-  if(verifyOnly){const proof=confirmChoiceEvidence(candidate,candidate,{expectedLabel:optionText,blurredLabel});return {performed:false,selectionProof:proof,verification:'requires_independent_readback'};}
+  if(verifyOnly){const proof=family==='phoenix'&&candidate.selected!==true?confirmPhoenixSelectedDisplay(candidate,await readPhoenixSelectedDisplay(trigger),{expectedLabel:optionText,blurredLabel}):confirmChoiceEvidence(candidate,candidate,{expectedLabel:optionText,blurredLabel});return {performed:false,selectionProof:proof,verification:'requires_independent_readback'};}
   // Reopen with no click on the option. Keyboard highlight or a search result
   // must not be confused with the portal's actual selected state.
   const checked=await performChoice(adapter,{...action,method:action.method+'_verify'},value,family);
+  if(checked.selectionProof?.kind==='selected_display'){
+   if(checked.selectionProof.label!==candidate.label||checked.selectionProof.value!==candidate.value)throw Error('CHOICE_SELECTED_VALUE_MISMATCH');
+   return {performed:true,selectionProof:checked.selectionProof,verification:'requires_independent_readback'};
+  }
   const proof=confirmChoiceEvidence(candidate,{...checked.selectionProof,selected:checked.selectionProof.reopenedOptionSelected},{expectedLabel:optionText,blurredLabel});
   return {performed:true,selectionProof:proof,verification:'requires_independent_readback'};
  }catch(e){if(queryApplied&&search&&initialQuery!==undefined)await search.fill(initialQuery,{timeout:10000}).catch(()=>{});await dismiss().catch(()=>{});throw e;}

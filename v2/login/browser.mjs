@@ -1,6 +1,21 @@
 // Reuse the already connected browser host. No browser launch, CDP reconnect,
 // cookie access, arbitrary evaluate endpoint or direct authentication HTTP API.
 import {BrokerBrowserAdapter} from '../shared/browser-rpc.mjs';
+export async function observeUserOperatedSession(broker,c,url,{currentSnapshot}={}){
+ const read=async pageUrl=>{if(new URL(pageUrl).origin!==c.origin)throw Error('LOGIN_PAGE_SCOPE_MISMATCH');const page=await broker.existingPage(pageUrl);const raw=await page.observe({fields:[{id:'account',read:{selector:c.account.selector,kind:'text'}}]});if(new URL(raw.pageUrl).origin!==c.origin)throw Error('LOGIN_PAGE_SCOPE_MISMATCH');return raw;};
+ if(new URL(url).origin!==c.origin)throw Error('LOGIN_PAGE_SCOPE_MISMATCH');
+ let raw,currentFormPresent=false;
+ if(currentSnapshot){
+  if(currentSnapshot.pageUrl!==url||currentSnapshot.account!=null&&typeof currentSnapshot.account!=='string')throw Error('LOGIN_PAGE_SCOPE_MISMATCH');
+  const present=typeof currentSnapshot.account==='string'&&!!currentSnapshot.account.trim();
+  raw={pageUrl:url,readAt:currentSnapshot.readAt,fields:{account:{present,value:currentSnapshot.account??null}}};currentFormPresent=currentSnapshot.loginFormPresent===true;
+ }else try{raw=await read(url);}catch(cause){if(cause.message!=='EXISTING_PAGE_NOT_FOUND')throw cause;}
+ if(!raw?.fields.account.present&&url!==c.account.pageUrl){
+  try{raw=await read(c.account.pageUrl);}catch(cause){if(cause.message!=='EXISTING_PAGE_NOT_FOUND')throw cause;const error=Error('ACCOUNT_PROOF_PAGE_NOT_OPEN');error.details={identityPagePath:new URL(c.account.pageUrl).pathname,rolePagePath:new URL(url).pathname,recovery:'verify_real_account_locator_on_an_existing_same_origin_page'};throw error;}
+ }
+ if(!raw)throw Error('ACCOUNT_PROOF_PAGE_NOT_OPEN');
+ return {url,identityPageUrl:raw.pageUrl,readAt:raw.readAt,account:raw.fields.account.present?raw.fields.account.value:null,form:currentFormPresent||!raw.fields.account.present,userOperated:true,dialogs:0,challenges:0,errors:0};
+}
 export class LoginBrowser{
   constructor(socket,{broker}={}){if(!socket)throw Error('SHARED_BROWSER_SOCKET_REQUIRED');this.broker=broker||new BrokerBrowserAdapter(socket,{requestTimeoutMs:45000});}
   status(){return this.broker.status();}
@@ -14,13 +29,7 @@ export class LoginBrowser{
   }
   async observe(c,url){
     if(c.loginMethod==='user_operated'){
-      const read=async pageUrl=>{if(new URL(pageUrl).origin!==c.origin)throw Error('LOGIN_PAGE_SCOPE_MISMATCH');const page=await this.broker.existingPage(pageUrl);const raw=await page.observe({fields:[{id:'account',read:{selector:c.account.selector,kind:'text'}}]});if(new URL(raw.pageUrl).origin!==c.origin)throw Error('LOGIN_PAGE_SCOPE_MISMATCH');return raw;};
-      let raw;try{raw=await read(url);}catch(cause){if(cause.message!=='EXISTING_PAGE_NOT_FOUND')throw cause;}
-      if(!raw?.fields.account.present&&url!==c.account.pageUrl){
-       try{raw=await read(c.account.pageUrl);}catch(cause){if(cause.message!=='EXISTING_PAGE_NOT_FOUND')throw cause;const error=Error('ACCOUNT_PROOF_PAGE_NOT_OPEN');error.details={identityPagePath:new URL(c.account.pageUrl).pathname,rolePagePath:new URL(url).pathname,recovery:'verify_real_account_locator_on_an_existing_same_origin_page'};throw error;}
-      }
-      if(!raw)throw Error('ACCOUNT_PROOF_PAGE_NOT_OPEN');
-      return {url,identityPageUrl:raw.pageUrl,readAt:raw.readAt,account:raw.fields.account.present?raw.fields.account.value:null,form:!raw.fields.account.present,userOperated:true,dialogs:0,challenges:0,errors:0};
+      return observeUserOperatedSession(this.broker,c,url);
     }
     const f=c.fields,p=c.popups[0];
     const fields=[['account',c.account.selector,'text'],['form',f.root,'text',true],['country',f.countrySelected,'text'],['phone',f.phone,'value'],['otp',f.otp,'value',true],['send',f.send,'text'],['sendDisabled',f.send,'attribute'],['submit',f.submit,'text'],['consent',f.consent,'checked'],['popupTitle',p.titleSelector,'text'],['popupBody',p.bodySelector,'text'],['registrationNotice',f.automaticRegistrationNotice,'text']].map(([id,selector,kind,userOnly])=>({id,userOnly,read:{selector,kind,...(id==='sendDisabled'?{attribute:'disabled'}:{}),...(id==='consent'?{presenceSelector:f.consentPresence}:{})}}));

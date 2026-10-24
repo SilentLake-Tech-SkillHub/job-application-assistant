@@ -80,7 +80,7 @@ REA 端点来自该宿主的 `RECRUITING_REA_ENDPOINT` 或既有 `RECRUITING_BRO
 
 两个 MCP 的公共工具统一经 `registerWorkflowTool` 注册。新增工具必须声明自己是纯查询或哪个工作流阶段，否则启动失败；阶段工具统一返回 `workflowContract`、`continuation` 和 `completion`。Hook 对实际启用会话动态消费这些元数据，不依赖易遗漏的固定工具名单。DSH 中须由当前宿主调用作用域 enable 入口，启用后验证真实 PostToolUse/Stop；未启用的其它会话保持独立。
 
-账号先从当前实际同源岗位/申请页核对；当前可见账号不匹配即拒绝，不能用另一页的正确账号掩盖。当前页没有账号时，才读取已配置的同源证明页，并重新核对读回页面的实际 origin。已配置的账号证明页不存在时返回 `ACCOUNT_PROOF_PAGE_NOT_OPEN`，不能归因于岗位 URL 或登录失败。依据真实账号节点修正私有证明页配置，或在同一已授权浏览器打开官网证明页，保留原岗位。声明式岗位入口优先复用已观察到的原 detail/form，读取真实标题、账号和精确 query，不改冻结岗位 ID 适配网站重定向。已有任务的重复 role_open 先核对冻结身份并保留 applicationUrl、returnUrl 和未保存状态，只重绑同浏览器中完整 URL 唯一相同的原页；无法重绑即明确阻塞，不导航回详情掩盖丢页。
+账号先从当前实际同源岗位/申请页核对；当前可见账号不匹配即拒绝，不能用另一页的正确账号掩盖。当前页没有账号时，才读取已配置的同源证明页，并重新核对读回页面的实际 origin。已配置的账号证明页不存在时返回 `ACCOUNT_PROOF_PAGE_NOT_OPEN`，不能归因于岗位 URL 或登录失败。路由要求 Agent 调用 `login_open_identity` 在原浏览器打开或复用已配置的同源账号证明页，再执行登录检查和原岗位续跑；该入口不切换原表单、不触发短信或最终提交。登录与申请门禁共享 `observeUserOperatedSession`，当前账号不符优先拒绝。依据真实账号节点修正私有证明页配置，或在同一已授权浏览器打开官网证明页，保留原岗位。声明式岗位入口优先复用已观察到的原 detail/form，读取真实标题、账号和精确 query，不改冻结岗位 ID 适配网站重定向。已有任务的重复 role_open 先核对冻结身份并保留 applicationUrl、returnUrl 和未保存状态，只重绑同浏览器中完整 URL 唯一相同的原页；无法重绑即明确阻塞，不导航回详情掩盖丢页。
 
 原浏览器连接中断时，执行器保留页面并交给监督者。显式恢复可以通过 `RECRUITING_BROWSER_ATTACH_ENDPOINT` 附着同一个已核实的本机 Chrome 端点，禁止自动重连、启动另一个浏览器或关闭原实例；原 tab 以当前真实 URL/账号/岗位重新绑定 pageId。恢复后读取宿主实际注册、两个 MCP 进程及源码指纹，不能以进程文件改动替代实际重载。
 
@@ -102,7 +102,7 @@ Phoenix 的地区级联与双栏列表面板按实际 DOM 分派。双栏列表�
 
 实际规则在 MCP 代码中：`capture_choice_options` 读取本字段实际候选及 DOM 暴露的 value/id/disabled/selected；`choice-resolution.mjs` 对主档原值做别名或模糊候选排序并确认具体候选，保存原值、目标原文、实际值及采集绑定；构建和注册读取同一私有选项资产，拒绝无确认记录的别名映射。路由复用和冻结预检同样核验，不能手写模板 enumMap 绕过。
 
-执行器只在当前绑定菜单内精确定位唯一候选，检查禁用和实际值，再点击、失焦和重新展开。`choice-proof.mjs` 必须读到该候选的实际 selected 状态；高亮/aria-activedescendant 或搜索框文字都不算选择。可用的实际 value 必须保持一致，临时 DOM id 只作观察证据，不能冒充业务 ID。
+执行器只在当前绑定菜单内精确定位唯一候选，检查禁用和实际值，再点击、失焦和重新展开。默认由 `choice-proof.mjs` 读取该候选的实际 selected 状态；高亮/aria-activedescendant 或搜索框文字都不算选择。Phoenix 普通下拉若菜单不暴露 selected，只有冻结计划已声明同一普通下拉渲染器时，才可独立读取唯一、可见、非编辑、非占位的实际选中显示层；完整标签必须精确一致，候选或当前显示公开业务 value/ID 时两侧也必须存在并一致。该证明记录为 selected_display，不声称菜单已标记 selected，自动完成输入框不能使用此路径。临时 DOM id 只作观察证据，不能冒充业务 ID。
 
 `choice-verification.mjs` 由 Engine 自动执行独立重展开核验。已显示同样文字的字段也须验证后才允许跳过；`verifier.mjs` 缺少该证明即失败，不依赖 Agent 是否读了 Skill。`inspect_choice` 可在未封存表单上对一个已捕获字段核验：分别读已选文字和搜索 input.value，返回候选实际选中状态、恢复结果及该字段截图；这是核验，不会更改已选答案。截图失败或缺少选中证据要明确报告未核实。表单保存和重新打开后的持久化仍须另行证明，不能拿界面选择证明冒充保存回执。
 
