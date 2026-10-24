@@ -1,4 +1,5 @@
 import {runtimeIdentity} from './runtime-identity.mjs';
+import {safeControlErrorDetails} from './control-error-details.mjs';
 import {recordMaterialDestinationException,revokeMaterialDestinationException,withMaterialDispositions} from './material-disposition.mjs';
 const residentRuntime=await runtimeIdentity('application');
 import {prepareRoleMaterials} from './prepare-role-materials.mjs';
@@ -18,7 +19,7 @@ import {assertStoredChoiceGoals} from './choice-goal-contract.mjs';
 import {controlCapabilities,canonicalControlSpec} from './control-registry.mjs';
 import {normalizeWecruitDefinition,registerDefinitionQuestions} from './wecruit-definition.mjs';
 import {assertDefinitionMapped,matchesPageIdentity} from './definition-coverage.mjs';
-import {matchesRole} from './role-identity.mjs';
+import {matchesRole,bindRoleTitleProof} from './role-identity.mjs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -82,10 +83,7 @@ async function boundRole(args){
   const snapshot=await browser.request('roleSnapshot',{pageId:state.pageId,roleSelector:plan.roleSelector,accountSelector:login.account.selector,loginRoot:login.fields?.root,roleIdentity:plan.roleIdentity});
   if(plan.rolePrefix!==undefined){
     if(snapshot.pageUrl!==state.returnUrl)throw Error('ROLE_OR_ACCOUNT_CHANGED_BEFORE_FILL');
-    const titlePage=await browser.existingPage(snapshot.pageUrl,{pageId:state.pageId,readOnly:true});
-    const title=await titlePage.observe({fields:[],roleSelector:plan.roleSelector,rolePrefix:plan.rolePrefix});
-    if(title.source!=='live_dom'||title.pageUrl!==snapshot.pageUrl||title.pageUrl!==state.returnUrl)throw Error('ROLE_OR_ACCOUNT_CHANGED_BEFORE_FILL');
-    Object.assign(snapshot,{roleTitle:title.roleTitle,rawRoleTitle:title.rawRoleTitle,prefixApplied:title.prefixApplied});
+    await bindRoleTitleProof(browser,plan,state.pageId,snapshot);
   }
   if(login.loginMethod==='user_operated'){const accountPage=await browser.existingPage(login.account.pageUrl),account=await accountPage.observe({fields:[{id:'account',read:{selector:login.account.selector,kind:'text'}}]});snapshot.account=account.fields.account?.value;snapshot.loginFormPresent=!account.fields.account?.present;}
   if(snapshot.pageUrl!==state.returnUrl||!matchesRole(plan,snapshot)||snapshot.loginFormPresent||!matchesAccount(snapshot.account,resolveAccount(await loadProfile(profileFile),login)))throw Error('ROLE_OR_ACCOUNT_CHANGED_BEFORE_FILL');
@@ -265,11 +263,14 @@ async function prepareRole(args){
   const plan=await engine.preparePlan(task);
   if(!plan.readyForExecution&&!(args.authorization.allowPartialPreparation&&plan.status==='needs_answers'&&!plan.constructionBlockers?.length))return {...plan,status:plan.status,continuation:continuationFor({plan,template,profile}),submission:'not_performed'};
   const fill=await engine.prepare({tasks:[{...task,planId:plan.planId,planHash:plan.planHash}],concurrency:1,authorization:args.authorization});
-  if(fill.results[0]?.errorCode)return {status:'needs_attention',fillRunId:fill.id,error:fill.results[0].errorCode,failedField:fill.results[0].failedField||null,continuation:continuationFor({error:fill.results[0].errorCode}),submission:'not_performed'};
+  if(fill.results[0]?.errorCode){
+   state.status='needs_attention';state.fillRunId=fill.id;state.verifyRunId=null;state.verifiedAt=null;await queues.put(t.taskId,state);
+   return {status:'needs_attention',fillRunId:fill.id,error:fill.results[0].errorCode,errorDetails:safeControlErrorDetails(fill.results[0].errorDetails),failedField:fill.results[0].failedField||null,deferredControls:fill.results[0].deferredControls||[],fillElapsedMs:fill.elapsedMs,continuation:continuationFor({error:fill.results[0].errorCode}),submission:'not_performed'};
+  }
   const verification=await engine.verifyCurrent({...task,...await resolveInputs(await loadProfile(profileFile),template,{},t.companyId,{roleId:t.roleId,pageUrl:state.returnUrl})});
   state.status=verification.status==='verified'?'ready_for_user_review':'needs_attention';state.fillRunId=fill.id;state.verifyRunId=verification.id;state.verifiedAt=verification.readAt;
   await queues.put(t.taskId,state);
-  return {status:state.status,taskId:t.taskId,companyId:t.companyId,roleTitle:t.title,pageUrl:state.returnUrl,fillRunId:fill.id,verifyRunId:verification.id,counts:verification.counts,summary:verification.summary,continuation:continuationFor({verification,template,profile:await loadProfile(profileFile)}),fillElapsedMs:fill.elapsedMs,initialReadbackStatus:fill.status,exceptions:verification.checks.filter(x=>!['match','confirmed_omission'].includes(x.status)).map(({id,label,status,reason})=>({id,label,status,reason})),save:verification.save,submission:'not_performed'};
+  return {status:state.status,taskId:t.taskId,companyId:t.companyId,roleTitle:t.title,pageUrl:state.returnUrl,fillRunId:fill.id,verifyRunId:verification.id,counts:verification.counts,summary:verification.summary,deferredControls:fill.results[0]?.deferredControls||[],continuation:continuationFor({verification,template,profile:await loadProfile(profileFile)}),fillElapsedMs:fill.elapsedMs,initialReadbackStatus:fill.status,exceptions:verification.checks.filter(x=>!['match','confirmed_omission'].includes(x.status)).map(({id,label,status,reason})=>({id,label,status,reason})),save:verification.save,submission:'not_performed'};
 }
 registerTool('role_prepare',{description:'从冻结岗位队列取目标；核对登录后已返回原岗位，离线编译全部字段后填写并独立核验。仅返回异常与计数，不提交。',inputSchema:{...queueTask,authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1),sensitiveFields:z.boolean().default(false),uploads:z.boolean().default(false),allowPartialPreparation:z.boolean().default(false)})}},wrap(prepareRole));
 registerTool('workflow_advance',{description:'连续推进已确认队列中多个公司，每家公司调用完整岗位准备和读回链；一家公司待用户不会停止其它公司。只执行已封存模板，不自动重试失败写入，不提交。',inputSchema:{tasks:z.array(z.object(queueTask)).min(1).max(20),concurrency:z.number().int().min(1).max(5).default(2),authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1),sensitiveFields:z.boolean().default(false),uploads:z.boolean().default(false),allowPartialPreparation:z.boolean().default(false)})}},wrap(async a=>{const identities=await Promise.all(a.tasks.map(t=>queues.task(t)));if(new Set(identities.map(x=>x.t.companyId)).size!==identities.length)throw Error('ONE_CURRENT_ROLE_PER_COMPANY_REQUIRED');return advanceCompanies(a.tasks,async task=>{

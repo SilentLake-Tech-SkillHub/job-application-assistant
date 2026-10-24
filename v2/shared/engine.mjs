@@ -26,6 +26,11 @@ export const hash = value => createHash('sha256').update(JSON.stringify(value)).
 const idOK = value => typeof value === 'string' && /^[a-z0-9][a-z0-9_-]{0,79}$/.test(value);
 const blocked = /提交|投递|撤回|删除|同意|签名|验证码|密码|身份证|银行卡|submit|apply now|withdraw|delete|consent|signature|password|otp|captcha/i;
 const methods = templateMethods();
+export function canContinueAfterUnverifiedSelection(error,field){
+ if(error?.message!=='AUTOCOMPLETE_CURRENT_SELECTION_PROOF_REQUIRED'||field.control?.type!=='searchable_text'||field.kind!=='text'||field.userOnly||field.sensitive||typeof field.value!=='string'||!field.value.trim()||field.actions?.length!==1||field.actions[0].method!=='phoenix_autocomplete')return false;
+ const details=safeControlErrorDetails(error.details),expected=createHash('sha256').update(field.value).digest('hex');
+ return details?.phase==='independent_verify'&&details.valueMatches===true&&details.readbackAvailable===true&&details.expectedValueHash===expected&&details.observedValueHash===expected;
+}
 export function validateTemplate(t) {
   if(templateConstructionIssues(t).length)throw Error('FORM_CONSTRUCTION_GAPS_REQUIRE_REPAIR');
   if (!idOK(t.id) || !Number.isInteger(t.version) || t.version < 1) throw Error('INVALID_TEMPLATE_ID_OR_VERSION');
@@ -315,9 +320,13 @@ export class Engine {
         if(controlContractChanges(plan,expanded).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
         const fillOrder=compiled.executionOrder?.find(step=>step.stage==='fill')?.fieldIds;
         const fillFields=fillOrder?fillOrder.map(id=>frozenFields.find(f=>f.id===id)):frozenFields;
+        const unverifiedSources=new Set();
         for(const f of fillFields){
           if(f.disposition!=='fill'||uploads.includes(f)||f.prepareBeforeGroups)continue;
           activeField={id:f.id,source:f.source,kind:f.kind,label:f.label};
+          if(f.when&&unverifiedSources.has(f.when.source)){
+            unverifiedSources.add(f.source);(result.deferredControls??=[]).push({...activeField,status:'blocked_dependency',reason:'UNVERIFIED_CONTROL_DEPENDENCY',dependsOn:f.when.source});continue;
+          }
           if(prepared.materialCoverage?.exceptions?.length)assertMaterialDestinationsRemainAbsent(prepared.materialCoverage,await inventory());
           if(f.when&&!initial.fields[f.id]?.present)await page.wait(f.read.presenceSelector||f.read.selector);
           const current=initial.fields[f.id];
@@ -325,13 +334,23 @@ export class Engine {
             if(f.control?.type==='dropdown'&&!f.read.nativeSelect){const proofs=await verifyDropdownSelections(page,{fields:[f]},task);if(proofs[f.id]?.status!=='verified')throw Error('EXISTING_CHOICE_NOT_VERIFIED');}
             (result.skippedMatchingFields??=[]).push(f.id);continue;
           }
-          for(const action of f.actions||[]){
-            await page.assertLocation(company.origin,plan.pathPrefix);
-            const actionResult=await page.act(action, f.value, prepared.files);
-            if(f.control?.type==='searchable_text')await saveSearchableCommit(this.store,task,f,actionResult);
+          try{
+            for(const action of f.actions||[]){
+              await page.assertLocation(company.origin,plan.pathPrefix);
+              const actionResult=await page.act(action, f.value, prepared.files);
+              if(f.control?.type==='searchable_text')await saveSearchableCommit(this.store,task,f,actionResult);
+            }
+          }catch(error){
+            // A real candidate click and stable post-blur text are preparation
+            // progress, not a selected-entity proof. Preserve the failed proof,
+            // skip dependent controls, and continue only independent fields.
+            // The full independent verifier still prevents review/completion.
+            if(!canContinueAfterUnverifiedSelection(error,f))throw error;
+            unverifiedSources.add(f.source);(result.deferredControls??=[]).push({...activeField,status:'unverified',reason:error.message,errorDetails:safeControlErrorDetails(error.details)});
           }
         }
         activeField=null;
+        if(plan.fields.some(f=>f.userOnly&&f.when&&unverifiedSources.has(f.when.source)))throw Error('UNVERIFIED_DEPENDENCY_BEFORE_PROFILE_FILL');
         const authorizedProofs=await this.profileProofs(task,template,page,true);
         if(Object.values(authorizedProofs).some(proof=>proof.status!=='verified'))throw Error('AUTHORIZED_PROFILE_VALUE_MISMATCH');
         // A final read of the entire page catches later cascades or resume parsing overwriting earlier values.

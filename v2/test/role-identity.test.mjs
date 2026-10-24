@@ -3,6 +3,11 @@ test('a titleless editor uses independently observed job ID, never a fabricated 
 test('user-operated login requires an exact sourced display identity, not any logged-in account',()=>{const c={schemaVersion:1,version:1,companyId:'sample',origin:'https://example.com',loginPath:'/jobs',allowedPaths:['/'],loginMethod:'user_operated',account:{mask:'exact',selector:'.account',source:'account.display',pageUrl:'https://example.com/account'},success:{requiresAccountMatch:true,noApplicationSubmission:true},evidence:{sourceUrl:'https://example.com/account'}};validateCompany(c);const a=resolveAccount({facts:{'account.display':{status:'known',value:'User',sourceIds:['observed_session']}}},c);assert.equal(matchesAccount('User',a),true);assert.equal(matchesAccount('Other',a),false);});
 import {RoleFlow} from '../shared/role-flow.mjs';
 import {readRoleIdentity} from '../shared/role-identity.mjs';
+test('role resume uses the same literal prefix proof without replacing account or job ID',async()=>{
+ const url='https://a.test/form?pid=actual',plan={roleTitle:'Role',roleSelector:'#role',rolePrefix:'Applying for:',roleIdentity:{parameter:'pid',value:'actual'}};
+ const browser={request:async()=>({pageUrl:url,roleTitle:'Applying for: Role',account:'Actual Account',roleIdentity:{parameter:'pid',value:'actual'},loginFormPresent:false}),existingPage:async(pageUrl,options)=>{assert.equal(pageUrl,url);assert.equal(options.pageId,'chrome:bound');assert.equal(options.readOnly,true);return {observe:async()=>({source:'live_dom',pageUrl:url,roleTitle:'Role',rawRoleTitle:'Applying for: Role',prefixApplied:true,account:'Forged Account',roleIdentity:{parameter:'pid',value:'forged'}})};}};
+ const f=new RoleFlow({browser,login:{}}),o=await f.snapshot({plan,c:{account:{selector:'#account'}}},'chrome:bound');assert.equal(o.account,'Actual Account');assert.equal(o.roleIdentity.value,'actual');assert.ok(matchesRole(plan,o));
+});
 test('query and SPA fragment identities share actual URL extraction without expected-value substitution',()=>{
  assert.equal(readRoleIdentity({parameter:'id',value:'wrong'},'https://a.test/form?id=actual').value,'actual');
  assert.equal(readRoleIdentity({parameter:'id',source:'hashQuery'},'https://a.test/#/form?id=actual').value,'actual');

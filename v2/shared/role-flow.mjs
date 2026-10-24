@@ -1,5 +1,5 @@
 import {transitionLocationMatches} from './entry-transition.mjs';
-import {matchesRole,readRoleIdentity} from './role-identity.mjs';
+import {matchesRole,readRoleIdentity,bindRoleTitleProof} from './role-identity.mjs';
 import {resolveEntry,matchEntryPath} from './entry-recipe.mjs';
 import {accountMatches,matchesAccount,resolveAccount,assertScope} from '../login/contracts.mjs';
 export class RoleFlow{
@@ -22,6 +22,7 @@ export class RoleFlow{
   return {q,t,c,entry,template,plan,target};
  }
  async snapshot(x,pageId){const raw=await this.browser.request('roleSnapshot',{pageId,roleSelector:x.plan.roleSelector,roleIdentity:x.plan.roleIdentity,accountSelector:x.c.account.selector,loginRoot:x.c.fields?.root});
+  await bindRoleTitleProof(this.browser,x.plan,pageId,raw);
   if(x.c.loginMethod==='user_operated'){const session=await this.login.state(x.c,raw.pageUrl);raw.account=session.account;raw.loginFormPresent=session.form;}return raw;}
 
  async open(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{

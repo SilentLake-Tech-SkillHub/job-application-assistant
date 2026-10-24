@@ -20,3 +20,11 @@ export function matchesRole(plan,observed){
  }
  return !!plan.roleTitle&&observed.roleTitle===plan.roleTitle;
 }
+export async function bindRoleTitleProof(browser,plan,pageId,snapshot){
+ if(plan.rolePrefix===undefined)return snapshot;
+ const page=await browser.existingPage(snapshot.pageUrl,{pageId,readOnly:true});
+ const title=await page.observe({fields:[],roleSelector:plan.roleSelector,rolePrefix:plan.rolePrefix});
+ if(title.source!=='live_dom'||title.pageUrl!==snapshot.pageUrl)throw Error('ROLE_TITLE_OBSERVATION_SCOPE_CHANGED');
+ Object.assign(snapshot,{roleTitle:title.roleTitle,rawRoleTitle:title.rawRoleTitle,prefixApplied:title.prefixApplied});
+ return snapshot;
+}
