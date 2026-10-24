@@ -57,8 +57,10 @@ test('list popup reads one right pane with actual count, limit and selected-cont
  const container={innerText:'Example Industry',querySelector:()=>null,querySelectorAll:()=>[item]};
  const pane={getClientRects:()=>[{}],querySelectorAll:s=>s==='.select-data-num-text'?[header]:s==='.select-data-num-limit'?[limit]:s==='.select-data-container'?[container]:[]},root={querySelectorAll:()=>[pane]};
  const read=()=>vm.runInNewContext('('+listPopupSelectionDOM.toString()+')(root)',{root,getComputedStyle:()=>({visibility:'visible'})});const proof=read();assertAreaSelection(proof,'Example Industry','option-a');
+ limit.innerText='40';assert.equal(read().limit,40);assertAreaSelection(read(),'Example Industry','option-a');
+ header.innerText='2/';assert.throws(()=>assertAreaSelection(read(),'Example Industry','option-a'),/AREA_CURRENT_SELECTION_NOT_VERIFIED/);
  header.innerText='0/';container.innerText='请在左侧选择内容';container.querySelector=()=>({});assert.equal(read().empty,true);assert.throws(()=>assertAreaSelection(read(),'Example Industry'));
- limit.innerText='2';assert.equal(read().scopeValid,false);
+ for(const invalid of ['0','unknown','1/40']){limit.innerText=invalid;assert.equal(read().scopeValid,false);}
  root.querySelectorAll=()=>[pane,pane];assert.equal(read().scopeValid,false);
 });
 test('list popup option extraction uses only actual leaf row text and exposed identities',()=>{
@@ -74,3 +76,5 @@ test('list popup requires the actual unique visible selection icon and cannot fa
  const f=listFixture(),r=await performPhoenixListPopup(f.adapter,{method:'phoenix_dropdown',options:['Example Industry']},'Example Industry',{trigger:f.trigger,initial:''});assert.equal(r.selectionProof.reopenedOptionSelected,true);assert.equal(f.state().writes,1);assert.equal(f.state().navigationClicks,0);
  for(const iconCount of [0,2]){const missing=listFixture({iconCount});await assert.rejects(performPhoenixListPopup(missing.adapter,{method:'phoenix_dropdown',options:['Example Industry']},'Example Industry',{trigger:missing.trigger,initial:''}),/LIST_SELECTION_ACTION_TARGET_REQUIRED/);assert.equal(missing.state().writes,0);assert.equal(missing.state().navigationClicks,0);assert.equal(missing.state().confirms,0);assert.equal(missing.state().current,'');}
 });
+
+ test('scoped row locators tolerate rendered whitespace normalization but retain exact label and breadcrumb identity',async()=>{const {exactRenderedText}=await import('../shared/phoenix-area.mjs');const match=exactRenderedText('Product Manager\nInternet Products');assert.ok(match.test('Product Manager Internet Products'));assert.ok(match.test('Product ManagerInternet Products'));assert.ok(match.test('Product Manager\nInternet Products'));for(const wrong of ['Senior Product Manager Internet Products','Product Manager Finance','ProductManager InternetProducts'])assert.equal(match.test(wrong),false);});

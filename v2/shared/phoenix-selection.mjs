@@ -10,12 +10,15 @@ export function phoenixSelectedDisplayDOM(node){
  const root=node.closest?.('.phoenix-select'),visible=n=>!!n?.getClientRects?.().length&&getComputedStyle(n).visibility!=='hidden';
  const editable=n=>!!n&&(['INPUT','TEXTAREA','SELECT'].includes(n.tagName)||n.isContentEditable===true);
  const values=[];
- for(const target of [node,root])for(const attribute of ['data-value','data-id','value']){const value=target?.getAttribute?.(attribute);if(typeof value==='string'&&value.trim())values.push({attribute,value});}
+ for(const target of [node,node.closest?.('.phoenix-select__tipWrapper'),root])for(const attribute of ['data-value','data-id','value']){const value=target?.getAttribute?.(attribute);if(typeof value==='string'&&value.trim())values.push({attribute,value});}
  return {label:String(node.innerText??node.textContent??'').trim(),visible:visible(node),rootValid:!!root&&!editable(root),nonEditable:!editable(node)&&![...(node.querySelectorAll?.('input,textarea,[contenteditable="true"]')||[])].some(visible),placeholderAbsent:![...(root?.querySelectorAll?.('[class*="placeholder"]')||[])].some(visible),disabled:!!root?.disabled||root?.getAttribute?.('aria-disabled')==='true',values};
 }
 export async function readPhoenixSelectedDisplay(trigger){
  const content=trigger.locator('.phoenix-select__content');if(await content.count()!==1)throw Error('PHOENIX_SELECTED_CONTENT_NOT_UNIQUE');
- return content.evaluate(phoenixSelectedDisplayDOM);
+ // A search input may coexist with an independent noneditable selected label.
+ const selected=content.locator(':scope > .phoenix-select__tipWrapper--visible .phoenix-select__tipEle').filter({visible:true});
+ const count=await selected.count();if(count>1)throw Error('PHOENIX_SELECTED_CONTENT_NOT_UNIQUE');
+ return (count===1?selected:content).evaluate(phoenixSelectedDisplayDOM);
 }
 export function confirmPhoenixSelectedDisplay(candidate,display,{expectedLabel,blurredLabel}){
  if(candidate.disabled||display.disabled)throw Error('CHOICE_OPTION_DISABLED');

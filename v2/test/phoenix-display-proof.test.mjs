@@ -30,11 +30,12 @@ test('the final verifier accepts display proof only for the declared Phoenix dro
  for(const patch of [{nonEditable:false},{placeholderAbsent:false},{blurConfirmed:false},{label:'Different'}])assert.notEqual(verifyForm(expected,{...observed,fields:{choice:{...observed.fields.choice,selectionProof:{...proof,...patch}}}}).status,'verified');
  const other=compileExpected({...plan,fields:[{...field,actions:[{method:'ud_dropdown',selector:'#select'}]}]},task);assert.notEqual(verifyForm(other,observed).status,'verified');
 });
-test('actual Phoenix selection and independent reopening use display proof without inventing a menu selected flag',async()=>{
+test('actual Phoenix selection reads a separate selected label despite a sibling search input and never invents a menu selected flag',async()=>{
  let selected='Original',opened=false,clicks=0;
  const root={tagName:'DIV',classList:{contains:c=>c==='phoenix-select'},getAttribute:k=>k==='role'?'combobox':k==='aria-expanded'?String(opened):null,querySelector:()=>null,querySelectorAll:()=>[]};
  const node={tagName:'SPAN',get innerText(){return selected;},getClientRects:()=>[{}],getAttribute:()=>null,querySelectorAll:()=>[],closest:()=>root};
- const content={count:async()=>1,innerText:async()=>selected,evaluate:async(fn,arg)=>evaluate(fn,node,arg)};
+ const selectedLabel={filter(){return this;},count:async()=>1,evaluate:async(fn,arg)=>evaluate(fn,node,arg)};
+ const content={count:async()=>1,innerText:async()=>selected,evaluate:async()=>{throw Error('selected label must be read independently from the sibling search input');},locator:()=>selectedLabel};
  const input={count:async()=>1,filter(){return this;},evaluate:async fn=>fn(root),innerText:async()=>selected+'\n'+selected,click:async()=>{opened=true;},locator:()=>content,press:async()=>{opened=false;}};
  const label={count:async()=>1,click:async()=>{opened=false;}};
  const row={tagName:'DIV',className:'phoenix-selectList__listItem',innerText:'Other',textContent:'Other',hasAttribute:()=>false,getAttribute:()=>null,getClientRects:()=>[{}],querySelector:()=>null};row.closest=()=>row;

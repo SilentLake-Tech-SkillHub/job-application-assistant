@@ -1,6 +1,7 @@
 import {readPhoenixSelectedValue} from './phoenix-selection.mjs';
 const popup='.common-unmodeled-layer:has(.area-selector-container)';
-const exact=text=>new RegExp('^'+String(text).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$');
+export const exactRenderedText=text=>new RegExp('^'+String(text).split(/(\s+)/).map(part=>/^\s+$/.test(part)?(/[\r\n]/.test(part)?'\\s*':'\\s+'):part.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('')+'$');
+const exact=exactRenderedText;
 const pause=()=>new Promise(resolve=>setTimeout(resolve,30));
 export function areaOptionsDOM(root){
  const shown=n=>!!n.getClientRects().length&&getComputedStyle(n).visibility!=='hidden';
@@ -111,8 +112,8 @@ export function listPopupSelectionDOM(root){
  const pane=panes[0],headers=pane.querySelectorAll('.select-data-num-text'),limits=pane.querySelectorAll('.select-data-num-limit'),containers=pane.querySelectorAll('.select-data-container');
  if(headers.length!==1||limits.length!==1||containers.length!==1)return {count:null,text:'',empty:true,values:[],scopeValid:false};
  const count=String(headers[0].innerText||headers[0].textContent||'').trim().match(/^(\d+)\s*\/$/),limit=String(limits[0].innerText||limits[0].textContent||'').trim(),container=containers[0];
- if(!count||limit!=='1')return {count:null,text:'',empty:true,values:[],scopeValid:false};
- return {count:Number(count[1]),text:String(container.innerText||'').trim(),empty:Number(count[1])===0||!!container.querySelector('.select-data-empty'),values:[...container.querySelectorAll('[data-value],[data-id]')].map(n=>n.getAttribute('data-value')||n.getAttribute('data-id')),scopeValid:true};
+ if(!count||!/^\d+$/.test(limit)||Number(limit)<1||Number(count[1])>Number(limit))return {count:null,text:'',empty:true,values:[],scopeValid:false};
+ return {count:Number(count[1]),limit:Number(limit),text:String(container.innerText||'').trim(),empty:Number(count[1])===0||!!container.querySelector('.select-data-empty'),values:[...container.querySelectorAll('[data-value],[data-id]')].map(n=>n.getAttribute('data-value')||n.getAttribute('data-id')),scopeValid:true};
 }
 // Single-choice panels with a left list and a separate confirmed selection pane.
 export async function performPhoenixListPopup(adapter,action,value,{trigger,initial,dismiss}={}){

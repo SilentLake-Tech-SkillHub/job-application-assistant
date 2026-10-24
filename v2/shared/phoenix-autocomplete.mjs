@@ -66,7 +66,10 @@ export async function performPhoenixAutocomplete(adapter,action,value){
  const query=action.query||String(value||'');if(!query)throw Error('AUTOCOMPLETE_QUERY_REQUIRED');
  let queryApplied=false;
  try{
-  await input.click({timeout:10000});if(await read()!==query){await input.fill(query,{timeout:10000});await waitValue(query);}queryApplied=true;
+  await input.click({timeout:10000});
+  // A restored editor may show the old query without having issued this
+  // session's search. Reapply through the real input even when text matches.
+  await input.fill(query,{timeout:10000});await waitValue(query);queryApplied=true;
   const end=Date.now()+5000;let records=[],empty=null;
   do{
    if(await menu.count()===1)records=await menu.evaluate(choiceProofDOM,{operation:'options',selector:item});
