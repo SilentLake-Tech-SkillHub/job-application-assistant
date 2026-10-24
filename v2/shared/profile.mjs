@@ -239,7 +239,7 @@ export function mapProfileQuestions(profile,{companyId,pageUrl,mappings,evidence
   for(const mapping of mappings){
     const prior=form.mappings[mapping.questionId],definition=profile.fieldRegistry[prior.factKey];
     if(!Object.values(MATERIAL_SOURCES).includes(mapping.factKey)&&!profile.facts[mapping.factKey]){profile.fieldRegistry[mapping.factKey]={...mapping.define,semanticKey:mapping.factKey,status:'defined',definitionEvidence:evidence};profile.facts[mapping.factKey]={status:'missing',value:null,sourceIds:[],reason:'Observed question mapped to a newly defined semantic fact; no answer inferred'};}
-    if(definition){definition.aliasOf=mapping.factKey;definition.status='mapped';definition.mappingEvidence=evidence;}
+    if(definition&&prior.factKey.startsWith('unmapped.')){definition.aliasOf=mapping.factKey;definition.status='mapped';definition.mappingEvidence=evidence;}
     Object.assign(prior,{factKey:mapping.factKey,status:'mapped',mappingEvidence:evidence});
   }
   return {pageKey,mapped:mappings.length,remainingUnmapped:Object.values(form.mappings).filter(m=>m.status==='needs_semantic_mapping').length};

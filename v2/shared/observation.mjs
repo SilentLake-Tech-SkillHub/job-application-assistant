@@ -1,4 +1,4 @@
-import {materialAudit,effectiveRequired} from './business-materials.mjs';
+import {materialAudit,effectiveRequired,materialKey} from './business-materials.mjs';
 import {projectDateValue} from './value-contract.mjs';
 export {controlDOM as observeDOM} from './control-dom.mjs';
 
@@ -16,6 +16,7 @@ export function compileExpected(plan,task) {
 }
 
 export function attachInventory(observation,plan,inventory){
+  observation.materialDestinationKeys=[...new Set(inventory.map(materialKey).filter(Boolean))];
   observation.inventoryIds=inventory.map(control=>{
     const f=plan.fields.find(f=>(f.inventorySelectors||[f.read.selector]).includes(control.selector));
     return f?.id||`unmapped:${control.selector}`;

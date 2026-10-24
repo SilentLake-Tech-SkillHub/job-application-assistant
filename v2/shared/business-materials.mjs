@@ -36,16 +36,27 @@ export function resolveMaterialValues(context){
  }
  return {values,sources,omissions,materialContext:context};
 }
+export function materialDispositionApplies(context,record,key){
+ const scope=context.dispositionScope;
+ return !!scope&&record?.kind==='user_confirmed_no_destination'&&record.revoked!==true&&record.key===key&&!!record.captureId&&!!record.inventoryHash&&!!record.sourceId&&!!record.recordedAt&&
+  scope.companyId===context.companyId&&scope.roleId===String(context.roleId)&&scope.roleUrl===context.roleUrl&&scope.batchId===context.batchId&&scope.contentSha256===context.contentSha256&&scope.materialsHash===digest(context.materials)&&
+  typeof scope.pageUrl==='string'&&new URL(scope.pageUrl).origin===new URL(context.roleUrl).origin&&typeof scope.templateHash==='string'&&/^[a-f0-9]{64}$/.test(scope.templateHash)&&
+  ['companyId','roleId','roleUrl','batchId','contentSha256','materialsHash','pageUrl','templateHash'].every(k=>record[k]===scope[k]);
+}
 export function materialAudit(fields,task){
  const context=task.materialContext;if(!context)return {enabled:false,complete:true,requirements:[],blockers:[]};
  validateMaterials(context.materials);
  if(context.companyId!==task.companyId||task.roleId&&String(context.roleId)!==String(task.roleId))throw Error('ROLE_MATERIAL_SCOPE_MISMATCH');
- const requirements=[],blockers=[];
+ const requirements=[],blockers=[],exceptions=[];
  for(const item of context.materials.items){
   const source=MATERIAL_SOURCES[item.key],matches=fields.filter(f=>materialKey(f)===item.key);
   if(item.status==='unresolved'){blockers.push('ROLE_MATERIAL_REQUIRES_RESOLUTION');continue;}
   if(item.status!=='available')continue;
-  if(!matches.length)blockers.push('ROLE_MATERIAL_DESTINATION_REQUIRED');
+  if(!matches.length){
+   const record=context.dispositions?.[item.key];
+   if(materialDispositionApplies(context,record,item.key)&&context.dispositionScope.pageUrl===task.pageUrl&&context.dispositionScope.templateHash===task.templateHash)exceptions.push({key:item.key,kind:record.kind,sourceId:record.sourceId,captureId:record.captureId,inventoryHash:record.inventoryHash});
+   else blockers.push('ROLE_MATERIAL_DESTINATION_REQUIRED');
+  }
   for(const field of matches){
    if(field.source!==source)blockers.push('ROLE_MATERIAL_MAPPING_REQUIRED');
    if(field.userOnly||field.when&&task.values?.[field.when.source]!==field.when.equals)blockers.push('REQUIRED_MATERIAL_NOT_EXECUTABLE');
@@ -54,7 +65,12 @@ export function materialAudit(fields,task){
    requirements.push({key:item.key,fieldId:field.id,source,value:item.value,required:true});
   }
  }
- return {enabled:true,contextHash:digest(context),materialsHash:digest(context.materials),complete:blockers.length===0,requirements,blockers:[...new Set(blockers)]};
+ return {enabled:true,contextHash:digest(context),materialsHash:digest(context.materials),complete:blockers.length===0,requirements,exceptions,blockers:[...new Set(blockers)]};
+}
+export function assertMaterialDestinationsRemainAbsent(audit,inventory){
+ if(!audit?.exceptions?.length)return;
+ if(!Array.isArray(inventory))throw Error('MATERIAL_DESTINATION_INVENTORY_REQUIRED');
+ if(inventory.some(control=>audit.exceptions.some(exception=>materialKey(control)===exception.key)))throw Error('MATERIAL_DESTINATION_APPEARED_EXCEPTION_INVALID');
 }
 export function effectiveRequired(field,task){
  const key=materialKey(field);
@@ -63,10 +79,14 @@ export function effectiveRequired(field,task){
 export function verifyMaterialCoverage(expected,observed){
  const audit=expected.materialAudit;if(!audit?.enabled)return {enabled:false,complete:true,checks:[]};
  const checks=audit.blockers.map(reason=>({id:'material:contract',status:'invalid',reason}));
+ for(const exception of audit.exceptions||[]){
+  const captured=Array.isArray(observed.materialDestinationKeys),exists=captured&&observed.materialDestinationKeys.includes(exception.key);
+  checks.push({id:'material:'+exception.key,status:captured&&!exists?'confirmed_omission':'invalid',reason:!captured?'MATERIAL_DESTINATION_INVENTORY_REQUIRED':exists?'MATERIAL_DESTINATION_APPEARED_EXCEPTION_INVALID':'USER_CONFIRMED_NO_DESTINATION',sourceId:exception.sourceId});
+ }
  for(const requirement of audit.requirements){
   const field=expected.fields.find(f=>f.id===requirement.fieldId),actual=observed.fields?.[requirement.fieldId];
   const ok=field?.value===requirement.value&&actual?.present===true&&actual.value===requirement.value&&!actual.errors?.length;
   checks.push({id:'material:'+requirement.key+':'+requirement.fieldId,status:ok?'match':'mismatch',reason:ok?null:'REQUIRED_MATERIAL_READBACK_FAILED'});
  }
- return {enabled:true,contextHash:audit.contextHash,materialsHash:audit.materialsHash,complete:checks.every(c=>c.status==='match'),checks};
+ return {enabled:true,contextHash:audit.contextHash,materialsHash:audit.materialsHash,complete:checks.every(c=>['match','confirmed_omission'].includes(c.status)),checks};
 }

@@ -4,7 +4,9 @@ import {registerObservedQuestions,mapProfileQuestions} from '../shared/profile.m
 import {Store,hash} from '../shared/engine.mjs';
 import {randomUUID} from 'node:crypto';
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-test('actual application MCP reports new runtime and missing company form routes offline to acquisition', {timeout:10000},async()=>{
+// This fixture exercises the full multi-call MCP construction lifecycle. Each
+// RPC keeps its 3s deadline; allow cold dependency startup plus all those calls.
+test('actual application MCP reports new runtime and missing company form routes offline to acquisition', {timeout:30000},async()=>{
  const d=await mkdtemp(path.join(os.tmpdir(),'application-protocol-'));const profile=path.join(d,'profile.json');await writeFile(profile,JSON.stringify({schemaVersion:1,facts:{},sources:{},entities:{}}));
  const companyId='protocol-fixture',origin='https://application.example',pageUrl=origin+'/campus/resume/123/apply';
  const handoff=path.join(d,'handoff'),firm=path.join(handoff,'公司','测试地区','测试公司');await mkdir(firm,{recursive:true});
@@ -13,6 +15,7 @@ test('actual application MCP reports new runtime and missing company form routes
  try{await c.connect(new StdioClientTransport({command:process.execPath,args:[path.join(root,'application/server.mjs')],cwd:d,env:{PATH:process.env.PATH,RECRUITING_HANDOFF_DIR:handoff,RECRUITING_PROFILE_JSON:profile,RECRUITING_PRIVATE_DIR:path.join(d,'application'),RECRUITING_ROLE_QUEUE_DIR:path.join(d,'queue'),RECRUITING_BROWSER_SOCKET:path.join(d,'absent.sock')},stderr:'pipe'}));
  const toolList=(await c.listTools()).tools,names=toolList.map(t=>t.name);for(const name of ['runtime_info','workflow_next','template_rebind_role','application_closeout','capture_form_definition','inspect_choice','form_remove_attachment','role_prepare_profile_fields','role_submit','form_search_choices'])assert.ok(names.includes(name));
  assert.ok(toolList.find(t=>t.name==='form_build_template').inputSchema.properties.page.properties.rolePrefix);
+ assert.ok(names.includes('role_confirm_material_no_destination'));
  const checkPatterns=value=>{if(!value||typeof value!=='object')return;for(const [key,item]of Object.entries(value)){if(key==='pattern')assert.doesNotThrow(()=>new RegExp(item,'u'));else checkPatterns(item);}};toolList.forEach(t=>checkPatterns(t.inputSchema));
  const call=async(name,args={})=>{const r=await c.callTool({name,arguments:args},undefined,{timeout:3000}),data=JSON.parse(r.content[0].text);assert.notEqual(r.isError,true,`${name}: ${data.error||'MCP error'}`);return data;};
  const info=await call('runtime_info');assert.ok(info.runtime.processId>0);assert.match(info.runtime.sourceFingerprint,/^[a-f0-9]{64}$/);assert.equal(info.version,'2.0.0-alpha.7');assert.equal(info.compilerVersion,3);assert.equal(info.pipelineRevision,'rea-contract-5');assert.ok(info.capabilities.includes('choice_resolution_pending_diagnostics'));

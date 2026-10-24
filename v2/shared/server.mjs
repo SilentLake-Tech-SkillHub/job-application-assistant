@@ -1,4 +1,5 @@
 import {runtimeIdentity} from './runtime-identity.mjs';
+import {recordMaterialDestinationException,revokeMaterialDestinationException,withMaterialDispositions} from './material-disposition.mjs';
 const residentRuntime=await runtimeIdentity('application');
 import {prepareRoleMaterials} from './prepare-role-materials.mjs';
 import {submitReviewedRole} from './role-submit.mjs';
@@ -65,7 +66,8 @@ const queues=profileFile?queueFromEnv(catalog.companies):null;
 const companyBatches=queues?new CompanyBatch({store,queues,catalog:catalog.companies}):null;
 async function resolveInputs(profile,template,decisions,companyId,task={}){
  await assertStoredChoiceGoals(template,{store,companyId,profile});
- const materialContext=await confirmedMaterialContext({handoffDir:directory.handoffDir,companyId,roleId:task.roleId,pageUrl:task.pageUrl||template.evidence.sourceUrl,catalog:catalog.companies});
+ const rawMaterialContext=await confirmedMaterialContext({handoffDir:directory.handoffDir,companyId,roleId:task.roleId,pageUrl:task.pageUrl||template.evidence.sourceUrl,catalog:catalog.companies});
+ const materialContext=withMaterialDispositions(profile,rawMaterialContext,{pageUrl:task.pageUrl||template.evidence.sourceUrl,templateHash:hash(template)});
  const resolved=resolveProfile(profile,template,decisions,companyId,materialContext),pageUrl=task.pageUrl||template.evidence.sourceUrl,company=catalog.companies.find(c=>c.id===companyId);
  return {...resolved,profileFillContext:authorizedProfileContext(profile,template,{materialContext,companyId,roleId:materialContext.roleId,pageUrl,officialOrigin:company?.origin})};
 }
@@ -142,6 +144,24 @@ registerTool('workflow_handoff',{description:'把组件已记录的真实技术�
 registerTool('application_closeout',{description:'固定事件收尾：校验官网证据后把本岗位最新结果覆盖写入 岗位交接/投递回传.json（每岗位一条，不留历史和备份）；同事件幂等。记录“已投递”前，本岗位必须在本批队列中由 MCP 按已封存的公司表单模板填写并核验通过，手工填写的岗位拒绝记录。不改主表状态：由搜索端反向评审、用户确认后才写入。不提交网站。',inputSchema:{outcome:outcomeSchema}},wrap(async args=>{await refreshBindings();return closeApplication({...args,assertPrepared:outcome=>assertSubmissionPrepared({queues,store,catalog:catalog.companies,outcome})});},false));
 registerTool('form_assets_status',{description:'只读：按当前投递批次（或指定公司）列出每家公司的登录配置、表单模板是否封存、各岗位申请页链接是否已存；缺口须先按建库路线补齐，不得手工填表代替。',inputSchema:{companyIds:z.array(z.string()).min(1).max(50).optional()},annotations:{readOnlyHint:true}},wrap(async({companyIds})=>{await refreshBindings();const batch=await readBatchFile(directory.handoffDir);return formAssetStatus({directory,catalog:catalog.companies,store,batch,companyIds});}));
 const queueTask={queueId:z.string().uuid(),queueHash:z.string().length(64),taskId:z.string().uuid()};
+registerTool('role_confirm_material_no_destination',{description:'仅在用户明确确认本岗位不使用某项已有码材料后登记例外。核对原岗位/账号、已封存模板、本次捕获及当前实际完整控件均无对应入口；任一入口存在则拒绝。仅对该岗位、表单和材料摘要生效，不删除主表代码，不影响其他岗位；mode=revoke明确撤回例外；两种操作都使旧冻结计划失效，不提交。',inputSchema:{...queueTask,captureId:z.string().optional(),mode:z.enum(['confirm','revoke']).default('confirm'),key:z.enum(['referralCode']),authorization:z.object({confirm:z.literal(true),evidence:z.string().min(1)})}},wrap(async a=>{
+ const queued=await queues.task(a);return engine.withCompanyLease(queued.t.companyId,async()=>{
+  const {t,state,template}=await boundRole(a);
+  const context=await confirmedMaterialContext({handoffDir:directory.handoffDir,companyId:t.companyId,roleId:t.roleId,pageUrl:state.returnUrl,catalog:catalog.companies});
+  if(a.mode==='revoke'){
+   const result=await updateProfile(profileFile,p=>revokeMaterialDestinationException(p,{context,pageUrl:state.returnUrl,key:a.key,evidence:a.authorization.evidence}));
+   const {planId,planHash,fillRunId,verifyRunId,...rest}=state;await queues.put(t.taskId,{...rest,status:'ready_to_fill'});
+   return {...result,companyId:t.companyId,roleId:t.roleId,fullFormVerified:false,continuation:{state:'prepare',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['prepare_plan']}};
+  }
+  if(!a.captureId)throw Error('MATERIAL_EXCEPTION_CAPTURE_REQUIRED');
+  const route=await engine.formRoute({companyId:t.companyId,roleId:t.roleId,pageUrl:state.returnUrl});if(route.route!=='reuse')throw Error('SEALED_FORM_REQUIRED_FOR_MATERIAL_EXCEPTION');
+  const capture=await store.get('runs',a.captureId),page=await browser.existingPage(state.returnUrl,{pageId:state.pageId,readOnly:true});
+  const plan=template.pages.find(p=>new URL(state.returnUrl).pathname.startsWith(p.pathPrefix)),controls=await page.inventory(plan);
+  const result=await updateProfile(profileFile,p=>recordMaterialDestinationException(p,{context,pageUrl:state.returnUrl,template,templateHash:hash(template),capture,controls,key:a.key,evidence:a.authorization.evidence}));
+  const {planId,planHash,fillRunId,verifyRunId,...rest}=state;await queues.put(t.taskId,{...rest,status:'ready_to_fill'});
+  return {...result,companyId:t.companyId,roleId:t.roleId,fullFormVerified:false,continuation:{state:'prepare',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['prepare_plan','role_prepare']}};
+ });
+}));
 // Expose the page contract to the agent in the tool schema. An opaque record
 // made ordinary construction gaps look like unexplained runtime failures.
 const constructionPage=z.object({

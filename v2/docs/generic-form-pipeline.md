@@ -37,6 +37,8 @@ REA 关联使用同 target、同完整页面、相邻时间的 native AX backend
 
 `business-materials.mjs` 是通用规则入口，`role-material-context.mjs` 核对公司、岗位和原站点。推荐码字段按已观察的题目/placeholder语义映射到 `material:referralCode`；它不是个人主档缺失事实。网站必填属性保持原值；当已确认岗位有适用代码时，冻结计划计算 `effectiveRequired=true`。漏字段、漏映射、错误来源、未激活分支、普通 userOnly 或留空均阻断，部分填写授权不能放行。没有代码和代码待核实分别记录，后者属于 Agent 材料工作。
 
+官网当前表单确无材料入口时仍默认阻断。仅当用户明确同意该具体岗位不使用该材料，才可调用 `role_confirm_material_no_destination`：内核核对原页面角色和账号、已封存模板、捕获清单及同 pageId 的当前实际控件；任一清单出现对应入口即拒绝例外。决定只在私有主档的 `applicationDispositions.<company>.roleMaterials` 覆盖保存，引用真实用户来源，不复制或删除主表材料值。公司、原岗位、完整申请 URL、模板 Hash、批次与材料摘要共同绑定；冻结和独立核验读取同一决定。发生变更后须重新评审该决定。报告为明确省略，不声称已使用材料；实际出现入口时仍有码必填。
+
 冻结输入包含完整材料契约及确认摘要。材料变化使旧计划失效；独立读回再次从原确认岗位解析材料，并精确核对原始代码，空白、尾部空格、网站错误提示都不能通过。完成报告的 `materialCoverage` 必须完整且对应本岗位材料Hash；公司完成与提交结果记录均检查这一证明。
 
 旧批次只补材料时，由搜索固定脚本预览 `amend-materials`，附用户授权原话及原批次摘要执行；不改变岗位、顺序或批次ID。申请端调用 `company_batch_refresh_materials` 验证材料补充确认与岗位集合完全相同，保留任务ID、原页面、登录及已填内容，撤销旧计划/完成核验引用，返回新队列Hash。不能通过重新组批或重新开页完成迁移。

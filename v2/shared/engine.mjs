@@ -1,4 +1,5 @@
 import {saveSearchableCommit,verifySearchableCommits,attachSearchableCommits} from './searchable-commit.mjs';
+import {assertMaterialDestinationsRemainAbsent} from './business-materials.mjs';
 import {safeControlErrorDetails} from './control-error-details.mjs';
 import {verifyDropdownSelections,attachChoiceProofs} from './choice-verification.mjs';
 import {verifyDateRanges,attachDateRangeProofs} from './date-range-verification.mjs';
@@ -286,6 +287,7 @@ export class Engine {
         await page.wait(plan.readySelector);
         const inventory=()=>liveControls(page,plan);
         const live=await inventory();
+        assertMaterialDestinationsRemainAbsent(prepared.materialCoverage,live);
         if(this.onInventory)await this.onInventory(company.id,task.pageUrl,live,plan);
         const mapped=new Set(plan.fields.flatMap(f=>f.inventorySelectors||[f.read.selector]));
         const missing=live.filter(f=>!mapped.has(f.selector));
@@ -307,6 +309,7 @@ export class Engine {
         }
         if(plan.groups?.length)await page.ensureGroups(plan.groups);
         const expanded=uploads.length||plan.groups?.length?await inventory():live;
+        assertMaterialDestinationsRemainAbsent(prepared.materialCoverage,expanded);
         if((uploads.length||plan.groups?.length)&&this.onInventory)await this.onInventory(company.id,task.pageUrl,expanded,plan);
         if(expanded.some(f=>!mapped.has(f.selector)))throw Error('UNMAPPED_FORM_FIELDS_AFTER_EXPANSION');
         if(controlContractChanges(plan,expanded).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
@@ -315,6 +318,7 @@ export class Engine {
         for(const f of fillFields){
           if(f.disposition!=='fill'||uploads.includes(f)||f.prepareBeforeGroups)continue;
           activeField={id:f.id,source:f.source,kind:f.kind,label:f.label};
+          if(prepared.materialCoverage?.exceptions?.length)assertMaterialDestinationsRemainAbsent(prepared.materialCoverage,await inventory());
           if(f.when&&!initial.fields[f.id]?.present)await page.wait(f.read.presenceSelector||f.read.selector);
           const current=initial.fields[f.id];
           if(f.control?.type!=='searchable_text'&&current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'&&(!['choice','date'].includes(f.kind)||current.selected===true)){
@@ -332,6 +336,7 @@ export class Engine {
         if(Object.values(authorizedProofs).some(proof=>proof.status!=='verified'))throw Error('AUTHORIZED_PROFILE_VALUE_MISMATCH');
         // A final read of the entire page catches later cascades or resume parsing overwriting earlier values.
         const finalInventory=await inventory();
+        assertMaterialDestinationsRemainAbsent(prepared.materialCoverage,finalInventory);
         // Dependencies and parsing can reveal new optional questions after writing.
         // Persist these before any completion verdict, just like the initial capture.
         if(this.onInventory)await this.onInventory(company.id,task.pageUrl,finalInventory,plan);

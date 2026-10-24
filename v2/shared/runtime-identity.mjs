@@ -4,7 +4,8 @@ import {readFile,readdir} from 'node:fs/promises';import {createHash} from 'node
 export async function genericSourceManifest(){
  const files=['package.json','package-lock.json'];
  for(const dir of ['shared','login','application','catalog'])for(const name of await readdir(new URL('../'+dir+'/',import.meta.url)))if(/\.(?:mjs|json)$/.test(name))files.push(dir+'/'+name);
- const digest=createHash('sha256');for(const file of files.sort())digest.update(file).update('\0').update(await readFile(new URL('../'+file,import.meta.url)));
+ const ordered=files.sort(),contents=await Promise.all(ordered.map(file=>readFile(new URL('../'+file,import.meta.url))));
+ const digest=createHash('sha256');for(const [index,file]of ordered.entries())digest.update(file).update('\0').update(contents[index]);
  return {sourceFingerprint:digest.digest('hex'),fingerprintFileCount:files.length,fingerprintScope:'generic_code_dependencies_and_catalog'};
 }
 export async function runtimeIdentity(module){
