@@ -210,6 +210,7 @@
         "verify_current"
       ]
     ],
+    "profile_record_document_facts": ["prepare", ["prepare_plan"]],
     "profile_record_answers": [
       "prepare",
       [
