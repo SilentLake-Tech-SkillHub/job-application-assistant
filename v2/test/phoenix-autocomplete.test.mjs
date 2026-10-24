@@ -1,12 +1,12 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {performPhoenixAutocomplete,waitForAutocompleteCandidate} from '../shared/phoenix-autocomplete.mjs';
 const text='Example University',warningText='没有搜索到学校，将使用您输入的学校';
-function fixture({initial='',exposeId=true,markers=false,options=[{label:text,value:'school-id',valueAttribute:'data-id',disabled:false}],custom=false,ghostRestore=false,commitDelayMs=0,neverCommit=false,rollbackAfterBlur=false,targetCounts=[]}={}){
+function fixture({initial='',exposeId=true,markers=false,options=[{label:text,value:'school-id',valueAttribute:'data-id',disabled:false}],custom=false,ghostRestore=false,commitDelayMs=0,neverCommit=false,rollbackAfterBlur=false,targetCounts=[],onFill}={}){
  const state={value:initial,id:initial&&exposeId?'school-id':null,selected:initial||null,open:false,fills:[],clicks:0,blurs:0,optionClicks:0,pendingCommit:false,prematureBlurs:0,query:initial,targetReads:0};
  const container={getAttribute:k=>k==='data-entity-id'?state.id:null};
  const node={tagName:'INPUT',getAttribute:k=>k==='data-entity-id'?state.id:null,closest:s=>s==='.phoenix-auto-complete-container'?container:s==='.form-item--phoenix'?{innerText:custom&&state.value?warningText:''}:null};
- const input={count:async()=>1,evaluate:async fn=>fn(node),inputValue:async()=>state.value,click:async()=>{state.open=true;state.clicks++;},fill:async value=>{state.fills.push(value);state.value=value;state.query=value;state.id=ghostRestore&&!value?'ghost-id':null;state.selected=null;}};
- const label={count:async()=>1,click:async()=>{state.open=false;state.blurs++;if(state.pendingCommit){state.pendingCommit=false;state.prematureBlurs++;state.value=state.query;state.id=null;state.selected=null;}else if(rollbackAfterBlur&&state.selected){state.value=state.query;state.id=null;state.selected=null;}}};
+ const input={count:async()=>1,evaluate:async fn=>fn(node),inputValue:async()=>state.value,click:async()=>{state.open=true;state.clicks++;},fill:async value=>{state.fills.push(value);state.value=value;state.query=value;state.id=ghostRestore&&!value?'ghost-id':null;state.selected=null;onFill?.(value,options);}};
+ const label={count:async()=>1,click:async()=>{state.open=false;state.blurs++;if(state.pendingCommit){state.pendingCommit=false;state.prematureBlurs++;state.value=state.query;state.id=null;state.selected=null;}else if(rollbackAfterBlur&&state.selected){state.value='Rejected input';state.id=null;state.selected=null;}}};
  const menu={filter(){return this;},count:async()=>state.open?1:0,evaluate:async()=>options.map(o=>({...o,selected:markers&&state.selected===o.label})),locator:()=>({filter:({hasText})=>{const matches=options.filter(o=>hasText.test(o.label));return {count:async()=>targetCounts.length?targetCounts[Math.min(state.targetReads++,targetCounts.length-1)]:matches.length,click:async()=>{state.optionClicks++;const commit=()=>{state.pendingCommit=false;state.selected=matches[0].label;state.value=matches[0].label;state.id=exposeId?matches[0].value:null;state.open=false;};if(commitDelayMs||neverCommit){state.pendingCommit=true;if(!neverCommit)setTimeout(()=>{if(state.pendingCommit)commit();},commitDelayMs);}else commit();}};}})};
  const adapter={page:{locator:s=>s==='#input'?input:s==='#label'?label:menu}};
  return {adapter,state};
@@ -41,8 +41,17 @@ test('custom values require current same-field explicit acceptance after blur',a
 test('asynchronous candidate commit must render the exact label before blur can roll back a stale query',async()=>{
  const f=fixture({commitDelayMs:70}),r=await performPhoenixAutocomplete(f.adapter,{...action,query:'Example'},text);assert.equal(r.searchableCommit.currentSelection.kind,'entity_id');assert.equal(f.state.value,text);assert.equal(f.state.optionClicks,1);assert.equal(f.state.prematureBlurs,0);assert.equal(f.state.pendingCommit,false);
 });
-test('a click that never commits remains rejected before blur with private-value-safe phase details',async()=>{
- const f=fixture({neverCommit:true});await assert.rejects(performPhoenixAutocomplete(f.adapter,{...action,query:'Example'},text),error=>{assert.equal(error.message,'AUTOCOMPLETE_COMMIT_NOT_VERIFIED');assert.equal(error.details.phase,'after_option_click');assert.equal(error.details.valueMatches,false);assert.match(error.details.expectedValueHash,/^[a-f0-9]{64}$/);assert.match(error.details.observedValueHash,/^[a-f0-9]{64}$/);assert.equal(JSON.stringify(error.details).includes('Example'),false);return true;});assert.equal(f.state.blurs,0);assert.equal(f.state.optionClicks,1);
+test('candidate-label input without a committed entity never becomes successful selection',async()=>{
+ const f=fixture({neverCommit:true});await assert.rejects(performPhoenixAutocomplete(f.adapter,{...action,query:'Example'},text),error=>{assert.equal(error.message,'AUTOCOMPLETE_COMMIT_NOT_VERIFIED');assert.equal(error.details.phase,'after_option_click');assert.equal(error.details.valueMatches,true);assert.match(error.details.expectedValueHash,/^[a-f0-9]{64}$/);assert.equal(JSON.stringify(error.details).includes('Example'),false);return true;});assert.equal(f.state.optionClicks,1);assert.equal(f.state.id,null);assert.equal(f.state.blurs,0);
+});
+test('recall query converges to the real candidate before one click and still requires current ID',async()=>{
+ const f=fixture(),r=await performPhoenixAutocomplete(f.adapter,{...action,query:'Example'},text);
+ assert.deepEqual(f.state.fills,['Example',text]);assert.equal(f.state.optionClicks,1);assert.equal(r.searchableCommit.currentSelection.value,'school-id');
+ const lost=fixture({exposeId:false});await assert.rejects(performPhoenixAutocomplete(lost.adapter,{...action,query:'Example'},text),/CURRENT_SELECTION_PROOF_REQUIRED/);assert.equal(lost.state.optionClicks,1);
+});
+test('candidate identity changes during full-label convergence reject before any option click',async()=>{
+ const f=fixture({onFill:(value,options)=>{if(value===text)options[0].value='different-id';}});
+ await assert.rejects(performPhoenixAutocomplete(f.adapter,{...action,query:'Example'},text),/ACTUAL_CAPTURED_OPTION_REQUIRED/);assert.equal(f.state.optionClicks,0);
 });
 test('post-blur rollback and independent verification failure are reported in distinct phases',async()=>{
  const f=fixture({rollbackAfterBlur:true});await assert.rejects(performPhoenixAutocomplete(f.adapter,{...action,query:'Example'},text),error=>{assert.equal(error.message,'AUTOCOMPLETE_COMMIT_NOT_VERIFIED');assert.equal(error.details.phase,'after_blur');assert.equal(error.details.valueMatches,false);return true;});

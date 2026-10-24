@@ -143,8 +143,11 @@ export function controlDOM(spec){
     const root=spec.sectionDiscovery.parentContainer?n.parentElement:n;
     return {title:text(n.querySelector(spec.sectionDiscovery.titleSelector)),unexpanded:!!spec.sectionDiscovery.unexpandedSelector&&[...root.querySelectorAll(spec.sectionDiscovery.unexpandedSelector)].some(visible)};
   }):undefined;
+  const roleNode=one(spec.roleSelector),rawRoleTitle=roleNode?.innerText??null;
+  const hasRolePrefix=spec.rolePrefix!==undefined,prefixApplied=hasRolePrefix&&typeof spec.rolePrefix==='string'&&typeof rawRoleTitle==='string'&&rawRoleTitle.startsWith(spec.rolePrefix);
+  const roleTitle=prefixApplied?rawRoleTitle.slice(spec.rolePrefix.length).trim():text(roleNode);
   return {source:'live_dom',readAt:new Date().toISOString(),pageUrl:location.href,
-    roleTitle:text(one(spec.roleSelector)),fields,groups,sections,pageErrors:errors(spec.errorSelectors),saveEvidence:'not_verified'};
+    roleTitle,...(hasRolePrefix?{rawRoleTitle,prefixApplied}:{}),fields,groups,sections,pageErrors:errors(spec.errorSelectors),saveEvidence:'not_verified'};
 
  }
 

@@ -3,7 +3,7 @@ import {projectDateValue} from './value-contract.mjs';
 export {controlDOM as observeDOM} from './control-dom.mjs';
 
 export function compileExpected(plan,task) {
-  return {pageUrl:task.pageUrl,roleTitle:plan.roleTitle,...(plan.roleIdentity?{roleIdentity:plan.roleIdentity}:{}),contentPolicy:task.contentPolicy,materialAudit:materialAudit(plan.fields,task),groups:plan.groups||[],sections:plan.sections,fields:plan.fields.filter(f=>!f.when||task.values?.[f.when.source]===f.when.equals).map(f=>{
+  return {pageUrl:task.pageUrl,roleTitle:plan.roleTitle,...(plan.rolePrefix!==undefined?{rolePrefix:plan.rolePrefix,roleSelector:plan.roleSelector}:{}),...(plan.roleIdentity?{roleIdentity:plan.roleIdentity}:{}),contentPolicy:task.contentPolicy,materialAudit:materialAudit(plan.fields,task),groups:plan.groups||[],sections:plan.sections,fields:plan.fields.filter(f=>!f.when||task.values?.[f.when.source]===f.when.equals).map(f=>{
     let value=task.values?.[f.source];
     if(f.enumMap && value!==undefined)value=f.enumMap[value];
     if(f.ongoingSource&&task.values?.[f.ongoingSource]===true)value=task.dateRepresentations?.[f.id]?.value||'至今';

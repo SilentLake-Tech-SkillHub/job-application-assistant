@@ -10,6 +10,10 @@ export function readRoleIdentity(spec,url){
  return {parameter:spec.parameter,value,source};
 }
 export function matchesRole(plan,observed){
+ if(plan.rolePrefix!==undefined){
+  const prefix=plan.rolePrefix,raw=observed.rawRoleTitle;
+  if(typeof prefix!=='string'||!prefix.trim()||/[\r\n\u2028\u2029]/u.test(prefix)||typeof plan.roleSelector!=='string'||!plan.roleSelector.trim()||observed.prefixApplied!==true||typeof raw!=='string'||!raw.startsWith(prefix)||!plan.roleTitle||observed.roleTitle!==plan.roleTitle||observed.roleTitle!==raw.slice(prefix.length).trim())return false;
+ }
  if(plan.roleIdentity){
   const r=plan.roleIdentity,actual=observed.roleIdentity;
   return !!r.value&&actual?.parameter===r.parameter&&actual.value===r.value&&(!observed.roleTitle||observed.roleTitle===plan.roleTitle);

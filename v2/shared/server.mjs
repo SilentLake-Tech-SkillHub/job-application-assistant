@@ -78,6 +78,13 @@ async function boundRole(args){
   if(!plan||plan.roleTitle!==t.title)throw Error('CONFIRMED_ROLE_TITLE_TEMPLATE_MISMATCH');
   const login=JSON.parse(await readFile(directory.loginFile(t.companyId),'utf8'));
   const snapshot=await browser.request('roleSnapshot',{pageId:state.pageId,roleSelector:plan.roleSelector,accountSelector:login.account.selector,loginRoot:login.fields?.root,roleIdentity:plan.roleIdentity});
+  if(plan.rolePrefix!==undefined){
+    if(snapshot.pageUrl!==state.returnUrl)throw Error('ROLE_OR_ACCOUNT_CHANGED_BEFORE_FILL');
+    const titlePage=await browser.existingPage(snapshot.pageUrl,{pageId:state.pageId,readOnly:true});
+    const title=await titlePage.observe({fields:[],roleSelector:plan.roleSelector,rolePrefix:plan.rolePrefix});
+    if(title.source!=='live_dom'||title.pageUrl!==snapshot.pageUrl||title.pageUrl!==state.returnUrl)throw Error('ROLE_OR_ACCOUNT_CHANGED_BEFORE_FILL');
+    Object.assign(snapshot,{roleTitle:title.roleTitle,rawRoleTitle:title.rawRoleTitle,prefixApplied:title.prefixApplied});
+  }
   if(login.loginMethod==='user_operated'){const accountPage=await browser.existingPage(login.account.pageUrl),account=await accountPage.observe({fields:[{id:'account',read:{selector:login.account.selector,kind:'text'}}]});snapshot.account=account.fields.account?.value;snapshot.loginFormPresent=!account.fields.account?.present;}
   if(snapshot.pageUrl!==state.returnUrl||!matchesRole(plan,snapshot)||snapshot.loginFormPresent||!matchesAccount(snapshot.account,resolveAccount(await loadProfile(profileFile),login)))throw Error('ROLE_OR_ACCOUNT_CHANGED_BEFORE_FILL');
   return {q,t,state,template};
@@ -138,11 +145,11 @@ const queueTask={queueId:z.string().uuid(),queueHash:z.string().length(64),taskI
 // Expose the page contract to the agent in the tool schema. An opaque record
 // made ordinary construction gaps look like unexplained runtime failures.
 const constructionPage=z.object({
- roleTitle:z.string().min(1),roleSelector:z.string().min(1).optional(),roleIdentity:z.record(z.unknown()).optional(),
+ roleTitle:z.string().min(1),roleSelector:z.string().min(1).optional(),rolePrefix:z.string().refine(value=>value.trim().length>0&&!/[\r\n\u2028\u2029]/u.test(value),'ROLE_PREFIX_CONTRACT_REQUIRED').optional(),roleIdentity:z.record(z.unknown()).optional(),
  readySelector:z.string().min(1),provider:z.enum(['feishu','ant','phoenix']).optional(),
  sections:z.array(z.union([z.string().min(1),z.object({title:z.string().min(1)}).passthrough()])).min(1),
  sectionDiscovery:z.object({selector:z.string().min(1),titleSelector:z.string().min(1),selectors:z.array(z.string()).optional()}).passthrough()
-}).passthrough();
+}).passthrough().superRefine((page,ctx)=>{if(page.rolePrefix!==undefined&&(typeof page.roleSelector!=='string'||!page.roleSelector.trim()))ctx.addIssue({code:z.ZodIssueCode.custom,path:['roleSelector'],message:'ROLE_PREFIX_CONTRACT_REQUIRED'});});
 registerTool('form_search_choices',{description:'通用控件目标闭环：只传已捕获字段引用，内核从该字段当前主档映射取真实值与已确认别名，逐次搜索、等实际候选或明确无结果、恢复页面并匹配。Agent不能传搜索词。唯一已知别名自动保存实际选项映射；模糊或歧义返回真实候选。只建库，不替代冻结后的填写及选中核验，不提交。',inputSchema:{companyId:z.string(),captureId:z.string(),selector:z.string()}},wrap(async a=>engine.withCompanyLease(a.companyId,async()=>{
  const capture=await store.get('runs',a.captureId);if(capture.companyId!==a.companyId)throw Error('CHOICE_CAPTURE_SCOPE_MISMATCH');
  const field=capture.controls.find(c=>c.selector===a.selector);if(!field||!isChoiceControl(field))throw Error('ORDINARY_CAPTURED_CHOICE_REQUIRED');

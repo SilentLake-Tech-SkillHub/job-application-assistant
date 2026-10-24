@@ -78,14 +78,27 @@ export async function performPhoenixAutocomplete(adapter,action,value){
   }
   let proof;
   if(records.length||!empty){
-   const {candidate,target}=await phase('candidate_resolution',String(value),()=>waitForAutocompleteCandidate({query,expectedLabel:String(value),expectedOptionValue:action.expectedOptionValue,allowedOptions:action.options,read:async()=>{
+   const resolveCandidate=(search,optionValue,stableMs)=>phase('candidate_resolution',String(value),()=>waitForAutocompleteCandidate({query:search,expectedLabel:String(value),expectedOptionValue:optionValue,allowedOptions:action.options,...(stableMs?{stableMs}:{}),read:async()=>{
     const queryBefore=await read(),menuCount=await menu.count();
     const actual=menuCount===1?await menu.evaluate(choiceProofDOM,{operation:'options',selector:item}):[];
     const target=menu.locator(item).filter({visible:true,hasText:new RegExp('^'+escape(String(value))+'$')});
     const visibleTargetCount=menuCount===1?await target.count():0,queryAfter=await read();
     return {queryBefore,queryAfter,menuCount,records:actual,visibleTargetCount,target};
    }}));
-   await target.click({timeout:10000});await phase('after_option_click',candidate.label,()=>waitValue(candidate.label));proof={mode:'actual_option_click',optionLabel:candidate.label,optionValue:candidate.value??null,valueAttribute:candidate.valueAttribute,optionClicked:true};
+   let {candidate,target}=await resolveCandidate(query,action.expectedOptionValue);
+   // Recall queries are not selection labels. Some controlled autocomplete
+   // wrappers commit their blur input asynchronously; converge to the observed
+   // candidate before the real click so an old prefix cannot overwrite it.
+   // This never substitutes input text for the click or independent entity proof.
+   if(query!==candidate.label){
+    const optionValue=candidate.value??action.expectedOptionValue;
+    await input.fill(candidate.label,{timeout:10000});await waitValue(candidate.label);
+    ({candidate,target}=await resolveCandidate(candidate.label,optionValue,500));
+   }
+   await target.click({timeout:10000});await phase('after_option_click',candidate.label,async()=>{
+    const deadline=Date.now()+2500;
+    while(await read()!==candidate.label||await menu.count()!==0){if(Date.now()>=deadline)throw Error('AUTOCOMPLETE_COMMIT_NOT_VERIFIED');await new Promise(r=>setTimeout(r,20));}
+   });proof={mode:'actual_option_click',optionLabel:candidate.label,optionValue:candidate.value??null,valueAttribute:candidate.valueAttribute,optionClicked:true};
   }else if(!records.length&&empty&&action.customValueEvidence){proof={mode:'explicit_custom_value',optionLabel:String(value),optionValue:null,optionClicked:false,customValueEvidence:empty};}
   else throw Error('UNSUPPORTED_CHOICE_NO_FALLBACK');
   const current=await currentProof(proof.mode,String(value),proof.optionValue);
