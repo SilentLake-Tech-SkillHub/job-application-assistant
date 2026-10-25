@@ -1,3 +1,4 @@
+import {contractRebuildRequired} from './rebuild-mark.mjs';
 import {assertStoredChoiceResolutions} from './choice-resolution.mjs';
 import {assertAcquisitionChain} from './acquisition-chain.mjs';
 // 公司表单资产：申请页链接写回公司文件夹、记录“已投递”前核对表单模板与核验记录、按批次汇报资产缺口。
@@ -67,7 +68,7 @@ export async function readBatchFile(handoffDir){
 }
 
 // 只读：按投递批次（或指定公司）列出每家公司的登录配置、表单模板（是否封存）和各岗位申请页链接是否齐全。
-export async function formAssetStatus({directory,catalog,store,batch,companyIds}){
+export async function formAssetStatus({directory,catalog,store,batch,companyIds,profile=null}){
  const wanted=companyIds?.length?new Set(companyIds):new Set((batch?.companies||[]).map(c=>c.companyId));
  const rows=[];
  for(const id of wanted){
@@ -80,8 +81,8 @@ export async function formAssetStatus({directory,catalog,store,batch,companyIds}
   const sites=[];
   for(const e of entries){const required=roles.length?roles.filter(role=>!role.applicationUrl||new URL(role.applicationUrl).origin===e.origin).map(role=>({roleId:String(role.roleId),templateId:e.roleTemplates?.[String(role.roleId)]||e.templateId||null})):[{roleId:null,templateId:e.templateId||null}],assets=[];
    for(const requiredRole of required){let template=null;try{if(requiredRole.templateId)template=await store.get('templates',requiredRole.templateId);}catch{}
-    assets.push({...requiredRole,status:template?(await storedSeal(store,template,e.id)?'sealed':'unsealed'):'missing'});}
-   sites.push({siteId:e.id,origin:e.origin,login:!!e.loginFile,template:!assets.length?'not_applicable':assets.every(a=>a.status==='sealed')?'sealed':assets.some(a=>a.status==='unsealed')?'unsealed':'missing',roleTemplates:Object.keys(e.roleTemplates||{}).length,roleAssets:assets});}
+    assets.push({...requiredRole,status:template?(contractRebuildRequired(profile,hash(template))?'requires_rebuild':await storedSeal(store,template,e.id)?'sealed':'unsealed'):'missing'});}
+   sites.push({siteId:e.id,origin:e.origin,login:!!e.loginFile,template:!assets.length?'not_applicable':assets.every(a=>a.status==='sealed')?'sealed':assets.some(a=>a.status==='requires_rebuild')?'requires_rebuild':assets.some(a=>a.status==='unsealed')?'unsealed':'missing',roleTemplates:Object.keys(e.roleTemplates||{}).length,roleAssets:assets});}
   const gaps=[];
   if(!sites.some(s=>s.login))gaps.push('登录配置');
   const allRolesSealed=roles.length?roles.every(role=>sites.some(site=>site.roleAssets.some(asset=>asset.roleId===String(role.roleId)&&asset.status==='sealed'))):sites.some(s=>s.template==='sealed');

@@ -1,10 +1,12 @@
 // Declarative, evidence-bound navigation shared by every browser executor.
 // This module never builds an application URL and never clicks on a form page.
 import {READY_TIMEOUT_MS} from './entry-recipe.mjs';
+import {entrySelectors,unstableClassTokens,ruleApplies} from './selector-stability.mjs';
 const fail=code=>{throw Error(code);};
 const pattern=(value)=>{if(typeof value!=='string'||!value.startsWith('^')||!value.endsWith('$')||value.length>500)fail('ENTRY_LOCATION_PATTERN_REQUIRED');try{return new RegExp(value);}catch{fail('ENTRY_LOCATION_PATTERN_INVALID');}};
 export function validateTransition(entry){
  if(entry?.kind!=='declarative_transition')fail('ROLE_ENTRY_RECIPE_REQUIRED');
+ if(ruleApplies(entry.evidence)&&entrySelectors(entry).some(([,s])=>unstableClassTokens(s).length))fail('ENTRY_SELECTOR_UNSTABLE');
  for(const phase of ['detail','form']){
   const p=entry[phase],l=p?.location;if(!l||!l.pathnamePattern)fail('ENTRY_LOCATION_PATTERN_REQUIRED');pattern(l.pathnamePattern);if(l.hashPathPattern)pattern(l.hashPathPattern);
   for(const map of [l.query,l.hashQuery])if(map&&(typeof map!=='object'||Array.isArray(map)||Object.entries(map).some(([k,v])=>!k||typeof v!=='string'||!v)))fail('ENTRY_LOCATION_QUERY_INVALID');
@@ -40,9 +42,20 @@ export function transitionRoleIdentity(spec,url){
  else value=pattern(spec.pattern).exec(u.pathname)?.groups?.[spec.parameter]||null;
  return {parameter:spec.parameter,value,source:spec.source};
 }
-async function readRole(page,spec,expectedTitle,expectedRoleId){
- let roleTitle=null;if(spec.roleSelector){const l=page.locator(spec.roleSelector);await l.waitFor({state:'visible',timeout:READY_TIMEOUT_MS});if(await l.count()!==1)fail('APPLICATION_ENTRY_ROLE_CHANGED');roleTitle=(await l.innerText()).trim();if(spec.rolePrefix){if(!roleTitle.startsWith(spec.rolePrefix))fail('APPLICATION_ENTRY_ROLE_CHANGED');roleTitle=roleTitle.slice(spec.rolePrefix.length).trim();}if(roleTitle!==expectedTitle)fail('APPLICATION_ENTRY_ROLE_CHANGED');}
- const roleIdentity=transitionRoleIdentity(spec.roleIdentity,await page.url());if(roleIdentity&&roleIdentity.value!==expectedRoleId)fail('APPLICATION_ENTRY_RESULT_ROLE_CHANGED');
+const digestText=async value=>{const {createHash}=await import('node:crypto');return createHash('sha256').update(String(value)).digest('hex');};
+const normalizeTitle=value=>String(value).normalize('NFKC').replace(/\s+/g,'').toLowerCase();
+async function roleFailure(code,{stage,check,selectorMatches,expected,observed,prefixMatched=null}){
+ const error=Error(code);
+ error.details={phase:'entry_role_identity',stage,check,selectorMatches,expectedValueHash:await digestText(expected),observedValueHash:observed==null?null:await digestText(observed),valueMatches:observed!=null&&observed===expected,readbackAvailable:observed!=null,normalizedMatch:observed==null?null:normalizeTitle(observed)===normalizeTitle(expected),prefixMatched};
+ throw error;
+}
+async function readRole(page,spec,expectedTitle,expectedRoleId,stage){
+ let roleTitle=null;if(spec.roleSelector){const l=page.locator(spec.roleSelector);await l.waitFor({state:'visible',timeout:READY_TIMEOUT_MS});const count=await l.count();
+  if(count!==1)await roleFailure('APPLICATION_ENTRY_ROLE_CHANGED',{stage,check:'selector_count',selectorMatches:count,expected:expectedTitle,observed:null});
+  const raw=(await l.innerText()).trim();roleTitle=raw;
+  if(spec.rolePrefix){if(!raw.startsWith(spec.rolePrefix))await roleFailure('APPLICATION_ENTRY_ROLE_CHANGED',{stage,check:'prefix',selectorMatches:1,expected:expectedTitle,observed:raw,prefixMatched:false});roleTitle=raw.slice(spec.rolePrefix.length).trim();}
+  if(roleTitle!==expectedTitle)await roleFailure('APPLICATION_ENTRY_ROLE_CHANGED',{stage,check:'title',selectorMatches:1,expected:expectedTitle,observed:roleTitle,prefixMatched:spec.rolePrefix?true:null});}
+ const roleIdentity=transitionRoleIdentity(spec.roleIdentity,await page.url());if(roleIdentity&&roleIdentity.value!==expectedRoleId)await roleFailure('APPLICATION_ENTRY_RESULT_ROLE_CHANGED',{stage,check:'role_identity',selectorMatches:spec.roleSelector?1:0,expected:String(expectedRoleId),observed:roleIdentity.value==null?null:String(roleIdentity.value)});
  return {roleTitle,...(roleIdentity?{roleIdentity}:{})};
 }
 export async function executeTransition({entry,pageId,expectedTitle,expectedRoleId,expectedAccount,accountSelector,sessionAccountPageUrl},host){
@@ -63,7 +76,7 @@ export async function executeTransition({entry,pageId,expectedTitle,expectedRole
  if(inDetail&&inForm)fail('ENTRY_DETAIL_FORM_AMBIGUOUS');if(!inDetail&&!inForm)fail('APPLICATION_ENTRY_PATH_REQUIRED');
  const candidates=async()=>{const pages=await host.listPages();return pages.filter(p=>{let u;try{u=new URL(p.url);}catch{return false;}return u.origin===origin&&transitionLocationMatches(entry.form.location,u.href,expectedRoleId)&&(entry.target==='same'?p.id===pageId:entry.target==='new'?p.id!==pageId:true);});};
  if(inDetail){
-  await readRole(original,entry.detail,expectedTitle,expectedRoleId);
+  await readRole(original,entry.detail,expectedTitle,expectedRoleId,'detail');
   for(const a of entry.preActions||[]){
    const l=original.locator(a.selector);await l.waitFor({state:'visible',timeout:READY_TIMEOUT_MS});
    if(await l.count()!==1)fail('APPLICATION_ENTRY_PREACTION_CHANGED');
@@ -80,6 +93,8 @@ export async function executeTransition({entry,pageId,expectedTitle,expectedRole
   if(matches.length!==1)fail(matches.length?'AMBIGUOUS_ROLE_FORM':'ROLE_FORM_NOT_OPEN');targetId=matches[0].id;target=await host.getPage(targetId);
  }
  const after=new URL(await target.url());if(after.origin!==origin||!transitionLocationMatches(entry.form.location,after.href,expectedRoleId))fail('APPLICATION_ENTRY_RESULT_ROLE_CHANGED');
- await target.locator(entry.form.readySelector).filter({visible:true}).first().waitFor({state:'visible',timeout:READY_TIMEOUT_MS});const actual=await readRole(target,entry.form,expectedTitle,expectedRoleId);await readAccount();await host.preserve?.(pageId);await host.preserve?.(targetId);
- return {pageId:targetId,pageUrl:after.href,...actual,entryClicked:clicked,accountMatched:true,submission:'not_performed'};
+ await target.locator(entry.form.readySelector).filter({visible:true}).first().waitFor({state:'visible',timeout:READY_TIMEOUT_MS});const actual=await readRole(target,entry.form,expectedTitle,expectedRoleId,'form');await readAccount();await host.preserve?.(pageId);await host.preserve?.(targetId);
+ // The detail page actually observed (after any site redirect) is returned; when it
+ // differs from the confirmed role link, a link change is proposed to the search side.
+ return {pageId:targetId,pageUrl:after.href,...actual,...(inDetail?{detailUrl:before.href}:{}),entryClicked:clicked,accountMatched:true,submission:'not_performed'};
 }

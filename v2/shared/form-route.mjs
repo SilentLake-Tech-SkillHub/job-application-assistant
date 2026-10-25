@@ -4,8 +4,10 @@ import {assertAcquisitionChain} from './acquisition-chain.mjs';
 // an existing form. An incomplete or incompatible form asset still needs work.
 import {templateConstructionIssues} from './field-policy.mjs';
 import {assertSealContract} from './form-seal.mjs';
+import {contractRebuildRequired} from './rebuild-mark.mjs';
+import {hash} from './engine.mjs';
 export class FormRouter {
-  constructor({store,companies,validateTemplate}) {Object.assign(this,{store,companies,validateTemplate});}
+  constructor({store,companies,validateTemplate,loadProfile=async()=>null}) {Object.assign(this,{store,companies,validateTemplate,loadProfile});}
   async resolve({companyId,roleId,pageUrl}) {
     const company=this.companies.find(c=>c.id===companyId);
     if(!company||new URL(pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
@@ -25,6 +27,7 @@ export class FormRouter {
     if(blockers.length)return acquire('COMPANY_FORM_ASSET_INCOMPLETE',{templateId,blockers});
     try{await assertAcquisitionChain(template,{store:this.store,companyId});}catch(error){return acquire('COMPANY_FORM_ACQUISITION_CHAIN_INVALID',{templateId,blockers:[error.message],requiresUser:false});}
     try{assertSealContract(template);const probe=await this.store.get('runs',template.coverage.proof.runId);assertSealContract(template,probe,companyId);await assertStoredChoiceResolutions(template,{store:this.store,companyId});}catch(e){return acquire('COMPANY_FORM_ASSET_NOT_SEALED',{templateId,blockers:[e.code==='ENOENT'?'SEAL_PROBE_EVIDENCE_MISSING':e.message],requiresUser:false});}
+    if(contractRebuildRequired(await this.loadProfile(),hash(template)))return acquire('COMPANY_FORM_CONTRACT_REQUIRES_REBUILD',{templateId,blockers:['PROFILE_EXECUTION_CONTRACT_REQUIRES_REBUILD'],requiresUser:false});
     return {companyId,templateId,route:'reuse',nextStage:'local_profile_preflight',reason:'COMPANY_FORM_ASSET_AVAILABLE',fullAcquisitionRequired:false,lightweightStructureCheckRequired:true,browserAccess:false};
   }
 }

@@ -4,8 +4,22 @@ const phases=new Set(['after_option_click','after_blur','independent_verify','ca
 const keys=['phase','expectedValueHash','observedValueHash','valueMatches','readbackAvailable'];
 const countKeys=['candidateCount','exactCandidateCount','visibleTargetCount'];
 const sha256=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
+const entryKeys=['phase','stage','check','selectorMatches','expectedValueHash','observedValueHash','valueMatches','readbackAvailable','normalizedMatch','prefixMatched'];
+const entryChecks=new Set(['selector_count','prefix','title','role_identity']);
+// Entry role identity failures: which check failed, on which page, how many
+// nodes matched, and hashes only — never the raw title, URL or selector.
+function entryDetails(value){
+ const own=Reflect.ownKeys(value);if(own.length!==entryKeys.length||own.some(k=>!entryKeys.includes(k)))return null;
+ const v=Object.fromEntries(entryKeys.map(k=>[k,Object.getOwnPropertyDescriptor(value,k)?.value]));
+ if(!['detail','form'].includes(v.stage)||!entryChecks.has(v.check)||!Number.isInteger(v.selectorMatches)||v.selectorMatches<0||v.selectorMatches>1000)return null;
+ if(!sha256(v.expectedValueHash)||typeof v.valueMatches!=='boolean'||typeof v.readbackAvailable!=='boolean')return null;
+ if(v.readbackAvailable?!sha256(v.observedValueHash):v.observedValueHash!==null)return null;
+ for(const k of ['normalizedMatch','prefixMatched'])if(v[k]!==null&&typeof v[k]!=='boolean')return null;
+ return v;
+}
 export function safeControlErrorDetails(value){
  try{
+ if(value&&typeof value==='object'&&!Array.isArray(value)&&[Object.prototype,null].includes(Object.getPrototypeOf(value))&&Object.getOwnPropertyDescriptor(value,'phase')?.value==='entry_role_identity')return entryDetails(value);
  if(!value||typeof value!=='object'||Array.isArray(value)||![Object.prototype,null].includes(Object.getPrototypeOf(value)))return null;
  const descriptors=Object.getOwnPropertyDescriptors(value),phase=descriptors.phase?.value;if(!phases.has(phase))return null;
  const restored=['originalValueHash','unchangedFromBefore','popupClosed','stableReadback','pageUnchanged'];

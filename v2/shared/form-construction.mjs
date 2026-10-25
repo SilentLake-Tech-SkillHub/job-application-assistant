@@ -1,3 +1,4 @@
+import {recordParentsFromProfile} from './record-source-binding.mjs';
 import {resolveDateRepresentation} from './date-representation.mjs';
 import {readRoleIdentity} from './role-identity.mjs';
 import {materialKey,MATERIAL_SOURCES} from './business-materials.mjs';
@@ -135,7 +136,7 @@ export function buildFormTemplate({capture,profile,mappings=[],choices=[],page,t
   // leave the executor guessing which of many choices needs reconciliation.
   return goal?.status==='blocked'?f:applyChoiceResolution(f,choiceGoals.choices.find(c=>f.inventorySelectors.includes(c.selector)),profile);
  });
- const template={id:templateId,version,evidence:{sourceUrl:capture.pageUrl,observedAt:capture.observedAt,captureId:capture.captureId,choiceGoalContract:1,...(reaStructure?{reaEvidenceId:reaStructure.reaEvidenceId,reaEvidenceHash:reaStructure.reaEvidenceHash}: {})},pages:[{...page,pathPrefix:page.pathPrefix||new URL(capture.pageUrl).pathname,fields}],coverage:{allControlsMapped:false,allDriversSupported:false,allConditionalBranchesVerified:false}};
+ const template={id:templateId,version,evidence:{sourceUrl:capture.pageUrl,observedAt:capture.observedAt,captureId:capture.captureId,choiceGoalContract:1,...(Object.keys(recordParentsFromProfile(profile)).length?{recordParents:recordParentsFromProfile(profile)}:{}),...(reaStructure?{reaEvidenceId:reaStructure.reaEvidenceId,reaEvidenceHash:reaStructure.reaEvidenceHash}: {})},pages:[{...page,pathPrefix:page.pathPrefix||new URL(capture.pageUrl).pathname,fields}],coverage:{allControlsMapped:false,allDriversSupported:false,allConditionalBranchesVerified:false}};
  const blockers=templateConstructionIssues(template);
  if(reaStructure){
   const unresolved=reaStructure.uncorrelatedControls||[];

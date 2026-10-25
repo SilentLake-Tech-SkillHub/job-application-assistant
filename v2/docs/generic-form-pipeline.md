@@ -27,13 +27,15 @@
 
 日期面板需显式加入 `capture_choice_options.selectors`。缺面板时 builder 返回 `DATE_OPTIONS_NOT_CAPTURED` 及绑定当前 capture 的 `nextGoals.arguments`，不能解释成缺驱动或缺用户日期。Phoenix 日期按真实 panel 的 day/month/year 精度构建；日格有完整日期属性时优先使用，没有时必须有唯一真实年月标题及当前月日格精确文字，排除前后月格，不按数组位置推算。动作与独立重展开核对同一日期身份及真实 selected；行内“至今”按同一日期列的唯一 checkbox 和精确可见标签归入复合日期控件，动作、读回、辅助控件身份一并冻结。网申截至日期与真实进行中状态分别取有来源的既有决定。
 
-扩充履历先读取真实栏目标题、记录容器、添加控件和数量限制。`capture_repeat_slots.count` 是该栏最终总条数；共享 class 不构成栏目范围。可用基于实际 heading 和祖先结构的 `phoenixq` repeatRecords/repeatAdd 引用，动作仍精确核对唯一添加按钮与每次实际记录增量。全部可填记录与已确认资料逐项核对；没有正式工作栏时不能把 employment 改填 internship，字段映射率也不能代表履历覆盖率。
+扩充履历先读取真实栏目标题、记录容器、添加控件和数量限制。`capture_repeat_slots.count` 是该栏最终总条数；共享 class 不构成栏目范围。可用基于实际 heading 和祖先结构的 `phoenixq` repeatRecords/repeatAdd 引用，动作仍精确核对唯一添加按钮与每次实际记录增量。全部可填记录与已确认资料逐项核对；哪类经历放进哪个栏目（如没有工作经历栏时正式工作放进实习栏、项目栏能否放创业或学生干部经历），只按工作区求职目标的「履历栏目放置」规则执行，组件不另定规则。字段映射率也不能代表履历覆盖率。
+
+记录归属核对覆盖所有已识别的框架记录容器（Phoenix/Ant 栏目序号、飞书 `_list` 卡片、`data-cy` 数组项），识别方式在 `record-source-binding.mjs` 的框架识别器里扩展。由另一段记录派生的记录（例如工作中的项目，主档事实带 `derivation.source`）可以使用其所属记录的角色、起止时间和职责；这个所属关系在建库时从主档写入模板 `evidence.recordParents`，核对只认这里登记的关系。
 
 REA 关联使用同 target、同完整页面、相邻时间的 native AX backendNodeId 与 DOMSnapshot 实际路径，再对照控件 diagnosticSelector。重复“请输入”等名字不构成身份。导航排除必须同时有实际 DOM 导航祖先和原生节点关联证据；其他未关联交互节点继续阻断，AX ID 不转为执行选择器。
 
 ## 已建库公司的复用
 
-正常填写复用已经封存的资产，不再调用 REA。`form_route` 判断需重建时只补缺失/变化部分。`form_template_audit` 可检查旧模板中被错误标为 userOnly 的普通字段，归还给建库阶段，不伪造旧资产已通过。
+正常填写复用已经封存的资产，不再调用 REA。主档执行合同标为 `requires_rebuild`（题目清单或专业策略变化）且仍绑定当前模板 Hash 时，路由返回 `COMPANY_FORM_CONTRACT_REQUIRES_REBUILD`，`form_assets_status` 显示 `requires_rebuild`，不再复用。`form_route` 判断需重建时只补缺失/变化部分。`form_template_audit` 可检查旧模板中被错误标为 userOnly 的普通字段，归还给建库阶段，不伪造旧资产已通过。
 
 ## 主档 global 填写授权
 

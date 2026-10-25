@@ -72,3 +72,31 @@ test('form asset status lists login, sealed template and application URL gaps pe
  s=await formAssetStatus({directory,catalog,store,batch});
  assert.deepEqual(s.incomplete[0].gaps,['登录配置','表单模板未封存','申请页链接（1/2 个岗位缺）']);
 });
+
+test('a template bound to a profile contract marked requires_rebuild is never reused',async()=>{
+ const {contractRebuildRequired}=await import('../shared/rebuild-mark.mjs');
+ const profile={companyForms:{a:{executionContract:{templateHash:'h1',status:'requires_rebuild',validForCurrentInventory:false}},b:{executionContract:{templateHash:'h2',status:'registered',validForCurrentInventory:true}}}};
+ assert.equal(contractRebuildRequired(profile,'h1'),true);assert.equal(contractRebuildRequired(profile,'h2'),false);assert.equal(contractRebuildRequired(profile,'h3'),false);assert.equal(contractRebuildRequired(null,'h1'),false);
+ const {FormRouter}=await import('../shared/form-route.mjs'),{hash}=await import('../shared/engine.mjs');
+ const t=sealedTemplate(),companies=[{id:'jia',origin:new URL(apply).origin,templateId:'jia-formal'}];
+ const store={get:async(kind,id)=>{if(kind==='templates')return t;throw Object.assign(Error('missing'),{code:'ENOENT'});}};
+ const marked={companyForms:{x:{executionContract:{templateHash:hash(t),status:'requires_rebuild',validForCurrentInventory:false}}}};
+ const route=await new FormRouter({store,companies,validateTemplate:()=>true,loadProfile:async()=>marked}).resolve({companyId:'jia',pageUrl:apply});
+ const plain=await new FormRouter({store,companies,validateTemplate:()=>true,loadProfile:async()=>null}).resolve({companyId:'jia',pageUrl:apply});
+ // The rebuild mark is checked last, so it only changes the outcome of an otherwise reusable asset.
+ if(plain.route==='reuse')assert.equal(route.reason,'COMPANY_FORM_CONTRACT_REQUIRES_REBUILD');else assert.equal(route.reason,plain.reason);
+ assert.equal(route.route,'acquire');
+});
+
+test('a redirected role link becomes one proposal for the search side, without personal query values or a second stored link',async()=>{
+ const {recordLinkChange,readOutcomes,canonicalRoleUrl}=await import('../shared/application-outcome.mjs');
+ const {dir,firm}=await workspace(),origin=new URL(roleUrl).origin,observed=origin+'/job/detail?jobAdId=G-1&userId=4096';
+ assert.equal(canonicalRoleUrl(observed),origin+'/job/detail?jobAdId=G-1');
+ const base={companyId:'jia',roleId:'123456',roleUrl,roleTitle:'AI产品经理',handoffDir:dir};
+ assert.equal((await recordLinkChange({...base,observedUrl:roleUrl})).status,'unchanged');
+ assert.equal((await recordLinkChange({...base,observedUrl:'https://elsewhere.example/job'})).status,'skipped_cross_origin');
+ assert.equal((await recordLinkChange({...base,observedUrl:observed})).status,'proposed');
+ assert.equal((await recordLinkChange({...base,observedUrl:observed})).status,'already_proposed');
+ const out=await readOutcomes(dir);assert.deepEqual(Object.keys(out.linkChanges),['jia|123456']);assert.equal(out.linkChanges['jia|123456'].observedUrl,origin+'/job/detail?jobAdId=G-1');assert.deepEqual(out.roles,{});
+ const company=JSON.parse(await readFile(path.join(firm,'公司.json'),'utf8'));assert.equal(JSON.stringify(company).includes('G-1'),false);
+});

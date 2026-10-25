@@ -116,9 +116,9 @@ export function compare(actual, expected) {
 }
 
 export class Engine {
-  constructor({store,companies,browser,onInventory,refreshCompanies,resolveTask,profileFields,leaseRoot=defaultLeaseRoot()}) { Object.assign(this,{store,companies,browser,onInventory,refreshCompanies,resolveTask,profileFields,leaseRoot}); this.locks = new Set(); }
+  constructor({store,companies,browser,onInventory,refreshCompanies,resolveTask,profileFields,loadProfile,leaseRoot=defaultLeaseRoot()}) { Object.assign(this,{store,companies,browser,onInventory,refreshCompanies,resolveTask,profileFields,loadProfile,leaseRoot}); this.locks = new Set(); }
   async profileProofs(task,template,page,prepare=false){if(!task.profileFillContext)return {};if(!this.profileFields)throw Error('PROFILE_FILL_KERNEL_REQUIRED');return this.profileFields({task,template,page,prepare});}
-  formRoute(task){return new FormRouter({store:this.store,companies:this.companies,validateTemplate}).resolve(task);}
+  formRoute(task){return new FormRouter({store:this.store,companies:this.companies,validateTemplate,...(this.loadProfile?{loadProfile:this.loadProfile}:{})}).resolve(task);}
   companyForTask(task){const c=this.companies.find(c=>c.id===task.companyId);return c?{...c,templateId:c.roleTemplates?.[task.roleId]||c.templateId}:null;}
   async acquireCompanies(companies){
     const origins=[...new Set(companies.map(c=>new URL(c.origin).origin))].sort(),releases=[];

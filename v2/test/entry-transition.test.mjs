@@ -43,3 +43,18 @@ test('current account proves identity even when declared proof page was navigate
 test('wrong current account cannot be hidden by a matching separate proof',async()=>{const f=fixture({account:'other'});f.args.sessionAccountPageUrl='https://example.test/proof';await assert.rejects(executeTransition(f.args,f.host),/APPLICATION_ENTRY_ACCOUNT_CHANGED/);assert.equal(f.clicks.length,0);});
 test('declared proof is same origin even when current page account is present',async()=>{const f=fixture();f.args.sessionAccountPageUrl='https://other.test/proof';await assert.rejects(executeTransition(f.args,f.host),/APPLICATION_ENTRY_ACCOUNT_SCOPE_CHANGED/);assert.equal(f.clicks.length,0);});
 test('absent current account uses unique same origin declared proof',async()=>{const f=fixture();const original=f.pages.get('original'),old=original.locator;original.locator=function(selector){const l=old.call(this,selector);if(selector==='.account')l.count=async()=>0;return l;};f.pages.set('proof',{id:'proof',current:'https://example.test/proof',locator:()=>({filter(){return this;},count:async()=>1,innerText:async()=>'person'})});f.args.sessionAccountPageUrl='https://example.test/proof';await executeTransition(f.args,f.host);});
+
+test('entry role failures say which check failed with hashes only, never the raw title',async()=>{
+ const {safeControlErrorDetails}=await import('../shared/control-error-details.mjs');
+ const {executeTransition}=await import('../shared/entry-transition.mjs');
+ const entry={kind:'declarative_transition',target:'same',detail:{location:{pathnamePattern:'^/job/detail$',query:{jobAdId:'A1'}},roleSelector:'.title'},entryLocator:{text:'立即投递',label:'立即投递'},form:{location:{pathnamePattern:'^/form$',query:{jobAdId:'A1'}},readySelector:'.ready',roleSelector:'.form-title',rolePrefix:'你正在投递职位:'},evidence:{detailUrl:'https://example.test/job/detail?jobAdId=A1',formUrl:'https://example.test/form?jobAdId=A1',capturedAt:'2026-10-26',method:'synthetic'}};
+ const loc=(texts)=>({filter(){return this;},first(){return this;},async waitFor(){},async count(){return texts.length;},async innerText(){return texts[0];},async click(){}});
+ const run=async formTexts=>{const page={url:async()=>'https://example.test/form?jobAdId=A1',locator:s=>s==='.acct'?loc(['me']):s==='.ready'?loc(['x']):loc(formTexts)};
+  try{await executeTransition({entry,pageId:'p',expectedTitle:'AI 产品经理(J1)',expectedRoleId:'A1',expectedAccount:'me',accountSelector:'.acct'},{getPage:async()=>page,listPages:async()=>[{id:'p',url:'https://example.test/form?jobAdId=A1'}],pause:async()=>{}});return null;}catch(e){return e;}};
+ let e=await run(['你正在投递职位: AI 产品经理(J1)','你正在投递职位: AI 产品经理(J1)']);
+ assert.equal(e.message,'APPLICATION_ENTRY_ROLE_CHANGED');let d=safeControlErrorDetails(e.details);assert.equal(d.check,'selector_count');assert.equal(d.selectorMatches,2);assert.equal(d.stage,'form');
+ e=await run(['你正在投递职位: AI 产品经理（J1）']);d=safeControlErrorDetails(e.details);assert.equal(d.check,'title');assert.equal(d.normalizedMatch,true);assert.equal(d.valueMatches,false);
+ assert.equal(JSON.stringify(d).includes('产品经理'),false);
+ e=await run(['投递职位：AI 产品经理(J1)']);d=safeControlErrorDetails(e.details);assert.equal(d.check,'prefix');assert.equal(d.prefixMatched,false);
+ assert.equal(await run(['你正在投递职位: AI 产品经理(J1)']),null);
+});

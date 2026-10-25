@@ -1,9 +1,11 @@
+import {unstableClassTokens,ruleApplies} from '../shared/selector-stability.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {readFile,writeFile,mkdir,rename} from 'node:fs/promises';
 import path from 'node:path';
 export const hash=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 export const safeCode=e=>/^[A-Z_]+$/.test(e?.message)?e.message:'LOGIN_OPERATION_FAILED';
 export function validateCompany(c){
+  if(ruleApplies(c.evidence)&&unstableClassTokens(c.account?.selector).length)throw Error('ACCOUNT_SELECTOR_UNSTABLE');
   if(c.schemaVersion!==1||!/^[a-z0-9][a-z0-9_-]{0,79}$/.test(c.companyId)||!Number.isInteger(c.version)||c.version<1)throw Error('INVALID_LOGIN_COMPANY');
   const u=new URL(c.origin);if(u.protocol!=='https:'||u.origin!==c.origin||!c.loginPath?.startsWith('/')||!c.allowedPaths?.every(p=>p.startsWith('/')))throw Error('INVALID_LOGIN_SCOPE');
   if(c.loginMethod==='user_operated'){

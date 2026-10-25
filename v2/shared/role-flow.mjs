@@ -4,7 +4,7 @@ import {resolveEntry,matchEntryPath} from './entry-recipe.mjs';
 import {accountMatches,matchesAccount,resolveAccount,assertScope} from '../login/contracts.mjs';
 export class RoleFlow{
  // onApplicationEntered：进入申请页并核对后回调，用于把申请页链接写回公司文件夹（见 form-assets.mjs）。
- constructor({queues,login,templates,browser,onApplicationEntered=null}){Object.assign(this,{queues,login,templates,browser,onApplicationEntered});}
+ constructor({queues,login,templates,browser,onApplicationEntered=null,onLinkObserved=null}){Object.assign(this,{queues,login,templates,browser,onApplicationEntered,onLinkObserved});}
  async context(args){
   const {q,t}=await this.queues.task(args),c=await this.login.company(t.companyId),entry=resolveEntry(c);let template;
   try{template=await this.templates(t.companyId,t.roleId);}catch(e){if(e.code!=='ENOENT')throw e;}
@@ -122,7 +122,9 @@ export class RoleFlow{
   if(new URL(result.pageUrl).origin!==c.origin||roleChanged||result.accountMatched!==true)throw Error('APPLICATION_ENTRY_RESULT_CHANGED');
   await this.queues.put(t.taskId,{...prior,queueId:q.id,taskId:t.taskId,pageId:result.pageId||opened.pageId,originalRoleUrl:t.url,applicationUrl:result.pageUrl,returnUrl:result.pageUrl,expectedTitle:t.title,status:'ready_to_fill',accountMatched:true,entryVerifiedAt:new Date().toISOString()});
   let applicationUrlRecord=null;if(this.onApplicationEntered){try{applicationUrlRecord=await this.onApplicationEntered({companyId:t.companyId,roleId:t.roleId,roleUrl:t.url,applicationUrl:result.pageUrl});}catch(e){applicationUrlRecord={status:'write_failed:'+(/^[A-Z_]+$/.test(e.message)?e.message:'UNKNOWN')};}}
-  return {...result,status:'ready_to_fill',taskId:t.taskId,applicationUrl:result.pageUrl,...(applicationUrlRecord?{applicationUrlRecord:applicationUrlRecord.status}:{}),submission:'not_performed'};
+  // The verified detail page differs from the confirmed role link: propose the new link (no master write here).
+  let linkChange=null;if(this.onLinkObserved&&result.detailUrl){try{linkChange=await this.onLinkObserved({companyId:t.companyId,roleId:t.roleId,roleUrl:t.url,roleTitle:t.title,observedUrl:result.detailUrl});}catch(e){linkChange={status:'write_failed:'+(/^[A-Z_]+$/.test(e.message)?e.message:'UNKNOWN')};}}
+  return {...result,status:'ready_to_fill',taskId:t.taskId,...(linkChange?{linkChange:linkChange.status}:{}),applicationUrl:result.pageUrl,...(applicationUrlRecord?{applicationUrlRecord:applicationUrlRecord.status}:{}),submission:'not_performed'};
  },{waitMs:q.parallelRoles||q.executionMode==='parallel_roles'?30000:0});}
  async screenshot(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{const state=await this.queues.read(x.t.taskId),s=await this.snapshot(x,state.pageId);if(new URL(s.pageUrl).origin!==x.c.origin)throw Error('ROLE_SCREENSHOT_SCOPE_CHANGED');return this.browser.request('screenshot',{pageId:state.pageId});},{waitMs:x.q.parallelRoles||x.q.executionMode==='parallel_roles'?30000:0});}
 }
