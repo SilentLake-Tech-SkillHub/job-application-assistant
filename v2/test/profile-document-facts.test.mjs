@@ -20,3 +20,15 @@ test('a document cannot invent a user omission or use a relative unsupported or 
  }
  await assert.rejects(recordProfileDocumentFacts(profile(),args,{...io,stat:async()=>({isFile:()=>true,size:0})}),/SIZE_INVALID/);
 });
+
+test('document-backed dates can define one missing time key on an existing named record',async()=>{
+ const p=profile();p.facts['workProjects.example.name']={status:'known',value:'Example Project',sourceIds:['original']};p.sources.original={kind:'primary_document'};
+ const fact={factKey:'workProjects.example.end',status:'known',value:'2023-12',define:{label:'Example end month',canonicalType:'string',precision:'month'}};
+ const r=await recordProfileDocumentFacts(p,{...args,facts:[fact]},io);assert.equal(p.facts[fact.factKey].value,'2023-12');assert.equal(p.fieldRegistry[fact.factKey].precision,'month');assert.equal(p.sources[r.sourceId].kind,'primary_document');
+ const repeated=await recordProfileDocumentFacts(p,{...args,facts:[fact]},io);assert.equal(repeated.sourceId,r.sourceId);
+ await assert.rejects(recordProfileDocumentFacts(p,{...args,facts:[{...fact,define:{...fact.define,precision:'day'}}]},io),/DEFINITION_ALREADY_EXISTS/);
+ for(const changed of [{...fact,factKey:'workProjects.other.end'},{...fact,value:'2023'},{...fact,factKey:'policy.consent.date'},{...fact,define:{...fact.define,canonicalType:'boolean'}}]){
+  const q=profile();q.facts['workProjects.example.name']={status:'known',value:'Example Project',sourceIds:['original']};q.sources.original={kind:'primary_document'};const before=structuredClone(q);
+  await assert.rejects(recordProfileDocumentFacts(q,{...args,facts:[changed]},io));assert.deepEqual(q,before);
+ }
+});

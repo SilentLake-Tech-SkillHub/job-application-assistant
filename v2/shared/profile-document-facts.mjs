@@ -13,7 +13,22 @@ export async function recordProfileDocumentFacts(profile,{filePath,sha256,excerp
  const content=await io.readFile(canonical);
  if(digest(content)!==sha256)throw Error('PRIMARY_DOCUMENT_HASH_MISMATCH');
  if(facts.some(fact=>fact.status!=='known'||fact.omissionKind!==undefined))throw Error('DOCUMENT_CANNOT_AUTHORIZE_OMISSION');
- const candidate=structuredClone(profile),result=recordProfileAnswers(candidate,{answers:facts,evidence});
+ const candidate=structuredClone(profile);
+ for(const fact of facts){
+  if(candidate.facts[fact.factKey]){
+   if(fact.define){const prior=candidate.fieldRegistry?.[fact.factKey];if(!prior||['label','canonicalType','precision'].some(key=>prior[key]!==fact.define[key]))throw Error('DOCUMENT_FACT_DEFINITION_ALREADY_EXISTS');}
+   continue;
+  }
+  const definition=fact.define,parent=fact.factKey?.replace(/\.[^.]+$/,'');
+  if(!definition)continue;
+  const name=candidate.facts[parent+'.name'];
+  if(!/^(?:education|employment|internship|projects|workProjects|awards|certificates|entrepreneurship)\.[a-zA-Z0-9_-]+\.(?:start|end|date|launch|yearMonth)$/.test(fact.factKey)||name?.status!=='known'||typeof name.value!=='string'||!name.value.trim()||definition.canonicalType!=='string'||!['day','month','year'].includes(definition.precision)||!definition.label?.trim())throw Error('DOCUMENT_TIME_DEFINITION_REQUIRED');
+  candidate.fieldRegistry??={};
+  if(candidate.fieldRegistry[fact.factKey])throw Error('DOCUMENT_FACT_DEFINITION_ALREADY_EXISTS');
+  candidate.fieldRegistry[fact.factKey]={semanticKey:fact.factKey,label:definition.label,canonicalType:'string',precision:definition.precision,status:'defined',definitionEvidence:evidence};
+  candidate.facts[fact.factKey]={status:'missing',value:null,sourceIds:[],precision:definition.precision};
+ }
+ const result=recordProfileAnswers(candidate,{answers:facts,evidence});
  const sourceId='document-'+digest(canonical).slice(0,24),recordedAt=candidate.sources[result.sourceId].recordedAt;
  candidate.sources[sourceId]={kind:'primary_document',filePath:canonical,sha256,excerpt,evidence,recordedAt};
  delete candidate.sources[result.sourceId];
