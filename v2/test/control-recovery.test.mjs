@@ -21,3 +21,12 @@ test('hash mismatch, unsupported controls and protected fields cannot release wo
  for(const patch of [{sensitive:true},{userOnly:true},{kind:'file'},{actions:[{method:'fill'}]}])assert.equal(canContinueAfterRecoveredControl(e,{...field,...patch}),false);
  assert.equal(canContinueAfterRecoveredControl({...e,message:'LOGIN_ACCOUNT_MISMATCH'},field),false);
 });
+
+test('search and calendar readiness failures are deferred only with the same positive UI recovery evidence',async()=>{for(const reason of ['AUTOCOMPLETE_RESULTS_NOT_READY','PHOENIX_DATE_YEAR_NOT_CAPTURED','PHOENIX_DATE_MONTH_NOT_CAPTURED']){const e=await annotateRecoveredControl(Error(reason),{before:'',expected:field.value,read:async()=>field.value,isClosed:async()=>true,samePage:async()=>true,sleep:async()=>{}});const target=reason.startsWith('AUTOCOMPLETE_')?{...field,kind:'text',actions:[{method:'phoenix_autocomplete'}]}:field;assert.equal(canContinueAfterRecoveredControl(e,target),true);}});
+
+test('raw UI exceptions require verified recovery, while unknown named kernel errors remain fatal',async()=>{
+ const recover=error=>annotateRecoveredControl(error,{before:'',expected:field.value,read:async()=>'',isClosed:async()=>true,samePage:async()=>true,sleep:async()=>{}});
+ const raw=await recover(Error('locator.press: Element cannot receive keyboard input'));assert.equal(raw.message,'CONTROL_OPERATION_FAILED_AFTER_RECOVERY');assert.equal(canContinueAfterRecoveredControl(raw,field),true);
+ for(const reason of ['LOGIN_ACCOUNT_MISMATCH','PAGE_IDENTITY_CHANGED','UNKNOWN_KERNEL_POLICY']){const error=await recover(Error(reason));assert.equal(error.message,reason);assert.equal(error.details,undefined);assert.equal(canContinueAfterRecoveredControl(error,field),false);}
+ const unsafe=await annotateRecoveredControl(Error('locator.press: failed'),{before:'',expected:field.value,read:async()=>'',isClosed:async()=>false,samePage:async()=>true});assert.equal(unsafe.details,undefined);assert.equal(unsafe.message,'locator.press: failed');
+});

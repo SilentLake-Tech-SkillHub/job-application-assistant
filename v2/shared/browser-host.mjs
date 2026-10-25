@@ -32,6 +32,7 @@ const server=http.createServer(async(req,res)=>{
     const {method,args={}}=JSON.parse(Buffer.concat(chunks));let data;
     if(diagnostics.isDegraded()&&!['status','tabs','pageIdentity','roleSnapshot','existingPage','inventory','observe','screenshot','assertLocation'].includes(method))throw Error('BROKER_DEGRADED_WRITES_BLOCKED');
     if(method==='status')data=status();
+    else if(method==='restoreConfiguredChrome')data=await browser.restoreConfiguredChrome(args);
     else if(method==='tabs')data=await browser.tabs();
     else if(method==='openPage')data=await browser.openPage(args.pageUrl,args);
     else if(method==='pageIdentity')data=await browser.pageIdentity(args.pageId);

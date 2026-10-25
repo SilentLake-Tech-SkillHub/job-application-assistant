@@ -15,8 +15,9 @@ test('only a sourced country prefix is removed for retrieval and it never become
  assert.equal(rankChoices(p,key,['示例理工大学']).selection,null);
  const unsourced=profile('示例国示例理工大学');assert.equal(planChoiceQueries(unsourced,key).steps[0].query,'示例国示例理工');
 });
-test('short weak stems stay full and campus qualifiers are retained',()=>{
- assert.equal(planChoiceQueries(profile('示例大学'),key).steps[0].query,'示例大学');
+test('two-character stems are retrieval only, one-character stems stay full, and campus qualifiers remain',()=>{
+ assert.equal(planChoiceQueries(profile('示例大学'),key).steps[0].query,'示例');assert.equal(planChoiceQueries(profile('示例大学'),key).steps[0].identityAlias,false);
+ assert.equal(planChoiceQueries(profile('示大学'),key).steps[0].query,'示大学');
  assert.equal(planChoiceQueries(profile('示例大学深圳校区'),key).steps[0].query,'示例大学深圳校区');
 });
 test('non-institution fields preserve canonical values and approved aliases, not ad-hoc substrings',()=>{

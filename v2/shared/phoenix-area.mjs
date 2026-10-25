@@ -103,10 +103,17 @@ export async function performPhoenixArea(adapter,action,value,{trigger,initial,d
 const listPopup='.common-unmodeled-layer:has(.list-item-container)';
 export function listPopupOptionsDOM(root){
  const shown=n=>!!n.getClientRects().length&&getComputedStyle(n).visibility!=='hidden';
- return [...root.querySelectorAll('.list-item-container')].filter(shown).map(row=>{
-  const label=row.innerText?.trim(),attribute=['data-value','data-id','value'].find(a=>row.hasAttribute(a))||null;
-  return {label,value:attribute?row.getAttribute(attribute):null,valueAttribute:attribute,disabled:row.getAttribute('aria-disabled')==='true'||row.classList.contains('disabled')};
- }).filter(row=>row.label);
+ return [...root.querySelectorAll('.list-item-container')].filter(row=>shown(row)&&!row.closest?.('.right-container')).map(row=>{
+  const leaves=[...row.querySelectorAll('.item-text-label')].filter(shown),paths=[...row.querySelectorAll('.item-text-fullname')].filter(shown);
+  if(leaves.length!==1||!leaves[0].innerText?.trim()||paths.length>1)throw Error('LIST_POPUP_LEAF_STRUCTURE_REQUIRED');
+  const label=leaves[0].innerText.trim(),path=paths[0]?.innerText?.trim()||null;
+  if(/[\r\n]/.test(label))throw Error('LIST_POPUP_LEAF_STRUCTURE_REQUIRED');
+  const identities=[];
+  for(const attribute of ['data-value','data-id','value'])for(const node of [row,leaves[0]]){const value=node.getAttribute(attribute);if(value!=null&&String(value).trim())identities.push({value,attribute});}
+  if(new Set(identities.map(i=>i.value)).size>1)throw Error('LIST_POPUP_OPTION_ID_CONFLICT');
+  const identity=identities[0];
+  return {label,path,rawText:row.innerText?.trim()||'',value:identity?.value??null,valueAttribute:identity?.attribute??null,disabled:row.getAttribute('aria-disabled')==='true'||row.classList.contains('disabled'),selected:row.getAttribute('aria-checked')==='true'||row.getAttribute('aria-selected')==='true'||!!row.querySelector('.icon-container svg.RadioChecked,.icon-container svg.CheckboxChecked,.icon-container [aria-checked="true"]')};
+ });
 }
 export function listPopupSelectionDOM(root){
  const visible=n=>n.getClientRects().length&&getComputedStyle(n).visibility!=='hidden';
@@ -124,6 +131,18 @@ export function listPopupSelectionDOM(root){
  if(classic&&(!leafText||classicPath&&!/^\(.+\)$/.test(rawPath)))return {count:Number(count[1]),text:'',empty:false,values:[],scopeValid:false};
  return {count:Number(count[1]),limit:Number(limit),text:leafText||String(container.innerText||'').trim(),path:classicPath?rawPath.slice(1,-1):rawPath,empty:Number(count[1])===0||!!container.querySelector('.select-data-empty'),values,scopeValid:true};
 }
+// Both inputs are current DOM observations. Expected data only rejects a proof;
+// it never supplies the observed label, path or business ID.
+export function confirmListPopupSelection(pane,records,{label,path=null,value=null,valueAttribute=null}={}){
+ if(!pane.scopeValid)throw Error('LIST_POPUP_SELECTION_PANE_REQUIRED');
+ assertAreaSelection(pane,label,null);
+ const selected=records.filter(r=>r.selected===true);
+ if(selected.length!==1||selected[0].disabled||selected[0].label!==pane.text)throw Error('LIST_POPUP_CURRENT_ENTITY_NOT_VERIFIED');
+ const entity=selected[0];
+ if((entity.path??null)!==path||pane.path!=null&&pane.path!==entity.path)throw Error('LIST_POPUP_SELECTED_PATH_MISMATCH');
+ if((entity.value??null)!==value||(entity.valueAttribute??null)!==valueAttribute||pane.values.length>1||pane.values.length===1&&pane.values[0]!==entity.value)throw Error('LIST_POPUP_SELECTED_ID_MISMATCH');
+ return {renderer:'phoenix_list_popup',choiceContract:'leaf_v2',label:pane.text,path:entity.path??null,value:entity.value??null,valueAttribute:entity.valueAttribute??null,blurConfirmed:true,reopenedOptionSelected:true,valueCompared:value!=null,selectedList:pane,selectedEntity:entity};
+}
 // Single-choice panels with a left list and a separate confirmed selection pane.
 export async function performPhoenixListPopup(adapter,action,value,{trigger,initial,dismiss}={}){
  const originalPage=adapter.page.url?.();
@@ -132,27 +151,38 @@ export async function performPhoenixListPopup(adapter,action,value,{trigger,init
  const button=text=>menu.locator('.phoenix-button').filter({hasText:exact(text)});
  const cancel=async()=>{const cancelButton=button('取消');if(await cancelButton.count()!==1)throw Error('LIST_POPUP_CANCEL_REQUIRED');await cancelButton.click({timeout:10000});await menu.waitFor({state:'hidden',timeout:5000});};
  const display=()=>readPhoenixSelectedValue(trigger);
- const selectedProof=async()=>{const selected=await menu.evaluate(listPopupSelectionDOM);if(!selected.scopeValid)throw Error('LIST_POPUP_SELECTION_PANE_REQUIRED');assertAreaSelection(selected,String(value),action.expectedOptionValue);return {label:String(value),value:action.expectedOptionValue??null,valueAttribute:action.expectedOptionValue==null?null:'observed_option_identity',blurConfirmed:true,reopenedOptionSelected:true,valueCompared:action.expectedOptionValue!=null,selectedList:selected};};
  try{
-  if(verify){const proof=await selectedProof();await cancel();if(await display()!==String(value))throw Error('CHOICE_SELECTED_LABEL_MISMATCH');return {performed:false,selectionProof:proof,verification:'requires_independent_readback'};}
+  if(!inspect&&(action.choiceRenderer!=='phoenix_list_popup'||action.choiceContract!=='leaf_v2'||!['expectedOptionPath','expectedOptionValue','expectedOptionValueAttribute'].every(k=>Object.hasOwn(action,k))))throw Error('LIST_POPUP_CONTRACT_REQUIRES_REBUILD');
   const search=menu.locator('input[placeholder="搜索"]'),query=action.query||String(value||'');
   if(await search.count()!==1)throw Error('LIST_POPUP_SEARCH_REQUIRED');
-  const before=await menu.evaluate(listPopupOptionsDOM);let records=before;
+  const read=async()=>({pane:await menu.evaluate(listPopupSelectionDOM),records:await menu.evaluate(listPopupOptionsDOM)});
+  let current=await read();
+  // A verifier may search this same transient panel to expose current selected
+  // markers. It never invokes a selection icon or the confirmation button.
   if(query){
-   const previous=await search.inputValue();await search.fill(query,{timeout:10000});const end=Date.now()+6000;
-   for(;;){records=await menu.evaluate(listPopupOptionsDOM);const applied=await search.inputValue();
-    const changed=JSON.stringify(records)!==JSON.stringify(before),filtered=records.length>0&&records.every(r=>r.label.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
-    if(applied===query&&records.length&&(previous===query||changed||filtered))break;
+   await search.fill(query,{timeout:10000});const end=Date.now()+6000;let previous=null,stableAt=null;
+   for(;;){current=await read();const applied=await search.inputValue(),signature=rowsKey(current.records),relevant=current.records.length&&current.records.every(r=>normalizeQuery(r.label+' '+(r.path||'')).includes(normalizeQuery(query)));
+    if(applied===query&&relevant){if(signature!==previous){previous=signature;stableAt=Date.now();}else if(Date.now()-stableAt>=90)break;}
+    else{previous=null;stableAt=null;}
     if(Date.now()>=end)throw Error('LIST_POPUP_SEARCH_RESULTS_NOT_READY');await pause();
    }
   }
-  if(inspect){await cancel();return {status:'captured',options:records.map(r=>r.label),optionRecords:records,renderer:'phoenix_list_popup',searchable:true,queryApplied:!!query,scope:query?'current_filtered_list':'current_visible_list',coverage:{complete:false,reason:'rendered_list_popup'},restored:await display()===initial};}
-  const matches=records.filter(r=>r.label===String(value));if(matches.length!==1||!action.options?.includes(String(value)))throw Error('ACTUAL_CAPTURED_OPTION_REQUIRED');
-  if(matches[0].disabled)throw Error('CHOICE_OPTION_DISABLED');if(action.expectedOptionValue!=null&&matches[0].value!==action.expectedOptionValue)throw Error('CHOICE_OPTION_VALUE_CHANGED');
-  const row=menu.locator('.list-item-container').filter({hasText:exact(value)});if(await row.count()!==1)throw Error('CHOICE_NOT_UNIQUE_OR_NOT_PRESENT');
+  const proof=()=>confirmListPopupSelection(current.pane,current.records,{label:String(value),path:action.expectedOptionPath,value:action.expectedOptionValue,valueAttribute:action.expectedOptionValueAttribute});
+  if(verify){const selected=proof();await cancel();const restored=await display();if(restored!==initial||restored!==String(value))throw Error('CHOICE_SELECTED_LABEL_MISMATCH');return {performed:false,selectionProof:selected,verification:'requires_independent_readback'};}
+  if(inspect){const {pane,records}=current;await cancel();return {status:'captured',options:[...new Set(records.map(r=>r.label))],optionRecords:records,selectedPane:pane,renderer:'phoenix_list_popup',choiceContract:'leaf_v2',searchable:true,queryApplied:!!query,scope:query?'current_filtered_list':'current_visible_list',coverage:{complete:false,reason:'rendered_list_popup'},restored:await display()===initial};}
+  const matches=current.records.filter(r=>r.label===String(value));if(matches.length!==1||!action.options?.includes(String(value)))throw Error('ACTUAL_CAPTURED_OPTION_REQUIRED');
+  const candidate=matches[0];if(candidate.disabled)throw Error('CHOICE_OPTION_DISABLED');
+  if((candidate.path??null)!==action.expectedOptionPath)throw Error('CHOICE_OPTION_PATH_CHANGED');
+  if((candidate.value??null)!==action.expectedOptionValue||(candidate.valueAttribute??null)!==action.expectedOptionValueAttribute)throw Error('CHOICE_OPTION_VALUE_CHANGED');
+  const row=menu.locator('.list-item-container').filter({has:adapter.page.locator('.item-text-label').filter({hasText:exact(value)})}).filter({visible:true});
+  if(await row.count()!==1)throw Error('CHOICE_NOT_UNIQUE_OR_NOT_PRESENT');
+  const live=await row.evaluate(node=>({label:[...node.querySelectorAll('.item-text-label')].filter(n=>n.getClientRects().length).map(n=>n.innerText.trim()),path:[...node.querySelectorAll('.item-text-fullname')].filter(n=>n.getClientRects().length).map(n=>n.innerText.trim()),values:[node,...node.querySelectorAll('.item-text-label')].flatMap(n=>['data-value','data-id','value'].map(a=>n.getAttribute(a)).filter(v=>v!=null&&String(v).trim()))}));
+  if(live.label.length!==1||live.label[0]!==candidate.label||(live.path.length?live.path.length!==1||live.path[0]!==candidate.path:candidate.path!=null)||live.values.some(v=>v!==candidate.value)||candidate.value!=null&&!live.values.length)throw Error('CHOICE_OPTION_IDENTITY_CHANGED');
+  // The captured renderer binds handleChangeCheck to the SVG, not its span.
+  // Clicking the wrapper's padded center can miss that actual event target.
   const selectIcon=row.locator(':scope > .icon-container > svg.RadioUnchecked, :scope > .icon-container > svg.RadioChecked').filter({visible:true});if(await selectIcon.count()!==1)throw Error('LIST_SELECTION_ACTION_TARGET_REQUIRED');
   await selectIcon.click({timeout:10000});const end=Date.now()+6000;
-  for(;;){try{await selectedProof();break;}catch(error){if(Date.now()>=end)throw error;await pause();}}
+  for(;;){current=await read();try{proof();break;}catch(error){if(Date.now()>=end)throw error;await pause();}}
   const confirm=button('确定');if(await confirm.count()!==1)throw Error('LIST_POPUP_CONFIRM_REQUIRED');await confirm.click({timeout:10000});await menu.waitFor({state:'hidden',timeout:5000});
   if(await display()!==String(value))throw Error('CHOICE_SELECTED_LABEL_MISMATCH');
   await trigger.click({timeout:10000});await menu.waitFor({state:'visible',timeout:5000});

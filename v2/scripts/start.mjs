@@ -12,6 +12,10 @@ process.env.RECRUITING_BROWSER_SOCKET=socket;
 const healthFor=sock=>new Promise(resolve=>{const r=http.get({socketPath:sock,path:'/health'},res=>{const chunks=[];res.on('data',c=>chunks.push(c));res.on('end',()=>{try{resolve(JSON.parse(Buffer.concat(chunks)));}catch{resolve(null);}});});r.on('error',()=>resolve(null));r.setTimeout(1000,()=>{r.destroy();resolve(null);});});
 const health=()=>healthFor(socket);
 const profileDir=process.env.RECRUITING_BROWSER_PROFILE_DIR||(process.env.RECRUITING_PROFILE_JSON?path.join(path.dirname(process.env.RECRUITING_PROFILE_JSON),'.browser-profile'):null);
+import {hostRole} from '../shared/host-role.mjs';
+// A maintainer host never starts, attaches or autostarts a browser.
+if(hostRole()==='maintainer'){process.env.RECRUITING_WORKER_SOURCE_SHA256=(await genericSourceManifest()).sourceFingerprint;await import(mode==='login'?'../login/server.mjs':'../application/server.mjs');}
+else{
 const release=await acquireLease(leasePath(defaultLeaseRoot(),'v2-browser-start:'+socket),{waitMs:5000,busyCode:'V2_BROWSER_START_BUSY'});
 try{
  let status=await health();
@@ -37,3 +41,4 @@ try{
 }finally{await release();}
 process.env.RECRUITING_WORKER_SOURCE_SHA256=(await genericSourceManifest()).sourceFingerprint;
 await import(mode==='login'?'../login/server.mjs':'../application/server.mjs');
+}

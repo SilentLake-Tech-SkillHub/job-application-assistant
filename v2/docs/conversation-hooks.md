@@ -9,6 +9,8 @@ python3 hooks/conversation_scope.py enable --scope-file <private-scope.json> --p
 python3 hooks/conversation_scope.py disable --scope-file <private-scope.json>
 ```
 
+宿主接线以 `RECRUITING_HOST_ROLE` 声明角色：`executor`（默认）或 `maintainer`。维护宿主（例如只修代码的 Codex）调用 `enable` 一律拒绝（`HOST_ROLE_MAINTAINER_CANNOT_ENABLE_EXECUTION`），`disable` 仍可用于清理自己的旧登记；两个 MCP 在维护宿主下只回答只读检查，所有阶段工具在执行前返回 `HOST_ROLE_MAINTAINER_READ_ONLY` 并停止续跑，启动器不启动或附着浏览器。
+
 重复启用同一对话幂等；其他对话的记录保留。停用仅移除当前对话，不删除其他对话、表单或业务状态。新会话与 fork 默认未启用；确需继承时由用户明确启动，不能仅因目录相同自动继承。已获准的子 Agent 是否共享作用域，按宿主事件的真实父对话身份核验，不启动额外 Agent 作为默认要求。
 
 加载回执至少绑定对话 ID、回合 ID、指令 Hash。对话间不得复用回执。Hook 负责注入和回执检查，填写前的建库／映射／冻结等事实由 MCP 内部阶段门禁验证；加载成功不代表业务准备完成。

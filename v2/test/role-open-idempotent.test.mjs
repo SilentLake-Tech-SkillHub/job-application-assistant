@@ -31,7 +31,7 @@ for(const legacy of [false,true])test('lost application pageId rebinds only the 
 test('lost, ambiguous, foreign or query-altered application pages never fall back to frozen detail',async()=>{
  const original=fixture().state();
  for(const tabs of [[],[{id:'a',url:form},{id:'b',url:form}],[{id:'a',url:form.replace('example.test','other.test')}],[{id:'a',url:detail}],[{id:'a',url:form.replace('?id=role','?id=role&extra=1')} ]]){
-  const f=fixture({prior:{...original,pageId:'lost'},tabs});await assert.rejects(f.flow.open({}),/ROLE_EXISTING_PAGE_NOT_UNIQUE/);assert.equal(f.calls.some(c=>c.method==='openPage'),false);assert.equal(f.writes.length,0);
+  const f=fixture({prior:{...original,pageId:'lost'},tabs});await assert.rejects(f.flow.open({}),/ROLE_EXISTING_PAGE_NOT_(?:UNIQUE|FOUND)/);assert.equal(f.calls.some(c=>c.method==='openPage'),false);assert.equal(f.writes.length,0);
  }
 });
 test('an existing bound page at another location is refused rather than navigated',async()=>{

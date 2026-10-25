@@ -14,8 +14,8 @@ import {READY_TIMEOUT_MS,matchEntryPath} from './entry-recipe.mjs';
 export {PageAdapter,inventoryDOM} from './ui-page.mjs';
 
 export class BrowserAdapter {
-  constructor(endpoint,{connector=(url,options)=>chromium.connectOverCDP(url,options),chromePortFile=path.join(homedir(),'Library/Application Support/Google/Chrome/DevToolsActivePort'),profileDir,screenshotDir,launcher=(dir,options)=>chromium.launchPersistentContext(dir,options),existingEndpoint=process.env.RECRUITING_BROWSER_ATTACH_ENDPOINT}={}) {
-    Object.assign(this,{endpoint,connector,chromePortFile,profileDir,screenshotDir,launcher,existingEndpoint});this.connection=null;this.connecting=null;this.state='new';this.connectionAttempts=0;this.pageIds=new Map();
+  constructor(endpoint,{connector=(url,options)=>chromium.connectOverCDP(url,options),chromePortFile=path.join(homedir(),'Library/Application Support/Google/Chrome/DevToolsActivePort'),profileDir,screenshotDir,launcher=(dir,options)=>chromium.launchPersistentContext(dir,options),existingEndpoint=process.env.RECRUITING_BROWSER_ATTACH_ENDPOINT,endpointProbe=async url=>fetch(new URL('/json/version',url),{signal:AbortSignal.timeout(1500)}).then(r=>r.ok).catch(()=>false)}={}) {
+    Object.assign(this,{endpoint,connector,chromePortFile,profileDir,screenshotDir,launcher,existingEndpoint,endpointProbe});this.connection=null;this.connecting=null;this.state='new';this.connectionAttempts=0;this.pageIds=new Map();
   }
   async connect(){
     if(!this.endpoint)throw Error('BROWSER_CONNECTION_NOT_CONFIGURED');
@@ -58,6 +58,32 @@ export class BrowserAdapter {
     try{return await this.connecting;}catch(error){this.state='failed';throw error;}finally{this.connecting=null;}
   }
   status(){return {state:this.state,mode:this.endpoint==='managed-chrome'?'managed':this.endpoint==='managed-iab'?'iab':'cdp',connectionAttempts:this.connectionAttempts,automaticRetries:0,driverRevision:'2026-10-23.4',reloadableReaders:['ant','native_dom','control_operations']};}
+  async restoreConfiguredChrome({authorization}={}){
+    if(authorization?.restore!==true||!authorization.evidence?.trim())throw Error('BROWSER_RESTORE_USER_AUTHORIZATION_REQUIRED');
+    if(this.state==='connected')return {...this.status(),restored:false,reason:'already_connected'};
+    if(this.connecting)throw Error('BROWSER_RESTORE_CONNECTION_IN_PROGRESS');
+    if(this.recoveryAttempted)throw Error('BROWSER_RESTORE_ALREADY_ATTEMPTED');
+    const forbidden=path.join(homedir(),'Library/Application Support/Google/Chrome');
+    if(!this.profileDir||!path.isAbsolute(this.profileDir)||path.resolve(this.profileDir)===forbidden||path.resolve(this.profileDir).startsWith(forbidden+path.sep))throw Error('PRIVATE_AUTOMATION_PROFILE_REQUIRED');
+    if(!(await stat(path.join(this.profileDir,'Local State')).catch(()=>null))?.isFile())throw Error('EXISTING_AUTOMATION_PROFILE_REQUIRED');
+    const endpoint=new URL(this.endpoint);
+    if(endpoint.protocol!=='http:'||!['127.0.0.1','localhost'].includes(endpoint.hostname)||!endpoint.port||endpoint.username||endpoint.password)throw Error('EXISTING_LOCAL_CDP_ENDPOINT_REQUIRED');
+    if(this.recoveryAttempted)throw Error('BROWSER_RESTORE_ALREADY_ATTEMPTED');
+    this.recoveryAttempted=true;this.state='connecting';this.connectionAttempts++;
+    try{
+      // Manual, explicitly authorized recovery of the configured private
+      // profile. Ordinary connect() still never retries or launches on loss.
+      if(await this.endpointProbe(endpoint.href)){
+        this.connection=await this.connector(endpoint.href,{timeout:15000});this.connection.on?.('disconnected',()=>{this.state='disconnected';this.connection=null;});
+      }else{
+        const context=await this.launcher(this.profileDir,{channel:'chrome',headless:false,viewport:null,args:[`--remote-debugging-port=${endpoint.port}`,'--remote-debugging-address=127.0.0.1','--restore-last-session']});
+        this.connection={contexts:()=>[context],on:(event,fn)=>{if(event==='disconnected')context.on('close',fn);}};
+        context.on('close',()=>{this.state='disconnected';this.connection=null;});
+      }
+      this.state='connected';
+      return {...this.status(),restored:true,profileReused:true,requiresRoleReadback:true};
+    }catch(error){this.state='failed';throw error;}
+  }
   async trackedPage(id){const page=this.pageIds.get(id);if(!page||page.isClosed())throw Error('ROLE_BROWSER_PAGE_LOST');return page;}
   async pageIdentity(id){const page=await this.trackedPage(id);return {pageId:id,pageUrl:page.url()};}
   async reaInspect({pageId,pageUrl,authorization}){

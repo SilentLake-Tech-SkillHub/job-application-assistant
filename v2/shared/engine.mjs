@@ -1,7 +1,7 @@
+import {isRecoverableControlReason} from './control-recovery.mjs';
 import {attachUploadContentProofs} from './upload-content-proof.mjs';
 import {uploadOriginKey,uploadOriginScope} from './upload-origin.mjs';
-import {isRecoverableControlReason} from './control-recovery.mjs';
-import {saveSearchableCommit,verifySearchableCommits,attachSearchableCommits} from './searchable-commit.mjs';
+import {saveSearchableCommit,searchableWitnessScope,verifySearchableCommits,attachSearchableCommits} from './searchable-commit.mjs';
 import {assertMaterialDestinationsRemainAbsent} from './business-materials.mjs';
 import {safeControlErrorDetails} from './control-error-details.mjs';
 import {verifyDropdownSelections,attachChoiceProofs} from './choice-verification.mjs';
@@ -39,6 +39,7 @@ export function canContinueAfterRecoveredControl(error,field){
  const allowed={date:['phoenix_date'],choice:['phoenix_dropdown'],text:['phoenix_autocomplete']};
  if(!allowed[field.kind]?.includes(field.actions[0].method))return false;
  if(!isRecoverableControlReason(error?.message))return false;
+ const family={date:/^PHOENIX_DATE_/,choice:/^(?:AREA_|LIST_POPUP_|CHOICE_)/,text:/^(?:AUTOCOMPLETE_|CHOICE_)/};if(error.message!=='CONTROL_OPERATION_FAILED_AFTER_RECOVERY'&&!family[field.kind].test(error.message))return false;
  const d=safeControlErrorDetails(error.details),expected=createHash('sha256').update(field.value).digest('hex');
  return d?.phase==='restored_control_failure'&&d.expectedValueHash===expected&&d.readbackAvailable===true&&d.popupClosed===true&&d.stableReadback===true&&d.pageUnchanged===true&&(d.valueMatches===true&&d.observedValueHash===expected||d.unchangedFromBefore===true&&d.observedValueHash===d.originalValueHash);
 }
@@ -312,7 +313,7 @@ export class Engine {
         result.pageChecks.push({pathPrefix:plan.pathPrefix,unmapped:missing.map(f=>({selector:f.selector,label:f.label,required:f.required}))});
         if(missing.length)throw Error('UNMAPPED_FORM_FIELDS');
         if(controlContractChanges(plan,live).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
-        const initial=await page.observe(plan);
+        let initial=await page.observe(plan);
         if(initial.pageUrl!==task.pageUrl||!matchesRole(plan,initial))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
         const canActivate=f=>{if(!f.when||!template.coverage?.proof)return false;const parent=frozenFields.find(p=>p.source===f.when.source);return parent?.disposition==='fill'&&parent.value===f.when.equals&&parent.control?.options?.includes(parent.value)&&initial.fields[parent.id]?.present===true&&initial.fields[parent.id]?.selected===true&&frozenFields.indexOf(parent)<frozenFields.indexOf(f);};
         const unavailable=frozenFields.filter(f=>!['inactive','omitted','user_only'].includes(f.disposition)&&!initial.fields[f.id]?.present&&!canActivate(f));
@@ -332,9 +333,16 @@ export class Engine {
         if((uploads.length||plan.groups?.length)&&this.onInventory)await this.onInventory(company.id,task.pageUrl,expanded,plan);
         if(expanded.some(f=>!mapped.has(f.selector)))throw Error('UNMAPPED_FORM_FIELDS_AFTER_EXPANSION');
         if(controlContractChanges(plan,expanded).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
+        if(uploads.length||plan.groups?.length){
+          const beforeMaterial=initial;initial=await page.observe(plan);
+          if(initial.pageUrl!==task.pageUrl||!matchesRole(plan,initial))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
+          result.pageChecks.at(-1).postMaterialReadAt=initial.readAt;
+          result.pageChecks.at(-1).changedAfterMaterial=plan.fields.filter(f=>!f.userOnly&&JSON.stringify(beforeMaterial.fields[f.id]?.value)!==JSON.stringify(initial.fields[f.id]?.value)).map(f=>f.id);
+          if(frozenFields.some(f=>!['inactive','omitted','user_only'].includes(f.disposition)&&!initial.fields[f.id]?.present&&!canActivate(f)))throw Error('PLANNED_FIELDS_MISSING_AFTER_MATERIAL');
+        }
         const fillOrder=compiled.executionOrder?.find(step=>step.stage==='fill')?.fieldIds;
         const fillFields=fillOrder?fillOrder.map(id=>frozenFields.find(f=>f.id===id)):frozenFields;
-        const unverifiedSources=new Set();
+        const unverifiedSources=new Set(),completedWrites=new Set();
         for(const f of fillFields){
           if(f.disposition!=='fill'||f.kind==='file'||f.prepareBeforeGroups)continue;
           activeField={id:f.id,source:f.source,kind:f.kind,label:f.label};
@@ -343,17 +351,26 @@ export class Engine {
           }
           if(prepared.materialCoverage?.exceptions?.length)assertMaterialDestinationsRemainAbsent(prepared.materialCoverage,await inventory());
           if(f.when&&!initial.fields[f.id]?.present)await page.wait(f.read.presenceSelector||f.read.selector);
-          const current=initial.fields[f.id];
+          // An upload/parser or earlier field may have changed the form. Never
+          // skip a write based on an observation made before those operations.
+          const latest=await page.observe({...plan,fields:[f]});
+          if(latest.pageUrl!==task.pageUrl||!matchesRole(plan,latest))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
+          const current=latest.fields[f.id];
           try{
+          if(f.control?.type==='searchable_text'&&current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'){
+            const proofs=await verifySearchableCommits({store:this.store,page,plan:{fields:[f]},task});
+            if(proofs[f.id]?.status==='verified'){(result.skippedMatchingFields??=[]).push(f.id);continue;}
+          }
           if(f.control?.type!=='searchable_text'&&current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'&&(!['choice','date'].includes(f.kind)||current.selected===true)){
             if(f.control?.type==='dropdown'&&!f.read.nativeSelect){const proofs=await verifyDropdownSelections(page,{fields:[f]},task);if(proofs[f.id]?.status!=='verified'){const proof=proofs[f.id],details=safeControlErrorDetails(proof?.errorDetails),error=Error(details?.phase==='restored_control_failure'?proof.reason:'EXISTING_CHOICE_NOT_VERIFIED');error.details=details;throw error;}}
             (result.skippedMatchingFields??=[]).push(f.id);continue;
           }
             for(const action of f.actions||[]){
               await page.assertLocation(company.origin,plan.pathPrefix);
-              const actionResult=await page.act(action, f.value, prepared.files);
+              const actionResult=await page.act(f.control?.type==='searchable_text'?{...action,witnessScope:searchableWitnessScope(task,f)}:action, f.value, prepared.files);
               if(f.control?.type==='searchable_text')await saveSearchableCommit(this.store,task,f,actionResult);
             }
+            completedWrites.add(f.id);
           }catch(error){
             // A real candidate click and stable post-blur text are preparation
             // progress, not a selected-entity proof. Preserve the failed proof,
@@ -368,20 +385,30 @@ export class Engine {
         const authorizedProofs=await this.profileProofs(task,template,page,true);
         if(Object.values(authorizedProofs).some(proof=>proof.status!=='verified'))throw Error('AUTHORIZED_PROFILE_VALUE_MISMATCH');
         // A final read of the entire page catches later cascades or resume parsing overwriting earlier values.
-        const finalInventory=await inventory();
+        let finalInventory=await inventory();
         assertMaterialDestinationsRemainAbsent(prepared.materialCoverage,finalInventory);
         // Dependencies and parsing can reveal new optional questions after writing.
         // Persist these before any completion verdict, just like the initial capture.
         if(this.onInventory)await this.onInventory(company.id,task.pageUrl,finalInventory,plan);
         if(controlContractChanges(plan,finalInventory).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
+        if(uploads.length){
+          const afterMaterial=await page.observe(plan),corrected=[];
+          for(const f of frozenFields){
+            if(f.disposition!=='fill'||f.kind!=='text'||f.control?.type!=='text'||f.userOnly||f.sensitive||f.actions?.length!==1||f.actions[0].method!=='fill'||typeof f.value!=='string'||!afterMaterial.fields[f.id]?.present||compare(afterMaterial.fields[f.id].value,f.value)==='match'||!completedWrites.has(f.id)&&!result.skippedMatchingFields?.includes(f.id))continue;
+            const current=await page.observe({...plan,fields:[f]});
+            if(current.pageUrl!==task.pageUrl||!matchesRole(plan,current))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
+            if(current.fields[f.id]?.value!==afterMaterial.fields[f.id].value)continue;
+            await page.act(f.actions[0],f.value,prepared.files);corrected.push(f.id);
+          }
+          if(corrected.length){result.lateMaterialCorrections=corrected;finalInventory=await inventory();if(this.onInventory)await this.onInventory(company.id,task.pageUrl,finalInventory,plan);if(controlContractChanges(plan,finalInventory).length||finalInventory.some(c=>!mapped.has(c.selector)))throw Error('FORM_CONTROL_CONTRACT_CHANGED');}
+        }
         const choiceProofs=await verifyDropdownSelections(page,plan,task);
         const dateProofs=await verifyDateRanges(page,plan,task);
         const profileProofs=await this.profileProofs(task,template,page),searchableProofs=await verifySearchableCommits({store:this.store,page,plan,task});
         const observation=attachSearchableCommits(attachProfileFillProofs(attachDateRangeProofs(attachChoiceProofs(attachInventory(await page.observe(plan),plan,finalInventory),choiceProofs),dateProofs),profileProofs),searchableProofs);
         result.selectionProofs={...(result.selectionProofs||{}),...choiceProofs};
         const observationRunId=randomUUID();
-        await attachUploadContentProofs(page,observation,plan,task,this.store);
-    await this.store.put('runs',observationRunId,{operation:'live_observation',companyId:company.id,observation});
+        await this.store.put('runs',observationRunId,{operation:'live_observation',companyId:company.id,observation});
         (result.observationRunIds??=[]).push(observationRunId);
         const verification=verifyForm(compiled.expected,observation);
         result.pageChecks.at(-1).verification=verification;

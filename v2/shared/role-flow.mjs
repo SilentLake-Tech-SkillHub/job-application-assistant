@@ -59,8 +59,8 @@ export class RoleFlow{
   state.status='needs_login';state.loginPlan=plan;await this.queues.put(x.t.taskId,state);
   return {status:'needs_login',taskId:state.taskId,pageId:state.pageId,originalRoleUrl:state.originalRoleUrl,returnUrl:state.returnUrl,loginPlan:plan,submission:'not_performed'};
  }
- async resume(args){const x=await this.context(args);return this.login.locked(x.c,async()=>this.resumeBoundPage(x,await this.queues.read(x.t.taskId)),{waitMs:x.q.parallelRoles||x.q.executionMode==='parallel_roles'?30000:0});}
- async resumeBoundPage(x,state,{allowNavigation=true}={}){if(state.queueId!==x.q.id||state.returnUrl!==x.target||state.expectedTitle!==x.t.title)throw Error('ROLE_TASK_STATE_CHANGED');
+ async resume(args){const x=await this.context(args);return this.login.locked(x.c,async()=>this.resumeBoundPage(x,await this.queues.read(x.t.taskId),{restoreLostPage:args.authorization?.restoreLostPage===true,recoveryEvidence:args.authorization?.evidence}),{waitMs:x.q.parallelRoles||x.q.executionMode==='parallel_roles'?30000:0});}
+ async resumeBoundPage(x,state,{allowNavigation=true,restoreLostPage=false,recoveryEvidence}={}){if(state.queueId!==x.q.id||state.returnUrl!==x.target||state.expectedTitle!==x.t.title)throw Error('ROLE_TASK_STATE_CHANGED');
   // Rebind only a lost tab to the unique already-open original URL. No new tab,
   // navigation, expected-value injection or account/role bypass is permitted.
   const tabs=await this.browser.request('tabs',{pageUrl:state.returnUrl});
@@ -70,6 +70,17 @@ export class RoleFlow{
    if(!candidates.length&&allowNavigation&&x.plan?.roleIdentity){
     const expected=new URL(state.returnUrl);
     candidates=tabs.filter(p=>{try{const u=new URL(p.url),identity=readRoleIdentity(x.plan.roleIdentity,p.url);return u.origin===expected.origin&&u.pathname===expected.pathname&&u.hash===expected.hash&&identity?.value===x.t.roleId;}catch{return false;}});
+   }
+   if(!candidates.length){
+    if(!restoreLostPage)throw Error('ROLE_EXISTING_PAGE_NOT_FOUND');
+    if(!recoveryEvidence?.trim())throw Error('ROLE_PAGE_RESTORE_AUTHORIZATION_REQUIRED');
+    if(state.submissionAttempt)throw Error('SUBMISSION_ALREADY_ATTEMPTED');
+    const opened=await this.browser.request('openPage',{pageUrl:state.returnUrl,readySelectors:[x.plan.readySelector,x.c.account.selector,x.c.fields?.root].filter(Boolean)});
+    if(!opened.pageId||new URL(opened.pageUrl).origin!==x.c.origin)throw Error('ROLE_RESTORED_PAGE_SCOPE_CHANGED');
+    state.pageId=opened.pageId;state.status='restored_page_requires_verification';state.accountMatched=false;
+    for(const key of ['fillRunId','verifyRunId','verifiedAt','selectedFieldRunId','previewAttempt'])delete state[key];
+    state.pageRecovery={reopenedAt:new Date().toISOString(),evidence:recoveryEvidence};await this.queues.put(x.t.taskId,state);
+    return this.assess(x,state);
    }
    if(candidates.length!==1)throw Error('ROLE_EXISTING_PAGE_NOT_UNIQUE');
    const candidate=candidates[0];let pageId=pageIdOf(candidate);

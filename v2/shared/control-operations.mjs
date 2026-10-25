@@ -184,8 +184,9 @@ export async function performControl(adapter,action,value,files={}){
     if(action.method==='remove_uploaded_file'){
       const {performAttachmentRemoval}=await import(new URL('./uploaded-file-removal.mjs',import.meta.url));return performAttachmentRemoval(adapter,action);
     }
-    if(action.method==='authorized_submit'){
+    if(['authorized_submit','authorized_preview'].includes(action.method)){
       if(!/^[a-f0-9]{64}$/.test(action.approvalHash||'')||!action.button?.label)throw Error('ROLE_SUBMISSION_AUTHORIZATION_REQUIRED');
+      if(action.method==='authorized_preview'&&!/^(?:预览并提交|Preview and submit)$/i.test(action.button.label))throw Error('CAPTURED_PREVIEW_ACTION_REQUIRED');
       if(!action.button.selector)throw Error('CAPTURED_SUBMISSION_BUTTON_REQUIRED');
       const button=adapter.page.locator(action.button.selector);
       if(await button.count()!==1||!await button.isEnabled())throw Error('SUBMISSION_BUTTON_NOT_UNIQUE_OR_ENABLED');

@@ -1,6 +1,9 @@
 import {readFileSync} from 'node:fs';
 import {humanActionReason,templateConstructionIssues} from './field-policy.mjs';
 import {validateControlContract} from './value-contract.mjs';
+import {hostRole,maintainerRefusal} from './host-role.mjs';
+import {stopLossBlocked,recordOutcome,stopLossRefusal} from './stop-loss.mjs';
+import {recordCall} from './call-metrics.mjs';
 
 export function auditStoredContract(template){
  const construction=templateConstructionIssues(template),fields=(template.pages||[]).flatMap(page=>(page.fields||[]).map(field=>{
@@ -70,17 +73,30 @@ export function stageResult(tool,data){
 }
 // Every new public tool must declare its lifecycle role. Both MCP servers use
 // this registration boundary, so new stages cannot silently omit their Hook.
-export function registerWorkflowTool(server,tool,definition,handler){
+// A maintainer host gets read-only inspections only; stage tools are refused
+// before the handler runs, so no browser, profile or queue state is touched.
+export function registerWorkflowTool(server,tool,definition,handler,env=process.env){
  if(!inspections.has(tool)&&!stages[tool])throw Error('WORKFLOW_STAGE_DECLARATION_REQUIRED:'+tool);
- return server.registerTool(tool,definition,async(args,extra)=>{
-  const result=await handler(args,extra);if(inspections.has(tool))return result;
+ const role=hostRole(env);
+ const handle=async(args,extra)=>{
+  if(role==='maintainer'&&!inspections.has(tool))return {isError:true,content:[{type:'text',text:JSON.stringify(stageResult(tool,maintainerRefusal(tool)))}]};
+  if(inspections.has(tool))return handler(args,extra);
+  const phase=stages[tool][0],blocked=await stopLossBlocked({tool,phase,args,env});
+  if(blocked)return {isError:true,content:[{type:'text',text:JSON.stringify({...stopLossRefusal(tool,blocked,isTechnicalFailure(blocked.reasons)),workflowContract:{revision:1,tool,phase,tracked:true}})}]};
+  const result=await handler(args,extra);
   const block=result.content?.find(x=>x.type==='text');if(!block)throw Error('WORKFLOW_RESPONSE_ENVELOPE_REQUIRED');
-  return {...result,content:[{type:'text',text:JSON.stringify(stageResult(tool,JSON.parse(block.text)))}]};
+  const staged=await recordOutcome({tool,phase,args,result:stageResult(tool,JSON.parse(block.text)),env,technical:isTechnicalFailure});
+  return {...result,content:[{type:'text',text:JSON.stringify(staged)}]};
+ };
+ return server.registerTool(tool,definition,async(args,extra)=>{
+  const startedAt=Date.now(),response=await handle(args,extra);
+  await recordCall({tool,args,startedAt,bytes:Buffer.byteLength(JSON.stringify(response?.content||[])),isError:response?.isError===true,env});
+  return response;
  });
 }
 
 export function technicalHandoffReasons(source){
- const drivers=new Set(['CONTROL_DRIVER_REQUIRED','DATE_DRIVER_CONTRACT_REQUIRED','UPLOAD_SITE_READBACK_REQUIRED','SEARCHABLE_TEXT_COMMIT_CONTRACT_REQUIRED','MULTISELECT_DRIVER_CONTRACT_REQUIRED']);
+ const drivers=new Set(['ROLE_BROWSER_PAGE_LOST','ROLE_EXISTING_PAGE_NOT_FOUND','EXISTING_PAGE_NOT_FOUND','ANT_DATE_NAVIGATION_UNSTABLE','ROLE_EXISTING_PAGE_NOT_UNIQUE','CONTROL_DRIVER_REQUIRED','DATE_DRIVER_CONTRACT_REQUIRED','UPLOAD_SITE_READBACK_REQUIRED','SEARCHABLE_TEXT_COMMIT_CONTRACT_REQUIRED','MULTISELECT_DRIVER_CONTRACT_REQUIRED','SUBMISSION_BUTTON_NOT_UNIQUE_OR_ENABLED','SUBMISSION_PREVIEW_REQUIRED','SUBMISSION_PREVIEW_DRIVER_REQUIRED','SUBMISSION_PREVIEW_SOURCE_NOT_VERIFIED','SUBMISSION_PREVIEW_TRANSITION_NOT_OBSERVED']);
  // Bad arguments, missing mappings and unfinished construction are ordinary
  // Agent work. A stored error alone does not make them supervisor blockers.
  const technical=/^(?:BROWSER_|HOST_BROWSER_|HOST_FILE_|REA_|CDP_|IAB_|CONTROL_COMMIT_|AUTOCOMPLETE_|SEARCHABLE_COMMIT_|PHOENIX_|AREA_|LIST_POPUP_|CHOICE_(?:TRIGGER_|MENU_|COMBOBOX_|INSPECTION_)|SHARED_RESUME_|OPERATION_FAILED$)/;
@@ -88,9 +104,15 @@ export function technicalHandoffReasons(source){
  if(error&&(drivers.has(error)||technical.test(error)))return [error];
  // Real preparation/verification runs are themselves evidence IDs. Do not
  // force the executor to manufacture a second error to report a driver gap.
- const execution=/^(?:FORM_CONTROL_|CONTROL_OPERATION_|AUTOCOMPLETE_|SEARCHABLE_COMMIT_|AREA_|LIST_POPUP_|PHOENIX_|CHOICE_|UPLOAD_(?:NOT_CONFIRMED_BY_SITE|DOWNLOAD_[A-Z_]+|VERIFIED_DOWNLOAD_CONTROL_REQUIRED|CONTENT_DIFFERS_FROM_SOURCE)$)/;
+ const execution=/^(?:ANT_DATE_NAVIGATION_UNSTABLE$|SUBMISSION_PREVIEW_|FORM_CONTROL_|CONTROL_OPERATION_|AUTOCOMPLETE_|SEARCHABLE_COMMIT_|AREA_|LIST_POPUP_|PHOENIX_|CHOICE_|UPLOAD_(?:NOT_CONFIRMED_BY_SITE|DOWNLOAD_[A-Z_]+|VERIFIED_DOWNLOAD_CONTROL_REQUIRED|CONTENT_DIFFERS_FROM_SOURCE)$)/;
  const runs=[source,...(source.results||[]),...(source.pageChecks||[]).map(page=>page.verification).filter(Boolean)];
  const reasons=runs.flatMap(run=>[run.errorCode,...(run.checks||[]).filter(check=>['mismatch','unverified'].includes(check.status)).map(check=>check.reason),...(run.deferredControls||[]).map(control=>control.reason)]).filter(reason=>typeof reason==='string'&&execution.test(reason));
  if(reasons.length)return [...new Set(reasons)];
  return [...new Set((source.blockers||[]).filter(b=>drivers.has(b.reason)).map(b=>b.reason))];
+}
+
+// A repeated failure is handed to the maintainer only when its codes are
+// driver/host gaps; ordinary mapping or value work is recorded as blocked.
+export function isTechnicalFailure(reasons){
+ return (reasons||[]).some(reason=>technicalHandoffReasons({operation:'mcp_error',error:reason}).length||technicalHandoffReasons({checks:[{status:'mismatch',reason}]}).length);
 }

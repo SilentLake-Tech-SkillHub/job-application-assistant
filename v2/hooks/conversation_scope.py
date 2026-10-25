@@ -24,6 +24,10 @@ def current_conversation():
 
 def update_scope(file, operation, *, policy_file=None, authorization_ref=None):
     conversation = current_conversation()
+    # The host wiring declares its role. A maintainer host repairs shared code
+    # and can never register itself as an application executor.
+    if operation == 'enable' and (os.environ.get('RECRUITING_HOST_ROLE') or 'executor').strip() == 'maintainer':
+        raise ValueError('HOST_ROLE_MAINTAINER_CANNOT_ENABLE_EXECUTION')
     file = Path(file).resolve()
     file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     lock_fd = os.open(str(file) + '.lock', os.O_RDWR | os.O_CREAT, 0o600)

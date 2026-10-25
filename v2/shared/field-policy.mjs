@@ -1,4 +1,5 @@
 import {MATERIAL_SOURCES} from './business-materials.mjs';
+import {recordSourceBindingIssues} from './record-source-binding.mjs';
 import {resolveDateFact,datePrecisionGap} from './date-fact-resolution.mjs';
 import {projectDateValue,validDate} from './value-contract.mjs';
 // Technical construction gaps are not human-only actions.
@@ -28,7 +29,7 @@ export function fieldConstructionIssues(field) {
  return [...new Set(issues)];
 }
 export function templateConstructionIssues(template) {
- return [...(template.acquisitionBlockers||[]),(template.pages||[]).flatMap(p=>(p.fields||[]).flatMap(f=>{
+ return [...recordSourceBindingIssues(template),...(template.acquisitionBlockers||[]),(template.pages||[]).flatMap(p=>(p.fields||[]).flatMap(f=>{
   const issues=fieldConstructionIssues(f),goal=f.choiceGoal;
   if(template.evidence?.choiceGoalContract===1&&!f.userOnly&&!f.readonly&&['dropdown','radio','multiselect','searchable_text'].includes(f.control?.type)){
    if(!goal&&(f.choiceGoalRequired===true||f.choiceResolution||f.enumMap))issues.push('CHOICE_GOAL_REQUIRED');

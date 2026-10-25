@@ -2,8 +2,9 @@ import {createHash} from 'node:crypto';import {resolvedFieldValue} from './execu
 import {safeControlErrorDetails} from './control-error-details.mjs';
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const key=(task,field)=>'searchable-'+hash({companyId:task.companyId,roleId:task.roleId,pageUrl:task.pageUrl,fieldId:field.id}).slice(0,40);
+export const searchableWitnessScope=(task,field)=>hash({companyId:task.companyId,roleId:task.roleId,pageUrl:task.pageUrl,templateHash:task.templateHash,fieldId:field.id});
 const nonempty=value=>typeof value==='string'&&value.trim().length>0;
-function assertCurrentProof(read,mode,value,expectedId){
+function assertCurrentProof(read,mode,value,expectedId,witnessScope){
  if(read?.value!==value||read.blurConfirmed!==true||read.readbackStable!==true)throw Error('SEARCHABLE_CURRENT_COMMIT_NOT_VERIFIED');
  if(mode==='explicit_custom_value'){
   const proof=read.customAcceptance;
@@ -12,15 +13,16 @@ function assertCurrentProof(read,mode,value,expectedId){
  }
  if(mode!=='actual_option_click'||read.warning)throw Error('SEARCHABLE_CURRENT_COMMIT_NOT_VERIFIED');
  const proof=read.currentSelection;
- if(proof?.verified!==true||proof.label!==value||!['entity_id','selected_option'].includes(proof.kind)||proof.kind==='selected_option'&&proof.selected!==true)throw Error('AUTOCOMPLETE_CURRENT_SELECTION_PROOF_REQUIRED');
+ if(proof?.verified!==true||proof.label!==value||!['entity_id','selected_option','live_observed_choice'].includes(proof.kind)||proof.kind==='selected_option'&&proof.selected!==true)throw Error('AUTOCOMPLETE_CURRENT_SELECTION_PROOF_REQUIRED');
  if(proof.kind==='entity_id'&&(!nonempty(proof.value)||!read.websiteId||read.websiteId.value!==proof.value||proof.websiteId?.value!==proof.value))throw Error('AUTOCOMPLETE_CURRENT_SELECTION_PROOF_REQUIRED');
+ if(proof.kind==='live_observed_choice'&&(!witnessScope||proof.liveWitness?.scope!==witnessScope||proof.liveWitness.source!=='broker_live_event_observer'||proof.liveWitness.sameNode!==true||proof.liveWitness.eventsUnchanged!==true||!Number.isInteger(proof.liveWitness.revision)||proof.liveWitness.revision<0))throw Error('AUTOCOMPLETE_CURRENT_SELECTION_PROOF_REQUIRED');
  if(expectedId!=null&&proof.value!==expectedId)throw Error('AUTOCOMPLETE_SELECTED_ID_MISMATCH');
  return proof;
 }
 export async function saveSearchableCommit(store,task,field,result){
  const proof=result?.searchableCommit;
  if(!proof||proof.optionLabel!==field.value||!(proof.mode==='actual_option_click'&&proof.optionClicked===true||proof.mode==='explicit_custom_value'&&proof.optionClicked===false&&nonempty(proof.customValueEvidence)))throw Error('SEARCHABLE_COMMIT_ACTION_PROOF_REQUIRED');
- assertCurrentProof(proof,proof.mode,field.value,proof.optionValue);
+ assertCurrentProof(proof,proof.mode,field.value,proof.optionValue,searchableWitnessScope(task,field));
  await store.put('runs',key(task,field),{companyId:task.companyId,roleId:task.roleId,pageUrl:task.pageUrl,fieldId:field.id,templateHash:task.templateHash,valueHash:hash(field.value),proof,readAt:new Date().toISOString()});
 }
 export async function verifySearchableCommits({store,page,plan,task}){
@@ -29,10 +31,10 @@ export async function verifySearchableCommits({store,page,plan,task}){
   const value=resolvedFieldValue(field,task);if(value==null)continue;
   try{const saved=await store.get('runs',key(task,field)),action=field.actions.find(a=>a.method==='phoenix_autocomplete');
    if(saved.templateHash!==task.templateHash||saved.valueHash!==hash(value)||!action)throw Error('SEARCHABLE_COMMIT_SOURCE_CHANGED');
-   assertCurrentProof(saved.proof,saved.proof.mode,value,saved.proof.optionValue);
+   assertCurrentProof(saved.proof,saved.proof.mode,value,saved.proof.optionValue,searchableWitnessScope(task,field));
    if(action.expectedOptionValue!=null&&saved.proof.optionValue!==action.expectedOptionValue)throw Error('AUTOCOMPLETE_SELECTED_ID_MISMATCH');
-   const read=await page.act({...action,method:'phoenix_autocomplete_verify',expectedCommitMode:saved.proof.mode,...(saved.proof.optionValue!=null?{expectedOptionValue:saved.proof.optionValue}:{})},value,{});
-   const current=assertCurrentProof(read,saved.proof.mode,value,saved.proof.optionValue);
+   const read=await page.act({...action,method:'phoenix_autocomplete_verify',witnessScope:searchableWitnessScope(task,field),expectedCommitMode:saved.proof.mode,...(saved.proof.optionValue!=null?{expectedOptionValue:saved.proof.optionValue}:{})},value,{});
+   const current=assertCurrentProof(read,saved.proof.mode,value,saved.proof.optionValue,searchableWitnessScope(task,field));
    proofs[field.id]={status:'verified',mode:saved.proof.mode,label:value,optionValue:saved.proof.optionValue,optionClicked:saved.proof.optionClicked,blurConfirmed:true,readbackStable:true,...(saved.proof.mode==='explicit_custom_value'?{customAcceptance:current}:{currentSelection:current})};
   }catch(error){const errorDetails=safeControlErrorDetails(error.details);proofs[field.id]={status:'failed',reason:/^[A-Z_]+$/.test(error.message)?error.message:'SEARCHABLE_COMMIT_NOT_VERIFIED',...(errorDetails?{errorDetails}:{})};}
  }

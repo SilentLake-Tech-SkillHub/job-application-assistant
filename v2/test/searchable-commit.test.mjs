@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,rm} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {createHash} from 'node:crypto';
-import {Store} from '../shared/engine.mjs';import {saveSearchableCommit,verifySearchableCommits,attachSearchableCommits} from '../shared/searchable-commit.mjs';
+import {Store} from '../shared/engine.mjs';import {saveSearchableCommit,verifySearchableCommits,attachSearchableCommits,searchableWitnessScope} from '../shared/searchable-commit.mjs';
 import {verifyForm} from '../shared/verifier.mjs';
 async function fixture(fn){const root=await mkdtemp(path.join(os.tmpdir(),'searchable-commit-'));try{await fn(new Store(root));}finally{await rm(root,{recursive:true,force:true});}}
 const task={companyId:'sample',roleId:'role',pageUrl:'https://example.test/form',templateHash:'template',values:{school:'Example University'}},field={id:'school',source:'school',value:'Example University',control:{type:'searchable_text'},actions:[{method:'phoenix_autocomplete',selector:'#school'}]},plan={fields:[field]};
@@ -51,4 +51,12 @@ test('independent verification drops unsafe exception details without changing t
  await saveSearchableCommit(store,task,field,proof());const digest=value=>createHash('sha256').update(value).digest('hex'),safe={phase:'independent_verify',expectedValueHash:digest('expected'),observedValueHash:null,valueMatches:false,readbackAvailable:false};
  const page={act:async()=>{throw Object.assign(Error('AUTOCOMPLETE_CURRENT_SELECTION_PROOF_REQUIRED'),{details:{...safe,rawValue:'synthetic-private-original',url:'https://private.invalid/'}});}};
  const result=await verifySearchableCommits({store,task,plan,page});assert.equal(result.school.status,'failed');assert.equal(result.school.reason,'AUTOCOMPLETE_CURRENT_SELECTION_PROOF_REQUIRED');assert.equal(result.school.errorDetails,undefined);assert.equal(JSON.stringify(result).includes('synthetic-private-original'),false);
+}));
+
+test('live choice observations remain bound to the frozen field and must be checked again during independent verification',()=>fixture(async store=>{
+ const scope=searchableWitnessScope(task,field),currentSelection={verified:true,kind:'live_observed_choice',label:field.value,value:null,liveWitness:{source:'broker_live_event_observer',scope,revision:3,sameNode:true,eventsUnchanged:true}},read={value:field.value,blurConfirmed:true,readbackStable:true,websiteId:null,warning:null,currentSelection};
+ await saveSearchableCommit(store,task,field,{searchableCommit:{mode:'actual_option_click',optionClicked:true,optionLabel:field.value,optionValue:null,...read}});
+ let called;const page={act:async a=>{called=a;return read;}};assert.equal((await verifySearchableCommits({store,page,plan,task})).school.status,'verified');assert.equal(called.witnessScope,scope);
+ page.act=async()=>({...read,currentSelection:{...currentSelection,liveWitness:{...currentSelection.liveWitness,eventsUnchanged:false}}});assert.equal((await verifySearchableCommits({store,page,plan,task})).school.status,'failed');
+ await assert.rejects(saveSearchableCommit(store,task,field,{searchableCommit:{mode:'actual_option_click',optionClicked:true,optionLabel:field.value,optionValue:null,...read,currentSelection:{...currentSelection,liveWitness:{...currentSelection.liveWitness,scope:'b'.repeat(64)}}}}),/CURRENT_SELECTION_PROOF_REQUIRED/);
 }));

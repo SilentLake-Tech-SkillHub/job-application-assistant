@@ -17,6 +17,7 @@ export async function submitReviewedRole({args,boundRole,resolveTask,engine,brow
  const page=await browser.existingPage(state.returnUrl),preview=await page.observe({operation:'submission_controls'});
  if(preview.pageUrl!==state.returnUrl||preview.receipt)throw Error('SUBMISSION_EXISTING_RECEIPT_REQUIRES_RECONCILIATION');
  const buttons=preview.buttons.filter(button=>!button.disabled);
+ if(buttons.some(button=>/^(?:预览并提交|Preview and submit)$/i.test(button.label)))throw Error('SUBMISSION_PREVIEW_REQUIRED');
  // Responsive layouts may render the same submit action at the top and bottom.
  // Only identical captured actions qualify; select the last exact live node.
  if(!buttons.length||new Set(buttons.map(({selector,...data})=>JSON.stringify(data))).size!==1||buttons.some(b=>!b.selector))throw Error('SUBMISSION_BUTTON_NOT_UNIQUE_OR_ENABLED');

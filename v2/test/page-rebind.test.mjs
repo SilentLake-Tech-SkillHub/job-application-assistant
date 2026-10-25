@@ -40,5 +40,5 @@ for(const role of ['one','other'])test(`query variation rebind requires an obser
  flow.context=async()=>({q:{id:'queue'},t:{taskId:'task',title:'Role',roleId:'one'},c:{},target:url,plan:{roleIdentity:{source:'query',parameter:'id',value:'one'}}});
  flow.assess=async(_,current)=>current;
  if(role==='one'){const current=await flow.resume({});assert.equal(current.returnUrl,observed);assert.equal(current.applicationUrl,observed);assert.equal(current.pageId,'chrome:retained');}
- else await assert.rejects(flow.resume({}),/ROLE_EXISTING_PAGE_NOT_UNIQUE/);
+ else await assert.rejects(flow.resume({}),/ROLE_EXISTING_PAGE_NOT_FOUND/);
 });

@@ -24,5 +24,5 @@ test('a lost tab resumes only the unique existing original URL and never opens a
  assert.equal((await f.resume({})).status,'ready_to_fill');assert.equal(bound,'iab:current');
  f.browser.request=async()=>[{id:'current',url:target,browserChannel:'iab'}];await f.resume({});assert.equal(bound,'iab:current');
  f.browser.request=async()=>[{id:'1',url:target},{id:'2',url:target}];await assert.rejects(f.resume({}),/EXISTING_PAGE_NOT_UNIQUE/);
- f.browser.request=async()=>[{id:'1',url:'https://a.test/other'}];await assert.rejects(f.resume({}),/EXISTING_PAGE_NOT_UNIQUE/);
+ f.browser.request=async()=>[{id:'1',url:'https://a.test/other'}];await assert.rejects(f.resume({}),/EXISTING_PAGE_NOT_FOUND/);
 });

@@ -54,13 +54,17 @@ export class LoginEngine{
     if(o.popupTitle!==c.consent.title||!o.popupBody?.includes('生效日期'))throw Error('PRIVACY_DISCLOSURE_NOT_READ');
     const disclosure={id:randomUUID(),companyId:c.companyId,planId:p.id,assetHash:p.assetHash,title:c.consent.title,sourceUrl:o.url,text:o.popupBody,readAt:now()};disclosure.textHash=hash(disclosure.text);await this.store.put('disclosures',disclosure.id,disclosure);
     o=await this.dismiss(c,o);
-    const known=(await this.profile()).policy?.loginPrivacyAcceptances?.[c.companyId];
+    const policy=(await this.profile()).policy||{};
+    const privacyScope=policy.privacyAcceptanceScope==='global'&&policy.globalAgreementAccepted===true?'global':'per_company';
+    const known=policy.loginPrivacyAcceptances?.[c.companyId];
     let reused=null;
-    if(known?.origin===c.origin&&known.disclosureHash===disclosure.textHash&&known.scope==='recruiting_login'&&!known.revoked){
+    if(privacyScope==='global'||(known?.origin===c.origin&&known.disclosureHash===disclosure.textHash&&known.scope==='recruiting_login'&&!known.revoked)){
       await this.browser.act(c,o.url,{method:'check',selector:f.consent},true);o=await this.state(c,o.url);if(!o.consent)throw Error('PRIVACY_CHECK_READBACK_FAILED');
-      reused={id:randomUUID(),companyId:c.companyId,planId:p.id,assetHash:p.assetHash,disclosureId:disclosure.id,disclosureHash:disclosure.textHash,evidenceHash:known.evidenceHash,acceptedAt:known.acceptedAt,reusedAt:now()};await this.store.put('acceptances',reused.id,reused);
+      const evidenceHash=privacyScope==='global'?hash({mode:'global',origin:c.origin,disclosureHash:disclosure.textHash}):known.evidenceHash;
+      reused={id:randomUUID(),companyId:c.companyId,planId:p.id,assetHash:p.assetHash,disclosureId:disclosure.id,disclosureHash:disclosure.textHash,evidenceHash,acceptedAt:privacyScope==='global'?now():known.acceptedAt,reusedAt:now(),scope:privacyScope};await this.store.put('acceptances',reused.id,reused);
+      if(privacyScope==='global')await updateProfile(this.profileFile,profile=>{profile.policy??={};profile.policy.loginPrivacyAcceptances??={};profile.policy.loginPrivacyAcceptances[c.companyId]={origin:c.origin,disclosureHash:disclosure.textHash,evidenceHash,acceptedAt:reused.acceptedAt,scope:'global',defaultSelect:true};});
     }
-    return this.record(c,'prepare',{status:reused?'ready_to_request_sms':'needs_privacy_acceptance',acceptanceId:reused?.id||null,privacyReused:!!reused,accountMatched:false,phoneReadback:'match',countryReadback:'match',popupHandling:'privacy_read_and_closed',disclosureId:disclosure.id,disclosureHash:disclosure.textHash,privacyTitle:disclosure.title,privacySourceUrl:disclosure.sourceUrl,smsSent:false});
+    return this.record(c,'prepare',{status:reused?'ready_to_request_sms':'needs_privacy_acceptance',privacyScope,acceptanceId:reused?.id||null,privacyReused:!!reused,accountMatched:false,phoneReadback:'match',countryReadback:'match',popupHandling:'privacy_read_and_closed',disclosureId:disclosure.id,disclosureHash:disclosure.textHash,privacyTitle:disclosure.title,privacySourceUrl:disclosure.sourceUrl,smsSent:false});
   });}
   async accept(args){const {p,c}=await this.plan(args);return this.locked(c,async()=>{
     const d=await this.store.get('disclosures',args.disclosureId);

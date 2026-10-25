@@ -64,7 +64,7 @@ function fieldFromControl(c,m,choice){
   else if(c.tag==='select'||c.type==='select'){f.read.nativeSelect=true;f.actions=[{...action('select'),options:options||[]}];}
   else if(c.renderer==='phoenix_select'){
    f.read.kind='text';f.read.selector=c.selectedSelector;f.read.selectedSelector=c.selectedSelector;
-   if(!human)f.actions=[{...action('phoenix_dropdown'),labelSelector:c.labelSelector,options:options||[]}];
+   if(!human)f.actions=[{...action('phoenix_dropdown'),labelSelector:c.labelSelector,options:options||[],...(choice?.renderer==='phoenix_list_popup'?{choiceRenderer:choice.renderer,choiceContract:choice.choiceContract}: {})}];
   }
   else if(framework==='.ant-form-item'||framework==='.ud-formily-item'){
    const method=framework==='.ant-form-item'?'ant_dropdown':'ud_dropdown';

@@ -14,8 +14,8 @@ export const CONTROL_TYPES = freeze({
  file_upload:{kind:'file',valueType:'string',readbackType:'string[]',methods:['upload'],reads:['files']}
 });
 export const CONTROL_METHODS = freeze(Object.fromEntries([
- ...new Set(Object.values(CONTROL_TYPES).flatMap(c=>c.methods)), 'verify_uploaded_file','authorized_submit','remove_uploaded_file','click','wait','dropdown_inspect','ant_dropdown_inspect','ud_dropdown_inspect','phoenix_dropdown_inspect','phoenix_dropdown_verify','phoenix_autocomplete_inspect','phoenix_autocomplete_verify','capture_wecruit_schema','ant_dropdown_verify','ud_dropdown_verify','dropdown_verify'
-].map(method=>[method,{method,inspection:method==='verify_uploaded_file'||method.endsWith('_inspect')||method.endsWith('_verify')||method==='wait'||method==='capture_wecruit_schema',templateAllowed:!method.endsWith('_inspect')&&!method.endsWith('_verify')&&!['verify_uploaded_file','capture_wecruit_schema','remove_uploaded_file','authorized_submit'].includes(method)}])));
+ ...new Set(Object.values(CONTROL_TYPES).flatMap(c=>c.methods)), 'verify_uploaded_file','authorized_preview','authorized_submit','remove_uploaded_file','click','wait','dropdown_inspect','ant_dropdown_inspect','ud_dropdown_inspect','phoenix_dropdown_inspect','phoenix_dropdown_verify','phoenix_autocomplete_inspect','phoenix_autocomplete_verify','capture_wecruit_schema','ant_dropdown_verify','ud_dropdown_verify','dropdown_verify'
+].map(method=>[method,{method,inspection:method==='verify_uploaded_file'||method.endsWith('_inspect')||method.endsWith('_verify')||method==='wait'||method==='capture_wecruit_schema',templateAllowed:!method.endsWith('_inspect')&&!method.endsWith('_verify')&&!['verify_uploaded_file','capture_wecruit_schema','remove_uploaded_file','authorized_preview','authorized_submit'].includes(method)}])));
 export const templateMethods = () => new Set(Object.keys(CONTROL_METHODS).filter(k=>CONTROL_METHODS[k].templateAllowed));
 export const controlCapabilities = () => ({schemaVersion:1,revision:'shared-controls-2',types:CONTROL_TYPES,methods:CONTROL_METHODS,locatorPolicy:'question_scoped_unique',readbackPolicy:'live_dom_independent'});
 

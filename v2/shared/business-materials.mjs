@@ -1,28 +1,32 @@
-import {createHash} from 'node:crypto';
+import {createHash} from 'node:crypto';import {readFileSync} from 'node:fs';
 
 // Role materials are owned by the confirmed handoff, never by personal facts.
-export const MATERIAL_SOURCES = Object.freeze({referralCode:'material:referralCode'});
+// Definitions live only in catalog/role-materials.json (one entry per material).
+export const MATERIAL_DEFINITIONS=Object.freeze(JSON.parse(readFileSync(new URL('../catalog/role-materials.json',import.meta.url),'utf8')).materials.map(d=>Object.freeze({...d,labels:Object.freeze([...d.labels])})));
+export const MATERIAL_SOURCES = Object.freeze(Object.fromEntries(MATERIAL_DEFINITIONS.map(d=>[d.key,d.source])));
+const definitionOf=key=>MATERIAL_DEFINITIONS.find(d=>d.key===key);
 const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const normalize=text=>String(text||'').normalize('NFKC').toLowerCase().replace(/请输入|请填写|选填|非必填|optional/gu,'').replace(/[\s*＊:：()（）]/gu,'');
 export function materialKey(field){
- if(field.source===MATERIAL_SOURCES.referralCode)return 'referralCode';
+ const bySource=MATERIAL_DEFINITIONS.find(d=>d.source===field.source);if(bySource)return bySource.key;
  const labels=[field.label,field.inventoryLabel,field.placeholder];
  // Only an explicitly observed placeholder can supplement a missing label.
  for(const selector of [field.selector,field.read?.selector,...(field.inventorySelectors||[])]){
   const match=typeof selector==='string'&&selector.match(/\[placeholder=["']([^"']+)["']\]/);if(match)labels.push(match[1]);
  }
- return labels.some(label=>['推荐码','内推码','referralcode','employeereferralcode','referral code'].includes(normalize(label)))?'referralCode':null;
+ const normalized=labels.map(normalize);
+ return MATERIAL_DEFINITIONS.find(d=>d.labels.some(label=>normalized.includes(label)))?.key||null;
 }
 export function validateMaterials(materials){
  if(!materials||materials.schemaVersion!==1||!Array.isArray(materials.items))throw Error('ROLE_MATERIALS_REQUIRED');
  const keys=new Set();
  for(const item of materials.items){
   if(!Object.hasOwn(MATERIAL_SOURCES,item.key)||keys.has(item.key)||!['available','absent','unresolved'].includes(item.status)||item.requireWhenAvailable!==true||!item.evidence?.masterDataSha256||!item.evidence?.roleUrl||typeof item.raw!=='string')throw Error('INVALID_ROLE_MATERIALS');
-  if(item.status==='available'&&(typeof item.value!=='string'||!/^[A-Za-z0-9_-]{3,64}$/.test(item.value)))throw Error('INVALID_ROLE_MATERIAL_VALUE');
+  if(item.status==='available'&&(typeof item.value!=='string'||!new RegExp(definitionOf(item.key).value).test(item.value)))throw Error('INVALID_ROLE_MATERIAL_VALUE');
   if(item.status!=='available'&&item.value!=null)throw Error('INVALID_ROLE_MATERIAL_VALUE');
   keys.add(item.key);
  }
- if(!keys.has('referralCode'))throw Error('ROLE_MATERIAL_INVENTORY_INCOMPLETE');
+ if(MATERIAL_DEFINITIONS.some(d=>d.requiredInInventory&&!keys.has(d.key)))throw Error('ROLE_MATERIAL_INVENTORY_INCOMPLETE');
  return materials;
 }
 export function resolveMaterialValues(context){

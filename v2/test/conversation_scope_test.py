@@ -56,6 +56,16 @@ class ConversationScopeTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(json.loads(self.scope.read_text())['session_ids'], ['dsh-conversation'])
 
+    def test_maintainer_host_cannot_enable_execution_but_can_disable(self):
+        r = self.run_scope('maintainer-thread', extra_env={'RECRUITING_HOST_ROLE': 'maintainer'})
+        self.assertEqual(r.returncode, 2)
+        self.assertIn('HOST_ROLE_MAINTAINER_CANNOT_ENABLE_EXECUTION', r.stderr)
+        self.assertFalse(self.scope.exists())
+        self.run_scope('maintainer-thread')
+        r = self.run_scope('maintainer-thread', 'disable', extra_env={'RECRUITING_HOST_ROLE': 'maintainer'})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(self.scope.read_text())['session_ids'], [])
+
 
 if __name__ == '__main__':
     unittest.main()

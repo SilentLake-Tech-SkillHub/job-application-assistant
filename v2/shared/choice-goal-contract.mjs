@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {rankChoices,resolveObservedChoice} from './choice-resolution.mjs';
+import {rankChoices,resolveObservedChoice,assertPopupChoiceContract} from './choice-resolution.mjs';
 
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
@@ -14,7 +14,7 @@ function currentResolution(profile,factKey,choice,stored){
  if(ranked.selection!==stored.selectedOption&&(stored.method!=='agent_semantic_review'||!nonempty(stored.evidence)))throw Error('CHOICE_SEMANTIC_REVIEW_REQUIRED');
  const fresh=resolveObservedChoice({profile,factKey,choice,selectedOption:stored.selectedOption,evidence:stored.evidence});
  if(stored.optionsHash!==fresh.optionsHash||!equal(stored.optionValue,fresh.optionValue)||
-    !equal(stored.optionValueAttribute,fresh.optionValueAttribute)||stored.majorPolicyHash!==fresh.majorPolicyHash)throw Error('CHOICE_RESOLUTION_STALE');
+    !equal(stored.optionValueAttribute,fresh.optionValueAttribute)||!equal(stored.optionPath,fresh.optionPath)||stored.choiceRenderer!==fresh.choiceRenderer||stored.choiceContract!==fresh.choiceContract||stored.majorPolicyHash!==fresh.majorPolicyHash)throw Error('CHOICE_RESOLUTION_STALE');
  return fresh;
 }
 
@@ -59,6 +59,7 @@ export function evaluateChoiceGoals({capture,profile,fields=[],choices=[]}){
   }
   if(choice.status!=='captured'||!Array.isArray(choice.options)||!choice.options.length){block('CHOICE_GOAL_OBSERVED_OPTIONS_REQUIRED');continue;}
   try{
+   assertPopupChoiceContract(choice);
    if(field.control.type==='multiselect'){
     if(!Array.isArray(fact.value)||!fact.value.length||new Set(fact.value).size!==fact.value.length)throw Error('MULTISELECT_ARRAY_SOURCE_REQUIRES_OBSERVED_LABELS');
     if(fact.value.some(v=>typeof v!=='string'||!choice.options.includes(v)))throw Error('MULTISELECT_ARRAY_SOURCE_REQUIRES_OBSERVED_LABELS');

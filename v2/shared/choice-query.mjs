@@ -20,8 +20,8 @@ export function planChoiceQueries(profile,factKey){
     core=core.slice(country.value.length).trim();transforms.push('sourced_country_prefix');
    }
    const stem=core.replace(/(?:大学|学院)$/u,'').replace(/\s+(?:university|college)$/iu,'').trim();
-   if(stem!==core&&Array.from(stem).length>=3){core=stem;transforms.push('institution_type_suffix');}
-   if(transforms.length&&Array.from(core).length>=3)add(core,alias,transforms);
+   if(stem!==core&&Array.from(stem).length>=2){core=stem;transforms.push('institution_type_suffix');}
+   if(transforms.length&&Array.from(core).length>=2)add(core,alias,transforms);
   }
  }
  for(const alias of aliases)add(alias,alias);

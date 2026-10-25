@@ -22,6 +22,17 @@ export function uncoveredControlsDOM({coveredSelectors,controls,primary=[]}){
  return result;
 }
 
+export async function resolveLiveReferences(page,reader,args,{now=Date.now,sleep=ms=>new Promise(r=>setTimeout(r,ms)),timeoutMs=2000}={}){
+ const original=page.url?.(),end=now()+timeoutMs;
+ for(;;){try{if(typeof original==='string'&&page.url()!==original)throw Error('PAGE_IDENTITY_CHANGED');const result=await page.evaluate(reader,args);if(typeof original==='string'&&page.url()!==original)throw Error('PAGE_IDENTITY_CHANGED');return result;}catch(error){
+  const match=String(error.message||'').match(/(?:^|Error:\s*)(PHOENIX_QUESTION_NOT_FOUND|PHOENIX_CONTROL_CHANGED|REPEAT_SECTION_NOT_FOUND)(?:\b|$)/);
+  if(!match||typeof original!=='string')throw error;
+  if(page.url()!==original)throw Error('PAGE_IDENTITY_CHANGED');
+  if(now()>=end)throw Error(match[1]);
+  await sleep(Math.min(50,end-now()));
+ }}
+}
+
 export class PageAdapter {
   constructor(page,{listOpenPageUrls}={}){Object.assign(this,{page,listOpenPageUrls});}
   async assertSingleEditor(){
@@ -31,11 +42,11 @@ export class PageAdapter {
     if(peers.length)throw Error('SHARED_RESUME_HAS_OTHER_OPEN_EDITORS');
   }
   async assertLocation(origin,prefix){const u=new URL(this.page.url());if(u.origin!==origin||!u.pathname.startsWith(prefix))throw Error('PAGE_IDENTITY_CHANGED');}
-  async resolveSelector(selector){if(selector?.startsWith('uploadq:'))return (await this.page.evaluate(await currentNative(),{operation:'resolveUpload',references:[selector]}))[0]||':not(*)';if(selector?.startsWith('phoenixq:'))return (await this.page.evaluate(await currentNative(),{operation:'resolvePhoenix',references:[normalizePhoenixReference(selector)]}))[0];if(!selector?.startsWith('antq:'))return selector;const actual=await this.page.evaluate(await currentAnt(),{operation:'resolve',reference:selector});return actual||':not(*)';}
+  async resolveSelector(selector){if(!['antq:','phoenixq:','uploadq:'].some(prefix=>selector?.startsWith(prefix)))return selector;return (await this.resolveSpec({selector})).selector;}
   async resolveSpec(spec){
     const refs=new Set();const collect=v=>{if(typeof v==='string'&&['antq:','phoenixq:','uploadq:'].some(prefix=>v.startsWith(prefix)))refs.add(v);else if(Array.isArray(v))v.forEach(collect);else if(v&&typeof v==='object')Object.values(v).forEach(collect);};collect(spec);if(!refs.size)return spec;
     const keys=[...refs],ant=keys.filter(k=>k.startsWith('antq:')),phoenix=keys.filter(k=>k.startsWith('phoenixq:')),uploads=keys.filter(k=>k.startsWith('uploadq:'));
-    const [antValues,phoenixValues,uploadValues]=await Promise.all([ant.length?this.page.evaluate(await currentAnt(),{operation:'resolve',references:ant}):[],phoenix.length?this.page.evaluate(await currentNative(),{operation:'resolvePhoenix',references:phoenix.map(normalizePhoenixReference)}):[],uploads.length?this.page.evaluate(await currentNative(),{operation:'resolveUpload',references:uploads}):[]]);
+    const [antValues,phoenixValues,uploadValues]=await Promise.all([ant.length?this.page.evaluate(await currentAnt(),{operation:'resolve',references:ant}):[],phoenix.length?resolveLiveReferences(this.page,await currentNative(),{operation:'resolvePhoenix',references:phoenix.map(normalizePhoenixReference)}):[],uploads.length?this.page.evaluate(await currentNative(),{operation:'resolveUpload',references:uploads}):[]]);
     const mapping=new Map([...ant.map((k,i)=>[k,antValues[i]||':not(*)']),...phoenix.map((k,i)=>[k,phoenixValues[i]||':not(*)']),...uploads.map((k,i)=>[k,uploadValues[i]||':not(*)'])]);
     const walk=v=>typeof v==='string'?mapping.get(v)||v:Array.isArray(v)?v.map(walk):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,walk(x)])):v;return walk(spec);
   }

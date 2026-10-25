@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {assertRecordSourceBindings} from './record-source-binding.mjs';
 import {canonicalControlSpec} from './control-registry.mjs';
 import {scriptCoverage} from './page-structure.mjs';
 
@@ -43,6 +44,7 @@ export async function recordAcquisitionChain(store,{companyId,structureId,struct
 }
 
 export async function assertAcquisitionChain(template,{store,companyId,profile}={}){
+ assertRecordSourceBindings(template);
  const binding=template?.evidence?.pipeline;
  if(binding?.version!==1||!binding.structureId||!binding.captureId)throw Error('MCP_ACQUISITION_CHAIN_REQUIRED');
  const [structure,capture,receipt]=await Promise.all([

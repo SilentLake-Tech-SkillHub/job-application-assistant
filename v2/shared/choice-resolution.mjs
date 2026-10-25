@@ -1,7 +1,11 @@
 import {createHash} from 'node:crypto';
 import {majorFacts} from './major-policy.mjs';
 const digest=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
-const optionHash=c=>digest({options:c.options,identities:(c.optionRecords||[]).map(({label,value,valueAttribute,disabled})=>({label,value,valueAttribute,disabled:!!disabled}))});
+const optionIdentity=r=>JSON.stringify([r.label,r.path??null,r.value??null,r.valueAttribute??null]);
+const optionHash=c=>digest({options:c.options,identities:(c.optionRecords||[]).map(({label,path,value,valueAttribute,disabled})=>({label,...(path!=null?{path}:{}),value,valueAttribute,disabled:!!disabled})),...(c.renderer==='phoenix_list_popup'?{renderer:c.renderer,choiceContract:c.choiceContract}: {})});
+export function assertPopupChoiceContract(choice){
+ if(choice?.renderer==='phoenix_list_popup'&&(choice.choiceContract!=='leaf_v2'||!choice.optionRecords?.length||choice.optionRecords.some(r=>typeof r.label!=='string'||!r.label.trim()||/[\r\n]/.test(r.label))))throw Error('LIST_POPUP_CONTRACT_REQUIRES_REBUILD');
+}
 const lockedChoice=c=>c?.status==='captured_locked_value'&&c.restored===true&&c.lockedControl?.disabled===true&&c.lockedControl.selected===true&&c.options?.length===1&&c.options[0]===c.lockedControl.value;
 const majorPolicyHash=(profile,key)=>{const major=majorFacts(profile,key);return major?.application?digest({real:major.real,application:major.application,policy:profile.policies?.majorDropdownResolution||profile.policy?.majorDropdownResolution}):null;};
 export const choiceKey=s=>String(s??'').normalize('NFKC').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu,'');
@@ -26,6 +30,7 @@ export function rankChoices(profile,factKey,options){
  return {factKey,aliases,candidates,selection:exact.length===1?exact[0].option:null,status:exact.length===1?'resolved_known_alias':exact.length>1?'ambiguous_alias':'semantic_review_required',automaticFuzzySelection:false};
 }
 export function resolveObservedChoice({profile,factKey,choice,selectedOption,evidence}){
+ assertPopupChoiceContract(choice);
  const locked=lockedChoice(choice);
  if(choice.status!=='captured'&&!locked||choice.restored!==true||!choice.options?.length)throw Error('RESTORED_OPTION_EVIDENCE_REQUIRED');
  const ranked=rankChoices(profile,factKey,choice.options),option=selectedOption??ranked.selection;
@@ -39,8 +44,8 @@ export function resolveObservedChoice({profile,factKey,choice,selectedOption,evi
   if(!complete&&!searched)throw Error('MAJOR_ORIGINAL_OPTION_SEARCH_REQUIRED');
  }
  if(!automatic&&!evidence?.trim())throw Error('CHOICE_SEMANTIC_REVIEW_REQUIRED');
- const observed=choice.optionRecords?.filter(r=>r.label===option)||[];if(observed.length>1)throw Error('CHOICE_OPTION_NOT_UNIQUE');if(observed[0]?.disabled&&!locked)throw Error('CHOICE_OPTION_DISABLED');
- return {...(choice.choicesId?{choicesId:choice.choicesId,captureId:choice.captureId,selector:choice.selector}:{}),optionValue:observed[0]?.value??null,optionValueAttribute:observed[0]?.valueAttribute??null,factKey,majorPolicyHash:majorPolicyHash(profile,factKey),sourceValue:profile.facts[factKey]?.value,selectedOption:option,optionsHash:optionHash(choice),method:automatic?'known_alias':'agent_semantic_review',evidence:automatic?'same confirmed fact or approved profile alias':evidence,query:choice.optionQueries?.[option]||option};
+ const observed=choice.optionRecords?.filter(r=>r.label===option)||[];if(observed.length>1)throw Error('CHOICE_OPTION_NOT_UNIQUE');if(choice.renderer==='phoenix_list_popup'&&observed.length!==1)throw Error('ACTUAL_CAPTURED_OPTION_REQUIRED');if(observed[0]?.disabled&&!locked)throw Error('CHOICE_OPTION_DISABLED');
+ return {...(choice.choicesId?{choicesId:choice.choicesId,captureId:choice.captureId,selector:choice.selector}:{}),...(choice.renderer==='phoenix_list_popup'?{choiceRenderer:choice.renderer,choiceContract:choice.choiceContract,optionPath:observed[0]?.path??null}:{}),optionValue:observed[0]?.value??null,optionValueAttribute:observed[0]?.valueAttribute??null,factKey,majorPolicyHash:majorPolicyHash(profile,factKey),sourceValue:profile.facts[factKey]?.value,selectedOption:option,optionsHash:optionHash(choice),method:automatic?'known_alias':'agent_semantic_review',evidence:automatic?'same confirmed fact or approved profile alias':evidence,query:choice.optionQueries?.[option]||option};
 }
 export function applyChoiceResolution(field,choice,profile){
  if(!choice?.options?.length||!['dropdown','radio','multiselect','searchable_text'].includes(field.control?.type))return field;
@@ -52,17 +57,20 @@ export function applyChoiceResolution(field,choice,profile){
  if(!resolution&&ranked.selection)resolution=resolveObservedChoice({profile,factKey:field.source,choice});
  if(!resolution){if(profile.facts[field.source]?.status==='known')field.constructionBlockers.push('CHOICE_SEMANTIC_RESOLUTION_REQUIRED');return field;}
  field.enumMap={...(field.enumMap||{}),[resolution.sourceValue]:resolution.selectedOption};field.choiceResolution=resolution;
- field.actions=field.actions.map(a=>({...a,query:resolution.query,...(resolution.optionValue!==null?{expectedOptionValue:resolution.optionValue}:{})}));return field;
+ field.actions=field.actions.map(a=>({...a,query:resolution.query,...(resolution.choiceRenderer?{choiceRenderer:resolution.choiceRenderer,choiceContract:resolution.choiceContract,expectedOptionPath:resolution.optionPath,expectedOptionValue:resolution.optionValue,expectedOptionValueAttribute:resolution.optionValueAttribute}:{}),...(resolution.optionValue!==null?{expectedOptionValue:resolution.optionValue}:{})}));return field;
 }
 
 export function mergeObservedChoices(previous=[],updates=[]){
  const merged=new Map(previous.map(c=>[c.selector,c]));
- for(const item of updates){const old=merged.get(item.selector);
-  const recordMap=new Map([...(old?.optionRecords||[]),...(item.optionRecords||[])].map(r=>[r.label,r]));const optionRecords=[...recordMap.values()];
+ for(const item of updates){let old=merged.get(item.selector);
+  // A fresh capture replaces obsolete popup semantics; never union old row text
+  // with new leaf labels or preserve decisions based on that old interpretation.
+  if(item.renderer==='phoenix_list_popup'&&old&&old.choiceContract!==item.choiceContract)old=null;
+  const recordMap=new Map([...(old?.optionRecords||[]),...(item.optionRecords||[])].map(r=>[optionIdentity(r),r]));const optionRecords=[...recordMap.values()];
   const searches=[...(old?.searches||[]),...(item.searches||[]),...(item.queryApplied&&item.query?[{query:item.query,options:item.options||[],restored:item.restored===true}]:[])];
   const optionQueries={...(old?.optionQueries||Object.fromEntries((old?.options||[]).map(o=>[o,old.query||o]))),...(item.optionQueries||Object.fromEntries((item.options||[]).map(o=>[o,item.query||o])))};
   if(old?.status==='captured'&&old.restored&&item.restored&&['captured','captured_empty_search'].includes(item.status))merged.set(item.selector,{...old,...item,status:'captured',options:[...new Set([...old.options,...(item.options||[])])],optionRecords,optionQueries,searches,scope:'observed_option_union',coverage:{complete:old.coverage?.complete===true||item.coverage?.complete===true}});
-  else merged.set(item.selector,{...item,optionQueries,searches});
+  else merged.set(item.selector,{...item,optionRecords:[...new Map((item.optionRecords||[]).map(r=>[optionIdentity(r),r])).values()],optionQueries,searches});
  }return [...merged.values()];
 }
 
@@ -71,6 +79,12 @@ export async function assertStoredChoiceResolutions(template,{store,companyId,pr
   if(f.kind!=='choice'&&f.control?.type!=='searchable_text'||(!f.enumMap&&!f.actions?.some(a=>a.optionTextMap)))continue;
   const r=f.choiceResolution;if(!r?.choicesId||!r.captureId||!r.selector)throw Error('STORED_CHOICE_CONFIRMATION_REQUIRED');
   const asset=await store.get('runs',r.choicesId),choice=asset.choices?.find(c=>c.selector===r.selector);
+  assertPopupChoiceContract(choice);
+  if(choice?.renderer==='phoenix_list_popup'&&(r.choiceRenderer!==choice.renderer||r.choiceContract!==choice.choiceContract||f.actions?.some(a=>a.choiceRenderer!==choice.renderer||a.choiceContract!==choice.choiceContract||a.expectedOptionPath!==r.optionPath||a.expectedOptionValue!==r.optionValue||a.expectedOptionValueAttribute!==r.optionValueAttribute)))throw Error('LIST_POPUP_CONTRACT_REQUIRES_REBUILD');
+  if(choice?.renderer==='phoenix_list_popup'){
+   const records=choice.optionRecords.filter(o=>o.label===r.selectedOption);
+   if(records.length!==1||r.optionPath!==(records[0].path??null)||r.optionValue!==(records[0].value??null)||r.optionValueAttribute!==(records[0].valueAttribute??null))throw Error('STORED_CHOICE_CONFIRMATION_CHANGED');
+  }
   const locked=f.readonly&&f.lockedControl&&lockedChoice(choice)&&f.lockedControl.value===choice.lockedControl.value;
   if(asset.companyId!==companyId||asset.pageUrl!==template.evidence.sourceUrl||asset.captureId!==r.captureId||!f.inventorySelectors?.includes(r.selector)||!choice||choice.restored!==true||choice.status!=='captured'&&!locked||optionHash(choice)!==r.optionsHash||!choice.options.includes(r.selectedOption))throw Error('STORED_CHOICE_CONFIRMATION_CHANGED');
   if(profile?.facts?.[f.source]?.status==='known'&&JSON.stringify(profile.facts[f.source].value)!==JSON.stringify(r.sourceValue))throw Error('CHOICE_RESOLUTION_STALE');

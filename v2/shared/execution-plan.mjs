@@ -126,8 +126,8 @@ export async function compileExecutionPlan(template,task){
   return {id:randomUUID(),createdAt:new Date().toISOString(),...body,planHash};
 }
 
-export async function assertPreparedPlan(prepared,template,task,authorization,{scope='full'}={}){
-  if(!['full','authorized_profile_fields'].includes(scope))throw Error('INVALID_EXECUTION_SCOPE');
+export async function assertPreparedPlan(prepared,template,task,authorization,{scope='full',fieldIds=[]}={}){
+  if(!['full','authorized_profile_fields','selected_fields'].includes(scope))throw Error('INVALID_EXECUTION_SCOPE');
   if(!prepared||!task.planId||!task.planHash)throw Error('PREPARED_PLAN_REQUIRED');
   const {id,createdAt,planHash,...body}=prepared;
   if(id!==task.planId||planHash!==task.planHash||digest(body)!==planHash)throw Error('PREPARED_PLAN_HASH_MISMATCH');
@@ -139,6 +139,12 @@ export async function assertPreparedPlan(prepared,template,task,authorization,{s
   if(current.planHash!==planHash)throw Error('PREPARED_PLAN_CONTENT_CHANGED');
   if(prepared.constructionBlockers.length)throw Error('FORM_CONSTRUCTION_INCOMPLETE');
   if(prepared.counts.needs_user&&!authorization.allowPartialPreparation)throw Error('PROFILE_PREPARATION_INCOMPLETE');
+  if(scope==='selected_fields'){
+    if(!authorization.prepare||!fieldIds.length||new Set(fieldIds).size!==fieldIds.length)throw Error('SELECTED_FIELD_IDS_REQUIRED');
+    const selected=prepared.pages.flatMap(page=>page.fields).filter(field=>fieldIds.includes(field.id));
+    if(selected.length!==fieldIds.length||selected.some(field=>field.disposition!=='fill'||!['text','choice','date'].includes(field.kind)||field.sensitive||field.userOnly||field.readonly||!field.actions?.length))throw Error('SELECTED_FIELD_NOT_WRITABLE');
+    return prepared;
+  }
   if(scope==='authorized_profile_fields'){
     const ids=new Set(prepared.profileFillContext?.fields?.map(field=>field.fieldId)||[]),fields=prepared.pages.flatMap(page=>page.fields).filter(field=>ids.has(field.id));
     if(!ids.size||fields.length!==ids.size||fields.some(field=>field.disposition!=='authorized_profile'||field.kind!=='text'||!field.userOnly))throw Error('AUTHORIZED_PROFILE_EXECUTION_SCOPE_INVALID');

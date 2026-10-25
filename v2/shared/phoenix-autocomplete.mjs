@@ -1,3 +1,4 @@
+import {beginChoiceWitness,sealChoiceWitness,verifyChoiceWitness} from './choice-witness.mjs';
 import {annotateRecoveredControl} from './control-recovery.mjs';
 import {choiceProofDOM} from './choice-proof.mjs';
 import {createHash} from 'node:crypto';
@@ -40,7 +41,7 @@ export async function performPhoenixAutocomplete(adapter,action,value){
   try{if(await menu.count()===1)records=await menu.evaluate(choiceProofDOM,{operation:'options',selector:item});}
   finally{await close();}
   const selected=records.filter(r=>r.selected===true),same=records.filter(r=>r.label===expected);
-  if(selected.length!==1||same.length!==1||selected[0].label!==expected||selected[0].disabled)throw Error('AUTOCOMPLETE_CURRENT_SELECTION_PROOF_REQUIRED');
+  if(selected.length!==1||same.length!==1||selected[0].label!==expected||selected[0].disabled){const witness=await verifyChoiceWitness(adapter.page,input,action.witnessScope,expected,expectedId);if(witness)return witness;throw Error('AUTOCOMPLETE_CURRENT_SELECTION_PROOF_REQUIRED');}
   if(expectedId!=null&&selected[0].value!==expectedId)throw Error('AUTOCOMPLETE_SELECTED_ID_MISMATCH');
   return {verified:true,kind:'selected_option',label:expected,value:selected[0].value??null,selected:true};
  };
@@ -85,17 +86,19 @@ export async function performPhoenixAutocomplete(adapter,action,value){
   return {options:records.map(record=>record.label),optionRecords:records,status:'captured',restored:true,restorationProof:{kind:'original_nonempty_unchanged',valueHash:createHash('sha256').update(before).digest('hex'),entityUnchanged:true},queryApplied:false,searchable:true,scope:'current_rendered_candidates',coverage:{complete:false,reason:'passive_existing_value_menu'},executionVerified:false};
  }
  const restoreEmpty=async()=>{await input.fill('',{timeout:10000});await close();await waitValue('');if(await websiteId()||await read()!=='')throw Error('AUTOCOMPLETE_INSPECTION_NOT_RESTORED');return true;};
- const query=action.query||String(value||'');if(!query)throw Error('AUTOCOMPLETE_QUERY_REQUIRED');
+ let query=action.query||String(value||'');if(!query)throw Error('AUTOCOMPLETE_QUERY_REQUIRED');
+ if(!inspect)await beginChoiceWitness(adapter.page,input,action.witnessScope);
  let queryApplied=false;
  try{
   await input.click({timeout:10000});
   // A restored editor may show the old query without having issued this
   // session's search. Reapply through the real input even when text matches.
+  if(await read()===query){await input.fill('',{timeout:10000});await waitValue('');}
   await input.fill(query,{timeout:10000});await waitValue(query);queryApplied=true;
-  const end=Date.now()+5000;let records=[],empty=null;
+  let end=Date.now()+5000,retriedActualLabel=false;let records=[],empty=null;
   do{
    if(await menu.count()===1)records=await menu.evaluate(choiceProofDOM,{operation:'options',selector:item});
-   empty=await warning();if(records.length||empty)break;if(Date.now()>=end)throw Error('AUTOCOMPLETE_RESULTS_NOT_READY');await new Promise(r=>setTimeout(r,30));
+   empty=await warning();if(records.length||empty)break;if(Date.now()>=end){if(!inspect&&!retriedActualLabel&&query!==String(value)&&action.options?.includes(String(value))){retriedActualLabel=true;query=String(value);await input.fill(query,{timeout:10000});await waitValue(query);end=Date.now()+5000;}else throw Error('AUTOCOMPLETE_RESULTS_NOT_READY');}await new Promise(r=>setTimeout(r,30));
   }while(true);
   if(inspect){
    await restoreEmpty();
@@ -123,7 +126,7 @@ export async function performPhoenixAutocomplete(adapter,action,value){
    await target.click({timeout:10000});await phase('after_option_click',candidate.label,async()=>{
     const deadline=Date.now()+2500;
     while(await read()!==candidate.label||await menu.count()!==0){if(Date.now()>=deadline)throw Error('AUTOCOMPLETE_COMMIT_NOT_VERIFIED');await new Promise(r=>setTimeout(r,20));}
-   });proof={mode:'actual_option_click',optionLabel:candidate.label,optionValue:candidate.value??null,valueAttribute:candidate.valueAttribute,optionClicked:true};
+   });await phase('after_blur',candidate.label,async()=>{await close();await waitValue(candidate.label);await sealChoiceWitness(adapter.page,input,action.witnessScope,candidate);});proof={mode:'actual_option_click',optionLabel:candidate.label,optionValue:candidate.value??null,valueAttribute:candidate.valueAttribute,optionClicked:true};
   }else if(!records.length&&empty&&action.customValueEvidence){proof={mode:'explicit_custom_value',optionLabel:String(value),optionValue:null,optionClicked:false,customValueEvidence:empty};}
   else throw Error('UNSUPPORTED_CHOICE_NO_FALLBACK');
   const current=await currentProof(proof.mode,String(value),proof.optionValue);

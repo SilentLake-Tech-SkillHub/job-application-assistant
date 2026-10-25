@@ -210,13 +210,13 @@
         "verify_current"
       ]
     ],
-    "profile_record_document_facts": ["prepare", ["prepare_plan"]],
     "profile_record_answers": [
       "prepare",
       [
         "prepare_plan"
       ]
     ],
+    "profile_record_document_facts": ["prepare", ["prepare_plan"]],
     "profile_map_questions": [
       "map",
       [
@@ -321,6 +321,9 @@
       ]
     ],
     "role_prepare_profile_fields": ["prepare", ["role_verify"]],
+    "role_prepare_fields": ["prepare", ["role_verify"]],
+    "role_preview_submission": ["submit", ["workflow_handoff"]],
+    "browser_restore_chrome": ["route", ["role_resume"]],
     "form_remove_attachment": ["construct", ["capture_controls", "form_build_template"]],
     "role_prepare_materials": [
       "prepare",
