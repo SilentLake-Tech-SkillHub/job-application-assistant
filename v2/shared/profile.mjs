@@ -205,10 +205,15 @@ export function recordProfileAnswers(profile,{answers,evidence,recordedAt=new Da
   if(new Set(answers.map(a=>a.factKey)).size!==answers.length)throw Error('DUPLICATE_ANSWER_FACT');
   const sourceId='user_'+randomUUID();
   answers=answers.map(answer=>{
-    const definition=profile.fieldRegistry?.[answer.factKey],precision=profile.facts[answer.factKey]?.precision||definition?.precision;
+    const definition=profile.fieldRegistry?.[answer.factKey],declared=profile.facts[answer.factKey]?.precision||definition?.precision;
+    const temporal=/(?:^|\.)(?:date|start|end|birthDate|earliestStart|yearMonth)$/.test(answer.factKey),units=['year','month','day'];
+    const supplied=temporal&&answer.status==='known'?units.find(unit=>validDate(answer.value,unit)):null;
+    // A user's explicit full date upgrades a coarse fact; a portal's month
+    // precision is projected later and must not discard the supplied day.
+    const precision=supplied&&(!declared||units.indexOf(supplied)>units.indexOf(declared))?supplied:declared;
     const value=answer.status==='known'?ingestFactValue(answer.value,precision):answer.value;
     if(answer.status==='known'&&definition?.canonicalType&&!matchesValueType(value,definition.canonicalType))throw Error('INVALID_CANONICAL_FACT_TYPE');
-    return {...answer,value};
+    return {...answer,value,canonicalPrecision:precision||null};
   });
   // Validate the entire update before mutation; secrets and unregistered facts stay rejected.
   for(const answer of answers){
@@ -222,6 +227,7 @@ export function recordProfileAnswers(profile,{answers,evidence,recordedAt=new Da
   for(const answer of answers){
     const previous=profile.facts[answer.factKey];
     const next={...previous,value:answer.status==='known'?answer.value:null,status:answer.status,sourceIds:[sourceId],updatedAt:recordedAt};
+    if(answer.status==='known'){delete next.reason;if(answer.canonicalPrecision){next.precision=answer.canonicalPrecision;delete next.dateNormalization;}}
     delete next.history;
     if(answer.status==='not_applicable')next.omission={kind:answer.omissionKind,evidence:sourceId};else delete next.omission;
     profile.facts[answer.factKey]=next;

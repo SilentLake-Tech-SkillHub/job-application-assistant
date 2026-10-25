@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {recordProfileAnswers,registerObservedQuestions,mapProfileQuestions} from '../shared/profile.mjs';
+import {projectDateValue} from '../shared/value-contract.mjs';
+test('explicit day answers upgrade coarse time facts without losing the day to a portal month contract',()=>{
+ const p={schemaVersion:1,entities:{},sources:{},fieldRegistry:{'workProjects.example.start':{canonicalType:'string',precision:'month'}},facts:{'workProjects.example.start':{status:'missing',value:null,sourceIds:[],reason:'missing'},'certificates.example.date':{status:'missing',value:null,sourceIds:[]}}};
+ recordProfileAnswers(p,{answers:[{factKey:'workProjects.example.start',status:'known',value:'2025-12-17'},{factKey:'certificates.example.date',status:'known',value:'2025-01-11'}],evidence:'User supplied exact full dates'});
+ for(const key of ['workProjects.example.start','certificates.example.date'])assert.equal(p.facts[key].precision,'day');
+ assert.equal(p.facts['workProjects.example.start'].value,'2025-12-17');assert.equal(p.facts['workProjects.example.start'].reason,undefined);assert.equal(projectDateValue(p.facts['workProjects.example.start'].value,'month'),'2025-12');
+ const before=structuredClone(p);
+ for(const value of ['2025-12','2025-02-30']){assert.throws(()=>recordProfileAnswers(p,{answers:[{factKey:'workProjects.example.start',status:'known',value}],evidence:'Invalid or downgraded date'}),/INVALID_CANONICAL_DATE/);assert.deepEqual(p,before);}
+});
 test('user answer overwrites the current fact and removes old history',()=>{
  const p={schemaVersion:1,entities:{},sources:{old:{kind:'user_reply'}},fieldRegistry:{'application.preference':{canonicalType:'string'}},facts:{'application.preference':{value:'old',status:'known',sourceIds:['old'],history:[{value:'older'}]}}};
  recordProfileAnswers(p,{answers:[{factKey:'application.preference',status:'known',value:'current'}],evidence:'User corrected the preference'});
