@@ -15,11 +15,12 @@ function element(tag,text='',attrs={},children=[]){
  n.querySelectorAll=s=>children.flatMap(c=>[...(c.matches(s)?[c]:[]),...c.querySelectorAll(s)]);n.querySelector=s=>n.querySelectorAll(s)[0]||null;n.contains=x=>n===x||children.some(c=>c.contains(x));n.closest=s=>n.matches(s)?n:n.parentElement?.closest(s)||null;
  children.forEach(c=>{c.parentElement=n;});return n;
 }
-function fixture({icon='download',bundle='entry',wrongLevel=false,state,duplicateName=false}={}){
+function fixture({icon='download',bundle='entry',wrongLevel=false,state,duplicateName=false,salt=''}={}){
+ const c=name=>name.replace('sc-','sc-'+salt);
  const svg=element('svg','',{},[element('path','',{d:'M0 0h18v18H0z'}),element('path','',{d:icon==='download'?download:icon==='preview'?preview:'unrecognized-delete-or-filetype-path'})]);
- const action=element('div','',{class:'sc-fIosxK'},[svg]),actions=element('div','',{class:'sc-htJRVC'},wrongLevel?[]:[action]);
- const name=element('div','resume.pdf',{id:'filename',class:'sc-hAcGzb'}),text=element('div','',{class:'sc-dUbtfd'},[name,...(duplicateName?[element('div','resume.pdf')]:[])]),type=element('div','',{class:'sc-cbTzjv'},[element('div','',{class:'upload-file-icon-style pdf-icon file-card-type'}),...(wrongLevel?[action]:[])]);
- const row=element('div','',{class:'sc-jlRLRk'},[type,text,actions]),card=element('div','',{class:'sc-lkgTHX'},[row]),list=element('div','',{class:'file-uploader__list-view'},[card]);
+ const action=element('div','',{class:c('sc-fIosxK')},[svg]),actions=element('div','',{class:c('sc-htJRVC')},wrongLevel?[]:[action]);
+ const name=element('div','resume.pdf',{id:'filename',class:c('sc-hAcGzb')}),text=element('div','',{class:c('sc-dUbtfd')},[name,...(duplicateName?[element('div','resume.pdf')]:[])]),type=element('div','',{class:c('sc-cbTzjv')},[element('div','',{class:'upload-file-icon-style pdf-icon file-card-type'}),...(wrongLevel?[action]:[])]);
+ const row=element('div','',{class:c('sc-jlRLRk')},[type,text,actions]),card=element('div','',{class:c('sc-lkgTHX')},[row]),list=element('div','',{class:'file-uploader__list-view'},[card]);
  const input=element('input','',{type:'file'});input.hidden=true;
  const extra=state==='progress'?[element('span','63%')]:state==='error'?[element('span','上传错误')]:state==='busy'?[element('div','',{'aria-busy':'true'})]:[];
  const wrapper=element('div','',{class:'file-uploader__wrapper'},[element('span','重新上传'),input,list,...extra]),root=element('div','',{id:'upload',class:'form-item--phoenix'},[element('div','',{class:'form-item__title'},[element('span','简历附件',{class:'form-item__text'})]),wrapper]);
@@ -32,7 +33,7 @@ function fixture({icon='download',bundle='entry',wrongLevel=false,state,duplicat
 }
 
 test('verified Phoenix done-only actions establish website completion with precise source provenance',()=>{
- for(const icon of ['download','preview'])for(const bundle of ['entry','library','resource']){const f=fixture({icon,bundle}),o=f.observe();assert.ok(f.resolved()[1]);assert.equal(o.fields.resume.uploadState,'site_rendered_uploaded');const evidence=o.fields.resume.uploadEvidence[0];assert.equal(evidence.kind,'phoenix_done_action_icon');assert.equal(evidence.icon,icon);assert.equal(evidence.contractSourceSha256.length,64);assert.equal(evidence.loadedVersionEvidence,bundle==='entry'?'entry_script_known_chunk_map':'library_resource_url');assert.equal(evidence.liveSourceHash,undefined);const result=verifyForm({pageUrl:'https://fixture.test/form',roleTitle:'Product',fields:[{id:'resume',kind:'file',value:['resume.pdf']}]},{...o,inventoryIds:['resume']});assert.equal(result.status,'verified');}
+ for(const icon of ['download','preview'])for(const bundle of ['entry','library','resource']){const f=fixture({icon,bundle}),o=f.observe();assert.ok(f.resolved()[1]);assert.equal(o.fields.resume.uploadState,'site_rendered_uploaded');const evidence=o.fields.resume.uploadEvidence[0];assert.equal(evidence.kind,'phoenix_done_action_icon');assert.equal(evidence.icon,icon);assert.equal(evidence.contractSourceSha256.length,64);assert.equal(evidence.loadedVersionEvidence,undefined);assert.equal(evidence.liveSourceHash,undefined);const result=verifyForm({pageUrl:'https://fixture.test/form',roleTitle:'Product',fields:[{id:'resume',kind:'file',value:['resume.pdf']}]},{...o,inventoryIds:['resume']});assert.equal(result.status,'verified');}
 });
 test('filename, replace text and filetype/delete icons cannot prove completion',()=>{
  const f=fixture({icon:'delete'});assert.equal(f.resolved()[1],null);assert.equal(f.observe().fields.resume.uploadState,'unverified');
@@ -47,6 +48,11 @@ test('the same done-only SVG outside the exact filecard action hierarchy is reje
 test('progress, error and busy states override a positive action icon',()=>{
  for(const state of ['progress','error','busy']){const f=fixture({state});assert.equal(f.resolved()[1],null);assert.equal(f.observe().fields.resume.uploadState,'unverified');assert.deepEqual(f.observe().fields.resume.uploadEvidence,[]);}
 });
-test('unknown bundle versions and ambiguous same-card filenames remain unverified',()=>{
- for(const options of [{bundle:'unknown'},{duplicateName:true}]){const f=fixture(options);assert.equal(f.resolved()[1],null);assert.equal(f.observe().fields.resume.uploadState,'unverified');}
+test('rebuilt styles and bundle versions do not change the filecard reading; ambiguous same-card filenames stay unverified',()=>{
+ for(const options of [{bundle:'unknown'},{salt:'Zq9'},{bundle:'unknown',salt:'Xy7'}]){const f=fixture(options);assert.ok(f.resolved()[1]);assert.equal(f.observe().fields.resume.uploadState,'site_rendered_uploaded');}
+ const f=fixture({duplicateName:true});assert.equal(f.resolved()[1],null);assert.equal(f.observe().fields.resume.uploadState,'unverified');
+});
+test('the Phoenix adapter is the last retrieval route: the download icon is retrievable, a preview-only card is not',()=>{
+ const download=fixture({salt:'Ab1'}).read({operation:'resolveUploadDownload',containerSelector:'#upload',filename:'resume.pdf'});assert.equal(download.via,'phoenix_download_icon');assert.ok(download.selector);
+ assert.equal(fixture({icon:'preview'}).read({operation:'resolveUploadDownload',containerSelector:'#upload',filename:'resume.pdf'}),null);
 });

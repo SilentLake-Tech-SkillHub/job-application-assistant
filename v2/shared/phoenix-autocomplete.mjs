@@ -82,6 +82,9 @@ export async function performPhoenixAutocomplete(adapter,action,value){
    const expected={value:before,id:originalId,warning:originalWarning};
    if(await menu.count()!==0||JSON.stringify(first)!==JSON.stringify(expected)||JSON.stringify(second)!==JSON.stringify(expected))throw Error('AUTOCOMPLETE_INSPECTION_NOT_RESTORED');
   }
+  // Existing text is never cleared or retyped to obtain candidates: once
+  // changed, the site's original selection cannot be proven restored. A box
+  // the site filled itself (resume parsing) is captured on a blank form.
   if(!records.length)throw Error('AUTOCOMPLETE_PASSIVE_OPTIONS_NOT_AVAILABLE');
   return {options:records.map(record=>record.label),optionRecords:records,status:'captured',restored:true,restorationProof:{kind:'original_nonempty_unchanged',valueHash:createHash('sha256').update(before).digest('hex'),entityUnchanged:true},queryApplied:false,searchable:true,scope:'current_rendered_candidates',coverage:{complete:false,reason:'passive_existing_value_menu'},executionVerified:false};
  }

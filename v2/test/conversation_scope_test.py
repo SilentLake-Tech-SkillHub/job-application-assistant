@@ -22,7 +22,7 @@ class ConversationScopeTest(unittest.TestCase):
 
     def run_scope(self, session, operation='enable', extra_env=None):
         base = {k: v for k, v in os.environ.items()
-                if k not in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'DSH_SESSION_ID')}
+                if k not in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'DSH_SESSION_ID', 'RECRUITING_HOST_ROLE')}
         env = {**base, 'CODEX_THREAD_ID': session, 'CODEX_SESSION_ID': session, **(extra_env or {})}
         return subprocess.run([sys.executable, str(SCRIPT), operation, '--scope-file', str(self.scope),
                                '--policy-file', str(self.policy), '--authorization-ref', 'synthetic user request'],

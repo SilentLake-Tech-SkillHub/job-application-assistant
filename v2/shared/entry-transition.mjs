@@ -34,6 +34,21 @@ export function transitionLocationMatches(spec,url,roleId){
  for(const [map,params]of[[spec.query,u.searchParams],[spec.hashQuery,h.query]])for(const [k,v]of Object.entries(map||{})){const values=params.getAll(k);if(values.length!==1||values[0]!== (v==='$roleId'?roleId:v))return false;}
  return true;
 }
+// Proposal only, never navigated: when the role was entered from an already
+// open application page, the detail page that would carry the same role is
+// derived from the captured detail URL and the parameters the two locations
+// share. The search side shows it to the user; the next entry from that link
+// verifies it on the real detail page.
+export function proposedDetailUrl(entry,formUrl){
+ try{
+  const form=new URL(formUrl),detail=new URL(entry.evidence.detailUrl),dq=entry.detail.location.query||{},fq=entry.form.location.query||{};
+  const shared=Object.keys(dq).filter(k=>Object.hasOwn(fq,k)&&(dq[k]==='$roleId')===(fq[k]==='$roleId'));
+  if(!shared.length||detail.origin!==form.origin)return null;
+  let roleValue=null;
+  for(const k of shared){const v=form.searchParams.getAll(k);if(v.length!==1)return null;detail.searchParams.set(k,v[0]);if(dq[k]==='$roleId')roleValue=v[0];}
+  return transitionLocationMatches(entry.detail.location,detail.href,roleValue)?detail.href:null;
+ }catch{return null;}
+}
 export function transitionRoleIdentity(spec,url){
  if(!spec)return null;const u=new URL(url);let value;
  if(spec.source==='query')value=u.searchParams.getAll(spec.parameter).length===1?u.searchParams.get(spec.parameter):null;

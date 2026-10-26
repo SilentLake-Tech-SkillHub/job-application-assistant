@@ -8,17 +8,17 @@ function element(tag,text='',attrs={},children=[]){
  n.contains=x=>n===x||n.children.some(c=>c.contains(x));n.querySelectorAll=s=>n.children.flatMap(c=>[...(s==='*'||c.matches(s)?[c]:[]),...c.querySelectorAll(s)]);n.querySelector=s=>n.querySelectorAll(s)[0]||null;n.closest=s=>n.matches(s)?n:n.parentElement?.closest(s)||null;
  children.forEach(c=>{c.parentElement=n;});return n;
 }
-function fixture({state='empty',nativeHeading=false,multiple=false,titleFilename=false,fakeTitle=false,sameFilenameOnly=false,duplicateFilename=false}={}){
- const filename='current-resume.pdf',name=element('div',filename),replace=element('span','重新上传'),remove=element('span','删除'),controls=element('div','',{},[replace,remove]);
+function fixture({state='empty',nativeHeading=false,multiple=false,titleFilename=false,fakeTitle=false,sameFilenameOnly=false,duplicateFilename=false,download=null,href=null}={}){
+ const filename='current-resume.pdf',name=href?element('a',filename,{href}):element('div',filename),replace=element('span','重新上传'),remove=element('span','删除'),downloads=download==='button'?[element('button','下载')]:download==='anchor'?[element('a','下载',{href:'https://files.example.test/d/current-resume.pdf',target:'_blank'})]:download==='titled'?[element('span','',{title:'下载附件'})]:download==='two'?[element('button','下载'),element('a','',{'aria-label':'download'})]:[],controls=element('div','',{},[replace,remove,...downloads]);
  const record=element('div','',{},state==='empty'?[]:[name,...(sameFilenameOnly?[]:[controls]),...(state==='uploading'?[element('span','上传中')]:[]),...(duplicateFilename?[element('div',filename)]:[])]);
  const input=element('input','',{type:'file'});input.hidden=true;input.files=state==='empty'?[{name:filename}]:[];
  const uploadBody=element('div','',{},[record,input,...(multiple?[element('input','',{type:'file'})]:[])]);
  const title=element(nativeHeading?'h2':'div',titleFilename?filename:'上传简历',nativeHeading?{}:{id:fakeTitle?'random-caption':'special_field_fast_upload_resume'});
  const root=element('section','',{id:'upload-section'},[title,uploadBody]),body=element('body','',{},[root]);
- const oldDocument=globalThis.document,oldStyle=globalThis.getComputedStyle,oldCSS=globalThis.CSS;
- globalThis.document={body,querySelectorAll:s=>body.querySelectorAll(s)};globalThis.getComputedStyle=()=>({visibility:'visible'});globalThis.CSS={escape:s=>s};
+ const oldDocument=globalThis.document,oldStyle=globalThis.getComputedStyle,oldCSS=globalThis.CSS,oldLocation=globalThis.location;
+ globalThis.document={body,querySelectorAll:s=>body.querySelectorAll(s)};globalThis.getComputedStyle=()=>({visibility:'visible'});globalThis.CSS={escape:s=>s};globalThis.location={href:'https://careers.example.test/apply'};
  const ref=(part,file)=>'uploadq:'+JSON.stringify({label:'上传简历',occurrence:0,part,...(file?{filename:file}:{})});
- return {input,root,title,ref,resolve:(...parts)=>controlDOM({operation:'resolveUpload',references:parts.map(p=>ref(p))}),remove:()=>controlDOM({operation:'resolveUpload',references:[ref('remove',filename)]})[0],restore:()=>{globalThis.document=oldDocument;globalThis.getComputedStyle=oldStyle;globalThis.CSS=oldCSS;}};
+ return {input,root,title,ref,resolve:(...parts)=>controlDOM({operation:'resolveUpload',references:parts.map(p=>ref(p))}),remove:()=>controlDOM({operation:'resolveUpload',references:[ref('remove',filename)]})[0],retrieval:()=>controlDOM({operation:'resolveUploadDownload',containerSelector:'#upload-section',filename}),restore:()=>{globalThis.document=oldDocument;globalThis.getComputedStyle=oldStyle;globalThis.CSS=oldCSS;globalThis.location=oldLocation;}};
 }
 test('independent semantic upload title and unique sibling file body resolve before uploading, without claiming completion',()=>{
  const f=fixture();try{const [input,container,names,uploaded]=f.resolve('input','container','filenames','uploaded');assert.ok(input);assert.equal(container,'#upload-section');assert.equal(names,null);assert.equal(uploaded,null);assert.equal(f.input.files.length,1);}finally{f.restore();}
@@ -31,4 +31,14 @@ test('uploading state and filename-only text cannot become website uploaded proo
 });
 test('filenames cannot become section labels and multiple file inputs or unproven captions remain ambiguous',()=>{
  for(const options of [{state:'uploaded',titleFilename:true},{state:'uploaded',multiple:true},{state:'uploaded',fakeTitle:true}]){const f=fixture(options);try{assert.deepEqual(f.resolve('input','container','filenames','uploaded'),[null,null,null,null]);}finally{f.restore();}}
+});
+test('any site: a uniquely named download control in the file row is its retrieval',()=>{
+ for(const download of ['button','titled']){const f=fixture({state:'uploaded',download});try{const r=f.retrieval();assert.equal(r.via,'named_download_control');assert.ok(r.selector);}finally{f.restore();}}
+});
+test('any site: an https filename link is retrieved directly; page anchors and ambiguous controls are not retrieval',()=>{
+ let f=fixture({state:'uploaded',href:'https://files.example.test/u/current-resume.pdf'});try{const r=f.retrieval();assert.equal(r.via,'file_link');assert.equal(r.url,'https://files.example.test/u/current-resume.pdf');}finally{f.restore();}
+ for(const options of [{href:'#'},{href:'javascript:void(0)'},{href:'http://files.example.test/x.pdf'},{download:'two'},{}]){f=fixture({state:'uploaded',...options});try{assert.equal(f.retrieval(),null,JSON.stringify(options));}finally{f.restore();}}
+});
+test('any site: a named download link is fetched, not clicked',()=>{
+ const f=fixture({state:'uploaded',download:'anchor'});try{const r=f.retrieval();assert.equal(r.via,'file_link');assert.equal(r.url,'https://files.example.test/d/current-resume.pdf');}finally{f.restore();}
 });

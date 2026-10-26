@@ -57,6 +57,22 @@ export async function updateProfile(file,mutate){
 
 // Mandatory before a captured company form can be considered mapped.
 // Unknown questions are persisted even when optional, unanswered or semantically ambiguous.
+// Whether the form now asks something its execution contract does not cover:
+// a labelled question no contract field covers (by selector or label), or a
+// covered question whose control type changed. Filling never causes this:
+// parsed values, added repeat records, revealed conditional fields (they are in
+// the contract), changed option lists and layout paths are all ignored.
+export function contractQuestionChanges(contract,questions){
+ const fields=contract?.fields||[];if(!fields.length)return [];
+ const labels=new Set(fields.flatMap(f=>[f.inventoryLabel,f.label]).filter(Boolean));
+ const changes=[];
+ for(const q of questions){
+  const covered=fields.filter(f=>f.inventorySelectors?.includes(q.selector));
+  if(covered.length){if(q.type&&covered.some(f=>f.inventoryType&&f.inventoryType!==q.type))changes.push({kind:'type_changed',label:q.label||null});continue;}
+  if(q.label&&!labels.has(q.label))changes.push({kind:'new_question',label:q.label});
+ }
+ return changes.slice(0,10);
+}
 export function registerObservedQuestions(profile,{companyId,pageUrl,fields,observedAt,coverageRequired=false}){
   profile.companyForms??={}; profile.fieldRegistry??={};
   const {pageKey,form:old}=lookupCompanyForm(profile,companyId,pageUrl,{migrate:true});
@@ -84,8 +100,11 @@ export function registerObservedQuestions(profile,{companyId,pageUrl,fields,obse
     added.push(factKey);
   }
   profile.companyForms[pageKey]={...old,companyId,pageUrl,observedAt,inventoryHash:hash(questions),mappings};
-  delete profile.companyForms[pageKey].previousInventoryHash;
-  if(old?.executionContract&&old.inventoryHash!==hash(questions))Object.assign(profile.companyForms[pageKey].executionContract,{validForCurrentInventory:false,status:'requires_rebuild'});
+  delete profile.companyForms[pageKey].previousInventoryHash;delete profile.companyForms[pageKey].definitionHash;
+  // Only a question the contract does not cover invalidates it; the changes
+  // filling makes to the page (inventoryHash) do not.
+  const changes=old?.executionContract?contractQuestionChanges(old.executionContract,questions):[];
+  if(changes.length)Object.assign(profile.companyForms[pageKey].executionContract,{validForCurrentInventory:false,status:'requires_rebuild',rebuildReason:'question_definition_changed',rebuildEvidence:changes});
   profile.updatedAt=observedAt;
   return {pageKey,added,unmapped:Object.values(mappings).filter(m=>m.active!==false&&m.status==='needs_semantic_mapping').length};
 }

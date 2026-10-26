@@ -41,42 +41,65 @@ export function controlDOM(spec){
  const filenameSelector='.ant-upload-list-item-name,[class*="file-name"]';
  const uploadPending=root=>[root,...root.querySelectorAll('*')].some(n=>visible(n)&&(n.getAttribute('aria-busy')==='true'||n.getAttribute('role')==='progressbar'||/^(?:(?:正在上传(?:文件)?|上传中|uploading)(?:[.。…\s]*|\s*\d+(?:\.\d+)?%)|\d+(?:\.\d+)?%)$/i.test(n.innerText?.trim()||'')));
  const uploadError=root=>[root,...root.querySelectorAll('*')].some(n=>visible(n)&&(n.getAttribute('aria-invalid')==='true'||/^(?:上传失败|上传错误|upload failed|upload error)$/i.test(n.innerText?.trim()||'')));
- // Source-verified Phoenix HC renderer, module 98670: only done renders module
- // 30914 (download) / 79025 (preview). Filename, file-type and delete also occur
- // in non-done states. This hash documents the rule source, not a live hash read.
- const phoenixDoneEvidence=(entry,name,requiredIcon=null)=>{
+ // Beisen Phoenix filecard adapter. Only the component's public BEM class
+ // (file-uploader__list-view) and the card's relative structure are used; the
+ // build-generated styled-components classes and bundle-hash URLs are not page
+ // evidence. The done-only download/preview icons (public module 98670 renders
+ // modules 30914 / 79025 only for done files) locate the card's actions; final
+ // acceptance of an upload comes from content retrieval, not from these icons.
+ const phoenixCard=(entry,name)=>{
   if(entry.contextProvider!=='.form-item--phoenix')return null;
-  const base='https://acdn.bstatics.com/ux/ux-recruitment-portal-2022-form-pc/release/dist/',library=base+'beisen-phoenix-part2-502f98f31630e64ee05b.chk.js',bootstrap=base+'pcform-e1944db80b7bd4c43439.chunk.min.js';
-  const assetUrl=value=>{try{return new URL(value,location.href).href;}catch{return value;}};
-  const scripts=[...document.querySelectorAll('script[src]')].map(n=>assetUrl(n.getAttribute('src')));
-  const resources=typeof performance!=='undefined'&&typeof performance.getEntriesByType==='function'?performance.getEntriesByType('resource').map(n=>assetUrl(n.name)):[];
-  const loadedVersionEvidence=scripts.includes(library)||resources.includes(library)?'library_resource_url':scripts.includes(bootstrap)?'entry_script_known_chunk_map':null;
-  if(!loadedVersionEvidence)return null;
-  const card=name.closest('.sc-lkgTHX'),list=card?.parentElement;
+  let card=name;while(card?.parentElement&&!card.parentElement.matches('.file-uploader__list-view'))card=card.parentElement;
+  const list=card?.parentElement;
   if(!card||!list?.matches('.file-uploader__list-view')||!entry.root.contains(card)||!visible(card)||fileCandidates(card).length!==1||fileCandidates(card)[0]!==name)return null;
   const row=card.children[0],parts=row?[...row.children]:[];
-  if(card.children.length!==1||!row?.matches('.sc-jlRLRk')||parts.length!==3||!parts[0].matches('.sc-cbTzjv')||!parts[1].matches('.sc-dUbtfd')||!parts[1].contains(name)||!parts[2].matches('.sc-htJRVC'))return null;
+  if(card.children.length!==1||parts.length!==3||!parts[1].contains(name))return null;
+  return {card,actions:parts[2]};
+ };
+ const phoenixDoneEvidence=(entry,name,requiredIcon=null)=>{
+  const filecard=phoenixCard(entry,name);if(!filecard)return null;
   const paths={download:'M9.5 12.515c.748-.75 2.353-2.353 4.814-4.812l.707.707-5.303 5.303c-.39.39-1.028.387-1.415 0L3 8.41l.707-.707L8.5 12.496V2.383C8.5 2.17 8.724 2 9 2s.5.171.5.383v10.132zM2.404 16C2.18 16 2 15.776 2 15.5s.18-.5.404-.5h13.192c.223 0 .404.224.404.5s-.18.5-.404.5H2.404z',preview:'M.156 8.464c.117-.185.33-.487.633-.868.5-.628 1.079-1.254 1.735-1.841C4.437 4.042 6.608 3 9 3c2.38 0 4.549 1.042 6.466 2.754a15.213 15.213 0 0 1 1.74 1.84c.304.38.518.682.636.867a1 1 0 0 1-.002 1.081c-.118.184-.333.486-.64.866a15.36 15.36 0 0 1-1.744 1.839C13.535 13.958 11.37 15 9 15c-2.38 0-4.549-1.042-6.466-2.754a15.213 15.213 0 0 1-1.74-1.84c-.304-.38-.518-.682-.636-.867a1 1 0 0 1-.002-1.075zM1 9s3.2 5 8 5c4.775 0 8-5 8-5s-3.2-5-8-5C4.175 4 1 9 1 9zm5 0a3 3 0 1 1 6 0 3 3 0 0 1-6 0zm1 0a2 2 0 1 0 4 0 2 2 0 0 0-4 0z'};
-  for(const action of parts[2].children){
-   if(!action.matches('.sc-fIosxK')||!visible(action))continue;
+  for(const action of filecard.actions.children){
+   if(!visible(action))continue;
    const svgs=[...action.querySelectorAll('svg')].filter(visible);if(svgs.length!==1)continue;
    const actual=[...svgs[0].querySelectorAll('path')].map(n=>n.getAttribute('d'));
    const icon=Object.keys(paths).find(key=>actual.length===2&&actual[0]==='M0 0h18v18H0z'&&actual[1]===paths[key]);
-   if(icon&&(!requiredIcon||icon===requiredIcon))return {kind:'phoenix_done_action_icon',renderer:'beisen_phoenix_filecard_hc',icon,actionSelector:diagnosticSelector(action),loadedVersionEvidence,expectedLibraryUrl:library,contractSourceSha256:'601c6d6822be687de67c8dc69ffb4fccec5aca4c78699860175fa46c11304992'};
+   if(icon&&(!requiredIcon||icon===requiredIcon))return {kind:'phoenix_done_action_icon',renderer:'beisen_phoenix_filecard',icon,actionSelector:diagnosticSelector(action),contractSourceSha256:'601c6d6822be687de67c8dc69ffb4fccec5aca4c78699860175fa46c11304992'};
   }
   return null;
+ };
+ // Generic retrieval of the current uploaded file, searched only inside that
+ // file's own row: a uniquely named download control, then the filename as an
+ // https link, then a framework adapter. None found = the site offers no
+ // retrieval and completion stays UI-only.
+ const downloadLabel=/^(?:下载|下载附件|下载文件|download|download file)$/i;
+ const accessibleName=n=>(n.getAttribute('aria-label')||n.getAttribute('title')||n.innerText||'').trim();
+ const fileUrl=a=>{
+  const href=a?.getAttribute('href');let url=null;try{url=href?new URL(href,location.href):null;}catch{}
+  return url&&url.protocol==='https:'&&url.href.split('#')[0]!==location.href.split('#')[0]?url.href:null;
+ };
+ const uploadRetrieval=(entry,row,name)=>{
+  const named=[...new Set([...row.querySelectorAll('button,a,[role="button"],[title],[aria-label]')].filter(n=>visible(n)&&downloadLabel.test(accessibleName(n))).map(n=>n.closest('button,a,[role="button"]')||n))];
+  if(named.length>1)return null;
+  // A link is fetched with the page session instead of clicked: clicking may
+  // open a viewer tab instead of a download.
+  if(named.length===1){const url=named[0].tagName==='A'?fileUrl(named[0]):null;return url?{via:'file_link',url,selector:diagnosticSelector(named[0])}:{via:'named_download_control',selector:diagnosticSelector(named[0])};}
+  const link=name.closest('a'),url=link&&row.contains(link)&&visible(link)?fileUrl(link):null;
+  if(url)return {via:'file_link',url,selector:diagnosticSelector(link)};
+  const phoenix=phoenixDoneEvidence(entry,name,'download');
+  return phoenix?{via:'phoenix_download_icon',selector:phoenix.actionSelector}:null;
  };
  const replaceFor=row=>{const nodes=[...row.querySelectorAll('button,a,[role="button"],span')].filter(n=>visible(n)&&/^(?:重新上传|替换文件|reupload|replace file)$/i.test(n.innerText?.trim()||''));return nodes.length===1?nodes[0]:null;};
  const uploadRows=entry=>{
   const standalone=entry.layout==='adjacent_title_unique_file';if(uploadPending(entry.root)||uploadError(entry.root))return [];
-  return fileCandidates(entry.root).map(name=>{const evidence=phoenixDoneEvidence(entry,name);if(evidence)return {row:name.closest('.sc-lkgTHX'),name,evidence};let row=name.parentElement;while(row){if(fileCandidates(row).length!==1)break;if(removeFor(row,standalone)||(standalone?replaceFor(row):uploadComplete(row)))return {row,name};if(row===entry.root)break;row=row.parentElement;}if(standalone)return null;const done=name.closest('.ant-upload-list-item-done');return done?{row:done,name}:null;}).filter(Boolean);
+  return fileCandidates(entry.root).map(name=>{const evidence=phoenixDoneEvidence(entry,name);if(evidence)return {row:phoenixCard(entry,name).card,name,evidence};let row=name.parentElement;while(row){if(fileCandidates(row).length!==1)break;if(removeFor(row,standalone)||(standalone?replaceFor(row):uploadComplete(row)))return {row,name};if(row===entry.root)break;row=row.parentElement;}if(standalone)return null;const done=name.closest('.ant-upload-list-item-done');return done?{row:done,name}:null;}).filter(Boolean);
  };
  const uploadItems=entry=>uploadRows(entry).map(({row,name,evidence})=>{const filename=name.innerText?.trim(),remove=removeFor(row,entry.layout==='adjacent_title_unique_file');return {filename,...(evidence?{uploadEvidence:evidence}:{}),removeSelector:remove&&filename?'uploadq:'+JSON.stringify({...JSON.parse(uploadRef(entry).slice(8)),part:'remove',filename}):null};});
  if(spec?.operation==='resolveUploadDownload'){
   const roots=[...document.querySelectorAll(spec.containerSelector)].filter(visible);if(roots.length!==1)return null;
   const entry=uploadRoots().find(item=>item.root===roots[0]);if(!entry)return null;
   const rows=uploadRows(entry).filter(item=>item.name.innerText.trim()===spec.filename);if(rows.length!==1)return null;
-  return phoenixDoneEvidence(entry,rows[0].name,'download')?.actionSelector||null;
+  return uploadRetrieval(entry,rows[0].row,rows[0].name);
  }
  if(spec?.operation==='resolveUpload')return (spec.references||[]).map(reference=>{const ref=JSON.parse(reference.slice(8)),entry=uploadRoots().filter(x=>x.label===ref.label)[ref.occurrence];if(!entry)return null;const root=diagnosticSelector(entry.root);if(ref.part==='filenames')return uploadRows(entry).map(({name})=>diagnosticSelector(name)).join(',')||null;if(ref.part==='remove'){const rows=uploadRows(entry).filter(({name})=>name.innerText?.trim()===ref.filename);const remove=rows.length===1?removeFor(rows[0].row,entry.layout==='adjacent_title_unique_file'):null;return remove?diagnosticSelector(remove):null;}return ref.part==='container'?root:ref.part==='uploaded'?uploadRows(entry).length?root:null:diagnosticSelector(entry.input);});
  const eligible=n=>visible(n)||!!n&&['checkbox','radio'].includes(n.type)&&visible(n.closest('label'));

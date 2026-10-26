@@ -75,12 +75,12 @@ test('form asset status lists login, sealed template and application URL gaps pe
 
 test('a template bound to a profile contract marked requires_rebuild is never reused',async()=>{
  const {contractRebuildRequired}=await import('../shared/rebuild-mark.mjs');
- const profile={companyForms:{a:{executionContract:{templateHash:'h1',status:'requires_rebuild',validForCurrentInventory:false}},b:{executionContract:{templateHash:'h2',status:'registered',validForCurrentInventory:true}}}};
- assert.equal(contractRebuildRequired(profile,'h1'),true);assert.equal(contractRebuildRequired(profile,'h2'),false);assert.equal(contractRebuildRequired(profile,'h3'),false);assert.equal(contractRebuildRequired(null,'h1'),false);
+ const profile={companyForms:{a:{executionContract:{templateHash:'h1',status:'requires_rebuild',validForCurrentInventory:false,rebuildReason:'question_definition_changed'}},legacy:{executionContract:{templateHash:'h4',status:'requires_rebuild',validForCurrentInventory:false}},b:{executionContract:{templateHash:'h2',status:'registered',validForCurrentInventory:true}}}};
+ assert.equal(contractRebuildRequired(profile,'h1'),true);assert.equal(contractRebuildRequired(profile,'h2'),false);assert.equal(contractRebuildRequired(profile,'h3'),false);assert.equal(contractRebuildRequired(null,'h1'),false);assert.equal(contractRebuildRequired(profile,'h4'),false);
  const {FormRouter}=await import('../shared/form-route.mjs'),{hash}=await import('../shared/engine.mjs');
  const t=sealedTemplate(),companies=[{id:'jia',origin:new URL(apply).origin,templateId:'jia-formal'}];
  const store={get:async(kind,id)=>{if(kind==='templates')return t;throw Object.assign(Error('missing'),{code:'ENOENT'});}};
- const marked={companyForms:{x:{executionContract:{templateHash:hash(t),status:'requires_rebuild',validForCurrentInventory:false}}}};
+ const marked={companyForms:{x:{executionContract:{templateHash:hash(t),status:'requires_rebuild',validForCurrentInventory:false,rebuildReason:'major_policy_changed'}}}};
  const route=await new FormRouter({store,companies,validateTemplate:()=>true,loadProfile:async()=>marked}).resolve({companyId:'jia',pageUrl:apply});
  const plain=await new FormRouter({store,companies,validateTemplate:()=>true,loadProfile:async()=>null}).resolve({companyId:'jia',pageUrl:apply});
  // The rebuild mark is checked last, so it only changes the outcome of an otherwise reusable asset.
@@ -99,4 +99,38 @@ test('a redirected role link becomes one proposal for the search side, without p
  assert.equal((await recordLinkChange({...base,observedUrl:observed})).status,'already_proposed');
  const out=await readOutcomes(dir);assert.deepEqual(Object.keys(out.linkChanges),['jia|123456']);assert.equal(out.linkChanges['jia|123456'].observedUrl,origin+'/job/detail?jobAdId=G-1');assert.deepEqual(out.roles,{});
  const company=JSON.parse(await readFile(path.join(firm,'公司.json'),'utf8'));assert.equal(JSON.stringify(company).includes('G-1'),false);
+});
+
+test('filling a form does not mark its contract for rebuild; a question the contract does not cover does',async()=>{
+ const {registerObservedQuestions}=await import('../shared/profile.mjs');
+ const q=(label,extra={})=>({selector:`phoenixq:{"section":"教育经历","label":"${label}","occurrence":${extra.occurrence||0}}`,label,section:'教育经历',type:'text',required:true,...extra});
+ const field=(label,type='text',occurrences=[0])=>({id:label,label,inventoryLabel:label,inventoryType:type,inventorySelectors:occurrences.map(o=>q(label,{occurrence:o}).selector)});
+ const contract={templateHash:'h',status:'registered',validForCurrentInventory:true,fields:[field('学校名称','text',[0,1]),field('学历','combobox',[0,1]),field('毕业论文题目')]};
+ const fresh=[q('学校名称',{diagnosticSelector:'body > div:nth-of-type(3)'}),q('学历',{type:'combobox',options:['本科']})];
+ // After upload and filling: parsed values, a second record, a revealed conditional question in the contract, new option lists, new layout paths.
+ const filled=[...fresh.map(f=>({...f,diagnosticSelector:'body > div:nth-of-type(5)',value:'x',options:f.options?['本科','硕士研究生']:undefined,required:false})),q('学校名称',{occurrence:1}),q('学历',{occurrence:1,type:'combobox'}),q('毕业论文题目')];
+ const at='2026-10-26T12:00:00.000Z',pageUrl='https://jobs.example.test/form';
+ const observe=(...rounds)=>{const profile={companyForms:{},fieldRegistry:{},facts:{}};registerObservedQuestions(profile,{companyId:'jia',pageUrl,fields:rounds[0],observedAt:at});const form=()=>Object.values(profile.companyForms)[0];form().executionContract=structuredClone(contract);for(const r of rounds.slice(1))registerObservedQuestions(profile,{companyId:'jia',pageUrl,fields:r,observedAt:at});return form().executionContract;};
+ assert.equal(observe(fresh,filled,fresh).status,'registered');
+ const added=observe(fresh,[...fresh,q('期望薪资')]);assert.equal(added.status,'requires_rebuild');assert.equal(added.rebuildReason,'question_definition_changed');assert.deepEqual(added.rebuildEvidence,[{kind:'new_question',label:'期望薪资'}]);
+ const retyped=observe(fresh,[fresh[0],{...fresh[1],type:'text'}]);assert.deepEqual(retyped.rebuildEvidence,[{kind:'type_changed',label:'学历'}]);
+});
+
+test('entered from an already open application page: the detail link is derived as a labelled proposal, never navigated',async()=>{
+ const {proposedDetailUrl}=await import('../shared/entry-transition.mjs');
+ const {recordLinkChange,readOutcomes}=await import('../shared/application-outcome.mjs');
+ const origin='https://jobs.example.test';
+ const fixed={evidence:{detailUrl:origin+'/job/detail?jobAdId=G-1&userId=1'},detail:{location:{pathnamePattern:'^/job/detail$',query:{jobAdId:'G-1'}}},form:{location:{pathnamePattern:'^/form$',query:{jobAdId:'G-1'}}}};
+ assert.equal(proposedDetailUrl(fixed,origin+'/form?fromPage=job&jobAdId=G-1&userId=4096'),origin+'/job/detail?jobAdId=G-1&userId=1');
+ const byRole={evidence:{detailUrl:origin+'/job/detail?jobAdId=G-1'},detail:{location:{pathnamePattern:'^/job/detail$',query:{jobAdId:'$roleId'}}},form:{location:{pathnamePattern:'^/form$',query:{jobAdId:'$roleId'}}}};
+ assert.equal(proposedDetailUrl(byRole,origin+'/form?jobAdId=G-2'),origin+'/job/detail?jobAdId=G-2');
+ for(const url of [origin+'/form',origin+'/form?jobAdId=a&jobAdId=b','https://other.example.test/form?jobAdId=G-2'])assert.equal(proposedDetailUrl(byRole,url),null);
+ assert.equal(proposedDetailUrl({...byRole,detail:{location:{pathnamePattern:'^/job/detail$',query:{id:'$roleId'}}}},origin+'/form?jobAdId=G-2'),null);
+ const {dir}=await workspace(),base={companyId:'jia',roleId:'123456',roleUrl,roleTitle:'AI产品经理',handoffDir:dir},observed=new URL(roleUrl).origin+'/job/detail?jobAdId=G-1';
+ assert.equal((await recordLinkChange({...base,observedUrl:observed,evidence:'derived_from_application_page'})).status,'proposed');
+ assert.equal((await readOutcomes(dir)).linkChanges['jia|123456'].evidence,'derived_from_application_page');
+ assert.equal((await recordLinkChange({...base,observedUrl:observed})).status,'proposed');
+ assert.equal((await readOutcomes(dir)).linkChanges['jia|123456'].evidence,'entry_transition_detail_page_verified');
+ assert.equal((await recordLinkChange({...base,observedUrl:observed,evidence:'derived_from_application_page'})).status,'already_proposed');
+ await assert.rejects(recordLinkChange({...base,observedUrl:observed,evidence:'guess'}),/LINK_CHANGE_EVIDENCE_INVALID/);
 });

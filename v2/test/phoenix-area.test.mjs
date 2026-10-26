@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {performPhoenixArea,areaOptionsDOM,assertAreaSelection} from '../shared/phoenix-area.mjs';
+import {LIST_SELECTION_TARGET,performPhoenixArea,areaOptionsDOM,assertAreaSelection} from '../shared/phoenix-area.mjs';
 test('selected pane needs one exact actual label and compares exposed IDs',()=>{
  const proof={count:1,text:'Example City',empty:false,values:['id-a']};assertAreaSelection(proof,'Example City','id-a');
  for(const patch of [{count:0},{empty:true},{text:'Example City extended'},{values:['id-b']}])assert.throws(()=>assertAreaSelection({...proof,...patch},'Example City','id-a'));
@@ -32,13 +32,13 @@ test('verification cannot repair or select an unselected region',async()=>{
 
 import vm from 'node:vm';
 import {performPhoenixListPopup,listPopupOptionsDOM,listPopupSelectionDOM} from '../shared/phoenix-area.mjs';
-function listFixture({selected='',ids=false,badSelectedLabel=false,duplicate=false,iconCount=1}={}){
+function listFixture({selected='',ids=false,badSelectedLabel=false,duplicate=false,iconCount=1,checkbox=false}={}){
  let opened=true,current=selected,draft=selected,query='',writes=0,confirms=0,cancels=0,navigationClicks=0;
  const chain=o=>({...o,filter(){return this;}});
  const search=chain({count:async()=>1,inputValue:async()=>query,fill:async v=>{query=v;}});
  const rows=()=>[{label:'Example Industry',path:'Industry Category',value:ids?'option-a':null,valueAttribute:ids?'data-id':null,disabled:false,selected:draft==='Example Industry'}];
  const button=kind=>chain({count:async()=>1,click:async()=>{if(kind==='确定'){current=draft;confirms++;}else{draft=current;cancels++;}opened=false;}});
- const menu=chain({count:async()=>opened?1:0,waitFor:async()=>{},getByRole:(_,{name})=>button(name),evaluate:async fn=>fn.name==='listPopupOptionsDOM'?rows():{count:draft?1:0,text:badSelectedLabel?draft+' extra':draft,empty:!draft,values:draft&&ids?['option-a']:[],scopeValid:true},locator:s=>s==='input[placeholder="搜索"]'?search:s==='.phoenix-button'?{filter:({hasText})=>button(hasText.test('确定')?'确定':'取消')}:chain({count:async()=>duplicate?2:1,evaluate:async()=>({label:['Example Industry'],path:['Industry Category'],values:ids?['option-a']:[]}),click:async()=>{navigationClicks++;},locator:s=>s===':scope > .icon-container > svg.RadioUnchecked, :scope > .icon-container > svg.RadioChecked'?chain({count:async()=>iconCount,click:async()=>{draft='Example Industry';writes++;}}):chain({count:async()=>0,click:async()=>{navigationClicks++;}})})});
+ const menu=chain({count:async()=>opened?1:0,waitFor:async()=>{},getByRole:(_,{name})=>button(name),evaluate:async fn=>fn.name==='listPopupOptionsDOM'?rows():{count:draft?1:0,text:badSelectedLabel?draft+' extra':draft,empty:!draft,values:draft&&ids?['option-a']:[],scopeValid:true},locator:s=>s==='input[placeholder="搜索"]'?search:s==='.phoenix-button'?{filter:({hasText})=>button(hasText.test('确定')?'确定':'取消')}:chain({count:async()=>duplicate?2:1,evaluate:async()=>({label:['Example Industry'],path:['Industry Category'],values:ids?['option-a']:[]}),click:async()=>{navigationClicks++;},locator:s=>s===LIST_SELECTION_TARGET?chain({count:async()=>iconCount,click:async()=>{draft=checkbox&&draft==='Example Industry'?'':'Example Industry';writes++;}}):chain({count:async()=>0,click:async()=>{navigationClicks++;}})})});
  const trigger={innerText:async()=>current?current+'\n'+current:'请选择',locator:s=>{assert.equal(s,'.phoenix-select__content');return {count:async()=>1,innerText:async()=>current};},click:async()=>{opened=true;draft=current;}};
  return {adapter:{page:{locator:()=>menu}},trigger,state:()=>({opened,current,draft,writes,confirms,cancels,navigationClicks})};
 }
@@ -83,3 +83,9 @@ test('list popup requires the actual unique visible selection icon and cannot fa
 });
 
  test('scoped row locators tolerate rendered whitespace normalization but retain exact label and breadcrumb identity',async()=>{const {exactRenderedText}=await import('../shared/phoenix-area.mjs');const match=exactRenderedText('Product Manager\nInternet Products');assert.ok(match.test('Product Manager Internet Products'));assert.ok(match.test('Product ManagerInternet Products'));assert.ok(match.test('Product Manager\nInternet Products'));for(const wrong of ['Senior Product Manager Internet Products','Product Manager Finance','ProductManager InternetProducts'])assert.equal(match.test(wrong),false);});
+
+test('list popup selects through the row icon slot for single and multi choice panels and never toggles an already selected checkbox off',async()=>{
+ const action={method:'phoenix_dropdown',choiceRenderer:'phoenix_list_popup',choiceContract:'leaf_v2',expectedOptionPath:'Industry Category',expectedOptionValue:null,expectedOptionValueAttribute:null,options:['Example Industry']};
+ const multi=listFixture({checkbox:true}),r=await performPhoenixListPopup(multi.adapter,action,'Example Industry',{trigger:multi.trigger,initial:''});assert.equal(r.performed,true);assert.equal(multi.state().writes,1);assert.equal(multi.state().current,'Example Industry');
+ const already=listFixture({checkbox:true,selected:'Example Industry'}),again=await performPhoenixListPopup(already.adapter,action,'Example Industry',{trigger:already.trigger,initial:'Example Industry'});assert.equal(again.performed,true);assert.equal(already.state().writes,0);assert.equal(already.state().current,'Example Industry');
+});

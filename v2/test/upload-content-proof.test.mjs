@@ -8,7 +8,7 @@ const sha=value=>createHash('sha256').update(value).digest('hex');
 function fixture(bytes,{selector='#actual-download',failure=null}={}){
  let clicks=0,deleted=0;
  const download={failure:async()=>failure,createReadStream:async()=>Readable.from([Buffer.from(bytes)]),delete:async()=>{deleted++;}};
- const page={url:()=> 'https://example.test/form',evaluate:async()=>selector,locator:()=>({count:async()=>1,click:async()=>{clicks++;}}),waitForEvent:async event=>{assert.equal(event,'download');return download;}};
+ const page={url:()=> 'https://example.test/form',evaluate:async()=>selector&&{via:'named_download_control',selector},locator:()=>({count:async()=>1,click:async()=>{clicks++;}}),waitForEvent:async event=>{assert.equal(event,'download');return download;}};
  return {adapter:{page,resolveSpec:async spec=>spec},state:()=>({clicks,deleted})};
 }
 test('a renamed current file requires exact downloaded bytes of the approved source and leaves no downloaded copy',async()=>{
@@ -17,7 +17,7 @@ test('a renamed current file requires exact downloaded bytes of the approved sou
  const wrong=fixture('other bytes'),mismatch=await verifyUploadedContent(wrong.adapter,{selector:'#file',filename:'photo.jpeg',expectedSha256:sha('approved bytes')});assert.equal(mismatch.status,'mismatch');assert.equal(wrong.state().deleted,1);
 });
 test('missing source-verified download actions and failed downloads never establish provenance',async()=>{
- const absent=fixture('x',{selector:null});await assert.rejects(verifyUploadedContent(absent.adapter,{selector:'#file',filename:'photo.jpeg',expectedSha256:sha('x')}),/UPLOAD_VERIFIED_DOWNLOAD_CONTROL_REQUIRED/);assert.equal(absent.state().clicks,0);
+ const absent=fixture('x',{selector:null});await assert.rejects(verifyUploadedContent(absent.adapter,{selector:'#file',filename:'photo.jpeg',expectedSha256:sha('x')}),/UPLOAD_RETRIEVAL_NOT_OFFERED/);assert.equal(absent.state().clicks,0);
  const failed=fixture('x',{failure:'interrupted'});await assert.rejects(verifyUploadedContent(failed.adapter,{selector:'#file',filename:'photo.jpeg',expectedSha256:sha('x')}),/UPLOAD_DOWNLOAD_FAILED/);assert.equal(failed.state().deleted,1);
 });
 test('an empty browser stream uses only the actual HTTPS download URL with authenticated context',async()=>{
@@ -44,4 +44,19 @@ test('the verifier never reuploads and ordinary same-name files retain the exist
  let calls=0;const plan={fields:[{id:'photo',kind:'file',source:'photo',read:{selector:'#photo'}}]},task={values:{photo:'approved'},files:{approved:{sha256:[sha('x')],displayNames:['source.jpg']}}},observation={fields:{photo:{uploadState:'site_rendered_uploaded',value:['source.jpg']}}};
  await attachUploadContentProofs({act:async()=>{calls++;}},observation,plan,task);assert.equal(calls,0);
  observation.fields.photo.value=['photo.jpeg'];await attachUploadContentProofs({act:async action=>{calls++;assert.equal(action.method,'verify_uploaded_file');assert.equal(action.expectedSha256,sha('x'));return {status:'verified'};}},observation,plan,task);assert.equal(calls,1);
+});
+test('a renamed file is fetched through its https link with the page session; hosts that cannot retrieve are told apart from sites that offer nothing',async()=>{
+ const bytes=Buffer.from('approved');let requests=0;
+ const page={url:()=> 'https://example.test/form',evaluate:async()=>({via:'file_link',url:'https://files.example.test/u/resume.pdf',selector:'#link'}),locator:()=>({count:async()=>1,click:async()=>{throw Error('no click for links');}}),request:{get:async url=>{requests++;assert.equal(url,'https://files.example.test/u/resume.pdf');return {ok:()=>true,headers:()=>({'content-type':'application/pdf'}),body:async()=>bytes};}}};
+ const adapter={page,resolveSpec:async spec=>spec};
+ const result=await verifyUploadedContent(adapter,{selector:'#file',filename:'resume.pdf',expectedSha256:sha(bytes)});assert.equal(result.status,'verified');assert.equal(result.retrieval,'authenticated_file_link');assert.equal(result.via,'file_link');assert.equal(requests,1);
+ delete page.request;await assert.rejects(verifyUploadedContent(adapter,{selector:'#file',filename:'resume.pdf',expectedSha256:sha(bytes)}),/UPLOAD_DOWNLOAD_HOST_REQUIRED/);
+ const control=fixture('x');delete control.adapter.page.waitForEvent;await assert.rejects(verifyUploadedContent(control.adapter,{selector:'#file',filename:'resume.pdf',expectedSha256:sha('x')}),/UPLOAD_DOWNLOAD_HOST_REQUIRED/);
+ const none=fixture('x',{selector:null});delete none.adapter.page.waitForEvent;await assert.rejects(verifyUploadedContent(none.adapter,{selector:'#file',filename:'resume.pdf',expectedSha256:sha('x')}),/UPLOAD_RETRIEVAL_NOT_OFFERED/);
+});
+test('a file link that answers with a viewer page or an error is reported as not the file',async()=>{
+ for(const response of [{ok:()=>true,headers:()=>({'content-type':'text/html'}),body:async()=>Buffer.from('<html>')},{ok:()=>false,headers:()=>({}),body:async()=>Buffer.from('')}]){
+  const page={url:()=> 'https://example.test/form',evaluate:async()=>({via:'file_link',url:'https://files.example.test/view/1',selector:'#link'}),locator:()=>({count:async()=>1}),request:{get:async()=>response}};
+  await assert.rejects(verifyUploadedContent({page,resolveSpec:async spec=>spec},{selector:'#file',filename:'resume.pdf',expectedSha256:sha('x')}),/UPLOAD_LINK_NOT_FILE/);
+ }
 });

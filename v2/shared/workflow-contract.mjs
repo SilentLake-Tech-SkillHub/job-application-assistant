@@ -99,12 +99,12 @@ export function technicalHandoffReasons(source){
  const drivers=new Set(['ROLE_BROWSER_PAGE_LOST','ROLE_EXISTING_PAGE_NOT_FOUND','EXISTING_PAGE_NOT_FOUND','ANT_DATE_NAVIGATION_UNSTABLE','APPLICATION_ENTRY_ROLE_CHANGED','APPLICATION_ENTRY_RESULT_ROLE_CHANGED','APPLICATION_ENTRY_PATH_REQUIRED','APPLICATION_ENTRY_BUTTON_CHANGED','ROLE_FORM_NOT_OPEN','ROLE_EXISTING_PAGE_NOT_UNIQUE','CONTROL_DRIVER_REQUIRED','DATE_DRIVER_CONTRACT_REQUIRED','UPLOAD_SITE_READBACK_REQUIRED','SEARCHABLE_TEXT_COMMIT_CONTRACT_REQUIRED','MULTISELECT_DRIVER_CONTRACT_REQUIRED','SUBMISSION_BUTTON_NOT_UNIQUE_OR_ENABLED','SUBMISSION_PREVIEW_REQUIRED','SUBMISSION_PREVIEW_DRIVER_REQUIRED','SUBMISSION_PREVIEW_SOURCE_NOT_VERIFIED','SUBMISSION_PREVIEW_TRANSITION_NOT_OBSERVED']);
  // Bad arguments, missing mappings and unfinished construction are ordinary
  // Agent work. A stored error alone does not make them supervisor blockers.
- const technical=/^(?:BROWSER_|HOST_BROWSER_|HOST_FILE_|REA_|CDP_|IAB_|CONTROL_COMMIT_|AUTOCOMPLETE_|SEARCHABLE_COMMIT_|PHOENIX_|AREA_|LIST_POPUP_|CHOICE_(?:TRIGGER_|MENU_|COMBOBOX_|INSPECTION_)|SHARED_RESUME_|OPERATION_FAILED$)/;
+ const technical=/^(?:[A-Z_]+_ACTION_TARGET_REQUIRED$|BROWSER_|HOST_BROWSER_|HOST_FILE_|REA_|CDP_|IAB_|CONTROL_COMMIT_|AUTOCOMPLETE_|SEARCHABLE_COMMIT_|PHOENIX_|AREA_|LIST_POPUP_|CHOICE_(?:TRIGGER_|MENU_|COMBOBOX_|INSPECTION_)|SHARED_RESUME_|OPERATION_FAILED$)/;
  const error=source.operation==='mcp_error'?source.error:source.operation==='internal_condition_probe'?source.errorCode:null;
  if(error&&(drivers.has(error)||technical.test(error)))return [error];
  // Real preparation/verification runs are themselves evidence IDs. Do not
  // force the executor to manufacture a second error to report a driver gap.
- const execution=/^(?:ANT_DATE_NAVIGATION_UNSTABLE$|SUBMISSION_PREVIEW_|FORM_CONTROL_|CONTROL_OPERATION_|AUTOCOMPLETE_|SEARCHABLE_COMMIT_|AREA_|LIST_POPUP_|PHOENIX_|CHOICE_|UPLOAD_(?:NOT_CONFIRMED_BY_SITE|DOWNLOAD_[A-Z_]+|VERIFIED_DOWNLOAD_CONTROL_REQUIRED|CONTENT_DIFFERS_FROM_SOURCE)$)/;
+ const execution=/^(?:ANT_DATE_NAVIGATION_UNSTABLE$|[A-Z_]+_ACTION_TARGET_REQUIRED$|SUBMISSION_PREVIEW_|FORM_CONTROL_|CONTROL_OPERATION_|AUTOCOMPLETE_|SEARCHABLE_COMMIT_|AREA_|LIST_POPUP_|PHOENIX_|CHOICE_|UPLOAD_(?:NOT_CONFIRMED_BY_SITE|DOWNLOAD_[A-Z_]+|RETRIEVAL_NOT_OFFERED|LINK_NOT_FILE|CONTENT_DIFFERS_FROM_SOURCE)$)/;
  const runs=[source,...(source.results||[]),...(source.pageChecks||[]).map(page=>page.verification).filter(Boolean)];
  const reasons=runs.flatMap(run=>[run.errorCode,...(run.checks||[]).filter(check=>['mismatch','unverified'].includes(check.status)).map(check=>check.reason),...(run.deferredControls||[]).map(control=>control.reason)]).filter(reason=>typeof reason==='string'&&execution.test(reason));
  if(reasons.length)return [...new Set(reasons)];

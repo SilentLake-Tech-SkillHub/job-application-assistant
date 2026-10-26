@@ -1,6 +1,6 @@
 import {runtimeIdentity} from './runtime-identity.mjs';
 import {recordProfileDocumentFacts} from './profile-document-facts.mjs';
-import {assertAcquisitionChain,assertAcquiredStructure,assertCapturedAcquisition,recordAcquisitionChain} from './acquisition-chain.mjs';
+import {assertAcquisitionChain,assertAcquiredStructure,assertCapturedAcquisition,recordAcquisitionChain,recordReaInspection} from './acquisition-chain.mjs';
 import {observeUserOperatedSession} from '../login/browser.mjs';
 import {safeControlErrorDetails} from './control-error-details.mjs';
 import {recordMaterialDestinationException,revokeMaterialDestinationException,withMaterialDispositions} from './material-disposition.mjs';
@@ -400,6 +400,8 @@ async function captureCompanyControls({companyId,pageUrl,pageId,compact,provider
   const roleSelector=(plan||candidates[0]?.pages?.[0])?.roleSelector;
   const identity=roleSelector?await p.observe({fields:[],roleSelector}):null;
   const result={companyId,pageUrl,...(pageId?{pageId,readOnly:true}:{}),provider:collectionPlan.provider||null,roleTitle:identity?.roleTitle||null,observedAt,controls,scopeExclusions:controls.scopeExclusions||[],registration,structure,captureId,coverageLimit:'当前渲染文档；未展开选项、多步骤、静态问题、iframe与shadow root另行核对'};
+  // The record id is the control definition; its observation part (tab, time)
+  // is the latest capture. Templates bind only the definition (captureContentHash).
   await store.put('runs',captureId,result);await store.put('runs',captureIndexId,{latestCaptureId:captureId,previousCaptureId:previous?.captureId||null});
   if(!compact)return result;
   const summarize=rows=>rows.map(({selectors,...row})=>row);
@@ -433,11 +435,7 @@ registerTool('capture_rea_structure',{description:'内部建库：REA只读采�
  const binding={...result.binding,pageId:a.pageId};
  const structure=normalizeReaStructure(result.evidence,binding,{nativeStructure:result.nativeStructure});
  const capture=await captureCompanyControls({companyId:a.companyId,pageUrl:a.pageUrl,pageId:a.pageId,provider:a.provider});
- const joined=bindStructureControls(structure,capture),id='form-structure-'+a.companyId+'-'+hash(a.pageUrl).slice(0,16);
- const scripts=scriptCoverage(result.evidence);
- const asset={...joined,controlCaptureHash:hash(capture),structure,rawEvidence:result.evidence,nativeStructure:result.nativeStructure||null,scriptInventory:result.evidence.normalized_result.scripts||null,scriptCoverage:scripts,operation:'rea_form_structure',observedAt:structure.observedAt};
- assertAcquiredStructure(asset,capture,a.companyId);
- await store.put('runs',id,asset);
+ const {id,asset:{scriptCoverage:scripts},joined}=await recordReaInspection(store,{companyId:a.companyId,pageUrl:a.pageUrl,structure,capture,rawEvidence:result.evidence,nativeStructure:result.nativeStructure||null});
  return {structureId:id,captureId:capture.captureId,controls:joined.controls.length,reaEvidenceId:structure.evidenceId,nativeStructure:result.nativeStructure?{documents:result.nativeStructure.documents.length,nodes:result.nativeStructure.documents.reduce((n,d)=>n+d.nodes.length,0),structureHash:result.nativeStructure.structureHash}:null,scripts,limitations:structure.limitations,nextTools:['form_mapping_candidates','capture_choice_options','form_build_template'],submission:'not_performed'};
 })));
 registerTool('form_mapping_candidates',{description:'离线给每个已捕获问题列出个人主档语义候选；同名重复记录或多候选不自动选择，不向用户重复询问已知事实。',inputSchema:{companyId:z.string(),captureId:z.string()}},wrap(async a=>{

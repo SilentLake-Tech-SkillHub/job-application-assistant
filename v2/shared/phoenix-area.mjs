@@ -1,3 +1,4 @@
+import {resolveTarget} from './learned-targets.mjs';
 import {annotateRecoveredControl} from './control-recovery.mjs';
 import {readPhoenixSelectedValue} from './phoenix-selection.mjs';
 const popup='.common-unmodeled-layer:has(.area-selector-container)';
@@ -87,8 +88,7 @@ export async function performPhoenixArea(adapter,action,value,{trigger,initial,d
   if(action.expectedOptionValue!=null&&candidate.value!==action.expectedOptionValue)throw Error('CHOICE_OPTION_VALUE_CHANGED');
   const row=menu.locator('.area-data-container .area-item-container').filter({has:adapter.page.locator('.area-item-name').filter({hasText:exact(value)})});
   if(await row.count()!==1)throw Error('CHOICE_NOT_UNIQUE_OR_NOT_PRESENT');
-  const selectIcon=row.locator('.area-item-name .icon-container').filter({visible:true});
-  if(await selectIcon.count()!==1)throw Error('AREA_SELECTION_ACTION_TARGET_REQUIRED');
+  const {locator:selectIcon}=await resolveTarget(row,{driver:'phoenix_area.selection',builtIn:'.area-item-name .icon-container',code:'AREA_SELECTION_ACTION_TARGET_REQUIRED'});
   await selectIcon.click({timeout:10000});
   for(;;){try{await proofFor();break;}catch(error){if(Date.now()>=end)throw error;await pause();}}
   const confirm=button('确定');if(await confirm.count()!==1)throw Error('AREA_CONFIRM_CONTROL_REQUIRED');
@@ -101,6 +101,7 @@ export async function performPhoenixArea(adapter,action,value,{trigger,initial,d
 }
 
 const listPopup='.common-unmodeled-layer:has(.list-item-container)';
+export const LIST_SELECTION_TARGET=':scope > .icon-container svg';
 export function listPopupOptionsDOM(root){
  const shown=n=>!!n.getClientRects().length&&getComputedStyle(n).visibility!=='hidden';
  return [...root.querySelectorAll('.list-item-container')].filter(row=>shown(row)&&!row.closest?.('.right-container')).map(row=>{
@@ -180,12 +181,17 @@ export async function performPhoenixListPopup(adapter,action,value,{trigger,init
   if(live.label.length!==1||live.label[0]!==candidate.label||(live.path.length?live.path.length!==1||live.path[0]!==candidate.path:candidate.path!=null)||live.values.some(v=>v!==candidate.value)||candidate.value!=null&&!live.values.length)throw Error('CHOICE_OPTION_IDENTITY_CHANGED');
   // The captured renderer binds handleChangeCheck to the SVG, not its span.
   // Clicking the wrapper's padded center can miss that actual event target.
-  const selectIcon=row.locator(':scope > .icon-container > svg.RadioUnchecked, :scope > .icon-container > svg.RadioChecked').filter({visible:true});if(await selectIcon.count()!==1)throw Error('LIST_SELECTION_ACTION_TARGET_REQUIRED');
-  await selectIcon.click({timeout:10000});const end=Date.now()+6000;
+  // The row's own icon slot is the target whatever it draws: a radio for
+  // single-choice panels, a checkbox for multi-choice ones (same rule as the
+  // area panel). An already selected row is not clicked: a checkbox would
+  // toggle off. The selection pane proof below still requires exactly this one.
+  // Not found → the row's candidates go back to the Agent (see learned-targets).
+  const target=await resolveTarget(row,{driver:'phoenix_list_popup.selection',builtIn:LIST_SELECTION_TARGET,code:'LIST_SELECTION_ACTION_TARGET_REQUIRED'});
+  if(!candidate.selected)await target.locator.click({timeout:10000});const end=Date.now()+6000;
   for(;;){current=await read();try{proof();break;}catch(error){if(Date.now()>=end)throw error;await pause();}}
   const confirm=button('确定');if(await confirm.count()!==1)throw Error('LIST_POPUP_CONFIRM_REQUIRED');await confirm.click({timeout:10000});await menu.waitFor({state:'hidden',timeout:5000});
   if(await display()!==String(value))throw Error('CHOICE_SELECTED_LABEL_MISMATCH');
   await trigger.click({timeout:10000});await menu.waitFor({state:'visible',timeout:5000});
-  const verified=await performPhoenixListPopup(adapter,{...action,method:action.method+'_verify'},value,{trigger,initial:String(value),dismiss});return {...verified,performed:true};
+  const verified=await performPhoenixListPopup(adapter,{...action,method:action.method+'_verify'},value,{trigger,initial:String(value),dismiss});return {...verified,performed:true,selectionTarget:{source:target.source,...(target.learnedTargetId?{learnedTargetId:target.learnedTargetId}:{})}};
  }catch(error){if(await menu.count())await cancel().catch(()=>{});await dismiss?.().catch(()=>{});throw await annotateRecoveredControl(error,{before:initial,expected:String(value),read:()=>readPhoenixSelectedValue(trigger),isClosed:async()=>await menu.count()===0,samePage:async()=>typeof originalPage==='string'&&adapter.page.url()===originalPage});}
 }

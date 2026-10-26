@@ -17,7 +17,7 @@ test('interactive school cannot be parked as readonly text or ordinary user acti
 });
 test('new MCP public tools must declare workflow role; acquisition always continues',async()=>{
  assert.throws(()=>registerWorkflowTool({registerTool(){}},'future_fill',{},()=>{}),/WORKFLOW_STAGE_DECLARATION_REQUIRED/);
- let handler;registerWorkflowTool({registerTool:(n,d,h)=>{handler=h;}},'capture_rea_structure',{},async()=>({content:[{type:'text',text:JSON.stringify({captureId:'observed'})}]}));
+ let handler;registerWorkflowTool({registerTool:(n,d,h)=>{handler=h;}},'capture_rea_structure',{},async()=>({content:[{type:'text',text:JSON.stringify({captureId:'observed'})}]}),{RECRUITING_HOST_ROLE:'executor'});
  const result=JSON.parse((await handler({})).content[0].text);assert.equal(result.workflowContract.tracked,true);assert.equal(result.continuation.owner,'agent');assert.equal(result.continuation.shouldContinue,true);assert.equal(result.completion.complete,false);
 });
 test('technical errors cannot silently clear the continuation',()=>{

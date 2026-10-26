@@ -15,6 +15,17 @@ export function unstableClassTokens(selector){
   return false;
  }))];
 }
+// The same rule for engine code: string literals in shared/login/scripts code
+// may not name build-generated classes or content-hashed bundle files. Those
+// change on every site rebuild, so code that keys on them breaks silently.
+export function unstablePageSignals(source){
+ const out=new Set();
+ for(const m of String(source).matchAll(/(?<![\w-])(?:[\w-]*__)?sc-([A-Za-z0-9]{5,10})(?:-\d+)?(?![\w-])/g))if(hashLike(m[1]))out.add(m[0]);
+ for(const m of String(source).matchAll(/(?<![\w-])css-([a-z0-9]{5,})(?![\w])/g))if(/[0-9]/.test(m[1]))out.add(m[0]);
+ for(const m of String(source).matchAll(/(?<![\w-])[A-Za-z][\w-]*___[A-Za-z0-9_-]{5}(?![\w-])/g))out.add(m[0]);
+ for(const m of String(source).matchAll(/[\w-]+[-.][0-9a-f]{16,}(?:\.[a-z]+)*\.js\b/g))out.add(m[0]);
+ return [...out];
+}
 const captured=evidence=>String(evidence?.capturedAt||'').slice(0,10);
 export const ruleApplies=evidence=>captured(evidence)>=STABLE_SELECTOR_RULE_SINCE;
 export function entrySelectors(entry){

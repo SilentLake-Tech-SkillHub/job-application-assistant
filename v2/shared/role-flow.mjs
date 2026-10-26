@@ -1,4 +1,4 @@
-import {transitionLocationMatches} from './entry-transition.mjs';
+import {transitionLocationMatches,proposedDetailUrl} from './entry-transition.mjs';
 import {matchesRole,readRoleIdentity,bindRoleTitleProof} from './role-identity.mjs';
 import {resolveEntry,matchEntryPath} from './entry-recipe.mjs';
 import {accountMatches,matchesAccount,resolveAccount,assertScope} from '../login/contracts.mjs';
@@ -123,7 +123,9 @@ export class RoleFlow{
   await this.queues.put(t.taskId,{...prior,queueId:q.id,taskId:t.taskId,pageId:result.pageId||opened.pageId,originalRoleUrl:t.url,applicationUrl:result.pageUrl,returnUrl:result.pageUrl,expectedTitle:t.title,status:'ready_to_fill',accountMatched:true,entryVerifiedAt:new Date().toISOString()});
   let applicationUrlRecord=null;if(this.onApplicationEntered){try{applicationUrlRecord=await this.onApplicationEntered({companyId:t.companyId,roleId:t.roleId,roleUrl:t.url,applicationUrl:result.pageUrl});}catch(e){applicationUrlRecord={status:'write_failed:'+(/^[A-Z_]+$/.test(e.message)?e.message:'UNKNOWN')};}}
   // The verified detail page differs from the confirmed role link: propose the new link (no master write here).
-  let linkChange=null;if(this.onLinkObserved&&result.detailUrl){try{linkChange=await this.onLinkObserved({companyId:t.companyId,roleId:t.roleId,roleUrl:t.url,roleTitle:t.title,observedUrl:result.detailUrl});}catch(e){linkChange={status:'write_failed:'+(/^[A-Z_]+$/.test(e.message)?e.message:'UNKNOWN')};}}
+  // Entered from an already open application page: propose the detail link derived from it, labelled as derived.
+  const derived=!result.detailUrl&&entry?.kind==='declarative_transition'?proposedDetailUrl(entry,result.pageUrl):null;
+  let linkChange=null;if(this.onLinkObserved&&(result.detailUrl||derived)){try{linkChange=await this.onLinkObserved({companyId:t.companyId,roleId:t.roleId,roleUrl:t.url,roleTitle:t.title,observedUrl:result.detailUrl||derived,evidence:result.detailUrl?'entry_transition_detail_page_verified':'derived_from_application_page'});}catch(e){linkChange={status:'write_failed:'+(/^[A-Z_]+$/.test(e.message)?e.message:'UNKNOWN')};}}
   return {...result,status:'ready_to_fill',taskId:t.taskId,...(linkChange?{linkChange:linkChange.status}:{}),applicationUrl:result.pageUrl,...(applicationUrlRecord?{applicationUrlRecord:applicationUrlRecord.status}:{}),submission:'not_performed'};
  },{waitMs:q.parallelRoles||q.executionMode==='parallel_roles'?30000:0});}
  async screenshot(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{const state=await this.queues.read(x.t.taskId),s=await this.snapshot(x,state.pageId);if(new URL(s.pageUrl).origin!==x.c.origin)throw Error('ROLE_SCREENSHOT_SCOPE_CHANGED');return this.browser.request('screenshot',{pageId:state.pageId});},{waitMs:x.q.parallelRoles||x.q.executionMode==='parallel_roles'?30000:0});}

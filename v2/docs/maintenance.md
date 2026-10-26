@@ -44,3 +44,11 @@
 3. 执行宿主开工前：宿主缺 REA 端点、交接目录或角色配置时不开跑。
 
 栏目放置与“记录内非本记录字段”目前只报告、不拦截；改为拦截前，先把现有模板的报告结果交用户确认并完成迁移。
+
+## 7. 学会新的点击目标
+
+执行端交接的失败码以 `_ACTION_TARGET_REQUIRED` 结尾时，不改驱动代码，先走“报告 → 用户确认 → 写入组件”：`scripts/learned-targets.mjs show` 生成给用户看的候选清单，用户确认后 `add` 写入 `catalog/learned-targets.json` 并提交。只有同类失败在多家公司反复出现、需要新的执行逻辑时，才改驱动代码。细节见 [通用控件合集](control-collection.md)。
+
+## 7. 学会新的点击目标
+
+执行端交接的失败码以 `_ACTION_TARGET_REQUIRED` 结尾时，先走“报告 → 用户确认 → 写入组件”：`scripts/learned-targets.mjs show` 生成给用户看的候选清单，用户确认后 `add` 写入 `catalog/learned-targets.json` 并提交，不改驱动代码。只有同类失败在多家公司反复出现、需要新的执行逻辑时才改驱动。细节见 [通用控件合集](control-collection.md)。

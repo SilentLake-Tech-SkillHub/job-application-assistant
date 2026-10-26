@@ -54,7 +54,8 @@ export async function recordApplicationOutcome({outcome,handoffDir=handoffDirFro
 // (company_store.py relink-observed). One proposal per role, overwritten.
 const PERSONAL_QUERY=new Set(['userid','userId','uid','token']);
 export function canonicalRoleUrl(value){const u=new URL(value);for(const k of [...u.searchParams.keys()])if(PERSONAL_QUERY.has(k))u.searchParams.delete(k);u.hash=u.hash.replace(/([?&])(userId|uid|token)=[^&]*/g,'$1');return u.href;}
-export async function recordLinkChange({companyId,roleId,roleUrl,roleTitle,observedUrl,observedAt=new Date().toISOString(),handoffDir=handoffDirFromEnv()}){
+export async function recordLinkChange({companyId,roleId,roleUrl,roleTitle,observedUrl,evidence='entry_transition_detail_page_verified',observedAt=new Date().toISOString(),handoffDir=handoffDirFromEnv()}){
+ if(!['entry_transition_detail_page_verified','derived_from_application_page'].includes(evidence))throw Error('LINK_CHANGE_EVIDENCE_INVALID');
  const role=new URL(roleUrl),observed=new URL(canonicalRoleUrl(observedUrl));
  if(observed.protocol!=='https:'||observed.origin!==role.origin)return {status:'skipped_cross_origin'};
  if(observed.href===canonicalRoleUrl(role.href))return {status:'unchanged'};
@@ -62,8 +63,8 @@ export async function recordLinkChange({companyId,roleId,roleUrl,roleTitle,obser
  try{handle=await open(lock,'wx',0o600);}catch(error){if(error.code==='EEXIST')return {status:'skipped_locked'};throw error;}
  try{
   const out=await readOutcomes(dir),key=companyId+'|'+roleId,prior=out.linkChanges?.[key];
-  if(prior&&prior.observedUrl===observed.href)return {status:'already_proposed'};
-  out.linkChanges={...(out.linkChanges||{}),[key]:{companyId,roleId,roleUrl:role.href,roleTitle,observedUrl:observed.href,observedAt,evidence:'entry_transition_detail_page_verified'}};
+  if(prior&&prior.observedUrl===observed.href&&(prior.evidence===evidence||prior.evidence==='entry_transition_detail_page_verified'))return {status:'already_proposed'};
+  out.linkChanges={...(out.linkChanges||{}),[key]:{companyId,roleId,roleUrl:role.href,roleTitle,observedUrl:observed.href,observedAt,evidence}};
   tmp=file+'.'+randomUUID()+'.tmp';await writeFile(tmp,JSON.stringify(out,null,2)+'\n',{mode:0o600});await rename(tmp,file);tmp=null;
   return {status:'proposed',key};
  }finally{if(tmp)await unlink(tmp).catch(()=>{});await handle.close();await unlink(lock).catch(()=>{});}
