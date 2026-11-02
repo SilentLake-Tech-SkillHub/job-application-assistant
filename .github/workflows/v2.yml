@@ -1,0 +1,36 @@
+name: V2 component
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.13.0"
+          cache: npm
+          cache-dependency-path: v2/package-lock.json
+      - run: npm --prefix v2 ci --ignore-scripts
+      - run: npm --prefix v2 test
+      - run: python -m unittest discover -s v2/test -p "*_test.py"
+      - run: python v2/scripts/check_public_assets.py v2
+
+  portable-public-assets:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m unittest discover -s v2/test -p public_assets_test.py
+      - run: python v2/scripts/check_public_assets.py v2

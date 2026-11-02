@@ -1,0 +1,13 @@
+{
+  "说明": "岗位材料定义（投递端）。key 与搜索组件 references/role-materials.json 一致；source 是表单映射用的语义来源；labels 是网站题目/placeholder 规范化后的同义写法；value 校验已确认的取值格式；requiredInInventory 表示每个已确认岗位的材料清单必须含这一项。新增材料在两边各加一项。",
+  "schemaVersion": 1,
+  "materials": [
+    {
+      "key": "referralCode",
+      "source": "material:referralCode",
+      "labels": ["推荐码", "内推码", "referralcode", "employeereferralcode", "referral code"],
+      "value": "^[A-Za-z0-9_-]{3,64}$",
+      "requiredInInventory": true
+    }
+  ]
+}

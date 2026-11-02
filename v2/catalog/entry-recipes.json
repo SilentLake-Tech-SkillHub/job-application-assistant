@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "readyTimeoutMs": 15000,
+  "recipes": {
+    "feishu_campus_detail_to_form": {
+      "kind": "detail_to_form",
+      "description": "飞书招聘校招站：已核实的岗位详情页点击唯一“投递”按钮进入同一岗位的简历申请页；申请页上不点击任何按钮。",
+      "detailPathPattern": "^/(?<prefix>${pathPrefix})/(?:m/)?position/(?<id>\\d+)/detail$",
+      "formPathPattern": "^/(?<prefix>${pathPrefix})/resume/(?<id>\\d+)/apply$",
+      "formPathTemplate": "/{prefix}/resume/{id}/apply",
+      "detailTitleSeparator": " - ",
+      "entryButton": {"role": "button", "name": "投递"},
+      "roleSelector": ".resumeEditForm-headerText"
+    }
+  }
+}

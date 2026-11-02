@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "companyId": "insta360",
+  "version": 1,
+  "origin": "https://arashivision.jobs.feishu.cn",
+  "loginPath": "/campus/login",
+  "allowedPaths": [
+    "/campus/"
+  ],
+  "evidence": {
+    "capturedAt": "2026-10-16",
+    "sourceUrl": "https://arashivision.jobs.feishu.cn/campus/login",
+    "method": "live_rendered_DOM_and_real_option_inspection"
+  },
+  "account": {
+    "selector": ".topbar-user-login .topbar-userMobile",
+    "source": "contact.phone.cn",
+    "countryCode": "+86",
+    "mask": "first4_last3"
+  },
+  "fields": {
+    "root": ".mobileLogin-formWrap",
+    "country": "[data-cy=\"phonePrefix\"]",
+    "countrySelected": "[data-cy=\"phonePrefix\"] [data-cy=\"selectedValue\"]",
+    "countryOptionLabel": "中国大陆 +86",
+    "phone": "input[placeholder=\"手机号码\"]",
+    "otp": "input[data-test=\"validCodeInput\"]",
+    "send": ".loginForm-validCode button",
+    "sendLabel": "获取验证码",
+    "submit": "button[data-test=\"signInBtn\"]",
+    "submitLabel": "登录",
+    "consent": ".loginAgreement input[type=\"checkbox\"]",
+    "consentPresence": ".loginAgreement",
+    "errors": ".atsx-form-explain",
+    "automaticRegistrationNotice": ".mobileLogin-validTip"
+  },
+  "popups": [
+    {
+      "id": "privacy",
+      "selector": "[role=\"dialog\"]",
+      "titleSelector": ".atsx-modal-title",
+      "title": "隐私声明",
+      "bodySelector": ".atsx-modal-body",
+      "closeSelector": "[role=\"dialog\"] .atsx-modal-footer .atsx-btn-primary",
+      "closeLabel": "知道了",
+      "effect": "dismiss_reading_only",
+      "consentIsSeparate": true
+    }
+  ],
+  "consent": {
+    "title": "隐私声明",
+    "effectiveDate": "2024-02-05",
+    "openSelector": ".loginAgreement a",
+    "openLabel": "《隐私声明》",
+    "requiresExplicitAcceptance": true
+  },
+  "methods": [
+    {
+      "id": "phone_otp",
+      "supported": true,
+      "productionVerified": false
+    },
+    {
+      "id": "douyin",
+      "supported": false,
+      "observed": true,
+      "selector": "a[data-test=\"douyinLogin\"]",
+      "handoff": "user_operated_third_party_login"
+    }
+  ],
+  "challenge": {
+    "maxSendAttempts": 2,
+    "cooldownSeconds": 60,
+    "maxOtpAttempts": 2,
+    "expirySeconds": 300,
+    "observationWindowMs": 10000,
+    "selectors": [
+      ".sliderV2.atsx-slide-wrapper",
+      "iframe[src*=\"captcha\"]",
+      "[class*=\"captcha\"]",
+      "[class*=\"verify-wrap\"]"
+    ],
+    "operator": "user",
+    "automaticSolve": false,
+    "automaticResend": false
+  },
+  "success": {
+    "requiresAccountMatch": true,
+    "requiresLoginFormAbsent": true,
+    "noApplicationSubmission": true
+  }
+}
