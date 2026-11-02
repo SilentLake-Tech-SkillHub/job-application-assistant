@@ -1,0 +1,1 @@
+export const isImageAsset=asset=>{const names=asset?.displayNames?.length?asset.displayNames:asset?.paths;return !!names?.length&&names.every(name=>/\.(?:jpe?g|png|webp|gif|bmp|heic|avif)$/i.test(name));};

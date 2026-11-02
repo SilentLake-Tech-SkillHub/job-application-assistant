@@ -1,0 +1,4 @@
+interface:
+  display_name: "岗位代投助手 V2"
+  short_description: "Coordinate company login and application MCP tools"
+  default_prompt: "Use $job-application-assistant-v2 to prepare the confirmed roles through the login and application MCP tools."

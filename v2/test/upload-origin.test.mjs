@@ -1,0 +1,9 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {EventEmitter} from 'node:events';import {uploadWithOrigin,uploadArtifactBindings,uploadOriginMatches} from '../shared/upload-origin.mjs';
+test('native upload records only observed artifact metadata; source bytes or digest are never inspected',async()=>{
+ const page=new EventEmitter(),req={method:()=> 'POST',postDataBuffer:()=>assert.fail('Never inspect upload bytes')};const input={setInputFiles:async paths=>{assert.deepEqual(paths,['/source.pdf']);page.emit('response',{request:()=>req,ok:()=>true,status:()=>200,json:async()=>({fileName:'source.pdf',id:'artifact_12345678',url:'https://files.example.test/id/source.pdf?token=private'})});}};
+ const result=await uploadWithOrigin(page,input,{paths:['/source.pdf']},undefined,{timeoutMs:10});assert.equal(result.status,'ack_observed');assert.equal(result.kind,'upload_artifact_metadata');assert.equal(result.sourceBytesVerified,false);assert.equal(result.sourceSha256,undefined);assert.equal(JSON.stringify(result).includes('private'),false);assert.equal(page.listenerCount('response'),0);assert.equal(uploadOriginMatches(result,'https://files.example.test/id/source.pdf'),false);
+});
+test('missing acknowledgement never pretends to prove source bytes',async()=>{
+ const page=new EventEmitter(),result=await uploadWithOrigin(page,{setInputFiles:async()=>{}},{paths:['/source.pdf']},undefined,{timeoutMs:5});assert.equal(result.status,'unverified');assert.equal(result.sourceBytesVerified,false);
+});
+test('artifact binding extraction omits secrets and unrelated generic IDs',()=>{const result=uploadArtifactBindings({id:'applicant_12345678',token:'secret',file:{fileName:'x.pdf',id:'file_12345678'},fileUrl:'https://files.example.test/x.pdf?token=secret'});assert.deepEqual(result.fileIds,['file_12345678']);assert.equal(JSON.stringify(result).includes('secret'),false);});
