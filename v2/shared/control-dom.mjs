@@ -199,10 +199,10 @@ export function controlDOM(spec){
   return diagnosticSelector(part[0].node);
  };
  if(spec?.operation==='resolvePhoenix')return (spec.references||[]).map(phoenixResolve);
- // Superseded aliases are observations, not required current controls. Their
- // absence is no equivalence proof; all current references still use the strict
- // operation above. Invalid or changed controls must not be hidden here.
- if(spec?.operation==='resolvePhoenixAliases')return (spec.references||[]).map(reference=>{
+ // Optional aliases and readback report an absent question as missing.
+ // This never grants presence, equivalence or a successful field check.
+ // Writes retain strict resolution; malformed or changed controls still fail.
+ if(['resolvePhoenixAliases','resolvePhoenixReadback'].includes(spec?.operation))return (spec.references||[]).map(reference=>{
   try{return phoenixResolve(reference);}catch(error){if(error.message==='PHOENIX_QUESTION_NOT_FOUND')return null;throw error;}
  });
  if(spec?.operation==='recruiting_disclosure'){

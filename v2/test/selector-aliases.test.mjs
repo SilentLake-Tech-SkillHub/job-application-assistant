@@ -48,3 +48,16 @@ test('inactive unmapped locator records retire only with page/template-bound liv
  assert.equal(retireLegacyQuestionMappings(profile,{companyId,template,probe}).retired,1);assert.ok(profile.companyForms[key].mappings.unseen);assert.equal(profile.facts.name.value,'Keep real fact');
  probe.selectorEquivalences.pageUrl='https://other.test/form';assert.throws(()=>retireLegacyQuestionMappings(profile,{companyId,template,probe}),/SCOPE_MISMATCH/);
 });
+
+test('readback reports an absent Phoenix field while writes and changed controls remain strict',async()=>{
+ const ref=phoenix('not-rendered'),calls=[];
+ const page={evaluate:async(_reader,args)=>{calls.push(args);if(args.operation==='resolvePhoenix')throw Error('PHOENIX_QUESTION_NOT_FOUND');if(args.operation==='resolvePhoenixReadback')return [null];return {fields:{missing:{present:false,value:null,errors:[]}}};}};
+ const adapter=new PageAdapter(page),result=await adapter.observe({fields:[{id:'missing',read:{selector:ref,kind:'value'}}]});assert.equal(result.fields.missing.present,false);assert.equal(calls.at(-1).fields[0].read.selector,':not(*)');
+ await assert.rejects(adapter.resolveSelector(ref),/PHOENIX_QUESTION_NOT_FOUND/);
+ const changed=new PageAdapter({evaluate:async()=>{throw Error('PHOENIX_CONTROL_CHANGED');}});await assert.rejects(changed.observe({fields:[{id:'changed',read:{selector:ref,kind:'value'}}]}),/PHOENIX_CONTROL_CHANGED/);
+});
+test('native optional readback returns only absent markers and never accepts a malformed reference',()=>{
+ const context={document:{querySelectorAll:()=>[]},input:{operation:'resolvePhoenixReadback',references:[phoenix('not-rendered')]}};
+ const run=()=>vm.runInNewContext('('+controlDOM.toString()+')(input)',context);assert.deepEqual(JSON.parse(JSON.stringify(run())),[null]);
+ context.input.references=['phoenixq:invalid'];assert.throws(run,/PHOENIX_REFERENCE_INVALID/);
+});

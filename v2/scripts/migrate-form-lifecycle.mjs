@@ -40,7 +40,7 @@ const critical=[];for(const dir of [templateDir,runs])for(const name of await re
 critical.sort((a,b)=>a.file.localeCompare(b.file));
 const previewHash=hash(JSON.stringify({critical,removals}));
 const retainOldFiles=args.includes('--retain-old-files');
-const preview={previewHash,before,certify:protectedStates,choiceObjects:writes.length,retainOldFiles,removeFiles:removals.length,removeBytes:removals.reduce((n,r)=>n+r.size,0)};
+const preview={previewHash,removalPlan:removals.map(({file,size})=>({path:path.relative(root,file),bytes:size})),before,certify:protectedStates,choiceObjects:writes.length,retainOldFiles,removeFiles:removals.length,removeBytes:removals.reduce((n,r)=>n+r.size,0)};
 if(!args.includes('--apply')){console.log(JSON.stringify(preview,null,2));process.exit(0);}
 if(option('--expected-hash')!==previewHash)throw Error('MIGRATION_PREVIEW_CHANGED');
 const rollback=option('--rollback-dir');if(!args.includes('--rollback-dir'))throw Error('ROLLBACK_DIR_REQUIRED');

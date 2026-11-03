@@ -43,7 +43,7 @@ export class PageAdapter {
   }
   async assertLocation(origin,prefix){const u=new URL(this.page.url());if(u.origin!==origin||!u.pathname.startsWith(prefix))throw Error('PAGE_IDENTITY_CHANGED');}
   async resolveSelector(selector){if(!['antq:','phoenixq:','uploadq:'].some(prefix=>selector?.startsWith(prefix)))return selector;return (await this.resolveSpec({selector})).selector;}
-  async resolveSpec(spec){
+  async resolveSpec(spec,{readback=false}={}){
     if(spec?.operation==='compare_control_aliases'&&Array.isArray(spec.alternatives)){
       const {alternatives,...required}=spec,resolved=await this.resolveSpec(required);
       const oldPhoenix=[...new Set(alternatives.filter(s=>typeof s==='string'&&s.startsWith('phoenixq:')))];
@@ -53,7 +53,7 @@ export class PageAdapter {
     }
     const refs=new Set();const collect=v=>{if(typeof v==='string'&&['antq:','phoenixq:','uploadq:'].some(prefix=>v.startsWith(prefix)))refs.add(v);else if(Array.isArray(v))v.forEach(collect);else if(v&&typeof v==='object')Object.values(v).forEach(collect);};collect(spec);if(!refs.size)return spec;
     const keys=[...refs],ant=keys.filter(k=>k.startsWith('antq:')),phoenix=keys.filter(k=>k.startsWith('phoenixq:')),uploads=keys.filter(k=>k.startsWith('uploadq:'));
-    const [antValues,phoenixValues,uploadValues]=await Promise.all([ant.length?this.page.evaluate(await currentAnt(),{operation:'resolve',references:ant}):[],phoenix.length?resolveLiveReferences(this.page,await currentNative(),{operation:'resolvePhoenix',references:phoenix.map(normalizePhoenixReference)}):[],uploads.length?this.page.evaluate(await currentNative(),{operation:'resolveUpload',references:uploads}):[]]).catch(error=>{error.operationStep='resolve_control_reference';error.operationLocator=keys.join(' | ');throw error;});
+    const [antValues,phoenixValues,uploadValues]=await Promise.all([ant.length?this.page.evaluate(await currentAnt(),{operation:'resolve',references:ant}):[],phoenix.length?resolveLiveReferences(this.page,await currentNative(),{operation:readback?'resolvePhoenixReadback':'resolvePhoenix',references:phoenix.map(normalizePhoenixReference)}):[],uploads.length?this.page.evaluate(await currentNative(),{operation:'resolveUpload',references:uploads}):[]]).catch(error=>{error.operationStep='resolve_control_reference';error.operationLocator=keys.join(' | ');throw error;});
     const mapping=new Map([...ant.map((k,i)=>[k,antValues[i]||':not(*)']),...phoenix.map((k,i)=>[k,phoenixValues[i]||':not(*)']),...uploads.map((k,i)=>[k,uploadValues[i]||':not(*)'])]);
     const walk=v=>typeof v==='string'?mapping.get(v)||v:Array.isArray(v)?v.map(walk):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,walk(x)])):v;return walk(spec);
   }
@@ -66,7 +66,7 @@ export class PageAdapter {
    }
    const raw=await this.page.evaluate(plan?.provider==='feishu'?inventoryFeishuDOM:await currentNative());return plan?.provider==='feishu'&&!plan.rawKeys?canonicalizeInventory(raw).fields:raw;
   }
-  async observe(plan){plan=await this.resolveSpec(plan);const result=await this.page.evaluate(await currentNative(),plan.provider==='feishu'&&!plan.selectorsResolved?await this.page.evaluate(remapFeishuSpecDOM,plan):plan);if(plan.roleIdentity)result.roleIdentity=readRoleIdentity(plan.roleIdentity,result.pageUrl);return result;}
+  async observe(plan){plan=await this.resolveSpec(plan,{readback:true});const result=await this.page.evaluate(await currentNative(),plan.provider==='feishu'&&!plan.selectorsResolved?await this.page.evaluate(remapFeishuSpecDOM,plan):plan);if(plan.roleIdentity)result.roleIdentity=readRoleIdentity(plan.roleIdentity,result.pageUrl);return result;}
   async ensureGroups(groups){
     if(groups?.length)await this.assertSingleEditor();
     for(const group of groups||[]){
