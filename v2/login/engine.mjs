@@ -1,3 +1,4 @@
+import {taskRecordScope,bindTaskRecordScope} from '../shared/task-records.mjs';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -13,7 +14,7 @@ const smsCountdown=o=>o.sendDisabled&&/(?:\d{1,3}\s*(?:秒|s)|(?:重试|重发).
 const handoff={operator:'user',automaticSolve:false,automaticResend:false,nextTool:'login_resume_verification'};
 export class LoginEngine{
   constructor({companyRoot,loginFile,privateRoot,profileFile,browser,leaseRoot=defaultLeaseRoot()}){Object.assign(this,{companyRoot,loginFile,profileFile,browser,leaseRoot});this.store=new PrivateStore(privateRoot);}
-  async company(id){if(!keyOK(id))throw Error('INVALID_COMPANY_ID');const file=this.loginFile?this.loginFile(id):path.join(this.companyRoot,id+'.login.json');return validateCompany(JSON.parse(await readFile(file,'utf8')));}
+  async company(id){if(!keyOK(id))throw Error('INVALID_COMPANY_ID');const file=this.loginFile?this.loginFile(id):path.join(this.companyRoot,id+'.login.json');return validateCompany({...JSON.parse(await readFile(file,'utf8')),companyId:id,siteId:id});}
   async profile(){return JSON.parse(await readFile(this.profileFile,'utf8'));}
   async planState(c,p){const url=p.taskContext?(await this.browser.broker.request('pageIdentity',{pageId:p.taskContext.pageId})).pageUrl:p.pageUrl;return this.state(c,url);}
   async open({companyId}){const c=await this.company(companyId);return this.locked(c,async()=>{const result=await this.browser.open(c.origin+c.loginPath);await this.browser.ready(c,result.pageUrl);return {...result,companyId,ready:true,applicationSubmission:'not_performed'};});}
@@ -29,19 +30,19 @@ export class LoginEngine{
   async capture({companyId,pageUrl,evidence}){
     const c=await this.company(companyId);assertScope(c,pageUrl);if(!evidence)throw Error('CAPTURE_EVIDENCE_REQUIRED');
     return this.locked(c,async()=>{
-      const o=await this.state(c,pageUrl),controls=await this.browser.inventory(c,o.url),id=randomUUID();
+      const o=await this.state(c,pageUrl),controls=await this.browser.inventory(c,o.url),id='login-capture-'+companyId;
       await updateProfile(this.profileFile,p=>{p.loginForms??={};p.loginForms[companyId]={companyId,version:c.version,assetHash:hash(c),observedAt:now(),fields:Object.entries(c.fields).filter(([k])=>!k.endsWith('Label')).map(([key,selector])=>({key,selector,source:key==='phone'?c.account.source:null,storage:key==='otp'?'never_store_authentication_secret':'company_definition'})),observedControls:controls.map(({selector,type,placeholder,required,disabled})=>({selector,type,placeholder,required,disabled})),evidence};});
       const result={id,companyId,assetHash:hash(c),capturedAt:now(),controls,coverage:'current_login_document; declared_country_and_privacy_popup; captcha_not_yet_observed',submission:'not_performed'};await this.store.put('captures',id,result);return {id,companyId,controlCount:controls.length,assetHash:hash(c),profileRegistered:true,coverage:result.coverage};
     });
   }
   async compile({companyId,pageUrl,taskContext}){
     const c=await this.company(companyId);assertScope(c,pageUrl);const a=resolveAccount(await this.profile(),c);
-    const plan={id:randomUUID(),companyId,pageUrl,assetHash:hash(c),accountFingerprint:a.fingerprint,createdAt:now(),steps:c.loginMethod==='user_operated'?['check_current_session','user_login_handoff_if_required','verify_exact_account_at_session_page']:['check_current_session','inspect_and_dismiss_known_popups','select_actual_country_option','fill_phone_from_private_profile','require_privacy_acceptance','request_sms_once','handoff_verification_if_present','consume_ephemeral_user_otp','click_login_only','verify_account_and_absent_login_form'],applicationSubmission:'forbidden'};
+    const plan={id:taskContext?.taskId||taskRecordScope().taskId?randomUUID():'login-plan-'+companyId,companyId,pageUrl,assetHash:hash(c),accountFingerprint:a.fingerprint,createdAt:now(),steps:c.loginMethod==='user_operated'?['check_current_session','user_login_handoff_if_required','verify_exact_account_at_session_page']:['check_current_session','inspect_and_dismiss_known_popups','select_actual_country_option','fill_phone_from_private_profile','require_privacy_acceptance','request_sms_once','handoff_verification_if_present','consume_ephemeral_user_otp','click_login_only','verify_account_and_absent_login_form'],applicationSubmission:'forbidden'};
     if(taskContext)plan.taskContext=taskContext;
     plan.planHash=hash(plan);await this.store.put('plans',plan.id,plan);return {planId:plan.id,planHash:plan.planHash,companyId,assetHash:plan.assetHash,stepCount:plan.steps.length,browserAccess:false};
   }
-  async plan(args){const p=await this.store.get('plans',args.planId),h=p.planHash;delete p.planHash;if(hash(p)!==h||args.planHash!==h)throw Error('LOGIN_PLAN_HASH_MISMATCH');p.planHash=h;if(p.taskContext){if(!this.roleQueues)throw Error('ROLE_QUEUE_REQUIRED');await this.roleQueues.task(p.taskContext);}const c=await this.company(p.companyId),a=resolveAccount(await this.profile(),c);if(hash(c)!==p.assetHash)throw Error('LOGIN_ASSET_CHANGED');if(a.fingerprint!==p.accountFingerprint)throw Error('LOGIN_ACCOUNT_CHANGED');return {p,c,a};}
-  async record(c,operation,result){const run={id:randomUUID(),companyId:c.companyId,operation,finishedAt:now(),...result,applicationSubmission:'not_performed'};await this.store.put('runs',run.id,run);return run;}
+  async plan(args){const p=await this.store.get('plans',args.planId),h=p.planHash;delete p.planHash;if(hash(p)!==h||args.planHash!==h)throw Error('LOGIN_PLAN_HASH_MISMATCH');p.planHash=h;if(p.taskContext){if(!this.roleQueues)throw Error('ROLE_QUEUE_REQUIRED');await this.roleQueues.task(p.taskContext);bindTaskRecordScope(p.taskContext.taskId);}const c=await this.company(p.companyId),a=resolveAccount(await this.profile(),c);if(hash(c)!==p.assetHash)throw Error('LOGIN_ASSET_CHANGED');if(a.fingerprint!==p.accountFingerprint)throw Error('LOGIN_ACCOUNT_CHANGED');return {p,c,a};}
+  async record(c,operation,result){const run={id:taskRecordScope().taskId?randomUUID():'login-'+c.companyId+'-'+operation,companyId:c.companyId,operation,finishedAt:now(),...result,applicationSubmission:'not_performed'};await this.store.put('runs',run.id,run);return run;}
   async dismiss(c,o){
     if(!o.dialogs)return o;if(o.unknownPopup||o.dialogs!==1)throw Error('UNKNOWN_LOGIN_POPUP');
     const p=c.popups[0];await this.browser.act(c,o.url,{method:'click',selector:p.closeSelector,label:p.closeLabel});
@@ -66,7 +67,7 @@ export class LoginEngine{
     if(decision.decision!=='allow')return this.record(c,'prepare',{status:'privacy_evidence_required',accountMatched:false,phoneReadback:'match',countryReadback:'match',businessAuthorization,smsSent:false,continuation:{state:'login',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['login_inspect','login_capture'],reason:decision.reason}});
     await this.browser.act(c,o.url,{method:'check',selector:f.consent},true);o=await this.state(c,o.url);if(!o.consent)throw Error('PRIVACY_CHECK_READBACK_FAILED');
     // The acceptance record lives only in the login store as execution evidence; the profile keeps the single switch.
-    const acceptedAt=now(),reused={id:randomUUID(),companyId:c.companyId,planId:p.id,assetHash:p.assetHash,evidenceHash:hash({mode:'business_authorization_switch',origin:c.origin,authorizationRef:decision.authorizationRef}),acceptedAt,reusedAt:acceptedAt,scope:'global'};await this.store.put('acceptances',reused.id,reused);
+    const acceptedAt=now(),reused={id:'acceptance-'+c.companyId,companyId:c.companyId,planId:p.id,assetHash:p.assetHash,evidenceHash:hash({mode:'business_authorization_switch',origin:c.origin,authorizationRef:decision.authorizationRef}),acceptedAt,reusedAt:acceptedAt,scope:'global'};await this.store.put('acceptances',reused.id,reused);
     return this.record(c,'prepare',{status:'ready_to_request_sms',privacyScope:'global',acceptanceId:reused.id,privacyReused:true,accountMatched:false,phoneReadback:'match',countryReadback:'match',popupHandling:'not_opened_business_switch_on',businessAuthorization,smsSent:false});
   });}
   async acceptance(id,p){if(!id)return null;const a=await this.store.get('acceptances',id);if(a.planId!==p.id||a.assetHash!==p.assetHash)throw Error('PRIVACY_ACCEPTANCE_SCOPE_MISMATCH');const c=await this.company(p.companyId),permission=evaluateBusinessAuthorization(await this.profile(),{operation:'recruiting_privacy',phase:'classify',stage:'login',companyId:c.companyId,officialOrigin:c.origin,field:{label:c.consent.title}});if(permission.decision==='revoked')throw Error(permission.reason);return a;}

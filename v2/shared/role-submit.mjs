@@ -18,6 +18,7 @@ export async function submitReviewedRole({args,boundRole,resolveTask,engine,brow
  if(templateHash!==args.authorization.templateHash)throw Error('SUBMISSION_APPROVED_TEMPLATE_CHANGED');
  const review=await store.get('runs',args.authorization.reviewRunId);
  if(review.operation!=='verify_current'||review.status!=='verified'||review.companyId!==t.companyId||review.roleId!==t.roleId||review.pageUrl!==state.returnUrl||review.templateHash!==templateHash)throw Error('SUBMISSION_VERIFIED_REVIEW_REQUIRED');
+ const reviewProofs=await proofs(store,review);
  const task=await resolveTask(t,state,template);let fresh=null;
  const page=await rolePage(browser,state),controlsNow=async()=>{const c=await page.observe({operation:'submission_controls'});if(c.pageUrl!==state.returnUrl||c.receipt)throw Error('SUBMISSION_EXISTING_RECEIPT_REQUIRES_RECONCILIATION');return c;};
  const previewButtonsOf=c=>c.buttons.filter(b=>!b.disabled&&isPreviewButton(b));
@@ -29,7 +30,7 @@ export async function submitReviewedRole({args,boundRole,resolveTask,engine,brow
  if(!onSummaryFromPreview){
   fresh=await engine.verifyCurrentLocked(task);
   const fileIds=new Set((template.pages||[]).flatMap(p=>p.fields||[]).filter(f=>f.kind==='file').map(f=>f.id));
-  if(fresh.status!=='verified'||signature(review,fileIds)!==signature(fresh,fileIds)||hash(await proofs(store,review))!==hash(await proofs(store,fresh)))throw Error('SUBMISSION_REVIEW_CONTENT_CHANGED');
+  if(fresh.status!=='verified'||signature(review,fileIds)!==signature(fresh,fileIds)||hash(reviewProofs)!==hash(await proofs(store,fresh)))throw Error('SUBMISSION_REVIEW_CONTENT_CHANGED');
   preview=await controlsNow();
  }
  await reviewedPreparationFiles({store,state,role:t,templateHash,files:task.files});

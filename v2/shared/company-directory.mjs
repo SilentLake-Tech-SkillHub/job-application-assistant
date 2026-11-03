@@ -43,7 +43,7 @@ export function handoffView(doc){
  const roles=(doc['岗位']||[]).filter(r=>chosen.has(r['岗位编码'])).map(r=>pick(r,EXEC_ROLE_FIELDS)).sort(byKey('岗位编码'));
  const used=new Set(roles.map(r=>r['站点编码']));
  const sites=(doc['站点']||[]).filter(s=>used.has(s['站点编码'])).map(s=>pick(s,EXEC_SITE_FIELDS)).sort(byKey('站点编码'));
- return {'公司编码':doc['公司编码'],'批次编号':batch['批次编号']??null,'执行':batch['执行']??null,'岗位':roles,'站点':sites};
+ return {'公司编码':doc['公司编码'],'批次编号':batch['批次编号']??null,'岗位':roles,'站点':sites};
 }
 export const contentSha=doc=>createHash('sha256').update(pyJson(handoffView(doc)),'utf8').digest('hex');
 export const combinedSha=files=>createHash('sha256').update(pyJson(Object.keys(files).sort().map(c=>[c,files[c].contentSha256])),'utf8').digest('hex');
@@ -61,23 +61,10 @@ export async function readCompanyFiles(handoffDir=handoffDirFromEnv()){
  return out;
 }
 
-// 站点资产键：投递组件私有表单资产（模板、采集/结构/选项记录、主档表单记录与题目键）在编码迁移前按旧站点标识存放，
-// 且不少记录编号把该标识算进了指纹。迁移时一次性存下“站点编码 → 现有资产键”的固定绑定（私有 templates/site-asset-keys.json），
-// 之后只读绑定，不再按名称或域名推算；没有绑定的站点（新站点）资产键就是站点编码。第 3 步表单编码上线后删除此绑定。
-export async function readSiteAssetKeys(store){
- if(!store)return {};
- let keys;try{keys=await store.get('templates','site-asset-keys');}catch(e){if(e.code==='ENOENT')return {};throw e;}
- if(!keys||typeof keys!=='object'||Array.isArray(keys))throw Error('INVALID_SITE_ASSET_KEYS');
- const seen=new Set();
- for(const [s,k] of Object.entries(keys)){if(!CODE.site.test(s)||!keyOK(k)||seen.has(k))throw Error('INVALID_SITE_ASSET_KEYS');seen.add(k);}
- return keys;
-}
-
 export class CompanyDirectory{
  constructor({handoffDir=handoffDirFromEnv(),store=null}={}){this.handoffDir=path.resolve(handoffDir);this.base=path.join(this.handoffDir,'公司');this.store=store;}
- // 目录项 = 站点：id 是该站点的资产键（见 readSiteAssetKeys），siteId 是站点编码，companyId 是公司编码；登录链接、账号核对页来自宽表。
+ // 目录项以站点编码为 id/siteId，所属公司以 companyId 保存公司编码。
  async load(){
-  const assetKeys=await readSiteAssetKeys(this.store);
   const logins={},definitions={};
   for(const region of (await entries(this.base)).filter(d=>d.isDirectory()))
    for(const firm of (await entries(path.join(this.base,region.name))).filter(d=>d.isDirectory())){
@@ -98,7 +85,7 @@ export class CompanyDirectory{
     if(!CODE.site.test(s['站点编码']))throw Error('INVALID_SITE_CODE');
     if(ids.has(s['站点编码']))throw Error('DUPLICATE_SITE_CODE:'+s['站点编码']);ids.add(s['站点编码']);
     const origin=new URL(s['站点']).origin;
-    const id=assetKeys[s['站点编码']]||s['站点编码'];
+    const id=s['站点编码'];
     if(out.some(e=>e.id===id))throw Error('DUPLICATE_SITE_ASSET_KEY:'+id);
     out.push({id,siteId:s['站点编码'],companyId:code,name:doc['公司名称'],origin,status:s['状态']||'在用',loginUrl:s['登录链接']||null,accountPageUrl:s['账号核对页']||null,
      channel:'campus',templateId:null,file,loginFile:logins[origin]||null,definitionFile:definitions[origin]||null});
@@ -133,7 +120,7 @@ export async function readHandoffBatch({handoffDir=handoffDirFromEnv()}={}){
   const groups=new Map();for(const r of chosen){const g=r['志愿分组']||'公司';if(!groups.has(g))groups.set(g,[]);groups.get(g).push(r);}
   for(const list of groups.values()){const os=list.map(r=>r['志愿顺序']);if(list.length===1&&os[0]==null)continue;
    if(!os.every(o=>Number.isInteger(o)&&o>0)||new Set(os).size!==os.length)throw Error('INVALID_CONFIRMED_ROLE_ORDER');}
-  return {companyId:code,name:doc['公司名称'],order:i+1,execution:doc['批次']['执行']||null,roles:chosen.map((r,j)=>{validateMaterials(r['材料'],r['岗位编码']);return roleView(r,j,outcomes);})};
+  return {companyId:code,name:doc['公司名称'],order:i+1,roles:chosen.map((r,j)=>{validateMaterials(r['材料'],r['岗位编码']);return roleView(r,j,outcomes);})};
  });
  const sources=Object.fromEntries(files.map(({code,file,doc})=>[code,{file,contentSha256:doc['批次']['确认'].contentSha256,scope:doc['批次']['确认'].scope,previousContentSha256:doc['批次']['确认'].previousContentSha256||null,selection:[...doc['批次']['选中岗位']]}]));
  const input={schemaVersion:1,materialContractVersion:2,batchId,version:1,confirmation:{status:'confirmed',reference:files.map(f=>f.doc['批次']['确认'].userQuote).join(' / ')},companies};

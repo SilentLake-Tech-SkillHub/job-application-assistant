@@ -13,14 +13,14 @@ class PublicAssetsTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         source = Path(__file__).resolve().parents[1]
-        for name in ('package.json', 'package-lock.json', 'catalog/entry-recipes.json', 'catalog/workflow-tools.json', 'catalog/role-materials.json', 'catalog/learned-targets.json', 'test/fixtures/insta360.login.json'):
+        for name in ('package.json', 'package-lock.json', 'catalog/entry-recipes.json', 'catalog/workflow-tools.json', 'catalog/role-materials.json', 'catalog/learned-targets.json', 'hooks/tool-arguments.json', 'test/fixtures/insta360.login.json'):
             dest = self.root / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source / name, dest)
     def tearDown(self):
         self.temp.cleanup()
     def test_valid_public_assets(self):
-        self.assertEqual(len(public_json_files(self.root)), 7)
+        self.assertEqual(len(public_json_files(self.root)), 8)
 
     def write_asset(self, name, value):
         (self.root / 'catalog' / name).write_text(json.dumps(value), encoding='utf-8')

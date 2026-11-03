@@ -17,9 +17,8 @@ export async function assertCollectionProvider(page,plan){
  return true;
 }
 
-export function captureContentId(companyId,pageUrl,provider,controls,digest){
- return 'capture-'+companyId+'-'+digest({companyId,pageUrl,provider:provider||null,controls}).slice(0,24);
-}
+import {formAssetKeys} from './form-identity.mjs';
+export const captureContentId=formId=>formAssetKeys(formId).capture;
 
 export function isChoiceControl(field) {
  return field.type === 'radio' || field.tag === 'select' || field.type === 'select' || field.renderer === 'ant_select' || field.renderer === 'phoenix_select' || field.renderer === 'phoenix_autocomplete' ||

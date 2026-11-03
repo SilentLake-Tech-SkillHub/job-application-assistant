@@ -9,7 +9,7 @@ const privateDir=opt('--private-dir')||process.env.RECRUITING_PRIVATE_DIR;
 if(!privateDir){console.error('需要 --private-dir 或 RECRUITING_PRIVATE_DIR');process.exit(2);}
 const since=opt('--since')?Date.parse(opt('--since')):null,asJson=argv.includes('--json');
 const readJsonDir=async dir=>{let names=[];try{names=await readdir(dir);}catch{return [];}
- const out=[];for(const n of names.filter(n=>n.endsWith('.json'))){try{out.push({file:n,data:JSON.parse(await readFile(path.join(dir,n),'utf8'))});}catch{}}return out;};
+ const out=[];for(const n of names.filter(n=>n.endsWith('.json'))){try{const data=JSON.parse(await readFile(path.join(dir,n),'utf8'));if(data.taskId&&data.slots)out.push(...Object.values(data.slots).map(record=>({file:n,data:record.value})));else out.push({file:n,data});}catch{}}return out;};
 const at=d=>Date.parse(d.readAt||d.observedAt||d.lastAt||d.startedAt||'')||null;
 const classes=new Map(),latest=new Map();
 const add=(reason,kind,run,field)=>{const key=reason+'|'+kind;let c=classes.get(key);

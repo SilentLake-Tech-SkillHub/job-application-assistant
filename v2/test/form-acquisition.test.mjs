@@ -16,10 +16,9 @@ test('a Phoenix form rejects a guessed Feishu collector before empty capture can
  assert.equal((await detectedAcquisitionPlan(page,{})).provider,'phoenix');
  await assert.rejects(detectedAcquisitionPlan(page,{},'feishu'),/PROVIDER_EVIDENCE_MISMATCH/);
 });
-test('unchanged captures keep evidence identity; company, page, provider and control changes invalidate it',()=>{
- const controls=[{selector:'#a',required:true}],id=captureContentId('sample','https://a.test/form','ant',controls,hash);
- assert.equal(id,captureContentId('sample','https://a.test/form','ant',structuredClone(controls),hash));
- for(const args of [['other','https://a.test/form','ant',controls],['sample','https://a.test/other','ant',controls],['sample','https://a.test/form','feishu',controls],['sample','https://a.test/form','ant',[{selector:'#a',required:false}]]])assert.notEqual(id,captureContentId(...args,hash));
+test('capture identity is the allocated form code; content changes only its hash',()=>{
+ const id=captureContentId('F000001');assert.equal(id,'capture-F000001');assert.equal(id,captureContentId('F000001'));
+ assert.notEqual(id,captureContentId('F000002'));assert.throws(()=>captureContentId('arbitrary-name'),/FORM_CODE_REQUIRED/);
 });
 
 test('explicit construction provider overrides an obsolete template without dropping its page contract',()=>{

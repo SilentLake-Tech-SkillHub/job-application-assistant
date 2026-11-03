@@ -20,16 +20,75 @@
     "role_entry_inspect"
   ],
   "stages": {
-    "profile_select_projects": ["prepare", ["role_remove_project_record", "capture_rea_structure"]],
-    "role_remove_project_record": ["prepare", ["capture_rea_structure", "form_mapping_candidates", "form_build_template"]],
-    "role_restage_autocomplete": ["construct", ["capture_rea_structure", "form_search_choices", "form_build_template"]],
-    "login_open_identity": ["login", ["login_inspect", "role_resume"]],
-    "role_confirm_material_no_destination": ["prepare", ["prepare_plan", "role_prepare"]],
-    "form_search_choices": ["construct", ["form_resolve_choices", "form_build_template"]],
-    "role_submit": ["submit", ["application_closeout"]],
-    "role_report_link_failure": ["route", ["role_open"]],
-    "role_close_extra_pages": ["route", ["role_open"]],
-    "role_reload_page": ["route", ["role_open", "role_enter_application"]],
+    "profile_select_projects": [
+      "prepare",
+      [
+        "role_remove_project_record",
+        "capture_rea_structure"
+      ]
+    ],
+    "role_remove_project_record": [
+      "prepare",
+      [
+        "capture_rea_structure",
+        "form_mapping_candidates",
+        "form_build_template"
+      ]
+    ],
+    "role_restage_autocomplete": [
+      "construct",
+      [
+        "capture_rea_structure",
+        "form_search_choices",
+        "form_build_template"
+      ]
+    ],
+    "login_open_identity": [
+      "login",
+      [
+        "login_inspect",
+        "role_resume"
+      ]
+    ],
+    "role_confirm_material_no_destination": [
+      "prepare",
+      [
+        "prepare_plan",
+        "role_prepare"
+      ]
+    ],
+    "form_search_choices": [
+      "construct",
+      [
+        "form_resolve_choices",
+        "form_build_template"
+      ]
+    ],
+    "role_submit": [
+      "submit",
+      [
+        "application_closeout"
+      ]
+    ],
+    "role_report_link_failure": [
+      "route",
+      [
+        "role_open"
+      ]
+    ],
+    "role_close_extra_pages": [
+      "route",
+      [
+        "role_open"
+      ]
+    ],
+    "role_reload_page": [
+      "route",
+      [
+        "role_open",
+        "role_enter_application"
+      ]
+    ],
     "workflow_handoff": [
       "technical_block",
       []
@@ -78,12 +137,6 @@
       "construct",
       [
         "capture_controls"
-      ]
-    ],
-    "company_batch_restrict_channels": [
-      "route",
-      [
-        "company_batch_take"
       ]
     ],
     "company_batch_create": [
@@ -223,7 +276,12 @@
         "prepare_plan"
       ]
     ],
-    "profile_record_document_facts": ["prepare", ["prepare_plan"]],
+    "profile_record_document_facts": [
+      "prepare",
+      [
+        "prepare_plan"
+      ]
+    ],
     "profile_map_questions": [
       "map",
       [
@@ -321,11 +379,38 @@
         "form_build_template"
       ]
     ],
-    "role_prepare_profile_fields": ["prepare", ["role_verify"]],
-    "role_prepare_fields": ["prepare", ["role_verify"]],
-    "browser_initialize_chrome": ["route", ["runtime_info", "company_batch_create"]],
-    "browser_restore_chrome": ["route", ["role_resume"]],
-    "form_remove_attachment": ["construct", ["capture_controls", "form_build_template"]],
+    "role_prepare_profile_fields": [
+      "prepare",
+      [
+        "role_verify"
+      ]
+    ],
+    "role_prepare_fields": [
+      "prepare",
+      [
+        "role_verify"
+      ]
+    ],
+    "browser_initialize_chrome": [
+      "route",
+      [
+        "runtime_info",
+        "company_batch_create"
+      ]
+    ],
+    "browser_restore_chrome": [
+      "route",
+      [
+        "role_resume"
+      ]
+    ],
+    "form_remove_attachment": [
+      "construct",
+      [
+        "capture_controls",
+        "form_build_template"
+      ]
+    ],
     "role_prepare_materials": [
       "prepare",
       [

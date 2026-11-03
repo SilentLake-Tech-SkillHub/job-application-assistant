@@ -9,7 +9,7 @@ import time
 import uuid
 import shlex
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from conversation_scope import host_role
+from conversation_scope import host_role, read_active_scope
 
 ROOT = Path(os.environ['RECRUITING_WORKSPACE_ROOT']).resolve()
 POLICY = Path(os.environ['RECRUITING_WORKFLOW_POLICY'])
@@ -23,6 +23,27 @@ LEGACY_CONTINUATION_TOOLS = {'workflow_next', 'form_route', 'workflow_advance', 
 
 LIFECYCLE = json.loads((Path(__file__).resolve().parents[1] / 'catalog/workflow-tools.json').read_text(encoding='utf-8'))
 CONTINUATION_TOOLS = set(LIFECYCLE['stages']) | LEGACY_CONTINUATION_TOOLS
+
+def _load_tool_arguments():
+    # The one shared definition of text-only host tools and file argument names (hooks/tool-arguments.json).
+    # Missing or unreadable: no tool counts as text-only, so everything is checked as a file operation.
+    try:
+        spec = json.loads(Path(__file__).with_name('tool-arguments.json').read_text(encoding='utf-8'))
+        return {t.lower() for t in spec['textTools']}, set(spec['fileArgumentKeys'])
+    except (OSError, ValueError, KeyError, TypeError):
+        return set(), set()
+
+TEXT_TOOLS, FILE_ARGUMENT_KEYS = _load_tool_arguments()
+
+def _has_file_argument(value):
+    if isinstance(value, dict):
+        return any(k in FILE_ARGUMENT_KEYS or _has_file_argument(v) for k, v in value.items())
+    if isinstance(value, list):
+        return any(_has_file_argument(v) for v in value)
+    return False
+
+def text_only(kind, args):
+    return kind in TEXT_TOOLS and isinstance(args, dict) and not _has_file_argument(args)
 
 def recruiting_tool(tool):
     return 'recruiting_application_v2' in tool.replace('-', '_') or 'recruiting_login_v2' in tool.replace('-', '_')
@@ -54,8 +75,10 @@ def executor_boundary(event):
         try: args = json.loads(args)
         except ValueError: args = {}
     kind = tool.split('__')[-1].lower()
-    if kind in {'todo_write', 'todo_read', 'askuserquestion', 'sendusermessage', 'request_user_input', 'request_user_input_async'} and not any(k in args for k in ('file_path', 'filePath', 'path', 'attachments', 'files')):
+    if text_only(kind, args):
         return
+    if not isinstance(args, dict):
+        args = {}
     if kind in {'read', 'read_file', 'readfile'}:
         value = next((args.get(key) for key in ('filePath', 'file_path', 'path') if args.get(key)), None)
         if value and source_read_allowed(value):
@@ -183,7 +206,7 @@ def handle(event):
     # conversation sharing the project. Return before policy/receipt checks for
     # unrelated sessions, including continuations started before installation.
     try:
-        sessions = json.loads(SCOPE.read_text(encoding='utf-8')).get('session_ids', [])
+        sessions = read_active_scope(SCOPE).get('session_ids', [])
     except (FileNotFoundError, ValueError):
         return {}
     if event.get('session_id') not in sessions:

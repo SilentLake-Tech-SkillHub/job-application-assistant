@@ -1,0 +1,14 @@
+{
+  "说明": "执行端与工作区 Hook 共用的唯一定义：哪些宿主工具只传文字（待办、提问、发消息），以及哪些参数名表示文件。纯文字工具只有在参数里（任意层级）都没有文件参数时才按纯文字放行；带任何文件参数就按文件操作检查。读取方：本包 hooks/workflow_hook.py、工作区搜索组件 scripts/hook_file_policy.py 与 status_sync_hook.py。本文件缺失或无法解析时，所有工具都按文件操作检查。",
+  "schemaVersion": 1,
+  "textTools": [
+    "todo_write", "todo_read",
+    "askuserquestion", "request_user_input", "request_user_input_async",
+    "sendusermessage", "send_message", "send_message_to_thread",
+    "notify", "text"
+  ],
+  "fileArgumentKeys": [
+    "file_path", "filePath", "path", "notebook_path", "TargetFile", "AbsolutePath",
+    "attachments", "attachment_path", "files"
+  ]
+}

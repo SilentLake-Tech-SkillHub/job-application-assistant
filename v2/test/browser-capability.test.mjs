@@ -41,7 +41,7 @@ test('a built-in browser that is really Chrome (probe tab in the Chrome clone, a
 }));
 test('a built-in browser that cannot upload is not loadable; no built-in browser leaves the clone alone; no Chrome installed leaves nothing for Chrome',()=>fixture(async f=>{
  let r=await redetect({...f.base,fileUpload:undefined,agent:agentWith({i:{type:'iab',browser:hostBrowser()}})});
- assert.equal(r.iab.result,'not_loadable');assert.equal(r.iab.actions.upload,false);assert.deepEqual(r.channels,['chrome']);assert.equal(r.mode,'single');
+ assert.equal(r.iab.result,'not_loadable');assert.equal(r.iab.actions.upload,false);assert.equal(r.iab.search.usable,true);assert.equal(r.iab.application.usable,false);assert.deepEqual(r.searchChannels,['chrome','iab']);assert.deepEqual(r.channels,['chrome']);assert.equal(r.mode,'single');
  r=await redetect({...f.base,agent:undefined});assert.equal(r.iab.result,'not_declared');assert.deepEqual(r.channels,['chrome']);
  r=await redetect({...f.base,exists:async()=>false,agent:agentWith({i:{type:'iab',browser:hostBrowser()}})});assert.equal(r.chrome.result,'not_installed');assert.deepEqual(r.channels,['iab']);
  r=await redetect({...f.base,exists:async()=>false});assert.deepEqual(r.channels,[]);assert.equal(r.mode,'none');
@@ -87,7 +87,7 @@ test('every listed host has a valid adapter that describes only its built-in bro
 test('a model-only built-in browser is recorded as agent_only without probing; Chrome still runs on the clone',()=>fixture(async f=>{
  let probed=false;const agent={browsers:{list:async()=>{probed=true;return [];},get:async()=>{probed=true;}}};
  const r=await redetect({...f.base,host:'codex',adapter:await loadAdapter('codex'),agent});
- assert.equal(probed,false);assert.equal(r.iab.result,'agent_only');assert.equal(r.iab.reason,'HOST_BROWSER_AGENT_ONLY');assert.deepEqual(r.channels,['chrome']);assert.equal(r.mode,'single');assert.equal(r.adapter.id,'codex');
+ assert.equal(probed,false);assert.equal(r.iab.result,'agent_only');assert.equal(r.iab.reason,'HOST_BROWSER_AGENT_ONLY');assert.equal(r.iab.search.usable,true);assert.equal(r.iab.application.usable,false);assert.deepEqual(r.channels,['chrome']);assert.equal(r.mode,'single');assert.equal(r.adapter.id,'codex');
  const k=await detectBrowserCapability({...f.base,host:'kimi-code',adapter:await loadAdapter('kimi-code')});assert.equal(k.iab.result,'not_declared');assert.deepEqual(k.channels,['chrome']);
  await assert.rejects(detectBrowserCapability({...f.base,host:'dsh',adapter:await loadAdapter('codex')}),/HOST_ADAPTER_MISMATCH/);
  const cli=await detectWithoutHostSdk({file:f.base.file,host:'claude-code',env:f.env});assert.equal(cli.iab.result,'agent_only');assert.equal((await hostCapability({file:f.base.file,host:'claude-code'})).status,'detected');

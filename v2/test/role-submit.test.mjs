@@ -1,6 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,rm,writeFile} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
 import {attachmentFileMetadata} from '../shared/attachment-source-renderer.mjs';
 import {Store,hash} from '../shared/engine.mjs';import {submitReviewedRole} from '../shared/role-submit.mjs';import {templateMethods} from '../shared/control-registry.mjs';
+import {withTaskRecords} from '../shared/task-records.mjs';
 async function fixture(fn){
  const root=await mkdtemp(path.join(os.tmpdir(),'role-submit-')),store=new Store(root),pageUrl='https://recruit.example/apply',template={id:'fixture'},t={taskId:'task',companyId:'company',roleId:'role',url:'https://recruit.example/job/role',title:'Product'},q={batchId:'batch'};
  const filePath=path.join(root,'resume.pdf');await writeFile(filePath,'fixture resume');const files={resume:{paths:[filePath],displayNames:['resume.pdf']}},fileMetadata={resume:await attachmentFileMetadata(files.resume)};
@@ -16,6 +17,22 @@ async function fixture(fn){
 test('submission is excluded from ordinary templates and requires specific authorization',()=>fixture(async({context,clicks})=>{
  assert.equal(templateMethods().has('authorized_submit'),false);context.args.authorization.submit=false;
  await assert.rejects(submitReviewedRole(context),/AUTHORIZATION_REQUIRED/);assert.equal(clicks(),0);
+}));
+test('submission compares the accepted review before current task records overwrite its old observation',()=>fixture(async({context,review,store,clicks})=>{
+ const observation={operation:'live_observation',observation:{pageUrl:review.pageUrl,fields:{identity:{profileFillProof:{sourceHash:'source'}}}}};
+ await withTaskRecords({taskId:'task',tool:'role_verify'},async()=>{
+  await store.put('runs','old-current-observation',observation);
+  await store.put('runs','old-current-review',{...review,id:'old-current-review',observationRunId:'old-current-observation'});
+ });
+ context.args.authorization.reviewRunId='old-current-review';
+ context.engine.verifyCurrentLocked=async()=>{
+  const fresh={...review,id:'new-current-review',observationRunId:'new-current-observation'};
+  await store.put('runs','new-current-observation',observation);await store.put('runs',fresh.id,fresh);return fresh;
+ };
+ const result=await withTaskRecords({taskId:'task',tool:'role_submit'},()=>submitReviewedRole(context));
+ assert.equal(result.status,'official_receipt_confirmed');assert.equal(clicks(),1);
+ await assert.rejects(store.get('runs','old-current-observation'),{code:'ENOENT'});
+ assert.equal((await store.get('runs','submission-evidence-task')).result,'official_receipt_confirmed');
 }));
 test('verified incremental recovery retains final authority and frozen file binding without another upload',()=>fixture(async({context,state,review,store,files,fileMetadata,clicks})=>{
  delete state.fillRunId;state.selectedFieldRunId='selected';

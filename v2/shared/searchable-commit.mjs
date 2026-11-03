@@ -23,7 +23,7 @@ export async function saveSearchableCommit(store,task,field,result){
  const proof=result?.searchableCommit;
  if(!proof||proof.optionLabel!==field.value||!(proof.mode==='actual_option_click'&&proof.optionClicked===true||proof.mode==='explicit_custom_value'&&proof.optionClicked===false&&nonempty(proof.customValueEvidence)))throw Error('SEARCHABLE_COMMIT_ACTION_PROOF_REQUIRED');
  assertCurrentProof(proof,proof.mode,field.value,proof.optionValue,searchableWitnessScope(task,field));
- await store.put('runs',key(task,field),{companyId:task.companyId,roleId:task.roleId,pageUrl:task.pageUrl,fieldId:field.id,templateHash:task.templateHash,valueHash:hash(field.value),proof,readAt:new Date().toISOString()});
+ await store.put('runs',key(task,field),{operation:'searchable_commit',taskId:task.taskId||task.roleQueueArgs?.taskId||null,companyId:task.companyId,roleId:task.roleId,pageUrl:task.pageUrl,fieldId:field.id,templateHash:task.templateHash,valueHash:hash(field.value),proof,readAt:new Date().toISOString()});
 }
 export async function verifySearchableCommits({store,page,plan,task}){
  const proofs={};

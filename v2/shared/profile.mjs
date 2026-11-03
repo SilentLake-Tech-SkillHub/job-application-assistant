@@ -18,12 +18,16 @@ import {acquireLease,leasePath,defaultLeaseRoot} from './leases.mjs';
 import {validDate,ingestFactValue,matchesValueType} from './value-contract.mjs';
 import {auditStoredContract} from './workflow-contract.mjs';
 import {assertDefinitionMapped} from './definition-coverage.mjs';
+import {allocateFormCode} from './form-identity.mjs';
 
-export function lookupCompanyForm(profile,companyId,pageUrl,{migrate=false}={}){
- const pageKey=hash({companyId,pageUrl:formLocation(pageUrl)}).slice(0,20);let storedKey=pageKey,form=profile.companyForms?.[pageKey];
- if(!form){const exact=Object.entries(profile.companyForms||{}).filter(([,f])=>f.companyId===companyId&&f.pageUrl===pageUrl);if(exact.length===1)[storedKey,form]=exact[0];}
- if(migrate&&form&&storedKey!==pageKey){profile.companyForms[pageKey]=form;delete profile.companyForms[storedKey];storedKey=pageKey;}
- return {pageKey,storedKey,form};
+export function lookupCompanyForm(profile,companyId,pageUrl,{create=false,companyCode=null}={}){
+ const location=formLocation(pageUrl),matches=Object.entries(profile.companyForms||{}).filter(([,f])=>(f.siteId||f.companyId)===companyId&&f.pageUrl&&formLocation(f.pageUrl)===location);
+ if(matches.length>1)throw Error('FORM_IDENTITY_AMBIGUOUS');
+ if(matches.length){const [pageKey,form]=matches[0];return {pageKey,storedKey:pageKey,form};}
+ if(!create)return {pageKey:null,storedKey:null,form:undefined};
+ const pageKey=allocateFormCode(profile),form={formId:pageKey,siteId:companyId,companyId,companyCode,pageUrl,mappings:{}};
+ profile.companyForms??={};profile.companyForms[pageKey]=form;
+ return {pageKey,storedKey:pageKey,form};
 }
 const forbidden = /(?:^|\.)(?:password|otp|cookie|accessToken|idNumber|passportNumber|bankAccount)(?:\.|$)/i;
 export function validateProfile(profile) {
@@ -79,9 +83,9 @@ export function contractQuestionChanges(contract,questions){
 }
 const privacyGrant=(profile,field)=>isAgreementCheckbox(field)?evaluateBusinessAuthorization(profile,{operation:'recruiting_privacy',phase:'classify',field}):{decision:'out_of_scope',reason:'NOT_AN_AGREEMENT_CHECKBOX'};
 const sensitiveMappingStatus=(profile,field,fields)=>authorizedProfileField(profile,field,{fields})?'authorized_profile':privacyGrant(profile,field).decision==='allow'?'authorized_privacy':'user_only';
-export function registerObservedQuestions(profile,{companyId,pageUrl,fields,observedAt,coverageRequired=false}){
+export function registerObservedQuestions(profile,{companyId,companyCode=null,pageUrl,fields,observedAt,coverageRequired=false}){
   profile.companyForms??={}; profile.fieldRegistry??={};
-  const {pageKey,form:old}=lookupCompanyForm(profile,companyId,pageUrl,{migrate:true});
+  const {pageKey,form:old}=lookupCompanyForm(profile,companyId,pageUrl,{create:true,companyCode});
   const questions=fields.filter(f=>!['button','submit','reset','hidden'].includes(f.type));
   const mappings=Object.fromEntries(Object.entries(old?.mappings||{}).map(([key,m])=>[key,{...m,active:false}])); const added=[];
   for(const field of questions){
@@ -148,7 +152,7 @@ export function registerTemplateContract(profile,{companyId,template,templateHas
   const audit=auditStoredContract(template);if(stage!=='construction'&&!audit.ready)throw Error('COMPLETE_EXECUTION_CONTRACT_REQUIRED');
   for(const page of template.pages){
     const sourceUrl=new URL(template.evidence.sourceUrl),pageUrl=sourceUrl.pathname.startsWith(page.pathPrefix)?sourceUrl.href:new URL(page.pathPrefix,sourceUrl).href;
-    const {pageKey,form}=lookupCompanyForm(profile,companyId,pageUrl,{migrate:true});
+    const {pageKey,form}=lookupCompanyForm(profile,companyId,pageUrl,{create:true});
     const prior=form||{companyId,pageUrl,mappings:{}};
     const fields=page.fields.map((f,index)=>({...structuredClone(f),index}));
     prior.executionContract={revision:2,status:stage==='construction'?(audit.ready?'construction_complete':'construction_incomplete'):'registered',validForCurrentInventory:true,templateId:template.id,templateVersion:template.version,templateHash,inventoryHash:prior.inventoryHash||null,sections:page.sections,groups:page.groups||[],fields,evidence:template.evidence,storageAudit:audit};

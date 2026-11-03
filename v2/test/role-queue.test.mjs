@@ -122,6 +122,23 @@ test('a new company form is not a prerequisite for opening its confirmed role',(
 test('re-importing the same confirmed batch returns the same queue and the same task IDs; no new tasks, no new tabs',()=>fixture(async({queues})=>{
  const a=await queues.import({}),b=await queues.import({});assert.equal(b.reused,true);assert.equal(b.queueId,a.queueId);assert.deepEqual(b.tasks.map(t=>t.taskId),a.tasks.map(t=>t.taskId));assert.equal((await queues.queues()).length,1);
 }));
+test('reordering confirmed companies updates the original queue and preserves every task state',async()=>{
+ const docs=[sample(),companyDoc({code:'C00002',name:'Second',batchId:'synthetic',order:2,sites:[site('S0002','https://two.example')],roles:[role('J000003','S0002','Role C','https://two.example/job/3',{'志愿顺序':1})]})];
+ const dir=await handoffWorkspace(docs.map(confirm));
+ try{
+  const catalog=await new CompanyDirectory({handoffDir:dir}).load(),queues=new RoleQueue({root:path.join(dir,'queue'),catalog,inputAdapter:handoffInput(dir)});
+  const first=await queues.import({});
+  const task=first.tasks[0],state={queueId:first.queueId,taskId:task.taskId,status:'ready_for_user_review',pageId:'original-tab',verifyRunId:'verified',fillRunId:'filled'};
+  await queues.put(task.taskId,state);
+  const second=await queues.import({companyOrder:['C00002','C00001'],authorizationRef:'explicit reorder'});
+  assert.equal(second.queueId,first.queueId);assert.equal(second.reordered,true);
+  assert.equal(second.tasks[0].companyCode,'C00002');assert.equal((await queues.queues()).length,1);
+  assert.deepEqual(await queues.read(task.taskId),state);
+  await assert.rejects(queues.get(first),/ROLE_QUEUE_HASH_MISMATCH/);
+  assert.equal((await queues.get(second)).id,first.queueId);
+  assert.equal((await queues.import({})).tasks[0].companyCode,'C00002');
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
 test('a changed confirmation makes a new queue that supersedes the old one; each role keeps its bound tab; task records stay unique',()=>fixture(async({queues,doc,save})=>{
  const a=await queues.import({});await queues.put(a.tasks[0].taskId,{queueId:a.queueId,taskId:a.tasks[0].taskId,pageId:'chrome:tab-a',status:'authenticated_at_role'});await queues.put(a.tasks[1].taskId,{queueId:a.queueId,taskId:a.tasks[1].taskId,status:'opened'});
  const changed=structuredClone(doc);changed['岗位'][0]['岗位名称']='Role B (renamed)';await save(confirm(changed));

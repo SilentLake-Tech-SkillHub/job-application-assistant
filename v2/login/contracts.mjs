@@ -1,3 +1,4 @@
+import {TaskRecords} from '../shared/task-records.mjs';
 import {unstableClassTokens,ruleApplies} from '../shared/selector-stability.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {readFile,writeFile,mkdir,rename} from 'node:fs/promises';
@@ -31,10 +32,10 @@ export function accountMatches(mask,phone){
 }
 export function resolveAccount(profile,c){const f=profile.facts?.[c.account.source];if(f?.status!=='known'||typeof f.value!=='string'||!f.sourceIds?.length)throw Error('LOGIN_ACCOUNT_FACT_REQUIRED');if(c.loginMethod==='user_operated'){if(!f.value.trim()||c.account.mask!=='exact')throw Error('LOGIN_ACCOUNT_TYPE_MISMATCH');return {identityValue:f.value.trim(),identityType:'display_exact',fingerprint:hash({value:f.value,sourceIds:f.sourceIds})};}const phone=f.value.replace(/\D/g,'');if(!/^1\d{10}$/.test(phone)||c.account.countryCode!=='+86')throw Error('LOGIN_ACCOUNT_TYPE_MISMATCH');return {phone,fingerprint:hash({phone,country:c.account.countryCode,sourceIds:f.sourceIds})};}
 export class PrivateStore{
-  constructor(root){this.root=root;}
+  constructor(root){this.root=root;this.taskRecords=new TaskRecords(root);}
   file(group,id){if(!['plans','runs','challenges','disclosures','acceptances','captures'].includes(group)||!keyOK(id,90))throw Error('INVALID_LOGIN_STORAGE_KEY');return path.join(this.root,group,id+'.json');}
-  async get(group,id){return JSON.parse(await readFile(this.file(group,id),'utf8'));}
-  async put(group,id,value){const file=this.file(group,id);await mkdir(path.dirname(file),{recursive:true,mode:0o700});const tmp=file+'.'+randomUUID()+'.tmp';await writeFile(tmp,JSON.stringify(value,null,2),{mode:0o600});await rename(tmp,file);return value;}
+  async get(group,id){const file=this.file(group,id);if(['runs','plans'].includes(group)){const value=await this.taskRecords.get(group,id);if(value!==undefined)return value;}return JSON.parse(await readFile(file,'utf8'));}
+  async put(group,id,value){const file=this.file(group,id);if(await this.taskRecords.put(group,id,value))return;await mkdir(path.dirname(file),{recursive:true,mode:0o700});const tmp=file+'.'+randomUUID()+'.tmp';await writeFile(tmp,JSON.stringify(value,null,2),{mode:0o600});await rename(tmp,file);return value;}
 }
 
 export const matchesAccount=(actual,resolved)=>resolved.identityType==='display_exact'?typeof actual==='string'&&actual.trim()===resolved.identityValue:accountMatches(actual,resolved.phone);

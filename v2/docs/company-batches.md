@@ -1,13 +1,13 @@
 # 双通道公司批次
 
-新批次从 `company_batch_create({authorizationRef})` 开始，读取用户正向评审确认后的各公司宽表 `岗位交接/公司/<公司编码>.json`（见 role-entry.md）。此接口在 MCP 内取出未提交公司及岗位并冻结次序（任务只存编码与顺序），不转换 Excel。再调用 `company_batch_take({batchId,batchHash})` 原子领取、切分任务。默认 `companiesPerChannel=10`，Chrome 与 IAB 各至多十家公司；不是每家公司十个岗位或每个窗口十页。实际页面上限另行管理。
+`company_batch_create({authorizationRef,browserChannels?,companyOrder?})` 读取正向评审确认后的公司宽表，按公司和岗位编码派发；不转换 Excel，不打开网站。`company_batch_take({batchId,batchHash})` 原子领取。每通道默认最多十家公司，同公司多个岗位只占一个名额；共享账号范围按已核实的 loginScope 固定，不仅凭平台名称合并账号。
 
-同公司全部岗位属于一个公司任务；目录中已核实的 `loginScope`（否则为公司 origin）固定在同一通道。平台共享登录必须有资产依据，不能仅因为同为飞书域名就合并账号。保持公司与岗位的用户次序，不把分配通道的枚举次序改写为志愿顺序。公司间独立推进；同账号登录只做一次，再复核各岗位页身份。
+浏览器要求的唯一运行来源是 `runs/batch-browser-policy.json` 的当前批次 `browserChannels`；创建接口的同名参数覆盖它，不进入公司选岗、岗位链接或材料的确认指纹。创建时计算“本批要求 ∩ 本执行端已登记且当前可用的投递通道”；交集为空时自动使用可用通道，并在 `channelSelection` 返回要求、可用通道、实际通道与切换原因。没有能力记录或没有任何可用执行器仍拒绝。搜索可用与投递可用分开判定，模型可操作的内置浏览器不等于组件可填写的执行器。
 
-默认通道只取能力文件（内置浏览器三步全过时双开，否则只用 Chrome 分身，见 host-integration.md）；输入的每家公司 `批次.执行.浏览器通道` 可在此范围内收窄，目录投影为 `execution.browserChannels`；冻结分配前核实对应桥在线。缺能力文件返回 `BROWSER_CAPABILITY_DETECTION_REQUIRED`。浏览器政策只见工作区 `产品管理/求职配置.md`。返回任务必须由相应真实执行器执行：Chrome 可为已核实插件、专用托管或明确CDP，IAB 必须为宿主内置浏览器SDK。两个登录态不交换 Cookie。MCP 不伪装拥有 IAB，也不把 `browserExecuted:false` 改成完成。没有对应宿主执行能力时记录具体阻塞，不自动改为 Chrome。
+重复创建保留本批浏览器要求；显式传入新的 `browserChannels` 才更新要求。原队列因确认内容变化而必须替换时，仍保留本批要求。运行中通道失效时重新按同一规则选择；受影响任务保留旧页面信息，但要求在实际新通道核实岗位和账号后再填。不能把旧页面绑定复制成新浏览器的有效证明，也不关闭已有页面。通道政策统一经本批参数更新，不另设按公司只改运行记录的通道限制接口。
 
-`company_batch_record` 绑定公司、通道与租约令牌，可记录 running、waiting_for_user、blocked；ready_for_user_review 必须绑定实际 MCP 填写运行，覆盖公司全部岗位的当前页面核验。blocked 必须给出原因。租约过期转受阻，不自动重试验证码或原页面。`company_batch_status` 返回各公司状态且隐藏租约令牌。最终提交始终不在本轮准备接口中。
+同一确认内容重复导入返回原队列。显式 `companyOrder` 调整次序时更新原队列的 order 和 queueHash，保留 taskId、任务状态、页面绑定及已有核验引用；调用方使用返回的新 queueHash。公司批次同步更新队列引用并保留租约。确认内容确实改变时才替换队列并按原有规则重新核实受影响任务。
 
-采集支持 `capture_controls({companyId,pageUrl,compact:true})`。完整控件快照保存在私有 runs；返回 captureId、结构数量及与前一快照的差异。重复条目合并结构比较，位置变化不强制重新建库；类型、必填、选项和渲染器的变化仍列为差异。结构匹配率不等于填写成功率，不替代条件分支和独立读回。
+`company_batch_record` 绑定公司、通道和租约令牌。ready_for_user_review 必须覆盖公司全部岗位的真实独立核验；blocked 需有技术交接回执。租约过期不会自动重试验证码或提交。`company_batch_status` 隐藏租约令牌并返回通道选择依据。
 
-`company_batch_restrict_channels` 必须显式传 `companyIds`，仅收窄这些公司的 `allowedChannels`，不改变其它公司或全批策略。旧批次缺真实执行器身份时重新绑定原页，不自动迁移到其它浏览器。
+控件、结构、选项按代码分配的表单编码覆盖保存。每个任务的运行记录集中在一份当前文件中；批次关闭清理该批的任务运行记录并使旧核验引用不可用。表单采集证据和官网回执证据按各自固定对象保存，不当作可随批次丢弃的临时日志。所有准备接口均不包含最终提交。

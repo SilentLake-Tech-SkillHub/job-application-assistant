@@ -19,7 +19,7 @@ test('company concurrency releases another company but retains within-company ro
 test('creating the same confirmed batch again returns the existing run instead of a competing second batch',()=>fixture(async({batch})=>{const a=await batch.create({authorizationRef:'first'}),b=await batch.create({authorizationRef:'second'});assert.equal(b.reused,true);assert.equal(b.batchId,a.batchId);assert.equal(b.queue.queueId,a.queue.queueId);assert.deepEqual(b.queue.tasks.map(t=>t.taskId),a.queue.tasks.map(t=>t.taskId));const first=await batch.take(a);assert.ok(first.assignments.length>0);const again=await batch.take({batchId:b.batchId,batchHash:b.batchHash});assert.equal(again.assignments.length,0);}));
 test('runs created before the queue index are still found through the scope owners and released',()=>fixture(async({batch,store,addRole})=>{
  const a=await batch.create({authorizationRef:'first'});await batch.take(a);await store.put('runs','company-batch-by-queue',{});
- await addRole(0);const b=await batch.create({authorizationRef:'second'});assert.equal((await batch.take(b)).assignments.length,20);assert.ok((await store.get('runs',a.batchId)).closedAt);
+ await addRole(0);const b=await batch.create({authorizationRef:'second'});assert.equal((await batch.take(b)).assignments.length,20);await assert.rejects(store.get('runs',a.batchId),{code:'ENOENT'});
 }));
 test('a changed confirmation supersedes the old queue and run: old run closed, its login scopes released, page bindings carried by role',()=>fixture(async({batch,queues,addRole})=>{
  const a=await batch.create({authorizationRef:'first'}),taken=await batch.take(a),t0=taken.assignments[0].tasks[0];
@@ -50,38 +50,51 @@ test('company completion requires an independent receipt for the exact role mate
 },1));
 
 
-test('confirmed company browser channels survive import and allow a Chrome-only exception without changing others',()=>fixture(async({batch,setChannels})=>{
- await setChannels(0,['chrome']);await setChannels(1,['chrome']);await setChannels(2,['iab']);
- const b=await batch.create({authorizationRef:'confirmed per-company channels'}),a=(await batch.take(b)).assignments;
- assert.equal(a[0].channel,'chrome');assert.equal(a[1].channel,'chrome');assert.equal(a[2].channel,'iab');
- assert.deepEqual((await batch.status(b)).companies.map(c=>c.allowedChannels),[['chrome'],['chrome'],['iab'],['chrome','iab']]);
-},4));
-test('missing true IAB refuses the default batch before creating a queue or changing an old assignment',()=>fixture(async({batch,queues})=>{
- batch.browser={executionCapabilities:async()=>({channels:{chrome:{available:true},iab:{available:false,reason:'IAB_HOST_BRIDGE_REQUIRED'}},capability:{status:'detected',channels:['chrome','iab']}})};
- await assert.rejects(batch.create({authorizationRef:'dual default'}),/IAB_HOST_BRIDGE_REQUIRED/);assert.equal((await queues.queues()).length,0);
-},2));
-test('explicitly confirmed Chrome-only company batch does not require absent IAB',()=>fixture(async({batch,setChannels})=>{
- await setChannels(0,['chrome']);batch.browser={executionCapabilities:async()=>({channels:{chrome:{available:true},iab:{available:false}}})};
- const b=await batch.create({authorizationRef:'one company Chrome-only'});assert.equal((await batch.take(b)).assignments[0].channel,'chrome');
+test('legacy confirmed IAB never locks a Chrome-only executor and preference is a batch parameter',()=>fixture(async({batch,setChannels,queues})=>{
+ await setChannels(0,['iab']);batch.browser={executionCapabilities:async()=>({channels:{chrome:{available:true},iab:{available:false}},capability:{status:'detected',channels:['chrome']}})};
+ const b=await batch.create({authorizationRef:'confirmed batch',browserChannels:['iab']});
+ assert.deepEqual(b.channelSelection.channels,['chrome']);assert.equal(b.channelSelection.automaticFallback,true);
+ assert.equal((await batch.take(b)).assignments[0].channel,'chrome');
+ const again=await batch.create({authorizationRef:'continue'});assert.equal(again.batchId,b.batchId);assert.equal(again.queue.queueId,b.queue.queueId);assert.deepEqual(again.channelSelection.requestedChannels,['iab']);assert.equal((await queues.queues()).length,1);
 },1));
-test('channel restriction requires company scope and preserves unselected company policies and page state',()=>fixture(async({batch,queues})=>{
- const b=await batch.create({authorizationRef:'dual'}),assignments=(await batch.take(b)).assignments,selected=assignments.find(a=>a.channel==='iab'),other=assignments.find(a=>a.channel==='iab'&&a.companyId!==selected.companyId);
- for(const a of [selected,other])await queues.put(a.tasks[0].taskId,{pageId:'iab:'+a.companyId,returnUrl:a.tasks[0].url,status:'ready_to_fill'});
- await assert.rejects(batch.restrictChannels({...b,channels:['chrome'],authorizationRef:'only selected firm'}),/COMPANY_SCOPE_REQUIRED/);
- const result=await batch.restrictChannels({...b,companyIds:[selected.companyId],channels:['chrome'],authorizationRef:'only selected firm'});
- assert.equal(result.moved.length,1);assert.equal(result.moved[0].companyId,selected.companyId);
- const status=await batch.status(b);assert.deepEqual(status.channels,['chrome','iab']);assert.deepEqual(status.companies.find(c=>c.companyId===other.companyId).allowedChannels,['chrome','iab']);
- assert.equal((await queues.read(other.tasks[0].taskId)).pageId,'iab:'+other.companyId);
+test('an unavailable default IAB is removed automatically before queue creation',()=>fixture(async({batch})=>{
+ batch.browser={executionCapabilities:async()=>({channels:{chrome:{available:true},iab:{available:false}},capability:{status:'detected',channels:['chrome','iab']}})};
+ const b=await batch.create({authorizationRef:'default available'});assert.deepEqual((await batch.status(b)).channels,['chrome']);
+},2));
+test('changing the batch preference preserves queue identity and requires fresh page binding only for moved tasks',()=>fixture(async({batch,queues})=>{
+ const b=await batch.create({authorizationRef:'dual'}),assignments=(await batch.take(b)).assignments,selected=assignments.find(a=>a.channel==='iab'),kept=assignments.find(a=>a.channel==='chrome');
+ for(const a of [selected,kept])await queues.put(a.tasks[0].taskId,{queueId:b.queue.queueId,taskId:a.tasks[0].taskId,pageId:a.channel+':'+a.companyId,returnUrl:a.tasks[0].url,status:'ready_to_fill'});
+ const updated=await batch.create({authorizationRef:'whole batch Chrome',browserChannels:['chrome']});
+ assert.equal(updated.batchId,b.batchId);assert.equal(updated.queue.queueId,b.queue.queueId);
+ assert.equal((await queues.read(kept.tasks[0].taskId)).status,'ready_to_fill');
+ assert.equal((await queues.read(selected.tasks[0].taskId)).status,'channel_changed_require_role_open');
  assert.equal((await queues.read(selected.tasks[0].taskId)).previousBrowserBinding.pageId,'iab:'+selected.companyId);
+ assert.deepEqual((await batch.status(b)).channels,['chrome']);
 },4));
-test('default channels come only from the recorded capability file; without it no batch is created',()=>fixture(async({batch,queues})=>{
- batch.browser={executionCapabilities:async()=>({channels:{chrome:{available:true},iab:{available:true}},capability:{status:'detection_required',channels:[]}})};
- await assert.rejects(batch.create({authorizationRef:'no capability'}),/BROWSER_CAPABILITY_DETECTION_REQUIRED/);assert.equal((await queues.queues()).length,0);
- batch.browser={executionCapabilities:async()=>({channels:{chrome:{available:true},iab:{available:true}},capability:{status:'detected',channels:['chrome'],mode:'single'}})};
- const b=await batch.create({authorizationRef:'chrome only host'});assert.deepEqual((await batch.status(b)).companies.map(c=>c.allowedChannels),[['chrome'],['chrome']]);
+test('batch browser preference survives a necessary queue replacement after confirmed roles change',()=>fixture(async({batch,addRole})=>{
+ const first=await batch.create({authorizationRef:'IAB preference',browserChannels:['iab']});await addRole(0);
+ const second=await batch.create({authorizationRef:'new confirmed role'});assert.notEqual(second.queue.queueId,first.queue.queueId);assert.deepEqual(second.channelSelection.requestedChannels,['iab']);
 },2));
-test('a detected host without any usable channel (Chrome not installed, no built-in browser) stops with one explicit next step; an explicit batch channel still works',()=>fixture(async({batch,queues,setChannels})=>{
- batch.browser={executionCapabilities:async()=>({channels:{chrome:{available:true},iab:{available:false}},capability:{status:'detected',channels:[],iab:'agent_only',chrome:'not_installed'}})};
- await assert.rejects(batch.create({authorizationRef:'agent-only host'}),error=>error.message==='NO_USABLE_BROWSER_CHANNEL'&&/chrome-clone\.mjs status/.test(error.details.nextStep)&&!/Playwright/.test(error.details.nextStep));assert.equal((await queues.queues()).length,0);
- await setChannels(0,['chrome']);await setChannels(1,['chrome']);const b=await batch.create({authorizationRef:'user confirmed chrome'});assert.deepEqual((await batch.status(b)).companies.map(c=>c.allowedChannels),[['chrome'],['chrome']]);
+test('company reorder retains the existing batch, leases, queue and task state',()=>fixture(async({batch,queues})=>{
+ const first=await batch.create({authorizationRef:'original'}),a=(await batch.take(first)).assignments[0],task=a.tasks[0];
+ const state={queueId:first.queue.queueId,taskId:task.taskId,pageId:'same-tab',status:'ready_for_user_review',verifyRunId:'v'};await queues.put(task.taskId,state);
+ const second=await batch.create({authorizationRef:'reorder',companyOrder:['C00002','C00001']});
+ assert.equal(second.batchId,first.batchId);assert.equal(second.queue.queueId,first.queue.queueId);assert.equal(second.queue.tasks[0].companyCode,'C00002');assert.deepEqual(await queues.read(task.taskId),state);assert.equal((await batch.take(second)).assignments.length,0);
 },2));
+test('missing capability records or no recorded usable executor refuse before any queue is written',()=>fixture(async({batch,queues})=>{
+ batch.browser={executionCapabilities:async()=>({channels:{chrome:{available:true}},capability:{status:'detection_required',channels:[]}})};
+ await assert.rejects(batch.create({authorizationRef:'missing',browserChannels:['chrome']}),/BROWSER_CAPABILITY_DETECTION_REQUIRED/);
+ batch.browser={executionCapabilities:async()=>({channels:{chrome:{available:false}},capability:{status:'detected',channels:['chrome']}})};
+ await assert.rejects(batch.create({authorizationRef:'none'}),/NO_USABLE_BROWSER_CHANNEL/);assert.equal((await queues.queues()).length,0);
+},2));
+
+test('closing preparation removes task runs and old batch records while retaining page and durable form evidence',()=>fixture(async({batch,store,queues})=>{
+ const b=await batch.create({authorizationRef:'prepare'}),task=b.queue.tasks[0];await batch.take(b);
+ await store.put('runs','verify',{id:'verify',taskId:task.taskId,operation:'verify_current',status:'verified'});
+ await store.put('runs','form-structure-F000001',{operation:'rea_form_structure'});
+ await queues.put(task.taskId,{queueId:b.queue.queueId,taskId:task.taskId,pageId:'original-page',status:'ready_for_user_review',verifyRunId:'verify'});
+ await batch.closePreparation({...b,authorizationRef:'close this preparation',reason:'confirmed replacement'});
+ await assert.rejects(store.get('runs','verify'),{code:'ENOENT'});await assert.rejects(store.get('runs',b.batchId),{code:'ENOENT'});
+ assert.equal((await store.get('runs','form-structure-F000001')).operation,'rea_form_structure');assert.deepEqual(await store.get('runs','browser-channel-bindings'),{});
+ const state=await queues.read(task.taskId);assert.equal(state.pageId,'original-page');assert.equal(state.status,'rebind_required');assert.equal(state.verifyRunId,undefined);
+},1));

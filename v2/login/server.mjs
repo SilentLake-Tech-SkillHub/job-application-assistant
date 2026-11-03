@@ -1,3 +1,4 @@
+import {withTaskRecords,taskRecordScope} from '../shared/task-records.mjs';
 import {recordObservation} from '../shared/application-outcome.mjs';
 import {safeControlErrorDetails} from '../shared/control-error-details.mjs';
 import {runtimeIdentity} from '../shared/runtime-identity.mjs';
@@ -31,11 +32,11 @@ const appStore=new Store(process.env.RECRUITING_PRIVATE_DIR||path.join(path.dirn
 const flow=new RoleFlow({queues,login:engine,browser:browser.broker,templates:async (companyId,roleId)=>{const bindings=await appStore.get('templates','company-bindings');let roles={};try{roles=await appStore.get('templates','role-bindings');}catch(e){if(e.code!=='ENOENT')throw e;}const templateId=roles[companyId]?.[roleId]||bindings[companyId];return templateId?appStore.get('templates',templateId):null;},onObservation:o=>recordObservation({...o,handoffDir:directory.handoffDir})});
 const packageInfo=JSON.parse(await readFile(path.join(root,'package.json'),'utf8'));
 const server=new McpServer({name:'recruiting-login-v2',version:packageInfo.version});
-const registerTool=(name,definition,handler)=>registerWorkflowTool(server,name,definition,handler);
+const registerTool=(name,definition,handler)=>registerWorkflowTool(server,name,definition,args=>withTaskRecords({taskId:args.taskId,queueId:args.queueId,tool:name},()=>handler(args)));
 const output=v=>({content:[{type:'text',text:JSON.stringify(v)}]});
-const wrap=fn=>async args=>{try{return output(await fn(args));}catch(e){const error=safeCode(e),failureEvidenceId=randomUUID(),details=safeControlErrorDetails(e.details);await appStore.put('runs',failureEvidenceId,{id:failureEvidenceId,operation:'mcp_error',companyId:args.companyId||null,taskId:args.taskId||null,error,...(details?{details}:{}),observedAt:new Date().toISOString()});return {isError:true,...output(workflowEnvelope({error,failureEvidenceId,...(details?{details}:{})}))};}};
+const wrap=fn=>async args=>{try{return output(await fn(args));}catch(e){const error=safeCode(e),failureEvidenceId=args.taskId?randomUUID():'error-'+(typeof args.companyId==='string'&&/^[CS][0-9]+$/.test(args.companyId)?args.companyId:'host')+'-'+(taskRecordScope().tool||'operation'),details=safeControlErrorDetails(e.details);await appStore.put('runs',failureEvidenceId,{id:failureEvidenceId,operation:'mcp_error',companyId:args.companyId||null,taskId:args.taskId||null,error,...(details?{details}:{}),observedAt:new Date().toISOString()});return {isError:true,...output(workflowEnvelope({error,failureEvidenceId,...(details?{details}:{})}))};}};
 const location={companyId:z.string(),pageUrl:z.string().url()};
-const plan={planId:z.string().uuid(),planHash:z.string().length(64)};
+const plan={planId:z.string(),planHash:z.string().length(64)};
 const authorization=z.object({login:z.literal(true),evidence:z.string().min(1)});
 const queueTask={queueId:z.string().uuid(),queueHash:z.string().length(64),taskId:z.string().uuid()};
 registerTool('runtime_info',{description:'只读当前登录MCP实际版本，不连接或重启浏览器。',annotations:{readOnlyHint:true}},wrap(()=>({runtime:residentRuntime,version:packageInfo.version,capabilities:['role_queue_import','role_open','role_resume','role_enter_application','role_report_link_failure','role_close_extra_pages','role_reload_page','human_verification','user_operated_session_identity'],browserAccess:false})));
@@ -58,7 +59,7 @@ registerTool('login_capture',{description:'内部建库：盘点当前公司登�
 registerTool('login_inspect',{description:'只读核对登录页、账号匹配和阻塞弹窗；不以账号文本单独证明登录成功。',inputSchema:location,annotations:{readOnlyHint:true}},wrap(a=>engine.inspect(a)));
 registerTool('login_compile',{description:'离线编译公司登录方案，绑定公司资产和私有账号事实的 Hash；不访问页面。',inputSchema:location},wrap(a=>engine.compile(a)));
 registerTool('login_prepare',{description:'运行冻结方案：复用有效登录态，或处理已知阅读弹窗、选区号、填手机号。登录同意框只看主档业务授权开关：为1直接勾选并读回，不打开声明全文；为0或未设定时组件不勾，交用户在同一标签完成登录后调用 role_resume。',inputSchema:{...plan,authorization}},wrap(a=>engine.prepare(a)));
-registerTool('login_request_sms',{description:'通过真实按钮请求短信，限制重发次数与冷却时间；返回用户验证码或图形验证交接。绝不存验证码。',inputSchema:{...plan,authorization,acceptanceId:z.string().uuid()}},wrap(a=>engine.send(a)));
+registerTool('login_request_sms',{description:'通过真实按钮请求短信，限制重发次数与冷却时间；返回用户验证码或图形验证交接。绝不存验证码。',inputSchema:{...plan,authorization,acceptanceId:z.string()}},wrap(a=>engine.send(a)));
 registerTool('login_verify_otp',{description:'仅使用用户本次提供的临时短信码，真实填写并点击登录，核对账号及登录页消失；不落盘验证码。',inputSchema:{...plan,authorization,challengeId:z.string().uuid(),code:z.string().regex(/^\d{4,8}$/)}},wrap(a=>engine.verify(a)));
 registerTool('login_resume_verification',{description:'用户手动完成图形验证码后只读核验；验证码仍在则继续交接，消失后核实短信倒计时。不拖动、不重发短信。',inputSchema:{...plan,challengeId:z.string().uuid()},annotations:{readOnlyHint:true}},wrap(a=>engine.resumeVerification(a)));
 registerTool('login_batch_prepare',{description:'一次调用准备多个公司的登录；同账号 origin 串行，集中返回需用户参与的步骤。不会批量请求短信。',inputSchema:{tasks:z.array(z.object(plan)).min(1).max(20),concurrency:z.number().int().min(1).max(5).default(3),authorization}},wrap(a=>engine.batch(a)));

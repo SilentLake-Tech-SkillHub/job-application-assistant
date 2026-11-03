@@ -32,3 +32,15 @@ python3 hooks/conversation_scope.py disable --scope-file <private-scope.json>
 随后由执行 Agent 在自己的宿主上下文调用作用域 enable，并在同一真实会话验证 UserPromptSubmit、PreToolUse、PostToolUse 和 continuation 文件。错误响应可能由宿主包装为 `Error: {JSON}`，仍必须保留技术待办。每个阶段的 pending 在 SDK 校验之前登记；参数失败不能使 Stop 静默放行。只有组件已核实的用户等待、完整审阅或技术交接允许结束。代码维护/纯查询无需伪造投递回执。
 
 真实日志没有 Hook 事件时，应先确认插件实际加载；不能仅根据会话恢复时间推断是 resumed-agent 接线故障。宿主重载和 MCP 子进程重载分别核实，保持原浏览器、原页面及未保存内容。
+
+## 纯文字工具与文件参数
+
+哪些宿主工具只传文字（待办、提问、发消息）、哪些参数名表示文件，只在 `hooks/tool-arguments.json` 定义一次。本包 `hooks/workflow_hook.py` 与工作区搜索组件的数据保护、组件软锁 Hook 都读这一份：纯文字工具只有在参数任意层级都没有文件参数时才按纯文字放行，带任何文件参数就按文件操作检查。文件缺失或无法解析时不放行任何纯文字工具。新增宿主工具名或文件参数名只改这个文件。
+
+## 执行登记有效期
+
+登记保存 registeredAt 和 expiresAt，固定十二小时。Hook 每次读取都在同一文件锁下移除过期登记；重复读取或有效期内重新 enable 不滑动续期。没有时间戳的旧登记不会永久有效。
+
+上线时先与执行端核实当前会话并停靠，再由维护对话运行 `conversation_scope.py migrate --scope-file <scope> --retain-session <已核实且已登记的会话> --authorization-ref <依据>`：仅保留该旧登记并从上线时刻计时，已有时间戳不会重置。尚未登记的执行端须自己 enable，维护端不能代为新建执行资格。
+
+维护对话可按明确依据用 `disable --target-session <旧会话> --authorization-ref <依据>` 注销指定旧登记，参数可重复；启用操作不能指定他人身份，正在执行的对话不能管理其它会话。

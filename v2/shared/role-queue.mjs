@@ -1,6 +1,7 @@
 import {readFile,writeFile,mkdir,rename,unlink,readdir} from 'node:fs/promises';
 import {createHash,randomUUID} from 'node:crypto';
 import path from 'node:path';
+import {acquireLease,leasePath,defaultLeaseRoot} from './leases.mjs';
 import {assertHandoffUnchanged,readHandoffCompanies,roleView,combinedSha} from './company-directory.mjs';
 export const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 // 任务编号固定：同一批次的同一岗位永远是同一个 taskId，重新导入时页面绑定按它延续。
@@ -13,6 +14,10 @@ export class RoleQueue{
  async put(id,value){await mkdir(this.root,{recursive:true,mode:0o700});const file=this.file(id),tmp=file+'.'+randomUUID()+'.tmp';await writeFile(tmp,JSON.stringify(value,null,2),{mode:0o600});await rename(tmp,file);return value;}
  async read(id){return JSON.parse(await readFile(this.file(id),'utf8'));}
  async import(args){
+  const release=await acquireLease(leasePath(defaultLeaseRoot(),'queue-import:'+path.resolve(this.root)),{waitMs:30000,busyCode:'ROLE_QUEUE_BUSY'});
+  try{return await this.importUnlocked(args);}finally{await release();}
+ }
+ async importUnlocked(args){
   const {input,source}=await this.inputAdapter(args);let tasks=[],protectedRoles=[];
   if(source?.kind!=='handoff'||input.schemaVersion!==1||!Array.isArray(input.companies)||!input.batchId)throw Error('HANDOFF_BATCH_REQUIRED');
   if(input.confirmation?.status!=='confirmed'||!input.confirmation.reference)throw Error('COMPANY_PLAN_CONFIRMATION_REQUIRED');
@@ -47,12 +52,20 @@ export class RoleQueue{
   if(args.batchPolicy&&(!args.batchPolicy.authorizationRef||args.batchPolicy.mode!=='parallel_companies'))throw Error('COMPANY_BATCH_POLICY_REQUIRED');
   const executionMode=args.batchPolicy?'parallel_companies':upstreamMode;
   const parallelRoles=upstreamMode==='parallel_roles'||Boolean(args.batchPolicy?.parallelRoles);
-  const inputHash=digest(input),shape=q=>digest({executionMode:q.executionMode,parallelRoles:q.parallelRoles,companiesPerChannel:q.batchPolicy?.companiesPerChannel||null,channels:q.batchPolicy?.channels||null,tasks:q.tasks.map(t=>[t.taskId,t.companyId,t.order])});
+  const inputHash=digest(input),shape=q=>digest({executionMode:q.executionMode,parallelRoles:q.parallelRoles,companiesPerChannel:q.batchPolicy?.companiesPerChannel||null,tasks:q.tasks.map(t=>[t.taskId,t.companyId]).sort((a,b)=>a[0].localeCompare(b[0]))});
   // 按创建时间从旧到新处理：同一岗位在多个旧队列里都有绑定时，最新的那条生效。
   const previous=(await this.queues()).filter(q=>q.batchId===input.batchId).sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt)));
   // 同一批次、确认内容和执行方式都没变：返回原队列，不新建（重复导入不产生新任务、新标签）。
   const same=previous.find(q=>q.inputHash===inputHash&&shape(q)===shape({executionMode,parallelRoles,batchPolicy:args.batchPolicy||null,tasks}));
-  if(same)return {...await this.public(same),reused:true};
+  if(same){
+   const reordered=!!sequence&&digest(same.tasks)!==digest(tasks);
+   if(reordered){
+    if(!String(args.authorizationRef||args.batchPolicy?.authorizationRef||'').trim())throw Error('QUEUE_REORDER_AUTHORIZATION_REQUIRED');
+    same.tasks=tasks;same.orderAuthorization=args.authorizationRef||args.batchPolicy.authorizationRef;
+    delete same.queueHash;same.queueHash=digest(same);await this.put(same.id,same);
+   }
+   return {...await this.public(same),reused:true,reordered};
+  }
   const queue={executionMode,parallelRoles,batchPolicy:args.batchPolicy||null,id:randomUUID(),createdAt:new Date().toISOString(),inputKind:'confirmed-handoff-batch',batchId:input.batchId,version:input.version||1,source,inputHash,tasks,protectedRoles,submission:'forbidden'};
   queue.queueHash=digest(queue);await this.put(queue.id,queue);
   const carried=await this.supersede(previous,queue);

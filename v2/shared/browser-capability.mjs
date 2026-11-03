@@ -17,8 +17,15 @@ export {readChromeVersion};
 // Built-in passes all three -> channels ['chrome','iab'] (dual); otherwise the clone only.
 // Re-detection happens only for a new host or on the user's request; a Chrome update only refreshes
 // the recorded version (a cheap Info.plist read).
-export const CAPABILITY_SCHEMA=2,DETECTOR_VERSION=2;
+export const CAPABILITY_SCHEMA=2,DETECTOR_VERSION=3;
 export const REQUIRED_ACTIONS=['navigate','evaluate','fill','click','screenshot','upload'];
+export const SEARCH_ACTIONS=['navigate','evaluate'];
+export function iabUsage(iab){
+ const verified=iab?.identity?.verified===true;
+ const application=iab?.result==='usable';
+ const search=application||iab?.declared===true&&iab?.exposure==='agent_only'||verified&&SEARCH_ACTIONS.every(action=>iab?.actions?.[action]===true);
+ return {search:{usable:!!search,reason:search?'search_interface_available':iab?.reason||iab?.result||'not_detected'},application:{usable:application,reason:application?'component_actions_and_identity_verified':iab?.reason||iab?.result||'not_detected'}};
+}
 export function capabilityFile(env=process.env){const f=env.RECRUITING_BROWSER_CAPABILITY_FILE;if(!f||!path.isAbsolute(f))throw Error('BROWSER_CAPABILITY_FILE_REQUIRED');return f;}
 export function capabilityHostId(env=process.env){const id=env.RECRUITING_HOST_ID;if(!id||!/^[a-z][a-z0-9-]{1,31}$/.test(id))throw Error('RECRUITING_HOST_ID_REQUIRED');return id;}
 // A schema-1 file (Chrome via a host plugin) is obsolete: it is treated as "not detected", never reused.
@@ -32,8 +39,8 @@ export async function hostCapability({file,host,env}){
  const doc=await readCapabilities(file),own=doc.hosts[host];
  if(!own||!doc.chrome)return {status:'detection_required',host,entry:null,reason:'BROWSER_CAPABILITY_DETECTION_REQUIRED'};
  if(env){let config=null;try{config=cloneConfig(env);}catch{}if(config&&(config.profileDir!==doc.chrome.profileDir||config.port!==doc.chrome.cdpPort))return {status:'config_mismatch',host,entry:null,reason:'CHROME_CLONE_CONFIG_MISMATCH',expected:{profileDir:doc.chrome.profileDir,cdpPort:doc.chrome.cdpPort},actual:{profileDir:config.profileDir,cdpPort:config.port}};}
- const channels=channelsFor(doc.chrome,own.iab);
- return {status:'detected',host,entry:{...own,chrome:doc.chrome,channels,mode:modeOf(channels)}};
+ const usage=iabUsage(own.iab),channels=channelsFor(doc.chrome,{result:usage.application.usable?'usable':'unavailable'}),searchChannels=channelsFor(doc.chrome,{result:usage.search.usable?'usable':'unavailable'});
+ return {status:'detected',host,entry:{...own,iab:{...own.iab,...usage},chrome:doc.chrome,channels,applicationChannels:channels,searchChannels,mode:modeOf(channels)}};
 }
 export const channelsOf=entry=>Array.isArray(entry?.channels)?entry.channels.filter(ch=>['iab','chrome'].includes(ch)):[];
 export async function refreshChromeVersion({file,now=()=>new Date().toISOString(),read}){
@@ -106,7 +113,8 @@ export async function detectBrowserCapability({file,host,agent,adapter,fileUploa
    try{await candidate.tab?.close?.();}catch{}
   }finally{await probe.close();await rm(dir,{recursive:true,force:true});}
  }else record.iab=fixed||{declared:false,result:'not_declared'};
+ record.iab={...record.iab,...iabUsage(record.iab)};
  const doc=await readCapabilities(file);doc.hosts[host]=record;await writeCapabilities(file,doc);
  const channels=channelsFor(chrome,record.iab);
- return {...record,chrome,channels,mode:modeOf(channels)};
+ return {...record,chrome,channels,applicationChannels:channels,searchChannels:channelsFor(chrome,{result:record.iab.search.usable?'usable':'unavailable'}),mode:modeOf(channels)};
 }

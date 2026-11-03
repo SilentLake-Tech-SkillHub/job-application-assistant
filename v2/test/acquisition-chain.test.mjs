@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {assertAcquisitionChain,assertAcquiredStructure,assertCapturedAcquisition,acquisitionStructureId,latestStructurePointer,recordReaInspection,recordAcquisitionChain} from '../shared/acquisition-chain.mjs';
+import {assertAcquisitionChain,assertAcquiredStructure,assertCapturedAcquisition,acquisitionStructureId,recordReaInspection,recordAcquisitionChain} from '../shared/acquisition-chain.mjs';
 import {continuationFor} from '../shared/workflow-continuation.mjs';
 import {FormRouter} from '../shared/form-route.mjs';
 import {technicalHandoffReasons} from '../shared/workflow-contract.mjs';
 import {observedSeal} from './fixtures/observed-seal.mjs';
 import {registerObservedQuestions,assertQuestionsMapped} from '../shared/profile.mjs';
 import {hash} from '../shared/engine.mjs';
+import {formAssetKeys} from '../shared/form-identity.mjs';
 
 function fixture(extraFields=[]){
  const template={id:'pipeline',version:1,evidence:{sourceUrl:'https://example.test/form',observedAt:'synthetic'},pages:[{pathPrefix:'/form',fields:[{id:'name',label:'Name',source:'person.name',kind:'text',control:{type:'text',valueType:'string',readbackType:'string'},read:{selector:'#name',kind:'value'},actions:[{method:'fill',selector:'#name'}]},...extraFields]}]};
@@ -16,7 +17,7 @@ function fixture(extraFields=[]){
  return {...acquired,assets,store};
 }
 test('a sealed asset keeps the full collector and construction chain through version increment',async()=>{
- const f=fixture();assert.equal((await assertAcquisitionChain(f.template,{store:f.store,companyId:'example'})).version,1);
+ const f=fixture();assert.equal((await assertAcquisitionChain(f.template,{store:f.store,companyId:'example'})).version,2);
 });
 test('coverage flags and a valid seal cannot release an asset without collector provenance',async()=>{
  const f=fixture();delete f.template.evidence.pipeline;
@@ -35,7 +36,7 @@ test('missing raw REA, native structure, script integrity and incomplete structu
  ]){const f=fixture(),structure=structuredClone(f.structure);change(structure);assert.throws(()=>assertAcquiredStructure(structure,f.capture,'example'),new RegExp(reason));}
 });
 test('old construction cannot survive capture overwrite, changed field actions or missing receipts',async()=>{
- for(const change of [f=>f.capture.controls[0].label='Other question',f=>f.template.pages[0].fields[0].actions[0].selector='#other',f=>f.assets.delete(f.receipt.structureId)]){
+ for(const change of [f=>f.capture.controls[0].label='Other question',f=>f.template.pages[0].fields[0].actions[0].selector='#other',f=>f.assets.delete(formAssetKeys(f.capture.formId).structure)]){
   const f=fixture();change(f);await assert.rejects(assertAcquisitionChain(f.template,{store:f.store,companyId:'example'}),/ACQUISITION_CONTROL_CAPTURE_CHANGED|ACQUISITION_EVIDENCE_CHANGED|MCP_CONSTRUCTION_RECEIPT_CHANGED|ACQUISITION_EVIDENCE_MISSING/);
  }
 });
@@ -58,7 +59,7 @@ test('a partial live inventory preserves mapped repeat fields covered by the cur
  const f=partiallyRenderedRepeat();
  assert.equal(f.repeat.active,false);
  assertQuestionsMapped(f.profile,'example',f.capture.pageUrl);
- assert.equal((await assertAcquisitionChain(f.template,{store:f.store,companyId:'example',profile:f.profile})).version,1);
+ assert.equal((await assertAcquisitionChain(f.template,{store:f.store,companyId:'example',profile:f.profile})).version,2);
 });
 test('inactive mappings cannot substitute for absent, stale or changed contract coverage',async()=>{
  const changes=[
@@ -84,7 +85,7 @@ test('real verification and preparation runs can hand off driver failures withou
 
 test('mapping and choice acquisition require the paired collector before any website access',async()=>{
  const f=fixture();await assertCapturedAcquisition(f.store,{companyId:'example',captureId:f.capture.captureId});
- f.assets.delete(f.receipt.structureId);await assert.rejects(assertCapturedAcquisition(f.store,{companyId:'example',captureId:f.capture.captureId}),/MCP_ACQUISITION_CHAIN_REQUIRED/);
+ f.assets.delete(formAssetKeys(f.capture.formId).structure);await assert.rejects(assertCapturedAcquisition(f.store,{companyId:'example',captureId:f.capture.captureId}),/MCP_ACQUISITION_CHAIN_REQUIRED/);
 });
 
 test('already verified protected fields cannot be relabeled as user work because another answer is missing',()=>{
@@ -102,8 +103,8 @@ async function inspectionScenario(){
  const {captureContentId}=await import('../shared/form-acquisition.mjs');
  const assets=new Map(),store={get:async(group,id)=>{if(!assets.has(id))throw Object.assign(Error('absent'),{code:'ENOENT'});return structuredClone(assets.get(id));},put:async(group,id,value)=>{assets.set(id,structuredClone(value));}};
  const companyId='example',pageUrl='https://example.test/form',controls=[{selector:'#name',label:'Name',type:'text',required:true}];
- // Same as captureCompanyControls: content-addressed id, record overwritten with the latest observation.
- const capture=async(pageId,observedAt,list=controls)=>{const captureId=captureContentId(companyId,pageUrl,null,list,hash),record={companyId,pageUrl,pageId,readOnly:true,provider:null,observedAt,controls:list,captureId};await store.put('runs',captureId,record);return record;};
+ // Same as captureCompanyControls: fixed form id, record overwritten with the latest observation.
+ const capture=async(pageId,observedAt,list=controls)=>{const captureId=captureContentId('F000001'),record={formId:'F000001',companyId,pageUrl,pageId,readOnly:true,provider:null,observedAt,controls:list,captureId};await store.put('runs',captureId,record);return record;};
  const inspect=async(pageId,observedAt,captured,n)=>{
   const rawEvidence={operation:'inspect_web_page',predicate_type:'rea.web-page-inspection',evidence_id:'rea-'+n,normalized_result:{scripts:{items:[]}}};
   const body={schemaVersion:1,pageUrl,targetId:'target-'+pageId,documents:[{nodes:[{index:0,nodeName:'FORM'}]}],accessibility:[{nodeId:'1',role:'textbox'}]};
@@ -116,26 +117,21 @@ async function inspectionScenario(){
  };
  return {store,assets,capture,inspect,build,companyId,pageUrl};
 }
-test('rebuild scenarios: same page later, a new tab with the same controls, a changed form; the built template stays valid',async()=>{
+test('each form overwrites one capture and one structure; a changed current hash requires template revalidation',async()=>{
  const s=await inspectionScenario(),t0='2026-10-26T12:00:00.000Z',t3='2026-10-26T12:03:00.000Z',t9='2026-10-26T12:09:00.000Z';
- const first=await s.inspect('chrome:a',t0,await s.capture('chrome:a',t0),1),template=await s.build(first.id,await s.store.get('runs',(await s.store.get('runs',first.id)).captureId));
- assert.equal((await assertAcquisitionChain(template,{store:s.store,companyId:s.companyId})).version,1);
- // Same page three minutes later: a fresh capture and REA inspection bind; the template is untouched.
- const later=await s.inspect('chrome:a',t3,await s.capture('chrome:a',t3),2);assert.notEqual(later.id,first.id);
- assert.equal((await assertAcquisitionChain(template,{store:s.store,companyId:s.companyId})).version,1);
- // A newly opened tab with the same controls: same captureId, its own page and time.
+ const first=await s.inspect('chrome:a',t0,await s.capture('chrome:a',t0),1),template=await s.build(first.id,await s.store.get('runs','capture-F000001'));
+ await assertAcquisitionChain(template,{store:s.store,companyId:s.companyId});
+ const later=await s.inspect('chrome:a',t3,await s.capture('chrome:a',t3),2);assert.equal(later.id,first.id);
+ await assert.rejects(assertAcquisitionChain(template,{store:s.store,companyId:s.companyId}),/ACQUISITION_EVIDENCE_CHANGED/);
  const tab=await s.capture('chrome:b',t9),fresh=await s.inspect('chrome:b',t9,tab,3);assert.equal(tab.captureId,template.evidence.captureId);
  assert.equal((await assertCapturedAcquisition(s.store,{companyId:s.companyId,captureId:tab.captureId})).structure.pageId,'chrome:b');
- assert.equal((await assertAcquisitionChain(template,{store:s.store,companyId:s.companyId})).version,1);
- const rebuilt=await s.build(fresh.id,tab);assert.equal((await assertAcquisitionChain(rebuilt,{store:s.store,companyId:s.companyId})).version,1);
- // A REA inspection paired with a capture from another tab or minutes earlier is still refused.
+ const rebuilt=await s.build(fresh.id,tab);await assertAcquisitionChain(rebuilt,{store:s.store,companyId:s.companyId});
  await assert.rejects(s.inspect('chrome:c',t9,tab,4),/REA_CONTROL_CAPTURE_SCOPE_MISMATCH/);
  await assert.rejects(s.inspect('chrome:b','2026-10-26T12:15:00.000Z',tab,5),/REA_CONTROL_CAPTURE_TOO_FAR_APART/);
- // A changed form is a different capture; the template built on the old one keeps its evidence.
  const changed=await s.capture('chrome:b',t9,[{selector:'#name',label:'Name',type:'text',required:true},{selector:'#new',label:'New',type:'text',required:false}]);
- assert.notEqual(changed.captureId,tab.captureId);assert.equal((await assertAcquisitionChain(rebuilt,{store:s.store,companyId:s.companyId})).version,1);
- // Building again on a page replaces the page's construction receipt: the superseded template no longer runs.
- await assert.rejects(assertAcquisitionChain(template,{store:s.store,companyId:s.companyId}),/MCP_CONSTRUCTION_RECEIPT_CHANGED/);
+ assert.equal(changed.captureId,tab.captureId);
+ await assert.rejects(assertAcquisitionChain(rebuilt,{store:s.store,companyId:s.companyId}),/ACQUISITION_CONTROL_CAPTURE_CHANGED/);
+ assert.equal(s.assets.size,3);
 });
 test('a template whose captured controls changed under the same id is refused',async()=>{
  const s=await inspectionScenario(),t0='2026-10-26T12:00:00.000Z';
@@ -143,8 +139,7 @@ test('a template whose captured controls changed under the same id is refused',a
  s.assets.set(captured.captureId,{...captured,controls:[{...captured.controls[0],label:'Other'}]});
  await assert.rejects(assertAcquisitionChain(template,{store:s.store,companyId:s.companyId}),/ACQUISITION_CONTROL_CAPTURE_CHANGED|ACQUISITION_EVIDENCE_CHANGED/);
 });
-test('a page-level structure written before per-capture records still resolves',async()=>{
- const f=fixture(),url=f.template.evidence.sourceUrl;
- f.assets.set(acquisitionStructureId('example',url),f.structure);f.assets.delete(f.template.evidence.pipeline.structureId);
- assert.equal((await assertCapturedAcquisition(f.store,{companyId:'example',pageUrl:url})).capture.captureId,f.capture.captureId);
+test('a current form code resolves the latest paired assets without any old page pointer',async()=>{
+ const f=fixture();assert.equal((await assertCapturedAcquisition(f.store,{companyId:'example',formId:f.capture.formId})).capture.captureId,f.capture.captureId);
+ await assert.rejects(assertCapturedAcquisition(f.store,{companyId:'example',pageUrl:f.capture.pageUrl}),/FORM_CODE_OR_CAPTURE_REQUIRED/);
 });

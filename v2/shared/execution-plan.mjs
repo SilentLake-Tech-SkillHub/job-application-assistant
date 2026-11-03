@@ -125,7 +125,7 @@ export async function compileExecutionPlan(template,task){
   if(template.coverage?.allConditionalBranchesVerified!==true)constructionBlockers.push('CONDITIONAL_BRANCHES_NOT_VERIFIED');
   if(template.coverage?.allControlsMapped!==true)constructionBlockers.push('CONTROLS_NOT_FULLY_MAPPED');
   if(template.coverage?.allDriversSupported!==true)constructionBlockers.push('CONTROL_DRIVERS_NOT_SUPPORTED');
-  const body=json({schemaVersion:1,compilerVersion:3,companyId:task.companyId,pageUrl:task.pageUrl,templateHash:task.templateHash,inputHash:digest(inputSnapshot(template,task)),files:inputSnapshot(template,task).files,fileMetadata,profileFillContext:task.profileFillContext||null,privacyFillContext:task.privacyFillContext||null,pages,counts,materialCoverage,constructionBlockers,unstableFields,readyForExecution:constructionBlockers.length===0&&counts.needs_user===0,allKnown:counts.needs_user===0&&counts.user_only===0});
+  const body=json({schemaVersion:1,compilerVersion:3,taskId:task.taskId||task.roleQueueArgs?.taskId||null,companyId:task.companyId,pageUrl:task.pageUrl,templateHash:task.templateHash,inputHash:digest(inputSnapshot(template,task)),files:inputSnapshot(template,task).files,fileMetadata,profileFillContext:task.profileFillContext||null,privacyFillContext:task.privacyFillContext||null,pages,counts,materialCoverage,constructionBlockers,unstableFields,readyForExecution:constructionBlockers.length===0&&counts.needs_user===0,allKnown:counts.needs_user===0&&counts.user_only===0});
   const planHash=digest(body);
   return {id:randomUUID(),createdAt:new Date().toISOString(),...body,planHash};
 }

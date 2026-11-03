@@ -19,7 +19,7 @@ async function workspace(doc=netease()){
 test('python-compatible digest matches company_store.py content_sha',()=>{
  // 期望值由搜索端 company_store.content_sha 对同一份宽表算得
  const d=companyDoc({...{code:'C00007',name:'网易'},sites:netease()['站点'],roles:netease()['岗位'],selected:['J000011','J000012']});
- assert.equal(contentSha(d),'7ca793793dab099ae5b6e3a2d15207e2fb2d7fe501949a8944deadbc53b8c467');
+ assert.equal(contentSha(d),'50bf6d2b79a12e94ac74c14fab716476814c507aecf1e48429b3103865a781e6');
  // 只覆盖本批选中岗位的执行字段与其站点：未选岗位、投递状态、进度变化不影响指纹
  const other=structuredClone(d);other['岗位'][2]['岗位名称']='改了';other['岗位'][0]['投递状态']='岗位已投递';other['批次']['进度']={'已处理':['J000011']};other['站点'][2]['登录链接']='https://leihuo.163.com/login';
  assert.equal(contentSha(other),contentSha(d));
@@ -88,23 +88,11 @@ test('queue stores only codes and order; links are read from the company file at
  await assert.rejects(queues.task({...q,taskId:stored.tasks[0].taskId}),/HANDOFF_CHANGED_AFTER_CONFIRMATION|ROLE_INPUT_CHANGED/);
 });
 
-test('existing form assets keep their stored asset key through a fixed site binding; unbound sites use the site code',async()=>{
- const {Store}=await import('../shared/engine.mjs'),{readSiteAssetKeys}=await import('../shared/company-directory.mjs');
- const {recordApplicationOutcome}=await import('../shared/application-outcome.mjs');
- const dir=await workspace(),store=new Store(path.join(dir,'private'));
- assert.deepEqual(await readSiteAssetKeys(store),{});
- await store.put('templates','site-asset-keys',{S0003:'netease',S0004:'netease-game'});
+test('company directory uses company and site codes without consulting old asset-key aliases',async()=>{
+ const {Store}=await import('../shared/engine.mjs');const dir=await workspace(),store=new Store(path.join(dir,'private'));
+ await store.put('templates','site-asset-keys',{S0003:'old-name',S0004:'old-other'});
  const catalog=await new CompanyDirectory({handoffDir:dir,store}).load();
- assert.deepEqual(catalog.map(c=>[c.id,c.siteId,c.companyId]),[['netease','S0003','C00007'],['netease-game','S0004','C00007'],['S0005','S0005','C00007']]);
- await saveCompany(dir,confirm(netease()));
- const queues=new RoleQueue({root:path.join(dir,'queue'),catalog,inputAdapter:handoffInput(dir)}),q=await queues.import({});
- assert.deepEqual(q.tasks.map(t=>[t.companyId,t.siteId,t.roleId]),[['netease','S0003','J000012'],['netease-game','S0004','J000011']]);
- const {t}=await queues.task({...q,taskId:q.tasks[0].taskId});assert.equal(t.url,'https://campus.163.com/job/88');
- // 回传按资产键交来，按绑定对应到站点编码后核对
- const outcome={schemaVersion:1,eventId:'3b241101-e2bb-4255-8caf-4136c566a962',event:'submission_confirmed',batchId:'B1',companyId:'netease-game',roleId:'J000011',roleUrl:'https://campus.game.163.com/job/4791',roleTitle:'游戏产品经理',evidence:{file:'/nonexistent',sha256:'0'.repeat(64)}};
- await assert.rejects(recordApplicationOutcome({outcome,handoffDir:dir}),/OUTCOME_ROLE_IDENTITY_MISMATCH/);
- await assert.rejects(recordApplicationOutcome({outcome,handoffDir:dir,catalog}),/ENOENT/);  // 身份通过，才去读证据
- for(const bad of [{S0003:'Keep'},{X1:'a'},{S0003:'a',S0004:'a'}]){await store.put('templates','site-asset-keys',bad);await assert.rejects(new CompanyDirectory({handoffDir:dir,store}).load(),/INVALID_SITE_ASSET_KEYS/);}
- await store.put('templates','site-asset-keys',{S0003:'S0005'});
- await assert.rejects(new CompanyDirectory({handoffDir:dir,store}).load(),/DUPLICATE_SITE_ASSET_KEY/);
+ assert.deepEqual(catalog.map(c=>[c.id,c.siteId,c.companyId]),[['S0003','S0003','C00007'],['S0004','S0004','C00007'],['S0005','S0005','C00007']]);
+ await saveCompany(dir,confirm(netease()));const queues=new RoleQueue({root:path.join(dir,'queue'),catalog,inputAdapter:handoffInput(dir)}),q=await queues.import({});
+ assert.deepEqual(q.tasks.map(t=>[t.companyId,t.siteId,t.roleId]),[['S0003','S0003','J000012'],['S0004','S0004','J000011']]);
 });

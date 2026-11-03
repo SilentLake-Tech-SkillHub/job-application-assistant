@@ -1,4 +1,4 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';
+import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';
 import {registerWorkflowTool} from '../shared/workflow-contract.mjs';import {failureReasons} from '../shared/stop-loss.mjs';
 const setup=async(tool,responder,extra={})=>{const dir=await mkdtemp(path.join(os.tmpdir(),'stop-loss-'));const env={RECRUITING_PRIVATE_DIR:dir,RECRUITING_WORKER_SOURCE_SHA256:'v1',...extra};let handler,calls=0;
  registerWorkflowTool({registerTool:(n,d,h)=>{handler=h;}},tool,{},async a=>{calls++;return {content:[{type:'text',text:JSON.stringify(responder(a,calls))}]};},env);
@@ -36,6 +36,13 @@ test('construction tools only stop on identical arguments',async()=>{
  await t.call({companyId:'c',selectors:['#a']});let r=await t.call({companyId:'c',selectors:['#b']});assert.equal(r.data.stopLoss,undefined);
  r=await t.call({companyId:'c',selectors:['#b']});assert.equal(r.data.stopLoss.count,2);
 });
+test('a corrected material capture reference releases only that input; approval prose cannot release missing capture',async()=>{
+ const t=await setup('role_confirm_material_no_destination',a=>a.captureId==='real-capture'?{status:'recorded'}:{error:'MATERIAL_EXCEPTION_CAPTURE_REQUIRED'});
+ const a={taskId:'material-task',key:'referralCode'};
+ await t.call(a);await t.call(a);
+ assert.equal((await t.call({...a,authorization:{evidence:'new words'}})).data.error,'STOP_LOSS_REPEATED_FAILURE');assert.equal(t.calls(),2);
+ assert.equal((await t.call({...a,captureId:'real-capture'})).data.status,'recorded');assert.equal(t.calls(),3);
+});
 test('selected-field failures bind the actual field set; order and approval prose cannot unlock the same targets',async()=>{
  const t=await setup('role_prepare_fields',()=>({error:'SELECTED_FIELD_NOT_WRITABLE'}));
  await t.call({taskId:'x',fieldIds:['a','b']});await t.call({taskId:'x',fieldIds:['a','b']});
@@ -64,4 +71,14 @@ test('each call adds count, elapsed time and returned bytes to one overwritten r
  await t.call({taskId:'m'});await t.call({taskId:'m'});
  const dir=path.join(t.env.RECRUITING_PRIVATE_DIR,'metrics'),files=await readdir(dir);assert.equal(files.length,1);
  const m=JSON.parse(await readFile(path.join(dir,files[0]),'utf8'));assert.equal(m.calls,2);assert.equal(m.scope,'m');assert.equal(m.tool,'role_verify');assert.ok(m.resultBytes>2000);assert.equal(JSON.stringify(m).includes('xxxx'),false);
+});
+
+test('a fixed capture ID retries only when its actual control content changes, not its observation timestamp',async()=>{
+ const t=await setup('capture_choice_options',()=>({error:'ACTUAL_CAPTURED_OPTION_REQUIRED'})),dir=path.join(t.env.RECRUITING_PRIVATE_DIR,'runs');await mkdir(dir,{recursive:true});
+ const file=path.join(dir,'capture-F000001.json'),capture={companyId:'S0001',formId:'F000001',pageUrl:'https://example.test/form',provider:null,controls:[{selector:'#a',label:'Original'}],observedAt:'first'};
+ try{
+  await writeFile(file,JSON.stringify(capture));const args={companyId:'S0001',captureId:'capture-F000001',selectors:['#a']};await t.call(args);await t.call(args);
+  capture.observedAt='later';await writeFile(file,JSON.stringify(capture));assert.equal((await t.call(args)).data.error,'STOP_LOSS_REPEATED_FAILURE');
+  capture.controls[0].label='Changed';await writeFile(file,JSON.stringify(capture));assert.notEqual((await t.call(args)).data.error,'STOP_LOSS_REPEATED_FAILURE');assert.equal(t.calls(),3);
+ }finally{await rm(t.env.RECRUITING_PRIVATE_DIR,{recursive:true,force:true});}
 });

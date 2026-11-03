@@ -105,7 +105,7 @@ import {formLocation} from '../shared/profile.mjs';
 test('locator upgrades replace inactive mappings only after full live proof, without deleting facts',()=>{
  const url='https://fixture.test/form',template={evidence:{sourceUrl:url},pages:[{fields:[{source:'hasNoExperience',inventorySelectors:['label.question input'],read:{selector:'label.question input'}}]}]};
  const key=hash({companyId:'fixture',pageUrl:formLocation(url)}).slice(0,20);
- const profile={facts:{hasNoExperience:{value:false}},companyForms:{[key]:{mappings:{old:{factKey:'hasNoExperience',selector:'input[type="checkbox"]',active:false,coverageRequired:true,status:'mapped'},unknown:{factKey:'unknown',selector:'#unknown',active:false,coverageRequired:true,status:'mapped'}}}}};
+ const profile={facts:{hasNoExperience:{value:false}},companyForms:{[key]:{companyId:'fixture',pageUrl:url,mappings:{old:{factKey:'hasNoExperience',selector:'input[type="checkbox"]',active:false,coverageRequired:true,status:'mapped'},unknown:{factKey:'unknown',selector:'#unknown',active:false,coverageRequired:true,status:'mapped'}}}}};
  const probe={operation:'internal_condition_probe',companyId:'fixture',templateHash:hash(template),status:'verified',restoration:'verified',branches:[{status:'verified',newQuestions:0,inventory:[{selector:'label.question input'}]}]};
  assert.equal(retireLegacyQuestionMappings(profile,{companyId:'fixture',template,probe}).retired,1);assert.ok(!profile.companyForms[key].mappings.old);assert.ok(profile.companyForms[key].mappings.unknown);assert.equal(profile.facts.hasNoExperience.value,false);
  assert.throws(()=>retireLegacyQuestionMappings(profile,{companyId:'fixture',template,probe:{...probe,restoration:'failed'}}),/PROOF_REQUIRED/);

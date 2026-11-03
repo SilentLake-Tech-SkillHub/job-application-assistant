@@ -1,3 +1,4 @@
+import {TaskRecords,withTaskRecords} from './task-records.mjs';
 import {keyOK} from './ids.mjs';
 import {isRecoverableControlReason} from './control-recovery.mjs';
 import {attachUploadContentProofs} from './upload-content-proof.mjs';
@@ -14,7 +15,7 @@ import {continuationFor} from './workflow-continuation.mjs';
 import {matchesRole} from './role-identity.mjs';
 import {assertIndependentDrafts} from './shared-record.mjs';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile, rename, realpath } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, realpath, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { verifyForm } from './verifier.mjs';
 import { compileExpected, attachInventory } from './observation.mjs';
@@ -108,13 +109,15 @@ export function validateTemplate(t) {
 }
 
 export class Store {
-  constructor(root) { this.root = root; }
+  constructor(root) { this.root = root; this.taskRecords=new TaskRecords(root); }
   async get(group, id) {
     if (!idOK(id) || !['templates','runs','plans'].includes(group)) throw Error('INVALID_STORAGE_KEY');
+    if(group!=='templates'){const value=await this.taskRecords.get(group,id);if(value!==undefined)return value;}
     return JSON.parse(await readFile(path.join(this.root, group, `${id}.json`), 'utf8'));
   }
   async put(group, id, value) {
     if (!idOK(id) || !['templates','runs','plans'].includes(group)) throw Error('INVALID_STORAGE_KEY');
+    if(await this.taskRecords.put(group,id,value))return;
     const dir = path.join(this.root, group); await mkdir(dir, {recursive:true, mode:0o700});
     const dest = path.join(dir, `${id}.json`), temp = `${dest}.${randomUUID()}.tmp`;
     await writeFile(temp, JSON.stringify(value,null,2), {mode:0o600}); await rename(temp,dest);
@@ -128,6 +131,8 @@ export class Store {
       const next=await mutate(previous);await this.put(group,id,next);return next;
     }finally{await release();}
   }
+  async clearTaskRecords(taskIds){return this.taskRecords.clear(taskIds);}
+  async remove(group,id){if(!idOK(id)||!['runs','plans','templates'].includes(group))throw Error('INVALID_STORAGE_KEY');await unlink(path.join(this.root,group,id+'.json')).catch(e=>{if(e.code!=='ENOENT')throw e;});}
 }
 
 const normalize = value => typeof value === 'string' ? value.replace(/\r\n/g,'\n').trim() : value;
@@ -172,7 +177,7 @@ export class Engine {
       if(hash(template)!==task.templateHash)throw Error('TEMPLATE_VERSION_CHANGED');
       const matches=template.pages.filter(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix));
       if(matches.length!==1)throw Error('AMBIGUOUS_PROBE_PAGE');
-      const run={id:randomUUID(),operation:'internal_condition_probe',companyId:company.id,templateHash:hash(template),startedAt:new Date().toISOString(),status:'running',submission:'not_performed',save:'not_verified',authorizationEvidence:authorization.evidence};
+      const run={id:'probe-'+template.id,operation:'internal_condition_probe',companyId:company.id,templateHash:hash(template),startedAt:new Date().toISOString(),status:'running',submission:'not_performed',save:'not_verified',authorizationEvidence:authorization.evidence};
       const started=performance.now();
       try{
         await this.store.put('runs',run.id,run);
@@ -261,7 +266,8 @@ export class Engine {
         job.task=fresh;
       }
     }
-    run={id:randomUUID(),startedAt:new Date().toISOString(),status:'running',results:[],batchPrepareCalls:1,parallelRoles,requestedConcurrency:concurrency,modelRoundTrips:'not_measured'};
+    const queueIds=[...new Set(jobs.map(j=>j.task.roleQueueArgs?.queueId).filter(Boolean))];
+    run={id:queueIds.length===1?'batch-prepare-'+queueIds[0]:randomUUID(),operation:'batch_prepare',startedAt:new Date().toISOString(),status:'running',results:[],batchPrepareCalls:1,parallelRoles,requestedConcurrency:concurrency,modelRoundTrips:'not_measured'};
     keys.forEach(k=>this.locks.add(k));
       await this.store.put('runs',run.id,run);
       const results=new Array(jobs.length);
@@ -270,7 +276,7 @@ export class Engine {
       const groups=parallelRoles?jobs.map((job,index)=>[{job,index}]):[...new Set(jobs.map(j=>j.company.origin))].map(origin=>jobs.map((job,index)=>({job,index})).filter(({job})=>job.company.origin===origin));
       let cursor=0;
       const workers=await Promise.allSettled(Array.from({length:Math.min(concurrency,groups.length)},async()=>{
-        while(cursor<groups.length){for(const {job,index}of groups[cursor++])results[index]=await this.runCompany(job,authorization);}
+        while(cursor<groups.length){for(const {job,index}of groups[cursor++])results[index]=await withTaskRecords({taskId:job.task.taskId||job.task.roleQueueArgs?.taskId,tool:'role_prepare'},()=>this.runCompany(job,authorization));}
       }));
       // Never release account leases while another worker is still writing,
       // even if one worker exits through an unexpected exception.
@@ -278,16 +284,18 @@ export class Engine {
       run.results=jobs.map((job,index)=>results[index]||{companyId:job.company.id,status:'needs_attention',errorCode:'BATCH_WORKER_INTERRUPTED',fields:[],pageChecks:[],submission:'not_performed',save:'not_verified'});
       run.status=run.results.every(r=>r.status==='verified')?'verified':run.results.every(r=>['verified','prepared_pending_verification'].includes(r.status))?'prepared_pending_verification':'needs_attention';
       for(const [index,result]of run.results.entries()){
+        const taskId=jobs[index].task.taskId||jobs[index].task.roleQueueArgs?.taskId;
+        if(taskId){result.preparationRunId=randomUUID();await this.store.put('runs',result.preparationRunId,{id:result.preparationRunId,operation:'task_preparation',taskId,status:result.status,results:[result]});}
         const checks=result.pageChecks.flatMap(p=>p.verification?.checks||[]);
         if(!result.errorCode&&checks.length&&result.pageChecks.every(p=>p.verification)&&checks.every(c=>['match','confirmed_omission','needs_user','missing_input'].includes(c.status))){
           const template=jobs[index].template;
-          await this.store.put('templates',`${template.id}-live`,{templateHash:hash(template),runId:run.id,readAt:result.pageChecks.at(-1).verification.readAt,pending:checks.filter(c=>['needs_user','missing_input'].includes(c.status)).length,source:'actual_batch_prepare_and_live_DOM_verification',scope:'current_active_fields_only'});
+          await this.store.put('templates',`${template.id}-live`,{templateHash:hash(template),runId:result.preparationRunId||run.id,readAt:result.pageChecks.at(-1).verification.readAt,pending:checks.filter(c=>['needs_user','missing_input'].includes(c.status)).length,source:'actual_batch_prepare_and_live_DOM_verification',scope:'current_active_fields_only'});
         }
       }
     } finally {
       keys.forEach(k=>this.locks.delete(k));
       try{
-        if(run){run.elapsedMs=Math.round(performance.now()-start);run.finishedAt=new Date().toISOString();if(run.status==='running')run.status='interrupted';await this.store.put('runs',run.id,run);}
+        if(run){run.elapsedMs=Math.round(performance.now()-start);run.finishedAt=new Date().toISOString();if(run.status==='running')run.status='interrupted';await this.store.put('runs',run.id,run.results.some(r=>r.preparationRunId)?{...run,results:run.results.map(({preparationRunId,companyId,roleId,status,errorCode})=>({preparationRunId,companyId,roleId,status,errorCode}))}:run);}
       }finally{await release();}
     }
     return run;
@@ -315,12 +323,12 @@ export class Engine {
     const observation=attachSearchableCommits(attachProfileFillProofs(attachDateRangeProofs(attachChoiceProofs(attachInventory(await page.observe(plan),plan,inventory),choiceProofs),dateProofs),profileProofs),searchableProofs),observationRunId=randomUUID();
     this.attachPrivacyProofs(observation,privacyProofs);
     await attachUploadContentProofs(page,observation,plan,task,this.store,{capture:this.attachmentCapture,visionReviewer:this.visionReviewer});
-    await this.store.put('runs',observationRunId,{operation:'live_observation',companyId:company.id,observation});
+    await this.store.put('runs',observationRunId,{operation:'live_observation',companyId:company.id,taskId:task.taskId||task.roleQueueArgs?.taskId||null,observation});
     const result=verifyForm(compileExpected(plan,task),observation);
     const contractChanges=controlContractChanges(plan,inventory);
     if(contractChanges.length){result.status='needs_attention';result.controlContractChanges=contractChanges;}
     if(mappingError){result.status='needs_attention';result.mappingError=mappingError;}
-    const run={id:randomUUID(),operation:'verify_current',companyId:company.id,roleId:task.roleId||null,pageUrl:task.pageUrl,templateHash:hash(template),profileHash:task.profileHash,observationRunId,...result};
+    const run={id:randomUUID(),operation:'verify_current',taskId:task.taskId||task.roleQueueArgs?.taskId||null,companyId:company.id,roleId:task.roleId||null,pageUrl:task.pageUrl,templateHash:hash(template),profileHash:task.profileHash,observationRunId,...result};
     await this.store.put('runs',run.id,run);return run;
   }
   async runCompany({task,company,template,prepared,deferFinalVerification=false},authorization) {
@@ -363,7 +371,7 @@ export class Engine {
           // user-entered fields by uploading the same material again.
           if(current?.uploadState==='site_rendered_uploaded'&&!authorization.uploadFieldIds?.includes(f.id)){(result.preservedUploads??=[]).push(f.id);continue;}
           if(current?.uploadState!=='site_rendered_uploaded'&&Array.isArray(current?.value)&&current.value.length)throw Error('EXISTING_UPLOAD_UNVERIFIED');
-          for(const action of f.actions){const result=await page.act(action,f.value,prepared.files);if(result?.uploadOrigin)await this.store.put('runs',uploadOriginKey(task,f),{...result.uploadOrigin,operation:'field_upload_origin',scopeHash:uploadOriginScope(task,f)});}
+          for(const action of f.actions){const result=await page.act(action,f.value,prepared.files);if(result?.uploadOrigin)await this.store.put('runs',uploadOriginKey(task,f),{...result.uploadOrigin,operation:'field_upload_origin',fieldId:f.id,scopeHash:uploadOriginScope(task,f)});}
           materialWrites++;
         }
         for(const f of frozenFields.filter(f=>f.prepareBeforeGroups&&f.disposition==='fill')){
@@ -454,7 +462,7 @@ export class Engine {
         this.attachPrivacyProofs(observation,privacyProofs);
         await attachUploadContentProofs(page,observation,plan,task,this.store,{capture:this.attachmentCapture,visionReviewer:this.visionReviewer});
         const observationRunId=randomUUID();
-        await this.store.put('runs',observationRunId,{operation:'live_observation',companyId:company.id,observation});
+        await this.store.put('runs',observationRunId,{operation:'live_observation',companyId:company.id,taskId:task.taskId||task.roleQueueArgs?.taskId||null,observation});
         (result.observationRunIds??=[]).push(observationRunId);
         const verification=verifyForm(compiled.expected,observation);
         result.pageChecks.at(-1).verification=verification;

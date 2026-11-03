@@ -1,25 +1,39 @@
 import {randomUUID,createHash} from 'node:crypto';
 import {acquireLease,leasePath,defaultLeaseRoot} from './leases.mjs';
+import {resolveBatchChannels} from './channel-policy.mjs';
 const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const active=new Set(['dispatched','running','waiting_for_user']);
 // 批次运行记录只存任务引用（taskId、岗位编码）；链接、标题、材料一律经队列现读交接宽表，不复制保存。
 // MCP acquires companies and splits channels. Dispatch is never browser success.
 export class CompanyBatch{
- constructor({store,queues,catalog,browser,clock=()=>Date.now(),leaseRoot=defaultLeaseRoot()}){Object.assign(this,{store,queues,catalog,browser,clock,leaseRoot});}
+ constructor({store,queues,catalog,browser,loginRecords=null,clock=()=>Date.now(),leaseRoot=defaultLeaseRoot()}){Object.assign(this,{store,queues,catalog,browser,loginRecords,clock,leaseRoot});}
  async assertCapabilities(channels){const report=await this.browser?.executionCapabilities?.();const missing=channels.filter(ch=>!report?.channels?.[ch]?.available);if(missing.length){const error=Error(missing.includes('iab')?'IAB_HOST_BRIDGE_REQUIRED':'CHROME_EXECUTOR_REQUIRED');error.details={phase:'browser_initialization',requestedChannels:channels,missingChannels:missing,browserExecuted:false};throw error;}return report;}
- async create({rolesFile,companyPlan,companyOrder,authorizationRef,companiesPerChannel=10,parallelRoles=false}){
+ async create(args){
+  const release=await acquireLease(leasePath(this.leaseRoot,'company-dispatch:'+this.store.root),{waitMs:30000,busyCode:'COMPANY_BATCH_BUSY'});
+  try{return await this.createUnlocked(args);}finally{await release();}
+ }
+ async createUnlocked({rolesFile,companyPlan,companyOrder,authorizationRef,companiesPerChannel=10,parallelRoles=false,browserChannels}){
   if(!authorizationRef?.trim())throw Error('BATCH_AUTHORIZATION_REQUIRED');
   if(!Number.isInteger(companiesPerChannel)||companiesPerChannel<1||companiesPerChannel>10)throw Error('INVALID_COMPANY_CHANNEL_CAPACITY');
   const {input}=await this.queues.inputAdapter({rolesFile,companyPlan,companyOrder});
-  // Default channels come only from the once-detected capability file of this host (dual when the
-  // built-in browser passed all three checks, otherwise the Chrome clone only); a batch may narrow them.
-  const recorded=(await this.browser?.executionCapabilities?.())?.capability,defaults=recorded?.channels?.length?recorded.channels:null;
-  const policy=new Map(input.companies.map(c=>{const channels=c.execution?.browserChannels||input.execution?.browserChannels||defaults;if(!channels){const detected=recorded?.status==='detected',error=Error(detected?'NO_USABLE_BROWSER_CHANNEL':'BROWSER_CAPABILITY_DETECTION_REQUIRED');error.details=detected?{phase:'browser_initialization',capabilityStatus:'detected',iab:recorded.iab,chrome:recorded.chrome,nextStep:'the Chrome clone is not installed or not configured: check node scripts/chrome-clone.mjs status and the Chrome installation, then re-detect (node scripts/browser-capability.mjs reset --quote ... then detect)',browserExecuted:false}:{phase:'browser_initialization',capabilityStatus:recorded?.status||'not_configured',nextStep:'detect once: node scripts/browser-capability.mjs detect, or detectHostBrowsers inside the executor host when its adapter exposes browsers to code',browserExecuted:false};throw error;}if(!Array.isArray(channels)||!channels.length||new Set(channels).size!==channels.length||channels.some(ch=>!['chrome','iab'].includes(ch)))throw Error('INVALID_CONFIRMED_BROWSER_CHANNELS');return [c.companyId,channels];}));
-  const channels=[...new Set([...policy.values()].flat())],initialization=await this.assertCapabilities(channels);
-  const queue=await this.queues.import({rolesFile,companyPlan,companyOrder,batchPolicy:{mode:'parallel_companies',authorizationRef,companiesPerChannel,channels,parallelRoles:!!parallelRoles}}),companies=[];
-  // 同一份确认内容重复创建：返回已有的批次运行，不新建（不产生新任务、不新开页面）。
   let index;try{index=await this.store.get('runs','company-batch-by-queue');}catch(e){if(e.code!=='ENOENT')throw e;index={};}
-  if(queue.reused&&index[queue.queueId]){try{const existing=await this.store.get('runs',index[queue.queueId]);if(!existing.closedAt)return {...await this.status({batchId:existing.id,batchHash:existing.batchHash}),batchHash:existing.batchHash,queue,reused:true,submission:'forbidden'};}catch(e){if(e.code!=='ENOENT')throw e;}}
+  let storedPolicy;try{storedPolicy=await this.store.get('runs','batch-browser-policy');}catch(e){if(e.code!=='ENOENT')throw e;}
+  const requested=browserChannels||(storedPolicy?.batchId===input.batchId?storedPolicy.browserChannels||undefined:undefined);
+  const initialization=await this.browser?.executionCapabilities?.(),channelSelection=resolveBatchChannels(initialization,requested),channels=channelSelection.channels;
+  await this.store.put('runs','batch-browser-policy',{batchId:input.batchId,browserChannels:channelSelection.requestedChannels,authorizationRef:browserChannels?authorizationRef:storedPolicy?.authorizationRef||authorizationRef});
+  const queue=await this.queues.import({rolesFile,companyPlan,companyOrder,batchPolicy:{mode:'parallel_companies',authorizationRef,companiesPerChannel,parallelRoles:!!parallelRoles}}),companies=[];
+  // Reordering or changing browser preferences never recreates task records.
+  if(queue.reused&&index[queue.queueId]){try{const existing=await this.store.get('runs',index[queue.queueId]);if(!existing.closedAt){
+   if(existing.queueHash!==queue.queueHash){
+    existing.queueHash=queue.queueHash;
+    existing.companies.sort((a,b)=>queue.tasks.findIndex(t=>t.companyId===a.companyId)-queue.tasks.findIndex(t=>t.companyId===b.companyId));
+    for(const c of existing.companies)c.tasks=queue.tasks.filter(t=>t.companyId===c.companyId).map(t=>({taskId:t.taskId,roleId:t.roleId}));
+    existing.revision++;
+   }
+   existing.sourceBatchId=input.batchId;existing.companiesPerChannel=companiesPerChannel;
+   await this.applyChannelSelection(existing,channelSelection);
+   return {...await this.status({batchId:existing.id,batchHash:existing.batchHash}),batchHash:existing.batchHash,queue,reused:true,submission:'forbidden'};
+  }}catch(e){if(e.code!=='ENOENT')throw e;}}
   // 新队列取代了旧队列：旧批次运行随之作废，释放它占着的公司登录范围，否则新批次领不到这些公司。
   if(queue.supersededQueues?.length){
    // 旧批次运行：索引里登记的，加上公司登录范围占用记录里指向的（索引上线前创建的运行不在索引里）。
@@ -28,13 +42,29 @@ export class CompanyBatch{
    for(const runId of runIds){let run;try{run=await this.store.get('runs',runId);}catch(e){if(e.code!=='ENOENT'&&e.message!=='INVALID_STORAGE_KEY')throw e;continue;}
     if(!gone.has(run.queueId))continue;
     for(const [scope,o] of Object.entries(owners))if(o.batchId===run.id)delete owners[scope];
-    if(!run.closedAt)await this.store.put('runs',run.id,{...run,closedAt:new Date(this.clock()).toISOString(),supersededByQueue:queue.queueId,revision:(run.revision||0)+1});}
+    const oldTaskIds=run.companies.flatMap(c=>c.tasks.map(t=>t.taskId));await this.store.clearTaskRecords?.(oldTaskIds);await this.loginRecords?.clear(oldTaskIds);await this.store.remove?.('runs','batch-prepare-'+run.queueId);await this.store.remove?.('runs',run.id);}
    for(const q of gone)delete index[q];
    await this.store.put('runs','company-channel-owners',owners);}
-  for(const task of queue.tasks){let c=companies.find(x=>x.companyId===task.companyId);if(!c){const entry=this.catalog.find(x=>x.id===task.companyId);c={companyId:task.companyId,loginScope:entry.loginScope||entry.origin,tasks:[],status:'pending',channel:null,allowedChannels:policy.get(task.companyCode)||channels};companies.push(c);}c.tasks.push({taskId:task.taskId,roleId:task.roleId});}
-  const body={schemaVersion:1,id:randomUUID(),queueId:queue.queueId,queueHash:queue.queueHash,authorizationRef,companiesPerChannel,parallelRoles:queue.parallelRoles,channels,initialization,companies,createdAt:new Date(this.clock()).toISOString(),submission:'forbidden'};
+  for(const task of queue.tasks){let c=companies.find(x=>x.companyId===task.companyId);if(!c){const entry=this.catalog.find(x=>x.id===task.companyId);c={companyId:task.companyId,loginScope:entry.loginScope||entry.origin,tasks:[],status:'pending',channel:null,allowedChannels:channels};companies.push(c);}c.tasks.push({taskId:task.taskId,roleId:task.roleId});}
+  const body={schemaVersion:1,id:randomUUID(),queueId:queue.queueId,queueHash:queue.queueHash,authorizationRef,companiesPerChannel,parallelRoles:queue.parallelRoles,channels,sourceBatchId:input.batchId,channelSelection,initialization,companies,createdAt:new Date(this.clock()).toISOString(),submission:'forbidden'};
   const batchHash=digest(body);await this.store.put('runs',body.id,{...body,batchHash,revision:0});index[queue.queueId]=body.id;await this.store.put('runs','company-batch-by-queue',index);
-  return {batchId:body.id,batchHash,queue,companies:companies.map(({tasks,...c})=>({...c,roleCount:tasks.length})),companiesPerChannel,parallelRoles:queue.parallelRoles,submission:'forbidden'};
+  return {batchId:body.id,batchHash,queue,channelSelection,companies:companies.map(({tasks,...c})=>({...c,roleCount:tasks.length})),companiesPerChannel,parallelRoles:queue.parallelRoles,submission:'forbidden'};
+ }
+ async applyChannelSelection(b,selection){
+  const owners=await this.owners();let bindings;try{bindings=await this.store.get('runs','browser-channel-bindings');}catch(e){if(e.code!=='ENOENT')throw e;bindings={};}
+  for(const c of b.companies){
+   c.allowedChannels=selection.channels;
+   if(!c.channel||selection.channels.includes(c.channel)||!active.has(c.status))continue;
+   const previousChannel=c.channel;
+   for(const ref of c.tasks){let state;try{state=await this.queues.read(ref.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
+    if(state){const {pageId,applicationUrl,returnUrl,browserBinding,...rest}=state;await this.queues.put(ref.taskId,{...rest,status:'channel_changed_require_role_open',previousBrowserBinding:{channel:previousChannel,pageId,applicationUrl,returnUrl,browserBinding},channelChangeReason:selection.reason});}
+   }
+   if(owners[c.loginScope]?.batchId===b.id)delete owners[c.loginScope];
+   for(const [origin,binding] of Object.entries(bindings))if(binding.batchId===b.id&&binding.companyId===c.companyId)delete bindings[origin];
+   Object.assign(c,{previousChannel,channel:null,status:'pending',reason:selection.reason});delete c.leaseToken;delete c.leaseExpiresAt;
+  }
+  b.channels=selection.channels;b.channelSelection=selection;
+  await this.store.put('runs','company-channel-owners',owners);await this.store.put('runs','browser-channel-bindings',bindings);await this.store.put('runs',b.id,b);
  }
  async get({batchId,batchHash}){const b=await this.store.get('runs',batchId);if(b.batchHash!==batchHash)throw Error('BATCH_HASH_MISMATCH');await this.queues.get({queueId:b.queueId,queueHash:b.queueHash});return b;}
  async locked(args,fn){const release=await acquireLease(leasePath(this.leaseRoot,'company-dispatch:'+this.store.root),{waitMs:30000,busyCode:'COMPANY_BATCH_BUSY'});try{return await fn(await this.get(args));}finally{await release();}}
@@ -50,26 +80,6 @@ export class CompanyBatch{
    return {batchId:b.id,batchHash:b.batchHash,queue,pagesPreserved:true,submission:'not_performed'};
   }finally{await release();}
  }
- async restrictChannels(args){return this.locked(args,async b=>{
-  const channels=args.channels;if(!Array.isArray(args.companyIds)||!args.companyIds.length||new Set(args.companyIds).size!==args.companyIds.length||args.companyIds.some(id=>!b.companies.some(c=>c.companyId===id)))throw Error('CHANNEL_RESTRICTION_COMPANY_SCOPE_REQUIRED');await this.assertCapabilities(channels);if(!args.authorizationRef?.trim()||!Array.isArray(channels)||!channels.length||new Set(channels).size!==channels.length||channels.some(ch=>!b.channels.includes(ch)))throw Error('INVALID_CHANNEL_RESTRICTION');
-  if(b.closedAt)throw Error('BATCH_ALREADY_CLOSED');
-  const counts=Object.fromEntries(channels.map(ch=>[ch,b.companies.filter(c=>c.channel===ch&&active.has(c.status)).length])),owners=await this.owners();
-  let bindings;try{bindings=await this.store.get('runs','browser-channel-bindings');}catch(e){if(e.code!=='ENOENT')throw e;bindings={};}
-  const moved=[],live=await this.queues.hydratedTasks(b.queueId);
-  for(const c of b.companies.filter(c=>args.companyIds.includes(c.companyId)&&c.channel&&!channels.includes(c.channel))){
-   const channel=channels.find(ch=>counts[ch]<b.companiesPerChannel);if(!channel)throw Error('CHANNEL_RESTRICTION_CAPACITY_EXCEEDED');
-   const previousChannel=c.channel;
-   for(const ref of c.tasks){const t=live.get(ref.taskId);if(t.inputChanged)continue;let state;try{state=await this.queues.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
-    if(state){const {pageId,applicationUrl,returnUrl,browserBinding,...rest}=state;await this.queues.put(t.taskId,{...rest,status:'channel_changed_require_role_open',returnUrl:t.url,previousBrowserBinding:{channel:previousChannel,pageId,applicationUrl,returnUrl,browserBinding},channelChangeAuthorization:args.authorizationRef});}
-    bindings[new URL(t.url).origin]={channel,batchId:b.id,companyId:c.companyId};
-   }
-   Object.assign(c,{previousChannel,channel,status:'dispatched',leaseToken:randomUUID(),leaseExpiresAt:new Date(this.clock()+30*60*1000).toISOString(),reason:'user_restricted_browser_channels'});counts[channel]++;owners[c.loginScope]={batchId:b.id,channel};moved.push({companyId:c.companyId,previousChannel,channel,leaseToken:c.leaseToken});
-  }
-  for(const c of b.companies.filter(c=>args.companyIds.includes(c.companyId)))c.allowedChannels=channels;
-  if(args.companyIds.length===b.companies.length)b.channels=channels;b.channelRestriction={authorizationRef:args.authorizationRef,companyIds:args.companyIds,at:new Date(this.clock()).toISOString()};b.revision++;
-  await this.store.put('runs','browser-channel-bindings',bindings);await this.store.put('runs','company-channel-owners',owners);await this.store.put('runs',b.id,b);
-  return {batchId:b.id,channels,moved,browsersClosed:false,browserRestarted:false,submission:'not_performed'};
- });}
  async closePreparation(args){
   // An explicitly superseded preparation may need closure after its source
   // plan changes. Preserve normal freshness checks for status/take/resume;
@@ -82,12 +92,16 @@ export class CompanyBatch{
    const owners=await this.owners();
    for(const c of b.companies){if(owners[c.loginScope]?.batchId===b.id)delete owners[c.loginScope];if(c.status!=='ready_for_user_review')Object.assign(c,{previousStatus:c.status,status:'closed_preparation',reason:args.reason});}
    b.closedAt=new Date(this.clock()).toISOString();b.closeAuthorizationRef=args.authorizationRef;b.revision++;
-   await this.store.put('runs','company-channel-owners',owners);await this.store.put('runs',b.id,b);
+   const taskIds=b.companies.flatMap(c=>c.tasks.map(t=>t.taskId));await this.store.clearTaskRecords?.(taskIds);await this.loginRecords?.clear(taskIds);
+   let bindings;try{bindings=await this.store.get('runs','browser-channel-bindings');}catch(e){if(e.code!=='ENOENT')throw e;bindings={};}for(const [origin,binding] of Object.entries(bindings))if(binding.batchId===b.id)delete bindings[origin];await this.store.put('runs','browser-channel-bindings',bindings);
+   for(const c of b.companies)for(const task of c.tasks){let state;try{state=await this.queues.read(task.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}if(!state)continue;for(const key of ['fillRunId','verifyRunId','selectedFieldRunId','planId','planHash','verifiedAt'])delete state[key];state.status=state.pageId?'rebind_required':'pending';await this.queues.put(task.taskId,state);}
+   await this.store.put('runs','company-channel-owners',owners);let index;try{index=await this.store.get('runs','company-batch-by-queue');}catch(e){if(e.code!=='ENOENT')throw e;index={};}delete index[b.queueId];await this.store.put('runs','company-batch-by-queue',index);await this.store.remove?.('runs','batch-prepare-'+b.queueId);await this.store.remove?.('runs',b.id);
    return {batchId:b.id,status:'closed_preparation',pagesClosed:false,browserRestarted:false,submission:'not_performed'};
   }finally{await release();}
  }
  async take(args){return this.locked(args,async b=>{
-  await this.assertCapabilities(b.channels);
+  const policy=await this.store.get('runs','batch-browser-policy');if(policy.batchId!==b.sourceBatchId)throw Error('BATCH_BROWSER_POLICY_CHANGED');
+  await this.applyChannelSelection(b,resolveBatchChannels(await this.browser?.executionCapabilities?.(),policy.browserChannels));
   const now=this.clock();for(const c of b.companies)if(active.has(c.status)&&Date.parse(c.leaseExpiresAt)<=now){c.status='blocked';c.reason='lease_expired_requires_explicit_recovery';}
   const live=await this.queues.hydratedTasks(b.queueId);
   // 某家公司的交接内容在导入后变了：这一家先停下，等用户确认后 refresh 再继续；别家照常。
@@ -140,5 +154,5 @@ export class CompanyBatch{
   }
   if(args.status==='blocked'&&!args.reason?.trim())throw Error('BLOCK_REASON_REQUIRED');Object.assign(c,{status:args.status,reason:args.reason||null,runIds:args.runIds||[],updatedAt:new Date(this.clock()).toISOString(),leaseExpiresAt:new Date(this.clock()+30*60*1000).toISOString()});b.revision++;await this.store.put('runs',b.id,b);if(c.status==='ready_for_user_review'&&!b.companies.some(x=>x.loginScope===c.loginScope&&active.has(x.status))){const owners=await this.owners();delete owners[c.loginScope];await this.store.put('runs','company-channel-owners',owners);}const remainingAgentWork=b.companies.filter(company=>['pending','dispatched','running'].includes(company.status)).length;return {companyId:c.companyId,channel:c.channel,status:c.status,remainingAgentWork,batchPreparationComplete:b.companies.every(company=>company.status==='ready_for_user_review'),continuation:remainingAgentWork?{state:'prepare',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['company_batch_take','workflow_advance']}:c.status==='blocked'?{state:'technical_block',owner:'supervisor',requiresUser:false,shouldContinue:false,handoffVerified:true,nextTools:[]}:{state:c.status==='waiting_for_user'?'user_input':'review',owner:'user',requiresUser:true,shouldContinue:false,nextTools:[]},submission:'not_performed'};
  });}
- async status(args){const b=await this.get(args);return {batchId:b.id,revision:b.revision,companiesPerChannel:b.companiesPerChannel,channels:b.channels,companies:b.companies.map(({leaseToken,tasks,...c})=>({...c,roleCount:tasks.length})),submission:'not_performed'};}
+ async status(args){const b=await this.get(args);return {batchId:b.id,revision:b.revision,companiesPerChannel:b.companiesPerChannel,channels:b.channels,channelSelection:b.channelSelection,companies:b.companies.map(({leaseToken,tasks,...c})=>({...c,roleCount:tasks.length})),submission:'not_performed'};}
 }

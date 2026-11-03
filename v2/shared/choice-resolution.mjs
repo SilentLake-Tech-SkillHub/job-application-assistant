@@ -86,7 +86,7 @@ export async function assertStoredChoiceResolutions(template,{store,companyId,pr
    if(records.length!==1||r.optionPath!==(records[0].path??null)||r.optionValue!==(records[0].value??null)||r.optionValueAttribute!==(records[0].valueAttribute??null))throw Error('STORED_CHOICE_CONFIRMATION_CHANGED');
   }
   const locked=f.readonly&&f.lockedControl&&lockedChoice(choice)&&f.lockedControl.value===choice.lockedControl.value;
-  if(asset.companyId!==companyId||asset.pageUrl!==template.evidence.sourceUrl||asset.captureId!==r.captureId||!f.inventorySelectors?.includes(r.selector)||!choice||choice.restored!==true||choice.status!=='captured'&&!locked||optionHash(choice)!==r.optionsHash||!choice.options.includes(r.selectedOption))throw Error('STORED_CHOICE_CONFIRMATION_CHANGED');
+  if(template.evidence.pipeline?.version===2&&asset.captureHash!==template.evidence.pipeline.captureHash||asset.companyId!==companyId||asset.pageUrl!==template.evidence.sourceUrl||asset.captureId!==r.captureId||!f.inventorySelectors?.includes(r.selector)||!choice||choice.restored!==true||choice.status!=='captured'&&!locked||optionHash(choice)!==r.optionsHash||!choice.options.includes(r.selectedOption))throw Error('STORED_CHOICE_CONFIRMATION_CHANGED');
   if(profile?.facts?.[f.source]?.status==='known'&&JSON.stringify(profile.facts[f.source].value)!==JSON.stringify(r.sourceValue))throw Error('CHOICE_RESOLUTION_STALE');
   if(profile&&majorPolicyHash(profile,f.source)!==null&&r.majorPolicyHash!==majorPolicyHash(profile,f.source))throw Error('CHOICE_RESOLUTION_STALE');
   if(f.enumMap?.[r.sourceValue]!==r.selectedOption)throw Error('CHOICE_MAPPING_DIFFERS_FROM_CONFIRMATION');

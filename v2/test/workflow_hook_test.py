@@ -1,9 +1,12 @@
-import hashlib,json,os,shlex,subprocess,sys,tempfile,unittest
+import hashlib,json,os,shlex,subprocess,sys,tempfile,unittest,time
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
+def scope_state(ids):
+ now=time.time()
+ return {'session_ids':ids,'sessions':{sid:{'registeredAt':now,'expiresAt':now+12*3600} for sid in ids}}
 class WorkflowHookTest(unittest.TestCase):
  def setUp(self):
-  self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name);self.policy=self.root/'policy.md';self.policy.write_text('Detailed policy is a reference, not per-turn context.',encoding='utf-8');self.scope=self.root/'scope.json';self.scope.write_text(json.dumps({'session_ids':['enabled']}));self.lock=self.root/'lock.json';self.lock.write_text(json.dumps({'version':'synthetic','sha256':hashlib.sha256(self.policy.read_bytes()).hexdigest(),'route_sha256':hashlib.sha256((ROOT/'hooks/route.md').read_bytes()).hexdigest()}));self.env={**os.environ,'RECRUITING_HOST_ROLE':'executor','RECRUITING_WORKSPACE_ROOT':str(self.root),'RECRUITING_WORKFLOW_POLICY':str(self.policy),'RECRUITING_WORKFLOW_SCOPE':str(self.scope),'RECRUITING_WORKFLOW_LOCK':str(self.lock),'RECRUITING_WORKFLOW_STATE':str(self.root/'state')}
+  self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name);self.policy=self.root/'policy.md';self.policy.write_text('Detailed policy is a reference, not per-turn context.',encoding='utf-8');self.scope=self.root/'scope.json';self.scope.write_text(json.dumps(scope_state(['enabled'])));self.lock=self.root/'lock.json';self.lock.write_text(json.dumps({'version':'synthetic','sha256':hashlib.sha256(self.policy.read_bytes()).hexdigest(),'route_sha256':hashlib.sha256((ROOT/'hooks/route.md').read_bytes()).hexdigest()}));self.env={**os.environ,'RECRUITING_HOST_ROLE':'executor','RECRUITING_WORKSPACE_ROOT':str(self.root),'RECRUITING_WORKFLOW_POLICY':str(self.policy),'RECRUITING_WORKFLOW_SCOPE':str(self.scope),'RECRUITING_WORKFLOW_LOCK':str(self.lock),'RECRUITING_WORKFLOW_STATE':str(self.root/'state')}
  def tearDown(self):self.tmp.cleanup()
  def invoke(self,**args):
   event={'session_id':'enabled','turn_id':'turn','cwd':str(self.root),'hook_event_name':'PreToolUse','tool_name':'mcp__recruiting_application_v2__batch_prepare',**args}
@@ -64,7 +67,7 @@ class WorkflowHookTest(unittest.TestCase):
   self.assertEqual(self.invoke(tool_name='mcp__recruiting_form__batch_prepare',session_id='other').returncode,0)
 
  def test_dsh_executor_cannot_use_external_browser_shell_or_runtime_file_edits(self):
-  self.scope.write_text(json.dumps({'session_ids':['session-executor']}))
+  self.scope.write_text(json.dumps(scope_state(['session-executor'])))
   self.invoke(session_id='session-executor',hook_event_name='UserPromptSubmit')
   for tool,args in [('Bash',{'command':'node /tmp/fill.mjs'}),('mcp__playwright__browser_evaluate',{'function':'() => 1'}),('apply_patch',{'patch':'x'}),('read_file',{'path':str(self.root/'private.json')})]:
    result=self.invoke(session_id='session-executor',tool_name=tool,tool_input=args)
@@ -74,7 +77,7 @@ class WorkflowHookTest(unittest.TestCase):
   self.assertEqual(self.invoke(session_id='maintainer',tool_name='apply_patch').returncode,0)
 
  def test_dsh_text_planning_is_allowed_but_file_operations_remain_scoped(self):
-  self.scope.write_text(json.dumps({'session_ids':['session-executor']}))
+  self.scope.write_text(json.dumps(scope_state(['session-executor'])))
   for tool,args in [('todo_write',{'todos':[{'content':'Read the component Skill','status':'pending'}]}),('AskUserQuestion',{'questions':[{'question':'Complete the captcha in the clone'}]})]:
    r=self.invoke(session_id='session-executor',tool_name=tool,tool_input=args)
    self.assertEqual(r.returncode,0,r.stderr)
@@ -88,7 +91,7 @@ class WorkflowHookTest(unittest.TestCase):
   for host,session in [('codex','01abc-uuid'),('dsh','arbitrary-id'),('claude-code','claude-uuid')]:
    with self.subTest(host=host):
     self.env.update(RECRUITING_HOST_ID=host,RECRUITING_HOST_ROLE='executor')
-    self.scope.write_text(json.dumps({'session_ids':[session]}))
+    self.scope.write_text(json.dumps(scope_state([session])))
     self.invoke(session_id=session,hook_event_name='UserPromptSubmit')
     r=self.invoke(session_id=session,tool_name='Bash',tool_input={'command':'node /tmp/fill.mjs'})
     self.assertEqual(r.returncode,2,r.stdout);self.assertIn('EXECUTOR_MCP_ONLY',r.stderr)
@@ -101,14 +104,14 @@ class WorkflowHookTest(unittest.TestCase):
 
  def test_maintainer_role_does_not_enter_stale_execution_scope(self):
   self.env['RECRUITING_HOST_ROLE']='maintainer'
-  self.scope.write_text(json.dumps({'session_ids':['session-old']}))
+  self.scope.write_text(json.dumps(scope_state(['session-old'])))
   r=self.invoke(session_id='session-old',tool_name='apply_patch',tool_input={'patch':'source fix'})
   self.assertEqual(r.returncode,0,r.stderr)
   self.assertEqual(json.loads(self.invoke(session_id='session-old',hook_event_name='UserPromptSubmit').stdout),{})
 
  def test_single_host_can_leave_execution_scope_through_current_session_command(self):
   self.env['RECRUITING_HOST_ROLE']='executor'
-  self.scope.write_text(json.dumps({'session_ids':['session-single']}))
+  self.scope.write_text(json.dumps(scope_state(['session-single'])))
   command=shlex.join([sys.executable,str(ROOT / 'hooks/conversation_scope.py'),'disable','--scope-file',str(self.scope)])
   r=self.invoke(session_id='session-single',tool_name='exec_command',tool_input={'cmd':command})
   self.assertEqual(r.returncode,0,r.stderr)
@@ -118,3 +121,15 @@ class WorkflowHookTest(unittest.TestCase):
   event={'session_id':'enabled','turn_id':'wrapper','cwd':str(self.root),'hook_event_name':'UserPromptSubmit'}
   r=subprocess.run([sys.executable,'-c',code],input=json.dumps(event),text=True,capture_output=True,env=self.env,cwd=self.root)
   self.assertEqual(r.returncode,0,r.stderr);self.assertIn('hookSpecificOutput',json.loads(r.stdout))
+ def test_text_tool_definition_is_the_shared_file_and_file_arguments_anywhere_are_checked(self):
+  spec=json.loads((ROOT/'hooks/tool-arguments.json').read_text(encoding='utf-8'))
+  self.assertIn('todo_write',spec['textTools']);self.assertIn('TargetFile',spec['fileArgumentKeys'])
+  self.scope.write_text(json.dumps(scope_state(['session-executor'])))
+  workbook=str(self.root/'workbook.xlsx')
+  for tool,args in [('send_message',{'message':'started Keep'}),('notify',{'text':'done'})]:
+   r=self.invoke(session_id='session-executor',tool_name=tool,tool_input=args);self.assertEqual(r.returncode,0,r.stderr)
+  # A text tool carrying a file argument, at any depth or under any listed name, is not text-only.
+  for tool,args in [('todo_write',{'todos':[],'TargetFile':workbook}),('send_message',{'message':{'body':'x','attachments':[workbook]}}),('AskUserQuestion',{'questions':[{'question':'q','notebook_path':workbook}]})]:
+   r=self.invoke(session_id='session-executor',tool_name=tool,tool_input=args);self.assertEqual(r.returncode,2,(tool,r.stderr));self.assertIn('EXECUTOR_MCP_ONLY',r.stderr)
+  # Arguments that are not an object never crash the hook.
+  r=self.invoke(session_id='session-executor',tool_name='read',tool_input=[workbook]);self.assertIn(r.returncode,(0,2));self.assertNotIn('Traceback',r.stderr)

@@ -101,7 +101,7 @@ export async function assertStoredChoiceGoals(template,{store,companyId,profile,
  const fields=template.pages.flatMap(p=>p.fields),choices=[];
  for(const id of new Set(fields.map(f=>f.choiceGoal?.choicesId).filter(Boolean))){
   const asset=await store.get('runs',id);
-  if(asset.companyId!==companyId||asset.captureId!==capture.captureId||asset.pageUrl!==capture.pageUrl)throw Error('CHOICE_GOAL_CAPTURE_SCOPE_MISMATCH');
+  if(template.evidence.pipeline?.version===2&&asset.captureHash!==template.evidence.pipeline.captureHash||asset.companyId!==companyId||asset.captureId!==capture.captureId||asset.pageUrl!==capture.pageUrl)throw Error('CHOICE_GOAL_CAPTURE_SCOPE_MISMATCH');
   choices.push(...asset.choices.map(c=>({...c,choicesId:id,captureId:capture.captureId})));
  }
  const current=evaluateChoiceGoals({capture,profile,fields,choices});

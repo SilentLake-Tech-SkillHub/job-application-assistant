@@ -111,7 +111,7 @@ test('observed popup identity is frozen through builder expected and independent
  const selectionProof={status:'verified',...confirmListPopupSelection(pane(),[record({selected:true})],{label,path,value:id,valueAttribute:'data-id'})},observation={source:'live_dom',readAt:new Date().toISOString(),pageUrl:task.pageUrl,roleTitle:page.roleTitle,sections:page.sections,inventoryIds:[field.id],fields:{[field.id]:{present:true,value:label,selected:true,selectionProof}}};
  assert.equal(verifyForm(expected,observation).status,'verified');
  for(const patch of [{path:'Other'},{value:'wrong'},{choiceContract:'old'},{renderer:'other'}]){const o=structuredClone(observation);Object.assign(o.fields[field.id].selectionProof,patch);assert.notEqual(verifyForm(expected,o).status,'verified');}
- const asset={companyId:'example',pageUrl:task.pageUrl,captureId:c.captureId,choices:built.choices},store={get:async()=>asset};await assertStoredChoiceResolutions(template,{companyId:'example',store,profile});
+ const asset={companyId:'example',pageUrl:task.pageUrl,captureId:template.evidence.captureId,captureHash:template.evidence.pipeline.captureHash,choices:built.choices},store={get:async()=>asset};await assertStoredChoiceResolutions(template,{companyId:'example',store,profile});
  asset.choices[0].optionRecords[0].path='Changed';await assert.rejects(assertStoredChoiceResolutions(template,{companyId:'example',store,profile}),/CONFIRMATION_CHANGED/);
  const changed=structuredClone(template);changed.pages[0].fields[0].actions[0].expectedOptionPath='Changed';await assert.rejects(assertPreparedPlan(plan,changed,{...task,planId:plan.id,planHash:plan.planHash},{allowPartialPreparation:false}),/PREPARED_PLAN_CONTENT_CHANGED/);
 });

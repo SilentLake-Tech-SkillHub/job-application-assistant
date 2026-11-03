@@ -121,6 +121,14 @@ def public_json_files(root):
         assert phase in {'construct', 'map', 'prepare', 'verify', 'route', 'login', 'closed', 'closeout', 'technical_block', 'submit'}
         assert isinstance(tools, list) and all(t in names for t in tools)
     no_personal_data(json.dumps(lifecycle))
+    tools = json.loads((root / 'hooks/tool-arguments.json').read_text(encoding='utf-8'))
+    assert set(tools) == {'说明', 'schemaVersion', 'textTools', 'fileArgumentKeys'} and tools['schemaVersion'] == 1
+    for key in ('textTools', 'fileArgumentKeys'):
+        values = tools[key]
+        assert isinstance(values, list) and values and len(values) == len(set(values))
+        assert all(isinstance(v, str) and re.fullmatch(r'[A-Za-z_]+', v) for v in values)
+    no_personal_data(json.dumps(tools, ensure_ascii=False))
+    allowed.add('hooks/tool-arguments.json')
     for name, validate in [('role-materials.json', validate_role_materials),
                            ('learned-targets.json', validate_learned_targets)]:
         relative = 'catalog/' + name
