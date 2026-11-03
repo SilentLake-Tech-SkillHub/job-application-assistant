@@ -22,6 +22,9 @@ import { compileExpected, attachInventory } from './observation.mjs';
 import {compileExecutionPlan,assertPreparedPlan} from './execution-plan.mjs';
 import {validateControlContract} from './value-contract.mjs';
 import {acquireLease,leasePath,defaultLeaseRoot} from './leases.mjs';
+import {assertSealContract} from './form-seal.mjs';
+import {constructionTemplate} from './template-lifecycle.mjs';
+import {readdir} from 'node:fs/promises';
 import {probeConditions} from './condition-probe.mjs';
 import {enrichControlContext,liveControls} from './control-context.mjs';
 import {controlContractChanges} from './control-contract.mjs';
@@ -115,8 +118,13 @@ export class Store {
     if(group!=='templates'){const value=await this.taskRecords.get(group,id);if(value!==undefined)return value;}
     return JSON.parse(await readFile(path.join(this.root, group, `${id}.json`), 'utf8'));
   }
-  async put(group, id, value) {
+  async put(group, id, value, {sealPromotion}={}) {
     if (!idOK(id) || !['templates','runs','plans'].includes(group)) throw Error('INVALID_STORAGE_KEY');
+    if(sealPromotion){if(group!=='runs'||id!=='sealed-probe-'+sealPromotion.template.id||sealPromotion.template.coverage?.proof?.runId!==id)throw Error('INVALID_SEAL_PROMOTION');assertSealContract(sealPromotion.template,value,sealPromotion.companyId);}
+    if(group==='runs'&&!sealPromotion){
+      let files=[];try{files=await readdir(path.join(this.root,'templates'));}catch(e){if(e.code!=='ENOENT')throw e;}
+      for(const f of files.filter(f=>f.endsWith('.json'))){const t=JSON.parse(await readFile(path.join(this.root,'templates',f),'utf8'));if(t.coverage?.proof?.runId!==id)continue;let old;try{old=await this.get('runs',id);}catch(e){if(e.code!=='ENOENT')throw e;}if(old&&hash(old)!==hash(value))throw Error('SEALED_EVIDENCE_PROTECTED');}
+    }
     if(await this.taskRecords.put(group,id,value))return;
     const dir = path.join(this.root, group); await mkdir(dir, {recursive:true, mode:0o700});
     const dest = path.join(dir, `${id}.json`), temp = `${dest}.${randomUUID()}.tmp`;
@@ -132,7 +140,12 @@ export class Store {
     }finally{await release();}
   }
   async clearTaskRecords(taskIds){return this.taskRecords.clear(taskIds);}
-  async remove(group,id){if(!idOK(id)||!['runs','plans','templates'].includes(group))throw Error('INVALID_STORAGE_KEY');await unlink(path.join(this.root,group,id+'.json')).catch(e=>{if(e.code!=='ENOENT')throw e;});}
+  async remove(group,id){if(!idOK(id)||!['runs','plans','templates'].includes(group))throw Error('INVALID_STORAGE_KEY');
+    if(group==='runs'){
+      let files=[];try{files=await readdir(path.join(this.root,'templates'));}catch(e){if(e.code!=='ENOENT')throw e;}
+      for(const f of files.filter(f=>f.endsWith('.json'))){const t=JSON.parse(await readFile(path.join(this.root,'templates',f),'utf8'));if(t.coverage?.proof?.runId===id)throw Error('SEALED_EVIDENCE_PROTECTED');}
+    }
+    await unlink(path.join(this.root,group,id+'.json')).catch(e=>{if(e.code!=='ENOENT')throw e;});}
 }
 
 const normalize = value => typeof value === 'string' ? value.replace(/\r\n/g,'\n').trim() : value;
@@ -173,11 +186,11 @@ export class Engine {
       const company=this.companyForTask(task);
       if(!company?.templateId)throw Error('COMPANY_NOT_COVERED');
       if(new URL(task.pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
-      const template=validateTemplate(await this.store.get('templates',company.templateId));
+      const template=validateTemplate(await constructionTemplate(this.store,company.templateId,task.templateHash));
       if(hash(template)!==task.templateHash)throw Error('TEMPLATE_VERSION_CHANGED');
       const matches=template.pages.filter(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix));
       if(matches.length!==1)throw Error('AMBIGUOUS_PROBE_PAGE');
-      const run={id:'probe-'+template.id,operation:'internal_condition_probe',companyId:company.id,templateHash:hash(template),startedAt:new Date().toISOString(),status:'running',submission:'not_performed',save:'not_verified',authorizationEvidence:authorization.evidence};
+      const run={id:'draft-probe-'+template.id,operation:'internal_condition_probe',companyId:company.id,templateHash:hash(template),startedAt:new Date().toISOString(),status:'running',submission:'not_performed',save:'not_verified',authorizationEvidence:authorization.evidence};
       const started=performance.now();
       try{
         await this.store.put('runs',run.id,run);
@@ -193,7 +206,7 @@ export class Engine {
   }
   async preparePlan(task){
     const route=await this.formRoute(task);
-    if(route.route==='acquire')return {...route,status:'needs_form_acquisition',readyForExecution:false};
+    if(route.route!=='reuse')return {...route,status:'needs_form_acquisition',readyForExecution:false};
     const company=this.companyForTask(task);
     if(!company?.templateId)return {...route,status:'needs_form_acquisition',readyForExecution:false};
     if(new URL(task.pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
@@ -211,7 +224,7 @@ export class Engine {
       if (!c.templateId) return {companyId:id,status:'missing_template'};
       try { const t=validateTemplate(await this.store.get('templates',c.templateId));
         const route=await this.formRoute({companyId:id,pageUrl:t.evidence.sourceUrl});
-        if(route.route==='acquire')return {companyId:id,status:'needs_construction_or_migration',templateId:t.id,reason:route.reason,blockers:route.blockers||[],executionVerified:false};
+        if(route.route!=='reuse')return {companyId:id,status:'needs_construction_or_migration',templateId:t.id,reason:route.reason,blockers:route.blockers||[],executionVerified:false};
         let probe;try{probe=await this.store.get('templates',`${t.id}-conditions`);}catch{}
         const conditionalFields=t.pages.flatMap(p=>p.fields).some(f=>f.when);
         const conditionCoverage=!conditionalFields?'not_required':probe?.templateHash===hash(t)?'declared_branches_verified':'not_probed';

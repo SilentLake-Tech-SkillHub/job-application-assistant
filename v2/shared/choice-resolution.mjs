@@ -1,8 +1,9 @@
 import {createHash} from 'node:crypto';
+import {formScope} from './control-choice-store.mjs';
 import {majorFacts} from './major-policy.mjs';
 const digest=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const optionIdentity=r=>JSON.stringify([r.label,r.path??null,r.value??null,r.valueAttribute??null]);
-const optionHash=c=>digest({options:c.options,identities:(c.optionRecords||[]).map(({label,path,value,valueAttribute,disabled})=>({label,...(path!=null?{path}:{}),value,valueAttribute,disabled:!!disabled})),...(c.renderer==='phoenix_list_popup'?{renderer:c.renderer,choiceContract:c.choiceContract}: {})});
+export const optionHash=c=>digest({options:c.options,identities:(c.optionRecords||[]).map(({label,path,value,valueAttribute,disabled})=>({label,...(path!=null?{path}:{}),value,valueAttribute,disabled:!!disabled})),...(c.renderer==='phoenix_list_popup'?{renderer:c.renderer,choiceContract:c.choiceContract}: {})});
 export function assertPopupChoiceContract(choice){
  if(choice?.renderer==='phoenix_list_popup'&&(choice.choiceContract!=='leaf_v2'||!choice.optionRecords?.length||choice.optionRecords.some(r=>typeof r.label!=='string'||!r.label.trim()||/[\r\n]/.test(r.label))))throw Error('LIST_POPUP_CONTRACT_REQUIRES_REBUILD');
 }
@@ -86,7 +87,7 @@ export async function assertStoredChoiceResolutions(template,{store,companyId,pr
    if(records.length!==1||r.optionPath!==(records[0].path??null)||r.optionValue!==(records[0].value??null)||r.optionValueAttribute!==(records[0].valueAttribute??null))throw Error('STORED_CHOICE_CONFIRMATION_CHANGED');
   }
   const locked=f.readonly&&f.lockedControl&&lockedChoice(choice)&&f.lockedControl.value===choice.lockedControl.value;
-  if(template.evidence.pipeline?.version===2&&asset.captureHash!==template.evidence.pipeline.captureHash||asset.companyId!==companyId||asset.pageUrl!==template.evidence.sourceUrl||asset.captureId!==r.captureId||!f.inventorySelectors?.includes(r.selector)||!choice||choice.restored!==true||choice.status!=='captured'&&!locked||optionHash(choice)!==r.optionsHash||!choice.options.includes(r.selectedOption))throw Error('STORED_CHOICE_CONFIRMATION_CHANGED');
+  if(asset.companyId!==companyId||formScope(asset.pageUrl)!==formScope(template.evidence.sourceUrl)||asset.formId&&asset.formId!==template.evidence.formId||!f.inventorySelectors?.includes(r.selector)||!choice||choice.restored!==true||choice.status!=='captured'&&!locked||optionHash(choice)!==r.optionsHash||!choice.options.includes(r.selectedOption))throw Error('STORED_CHOICE_CONFIRMATION_CHANGED');
   if(profile?.facts?.[f.source]?.status==='known'&&JSON.stringify(profile.facts[f.source].value)!==JSON.stringify(r.sourceValue))throw Error('CHOICE_RESOLUTION_STALE');
   if(profile&&majorPolicyHash(profile,f.source)!==null&&r.majorPolicyHash!==majorPolicyHash(profile,f.source))throw Error('CHOICE_RESOLUTION_STALE');
   if(f.enumMap?.[r.sourceValue]!==r.selectedOption)throw Error('CHOICE_MAPPING_DIFFERS_FROM_CONFIRMATION');

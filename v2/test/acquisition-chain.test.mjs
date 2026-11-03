@@ -23,7 +23,7 @@ test('coverage flags and a valid seal cannot release an asset without collector 
  const f=fixture();delete f.template.evidence.pipeline;
  const router=new FormRouter({store:f.store,companies:[{id:'example',origin:'https://example.test',templateId:'pipeline'}],validateTemplate:()=>{}});
  const result=await router.resolve({companyId:'example',pageUrl:'https://example.test/form'});
- assert.equal(result.route,'acquire');assert.equal(result.requiresUser,false);assert.deepEqual(result.blockers,['MCP_ACQUISITION_CHAIN_REQUIRED']);
+ assert.equal(result.route,'migrate');assert.equal(result.reasonCode,'contract_upgrade');assert.equal(result.requiresUser,false);assert.ok(result.blockers.includes('MCP_ACQUISITION_CHAIN_REQUIRED'));
 });
 test('missing raw REA, native structure, script integrity and incomplete structure are rejected',()=>{
  for(const [change,reason] of [
@@ -37,7 +37,7 @@ test('missing raw REA, native structure, script integrity and incomplete structu
 });
 test('old construction cannot survive capture overwrite, changed field actions or missing receipts',async()=>{
  for(const change of [f=>f.capture.controls[0].label='Other question',f=>f.template.pages[0].fields[0].actions[0].selector='#other',f=>f.assets.delete(formAssetKeys(f.capture.formId).structure)]){
-  const f=fixture();change(f);await assert.rejects(assertAcquisitionChain(f.template,{store:f.store,companyId:'example'}),/ACQUISITION_CONTROL_CAPTURE_CHANGED|ACQUISITION_EVIDENCE_CHANGED|MCP_CONSTRUCTION_RECEIPT_CHANGED|ACQUISITION_EVIDENCE_MISSING/);
+  const f=fixture();change(f);await assert.rejects(assertAcquisitionChain(f.template,{store:f.store,companyId:'example'}),/ORIGINAL_CONTROL_EVIDENCE_MISSING|ACQUISITION_CONTROL_CAPTURE_CHANGED|ACQUISITION_EVIDENCE_CHANGED|MCP_CONSTRUCTION_RECEIPT_CHANGED|ACQUISITION_EVIDENCE_MISSING/);
  }
 });
 test('current profile mapping must still identify the same captured field and source',async()=>{

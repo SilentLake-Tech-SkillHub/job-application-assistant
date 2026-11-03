@@ -36,7 +36,7 @@ export function workflowEnvelope(data){
  if(data.continuation){const review=data.continuation.state==='review'&&['verified','ready_for_user_review'].includes(data.status);return {...data,completion:data.completion||{complete:review,status:review?'ready_for_review':data.continuation.requiresUser?'waiting_for_user':'in_progress',scope:'preparation'}};}
  let nextTools,state='construct';
  if(data.error)nextTools=['form_template_audit','workflow_next'];
- else if(data.route==='acquire')nextTools=['capture_rea_structure','form_build_template'];
+ else if(data.route&&data.route!=='reuse')nextTools=data.nextTools;
  else if(data.route==='reuse'){state='prepare';nextTools=['prepare_plan'];}
  else if(Array.isArray(data.plans)){
   if(data.plans.some(p=>p.readyForExecution)){state='prepare';nextTools=['batch_prepare','verify_current'];}

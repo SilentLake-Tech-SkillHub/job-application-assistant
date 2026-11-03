@@ -61,7 +61,7 @@ test('form asset status reports login, sealed template and 投递链接 gaps per
  await saveLogin(dir,'甲公司','登录.json',login('jia','https://jobs.example.cn'));catalog=await new CompanyDirectory({handoffDir:dir}).load();
  catalog[0].templateId='jia-formal';await store.put('templates','jia-formal',{...sealedTemplate(),coverage:{}});
  s=await formAssetStatus({handoffDir:dir,catalog,store});
- assert.deepEqual(s.incomplete[0].gaps,['S0001：表单模板未封存、投递链接（1 个岗位缺）']);
+ assert.deepEqual(s.incomplete[0].gaps,['S0001：表单模板：not_built_or_evidence_missing、投递链接（1 个岗位缺）']);
  assert.deepEqual(s.detail[0].roles.map(r=>[r.roleId,r.siteId,!!r.applicationUrl]),[['J000001','S0001',true],['J000002','S0001',false]]);
  s=await formAssetStatus({handoffDir:dir,catalog,store,companyIds:['C00009']});assert.deepEqual(s.incomplete,[{companyId:'C00009',name:undefined,gaps:['unknown_company']}]);
 });
@@ -76,9 +76,7 @@ test('a template bound to a profile contract marked requires_rebuild is never re
  const marked={companyForms:{x:{executionContract:{templateHash:hash(t),status:'requires_rebuild',validForCurrentInventory:false,rebuildReason:'major_policy_changed'}}}};
  const route=await new FormRouter({store,companies,validateTemplate:()=>true,loadProfile:async()=>marked}).resolve({companyId:'S0001',pageUrl:apply});
  const plain=await new FormRouter({store,companies,validateTemplate:()=>true,loadProfile:async()=>null}).resolve({companyId:'S0001',pageUrl:apply});
- // The rebuild mark is checked last, so it only changes the outcome of an otherwise reusable asset.
- if(plain.route==='reuse')assert.equal(route.reason,'COMPANY_FORM_CONTRACT_REQUIRES_REBUILD');else assert.equal(route.reason,plain.reason);
- assert.equal(route.route,'acquire');
+ assert.equal(route.reasonCode,'page_changed');assert.equal(route.route,'incremental');assert.ok(route.blockers.includes('PROFILE_EXECUTION_CONTRACT_REQUIRES_REBUILD'));
 });
 
 test('filling a form does not mark its contract for rebuild; a question the contract does not cover does',async()=>{

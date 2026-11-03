@@ -14,10 +14,11 @@ export async function discoverMappedChoice({profile,capture,selector,prior=[],in
  if(!mapping||mapping.factKey.startsWith('unmapped.'))throw Error('CHOICE_GOAL_MAPPING_REQUIRED');
  const factKey=mapping.factKey,fact=profile.facts?.[factKey];
  if(fact?.status!=='known')throw Error('CHOICE_GOAL_KNOWN_FACT_REQUIRED');
- const existing=prior.find(choice=>choice.selector===selector&&choice.status==='captured'&&choice.restored===true&&choice.options?.length&&choice.goal?.captureId===capture.captureId&&choice.goal.factKey===factKey&&choice.goal.sourceHash===hash(fact));
+ const existing=prior.find(choice=>choice.selector===selector&&choice.status==='captured'&&choice.restored===true&&choice.options?.length&&choice.goal?.factKey===factKey&&choice.goal.sourceHash===hash(fact));
  if(existing?.resolutions?.[factKey]){
   const fresh=resolveObservedChoice({profile,factKey,choice:{...existing,choicesId,captureId:capture.captureId},selectedOption:existing.resolutions[factKey].selectedOption,evidence:existing.resolutions[factKey].evidence});
-  if(hash(fresh)===hash(existing.resolutions[factKey]))return {choices:prior,goal:existing.goal,resolution:fresh,status:'choice_resolved',evidenceReuse:'same_capture_source_and_option_contract',browserAccess:false,executionVerified:false};
+  const comparable=({captureId,...r})=>r;
+  if(hash(comparable(fresh))===hash(comparable(existing.resolutions[factKey])))return {choices:prior,goal:existing.goal,resolution:fresh,status:'choice_resolved',evidenceReuse:'same_control_source_and_option_contract',browserAccess:false,executionVerified:false};
  }
  const queryPlan=planChoiceQueries(profile,factKey),queries=queryPlan.steps.map(step=>step.query);
  if(!queries.length)throw Error('CHOICE_GOAL_QUERIES_REQUIRED');

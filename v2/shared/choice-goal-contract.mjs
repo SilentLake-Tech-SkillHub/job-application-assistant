@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {compatibleInventory,formScope} from './control-choice-store.mjs';
 import {rankChoices,resolveObservedChoice,assertPopupChoiceContract} from './choice-resolution.mjs';
 
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -8,7 +9,7 @@ const nonempty=value=>typeof value==='string'&&value.trim().length>0;
 
 function currentResolution(profile,factKey,choice,stored){
  if(stored.factKey!==factKey||!equal(stored.sourceValue,profile.facts[factKey].value)||
-    stored.captureId&&stored.captureId!==choice.captureId||stored.selector&&stored.selector!==choice.selector||
+    stored.selector&&stored.selector!==choice.selector||
     stored.choicesId&&stored.choicesId!==choice.choicesId)throw Error('CHOICE_RESOLUTION_STALE');
  const ranked=rankChoices(profile,factKey,choice.options||[]);
  if(ranked.selection!==stored.selectedOption&&(stored.method!=='agent_semantic_review'||!nonempty(stored.evidence)))throw Error('CHOICE_SEMANTIC_REVIEW_REQUIRED');
@@ -96,12 +97,22 @@ export async function assertStoredChoiceGoals(template,{store,companyId,profile,
   return true;
  }
  assertChoiceGoalSources(template,profile);
- const capture=await store.get('runs',template.evidence.captureId);
- if(capture.companyId!==companyId||capture.pageUrl!==template.evidence.sourceUrl)throw Error('CHOICE_GOAL_CAPTURE_SCOPE_MISMATCH');
+ let capture=await store.get('runs',template.evidence.captureId);
+ // A sealed form already proves its complete repeat inventory. Normal pages
+ // may show only the first row until preparation restores the declared groups.
+ // Use the certified capture only when every currently rendered definition
+ // still matches; new or changed controls continue to block the plan.
+ const formId=template.evidence.formId||template.id;
+ if(/^F\d{6}$/.test(formId||'')){
+  let seal;try{seal=await store.get('runs','seal-'+formId);}catch(e){if(e.code!=='ENOENT')throw e;}
+  const baseline=seal?.certifiedCapture;
+  if(seal?.operation==='form_seal'&&seal.templateHash===hash(template)&&baseline?.companyId===companyId&&baseline.formId===formId&&formScope(baseline.pageUrl)===formScope(capture.pageUrl)&&compatibleInventory(baseline,capture))capture=baseline;
+ }
+ if(capture.companyId!==companyId||formScope(capture.pageUrl)!==formScope(template.evidence.sourceUrl))throw Error('CHOICE_GOAL_CAPTURE_SCOPE_MISMATCH');
  const fields=template.pages.flatMap(p=>p.fields),choices=[];
  for(const id of new Set(fields.map(f=>f.choiceGoal?.choicesId).filter(Boolean))){
   const asset=await store.get('runs',id);
-  if(template.evidence.pipeline?.version===2&&asset.captureHash!==template.evidence.pipeline.captureHash||asset.companyId!==companyId||asset.captureId!==capture.captureId||asset.pageUrl!==capture.pageUrl)throw Error('CHOICE_GOAL_CAPTURE_SCOPE_MISMATCH');
+  if(asset.companyId!==companyId||asset.formId&&asset.formId!==capture.formId||formScope(asset.pageUrl)!==formScope(capture.pageUrl))throw Error('CHOICE_GOAL_CAPTURE_SCOPE_MISMATCH');
   choices.push(...asset.choices.map(c=>({...c,choicesId:id,captureId:capture.captureId})));
  }
  const current=evaluateChoiceGoals({capture,profile,fields,choices});

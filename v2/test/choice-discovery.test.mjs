@@ -27,10 +27,10 @@ test('driver failure remains a driver failure instead of an absent-option conclu
 test('the same capture, source and confirmed options are reused without probing a nonempty editor',async()=>{
  const args=setup(),first=await discoverMappedChoice({...args,inspect:async()=>captured(['Example University'])});let calls=0;
  const second=await discoverMappedChoice({...args,prior:first.choices,inspect:async()=>{calls++;throw Error('MUST_NOT_PROBE_VALID_EXISTING_EVIDENCE');}});
- assert.equal(calls,0);assert.equal(second.evidenceReuse,'same_capture_source_and_option_contract');assert.equal(second.browserAccess,false);assert.equal(second.executionVerified,false);
+ assert.equal(calls,0);assert.equal(second.evidenceReuse,'same_control_source_and_option_contract');assert.equal(second.browserAccess,false);assert.equal(second.executionVerified,false);
 });
-test('changed capture, source or actual option identity cannot reuse an old resolution',async()=>{
- for(const change of [args=>args.capture.captureId='other-capture',args=>args.profile.facts[factKey].sourceIds=['new-source'],args=>args.prior[0].optionRecords[0].value='other-id']){
+test('changed source or actual option identity cannot reuse an old resolution',async()=>{
+ for(const change of [args=>args.profile.facts[factKey].sourceIds=['new-source'],args=>args.prior[0].optionRecords[0].value='other-id']){
   const args=setup(),first=await discoverMappedChoice({...args,inspect:async()=>captured(['Example University'])});args.prior=structuredClone(first.choices);change(args);let calls=0;
   const result=await discoverMappedChoice({...args,inspect:async()=>{calls++;return captured(['Example University']);}});
   assert.equal(calls,1);assert.equal(result.evidenceReuse,undefined);

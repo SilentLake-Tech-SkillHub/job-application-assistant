@@ -1,3 +1,4 @@
+import {storedSeal} from './seal-state.mjs';
 import {contractRebuildRequired} from './rebuild-mark.mjs';
 import {assertStoredChoiceResolutions} from './choice-resolution.mjs';
 import {assertAcquisitionChain} from './acquisition-chain.mjs';
@@ -13,9 +14,6 @@ import {readCompanyFiles} from './company-directory.mjs';
 function boundTemplateId(catalog,companyId,roleId){
  const c=catalog.find(x=>x.id===companyId);return c?.roleTemplates?.[roleId]||c?.templateId||null;
 }
-const sealed=t=>{try{return !!(t?.coverage?.allConditionalBranchesVerified&&t.coverage.allControlsMapped&&t.coverage.allDriversSupported&&assertSealContract(t));}catch{return false;}};
-async function storedSeal(store,template,companyId){if(!sealed(template))return false;try{await assertAcquisitionChain(template,{store,companyId});assertSealContract(template,await store.get('runs',template.coverage.proof.runId),companyId);await assertStoredChoiceResolutions(template,{store,companyId});return true;}catch{return false;}}
-
 // 记录“已投递”前：本岗位必须在本批队列里由 MCP 按已封存的公司表单模板填写，并有通过的独立核验记录。
 // 手工在浏览器里填完提交的岗位，没有这条记录，拒绝记录为已投递。
 export async function assertSubmissionPrepared({queues,store,catalog,outcome}){
@@ -39,7 +37,7 @@ export async function assertSubmissionPrepared({queues,store,catalog,outcome}){
   if(t.materials&&(!run.materialCoverage?.enabled||!run.materialCoverage.complete||run.materialCoverage.materialsHash!==hash(t.materials)))throw Error('ROLE_MATERIAL_VERIFICATION_REQUIRED');
   const templateId=boundTemplateId(catalog,t.companyId,t.roleId);if(!templateId)throw Error('SUBMISSION_COMPANY_TEMPLATE_MISSING');
   const template=await store.get('templates',templateId);
-  if(!await storedSeal(store,template,t.companyId))throw Error('SUBMISSION_COMPANY_TEMPLATE_NOT_SEALED');
+  if((await storedSeal(store,template,t.companyId)).status!=='sealed')throw Error('SUBMISSION_COMPANY_TEMPLATE_NOT_SEALED');
   if(hash(template)!==run.templateHash)throw Error('SUBMISSION_TEMPLATE_CHANGED_AFTER_VERIFY');
   return {taskId:t.taskId,verifyRunId:run.id,templateId};
  }
@@ -61,13 +59,13 @@ export async function formAssetStatus({handoffDir,catalog,store,companyIds,profi
   const sites=[];
   for(const e of entries){const required=roles.length?roles.filter(r=>r.siteId===e.siteId).map(r=>({roleId:r.roleId,templateId:e.roleTemplates?.[r.roleId]||e.templateId||null})):[{roleId:null,templateId:e.templateId||null}],assets=[];
    for(const requiredRole of required){let template=null;try{if(requiredRole.templateId)template=await store.get('templates',requiredRole.templateId);}catch{}
-    assets.push({...requiredRole,status:template?(contractRebuildRequired(profile,hash(template))?'requires_rebuild':await storedSeal(store,template,e.id)?'sealed':'unsealed'):'missing'});}
+    const seal=await storedSeal(store,template,e.id);assets.push({...requiredRole,...seal,status:template?(contractRebuildRequired(profile,hash(template))?'requires_rebuild':seal.status):'missing',reasonCode:seal.reason});}
    const template=!assets.length?'not_applicable':assets.every(a=>a.status==='sealed')?'sealed':assets.some(a=>a.status==='requires_rebuild')?'requires_rebuild':assets.some(a=>a.status==='unsealed')?'unsealed':'missing';
    const noUrl=roles.filter(r=>r.siteId===e.siteId&&!r.applicationUrl).length,gaps=[];
    if(!e.loginFile)gaps.push('登录配置');
-   if(template!=='sealed'&&template!=='not_applicable')gaps.push(template==='unsealed'?'表单模板未封存':template==='requires_rebuild'?'表单模板需重建':'表单模板');
+   if(template!=='sealed'&&template!=='not_applicable')gaps.push(template==='unsealed'?`表单模板：${[...new Set(assets.map(a=>a.reasonCode))].join('、')}`:template==='requires_rebuild'?'表单模板需重建':'表单模板');
    if(noUrl)gaps.push(`投递链接（${noUrl} 个岗位缺）`);
-   sites.push({siteId:e.siteId,assetKey:e.id,origin:e.origin,login:!!e.loginFile,template,roleTemplates:Object.keys(e.roleTemplates||{}).length,roleAssets:assets,gaps});}
+   sites.push({siteId:e.siteId,assetKey:e.id,origin:e.origin,login:!!e.loginFile,template,reasonCodes:[...new Set(assets.map(a=>a.reasonCode))],routes:[...new Set(assets.map(a=>a.route))],roleTemplates:Object.keys(e.roleTemplates||{}).length,roleAssets:assets,gaps});}
   const missingSites=[...used].filter(s=>!entries.some(e=>e.siteId===s));
   const gaps=[...missingSites.map(s=>`${s}：站点不在目录`),...sites.filter(s=>s.gaps.length).map(s=>`${s.siteId}：${s.gaps.join('、')}`)];
   rows.push({companyId:id,name:doc['公司名称'],status:gaps.length?'incomplete':'ready',gaps,sites,roles});

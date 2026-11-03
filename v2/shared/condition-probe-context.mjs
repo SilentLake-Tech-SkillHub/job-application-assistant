@@ -1,3 +1,4 @@
+import {constructionTemplate} from './template-lifecycle.mjs';
 // Derive page identity from the confirmed queue, never from agent assertions.
 export async function runConditionProbe(args,{boundRole,engine,store,assertAcquisition,refreshBindings}){
  const {companyId,pageUrl,roleId,templateHash,authorization}=args;
@@ -13,6 +14,6 @@ export async function runConditionProbe(args,{boundRole,engine,store,assertAcqui
  }
  const company=engine.companyForTask(task);
  if(!company?.templateId)throw Error('COMPANY_NOT_COVERED');
- await assertAcquisition(await store.get('templates',company.templateId),{store,companyId});
+ await assertAcquisition(await constructionTemplate(store,company.templateId,templateHash),{store,companyId});
  return {...await engine.probeCompany(task,authorization),operation:'internal_condition_probe'};
 }

@@ -1,4 +1,5 @@
 import {captureContentHash} from '../shared/acquisition-chain.mjs';
+import {bindControlChoices} from '../shared/control-choice-store.mjs';
 import {formAssetKeys} from '../shared/form-identity.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';import {fileURLToPath} from 'node:url';
 import {companyDoc,site,saveCompany} from './fixtures/handoff.mjs';
@@ -47,7 +48,7 @@ test('actual application MCP reports new runtime and missing company form routes
  const registered=registerObservedQuestions(personal,{companyId,pageUrl,observedAt:'synthetic',fields:[{selector:'#school',label:'学校',type:'combobox'}]});
  const questionId=Object.keys(personal.companyForms[registered.pageKey].mappings).find(k=>personal.companyForms[registered.pageKey].mappings[k].selector==='#school');mapProfileQuestions(personal,{companyId,pageUrl,evidence:'synthetic observed school mapping',mappings:[{questionId,factKey:'school'}]});await writeFile(profile,JSON.stringify(personal));
  const schoolFixture=acquisitionFixture({...template,id:'school-source',pages:[{...template.pages[0],fields:[{...template.pages[0].fields[0],source:'school',label:'学校',inventorySelectors:['#school'],inventoryType:'combobox',read:{kind:'value',selector:'#school'}}]}]},companyId);await schoolFixture.persist(privateStore);
- await privateStore.put('runs','test-choices',{companyId,pageUrl,captureId:schoolFixture.capture.captureId,captureHash:captureContentHash(schoolFixture.capture),choices:[{selector:'#school',status:'captured',restored:true,options:['Alpha University']}]});
+ await privateStore.put('runs','test-choices',bindControlChoices({capture:schoolFixture.capture,choices:[{selector:'#school',status:'captured',restored:true,options:['Alpha University']}]}));
  const pending=await call('form_resolve_choices',{companyId,choicesId:'test-choices',resolutions:[{selector:'#missing',factKey:'school'},{selector:'#school',factKey:'wrong'}]});assert.deepEqual(pending.pending.map(p=>p.status),['needs_option_capture','needs_question_mapping']);assert.equal(pending.pending[1].questionId,questionId);assert.equal(pending.continuation.owner,'agent');
  const resolved=await call('form_resolve_choices',{companyId,choicesId:'test-choices',resolutions:[{selector:'#school',factKey:'school'}]});assert.equal(resolved.pending.length,0);assert.equal((await privateStore.get('runs','test-choices')).choices[0].resolutions.school.selectedOption,'Alpha University');
  // Exercise the actual sealing endpoint with a role-material source that must
@@ -66,7 +67,7 @@ test('actual application MCP reports new runtime and missing company form routes
  const materialField={...template.pages[0].fields[0],id:'code',source:'material:referralCode',label:'推荐码',inventoryLabel:'推荐码',inventoryType:'text',inventorySelectors:['#code'],read:{kind:'value',selector:'#code'},actions:[{method:'fill',selector:'#code'}]};
  const materialTemplate={...template,id:'material-source',coverage:{},pages:[{...template.pages[0],fields:[materialField]}]};const materialFixture=acquisitionFixture(materialTemplate,companyId);await materialFixture.persist(privateStore);
  const materialBuilt=await call('form_build_template',{companyId,structureId:formAssetKeys(materialFixture.capture.formId).structure,page:{...template.pages[0],fields:undefined,pathPrefix:undefined}});await call('template_register',{companyId,draftId:materialBuilt.draftId,draftHash:materialBuilt.draftHash});
- const stored=await privateStore.get('templates',materialFixture.capture.formId),probeId=randomUUID();
+ await assert.rejects(privateStore.get('templates',materialFixture.capture.formId),{code:'ENOENT'});const stored=(await privateStore.get('runs',formAssetKeys(materialFixture.capture.formId).draft)).template,probeId=randomUUID();
  await privateStore.put('runs',probeId,{id:probeId,operation:'internal_condition_probe',companyId,templateHash:hash(stored),status:'verified',restoration:'verified',branches:[{source:'__baseline__',value:null,status:'verified',newQuestions:0,selected:true,roleMatched:true,conditionFieldsMatched:true,inventory:[{selector:'#code',label:'推荐码',type:'text',required:false}]}]});
  const sealed=await call('template_finalize',{companyId,templateHash:hash(stored),probeRunId:probeId});assert.equal(sealed.status,'asset_sealed_require_profile_preflight');assert.equal(JSON.parse(await readFile(profile,'utf8')).facts['material:referralCode'],undefined);
  }finally{await c.close();await rm(d,{recursive:true,force:true});}

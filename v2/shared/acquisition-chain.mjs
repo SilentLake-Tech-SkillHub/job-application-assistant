@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {controlInventoryHash,compatibleInventory,formScope} from './control-choice-store.mjs';
 import {formAssetKeys} from './form-identity.mjs';
 import {assertRecordSourceBindings} from './record-source-binding.mjs';
 import {canonicalControlSpec} from './control-registry.mjs';
@@ -29,6 +30,18 @@ export function assertAcquiredStructure(structure,capture,companyId){
  return true;
 }
 
+export function originalStructureCapture(structure,current){
+ const reconstructed={...current,companyId:structure.companyId,formId:structure.formId,pageUrl:structure.pageUrl,pageId:structure.pageId,observedAt:structure.observedAt,controls:structure.controls.map(({reaCandidates,reaBindings,...control})=>control)};
+ if(captureContentHash(reconstructed)!==structure.controlCaptureHash)throw Error('ORIGINAL_CONTROL_EVIDENCE_MISSING');
+ assertAcquiredStructure(structure,reconstructed,structure.companyId);return reconstructed;
+}
+export async function assertCurrentStructure(store,structure,capture,companyId){
+ let seal;try{seal=await store.get('runs','seal-'+capture.formId);}catch(e){if(e.code!=='ENOENT')throw e;}
+ const baseline=structure.baselineCapture||seal?.baselineCapture||originalStructureCapture(structure,capture);
+ assertAcquiredStructure(structure,baseline,companyId);
+ if(capture.companyId!==companyId||capture.formId!==baseline.formId||formScope(capture.pageUrl)!==formScope(baseline.pageUrl)||!capture.controls?.length)throw Error('ACQUISITION_CAPTURE_SCOPE_CHANGED');
+ return {baseline,incremental:captureContentHash(baseline)!==captureContentHash(capture)};
+}
 export async function assertCapturedAcquisition(store,{companyId,captureId,pageUrl,formId}){
  if(!captureId&&!formId)throw Error('FORM_CODE_OR_CAPTURE_REQUIRED');
  const capture=await store.get('runs',captureId||formAssetKeys(formId).capture);
@@ -36,7 +49,7 @@ export async function assertCapturedAcquisition(store,{companyId,captureId,pageU
  if(pageUrl&&capture.pageUrl!==pageUrl)throw Error('ACQUISITION_CAPTURE_SCOPE_CHANGED');
  const keys=formAssetKeys(capture.formId);let structure;
  try{structure=await store.get('runs',keys.structure);}catch(error){if(error.code==='ENOENT')throw Error('MCP_ACQUISITION_CHAIN_REQUIRED');throw error;}
- assertAcquiredStructure(structure,capture,companyId);
+ await assertCurrentStructure(store,structure,capture,companyId);
  return {capture,structure};
 }
 
@@ -51,9 +64,9 @@ export async function recordReaInspection(store,{companyId,pageUrl,structure,cap
 }
 
 export async function recordAcquisitionChain(store,{companyId,structureId,structure,capture,template}){
- assertAcquiredStructure(structure,capture,companyId);
+ const {incremental}=await assertCurrentStructure(store,structure,capture,companyId);
  template.evidence.formId=capture.formId;template.evidence.captureId=formAssetKeys(capture.formId).capture;
- template.evidence.pipeline={version:2,formId:capture.formId,structureHash:hash(structure),captureHash:captureContentHash(capture)};
+ template.evidence.pipeline={version:incremental?3:2,formId:capture.formId,structureHash:hash(structure),captureHash:captureContentHash(capture)};
  const receipt={operation:'mcp_form_construction',companyId,pageUrl:capture.pageUrl,...template.evidence.pipeline,contractHash:acquisitionContractHash(template)};
  await store.put('runs',acquisitionReceiptId(capture.formId),receipt);
  return receipt;
@@ -62,12 +75,17 @@ export async function recordAcquisitionChain(store,{companyId,structureId,struct
 export async function assertAcquisitionChain(template,{store,companyId,profile}={}){
  assertRecordSourceBindings(template);
  const binding=template?.evidence?.pipeline;
- if(binding?.version!==2||!binding.formId)throw Error('MCP_ACQUISITION_CHAIN_REQUIRED');
+ if(![2,3].includes(binding?.version)||!binding.formId)throw Error('MCP_ACQUISITION_CHAIN_REQUIRED');
  const keys=formAssetKeys(binding.formId);
- const [structure,capture,receipt]=await Promise.all([
+ const [structure,latestCapture,latestReceipt]=await Promise.all([
   store.get('runs',keys.structure),store.get('runs',keys.capture),store.get('runs',keys.receipt)
  ]).catch(error=>{if(error.code==='ENOENT')throw Error('ACQUISITION_EVIDENCE_MISSING');throw error;});
- assertAcquiredStructure(structure,capture,companyId);
+ let certificate;try{certificate=await store.get('runs','seal-'+binding.formId);}catch(e){if(e.code!=='ENOENT')throw e;}
+ const certified=certificate?.operation==='form_seal'&&certificate.templateHash===hash(template);
+ const receipt=certified?certificate.acquisitionReceipt||latestReceipt:latestReceipt;
+ const original=certified?certificate.certifiedCapture||certificate.baselineCapture:originalStructureCapture(structure,latestCapture);
+ const capture=compatibleInventory(original,latestCapture)&&formScope(latestCapture.pageUrl)===formScope(template.evidence.sourceUrl)&&captureBound(binding.captureHash,original)?original:latestCapture;
+ if(binding.version===3)await assertCurrentStructure(store,structure,capture,companyId);else assertAcquiredStructure(structure,capture,companyId);
  if(binding.structureHash!==hash(structure)||!captureBound(binding.captureHash,capture)||template.evidence.sourceUrl!==capture.pageUrl||template.evidence.captureId!==capture.captureId)throw Error('ACQUISITION_EVIDENCE_CHANGED');
  if(receipt.operation!=='mcp_form_construction'||receipt.companyId!==companyId||receipt.pageUrl!==capture.pageUrl||receipt.formId!==binding.formId||receipt.structureHash!==binding.structureHash||receipt.captureHash!==binding.captureHash||receipt.contractHash!==acquisitionContractHash(template))throw Error('MCP_CONSTRUCTION_RECEIPT_CHANGED');
  const fields=template.pages.flatMap(page=>page.fields);

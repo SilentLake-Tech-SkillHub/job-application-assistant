@@ -1,33 +1,20 @@
-import {assertStoredChoiceResolutions} from './choice-resolution.mjs';
-import {assertAcquisitionChain} from './acquisition-chain.mjs';
-// Offline company-form lookup. A profile answer gap is not a reason to recapture
-// an existing form. An incomplete or incompatible form asset still needs work.
-import {templateConstructionIssues} from './field-policy.mjs';
-import {assertSealContract} from './form-seal.mjs';
+import {storedSeal} from './seal-state.mjs';
 import {contractRebuildRequired} from './rebuild-mark.mjs';
 import {hash} from './engine.mjs';
 export class FormRouter {
-  constructor({store,companies,validateTemplate,loadProfile=async()=>null}) {Object.assign(this,{store,companies,validateTemplate,loadProfile});}
-  async resolve({companyId,roleId,pageUrl}) {
-    const company=this.companies.find(c=>c.id===companyId);
-    if(!company||new URL(pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
-    const acquire=(reason,extra={})=>({companyId,route:'acquire',nextStage:'form_acquisition',reason,recapture:'missing_or_different_parts',browserAccess:false,...extra});
-    const templateId=company.roleTemplates?.[roleId]||company.templateId;
-    if(!templateId)return acquire('NO_COMPANY_FORM_ASSET');
-    let template;
-    try{template=await this.store.get('templates',templateId);}catch(e){if(e.code!=='ENOENT')throw e;return acquire('COMPANY_FORM_ASSET_MISSING',{templateId});}
-    const constructionIssues=templateConstructionIssues(template);
-    if(constructionIssues.length)return acquire('COMPANY_FORM_ASSET_INCOMPLETE',{templateId,blockers:[...new Set(constructionIssues.map(x=>x.reason))],fields:constructionIssues,requiresUser:false});
-    try{this.validateTemplate(template);}catch{return acquire('COMPANY_FORM_ASSET_INVALID',{templateId,requiresUser:false});}
-    const url=new URL(pageUrl),pages=template.pages.filter(p=>url.pathname.startsWith(p.pathPrefix));
-    if(pages.length!==1)return acquire('FORM_PATH_NOT_COVERED',{templateId});
-    const blockers=['allConditionalBranchesVerified','allControlsMapped','allDriversSupported'].filter(k=>template.coverage?.[k]!==true);
-    const legacySelectors=pages.flatMap(p=>p.fields).filter(f=>!f.userOnly&&!f.readonly).some(f=>[f.read?.selector,...(f.inventorySelectors||[]),...(f.actions||[]).flatMap(a=>[a.selector,a.labelSelector,a.openSelector])].some(s=>/^\s*(?:html\s*>\s*)?body\s*>/i.test(s||'')&&/:nth-(?:of-type|child)\(/.test(s)));
-    if(legacySelectors)blockers.push('PAGE_GLOBAL_POSITIONAL_LOCATORS');
-    if(blockers.length)return acquire('COMPANY_FORM_ASSET_INCOMPLETE',{templateId,blockers});
-    try{await assertAcquisitionChain(template,{store:this.store,companyId});}catch(error){return acquire('COMPANY_FORM_ACQUISITION_CHAIN_INVALID',{templateId,blockers:[error.message],requiresUser:false});}
-    try{assertSealContract(template);const probe=await this.store.get('runs',template.coverage.proof.runId);assertSealContract(template,probe,companyId);await assertStoredChoiceResolutions(template,{store:this.store,companyId});}catch(e){return acquire('COMPANY_FORM_ASSET_NOT_SEALED',{templateId,blockers:[e.code==='ENOENT'?'SEAL_PROBE_EVIDENCE_MISSING':e.message],requiresUser:false});}
-    if(contractRebuildRequired(await this.loadProfile(),hash(template)))return acquire('COMPANY_FORM_CONTRACT_REQUIRES_REBUILD',{templateId,blockers:['PROFILE_EXECUTION_CONTRACT_REQUIRES_REBUILD'],requiresUser:false});
-    return {companyId,templateId,route:'reuse',nextStage:'local_profile_preflight',reason:'COMPANY_FORM_ASSET_AVAILABLE',fullAcquisitionRequired:false,lightweightStructureCheckRequired:true,browserAccess:false};
-  }
+ constructor({store,companies,validateTemplate,loadProfile=async()=>null}){Object.assign(this,{store,companies,validateTemplate,loadProfile});}
+ async resolve({companyId,roleId,pageUrl}){
+  const company=this.companies.find(c=>c.id===companyId);
+  if(!company||new URL(pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
+  const templateId=company.roleTemplates?.[roleId]||company.templateId;
+  const out=(state,reason,extra={})=>({companyId,templateId,...state,reasonCode:state.reason,reason,routeCode:state.route,nextStage:state.route==='reuse'?'local_profile_preflight':state.route==='migrate'?'offline_contract_migration':'form_acquisition',recapture:state.route==='reuse'?'none':'missing_or_different_parts',fullAcquisitionRequired:state.route==='acquire',lightweightStructureCheckRequired:state.route==='reuse',browserAccess:false,requiresUser:false,nextTools:state.route==='reuse'?['prepare_plan']:state.route==='migrate'?['form_migrate_contract']:state.route==='incremental'?['capture_controls','form_mapping_candidates','form_build_template']:['capture_rea_structure','form_mapping_candidates','form_build_template'],...extra});
+  let template=null;
+  if(templateId)try{template=await this.store.get('templates',templateId);}catch(e){if(e.code!=='ENOENT')throw e;}
+  let state=await storedSeal(this.store,template,companyId);
+  if(!template)return out(state,templateId?'COMPANY_FORM_ASSET_MISSING':'NO_COMPANY_FORM_ASSET');
+  if(template.pages.filter(p=>new URL(pageUrl).pathname.startsWith(p.pathPrefix)).length!==1)return out({status:'unsealed',reason:'page_changed',route:'incremental',blockers:['FORM_PATH_NOT_COVERED']},'FORM_PATH_NOT_COVERED');
+  if(contractRebuildRequired(await this.loadProfile(),hash(template)))state={status:'unsealed',reason:'page_changed',route:'incremental',blockers:['PROFILE_EXECUTION_CONTRACT_REQUIRES_REBUILD']};
+  if(state.status==='sealed')try{this.validateTemplate(template);}catch(e){state={status:'unsealed',reason:'contract_upgrade',route:'migrate',blockers:[e.message]};}
+  return out(state,state.route==='reuse'?'COMPANY_FORM_ASSET_AVAILABLE':'COMPANY_FORM_ASSET_'+state.reason.toUpperCase());
+ }
 }

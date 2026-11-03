@@ -1,3 +1,4 @@
+import {formScope} from './control-choice-store.mjs';
 import {recordParentsFromProfile} from './record-source-binding.mjs';
 import {resolveDateRepresentation} from './date-representation.mjs';
 import {readRoleIdentity} from './role-identity.mjs';
@@ -104,7 +105,7 @@ export function buildFormTemplate({capture,profile,mappings=[],choices=[],page,t
  if(!capture?.controls?.length||!capture.pageUrl||!capture.observedAt)throw Error('CURRENT_CONTROL_CAPTURE_REQUIRED');
  if(!page?.roleTitle||!page.readySelector||!page.sections?.length||!page.sectionDiscovery)throw Error('OBSERVED_PAGE_CONTRACT_REQUIRED');
  if(page.roleIdentity&&readRoleIdentity(page.roleIdentity,capture.pageUrl)?.value!==page.roleIdentity.value)throw Error('OBSERVED_ROLE_IDENTITY_MISMATCH');
- if(reaStructure&&(reaStructure.pageUrl!==capture.pageUrl||reaStructure.companyId!==capture.companyId))throw Error('REA_CONTROL_CAPTURE_SCOPE_MISMATCH');
+ if(reaStructure&&(formScope(reaStructure.pageUrl)!==formScope(capture.pageUrl)||reaStructure.companyId!==capture.companyId))throw Error('REA_CONTROL_CAPTURE_SCOPE_MISMATCH');
  if(page.provider&&capture.provider&&page.provider!==capture.provider)throw Error('FORM_PROVIDER_EVIDENCE_MISMATCH');
  page={...page,sections:page.sections.map(section=>typeof section==='string'?{title:section}:section),...(capture.provider?{provider:capture.provider}:{})};
  if(page.sections.some(section=>!section?.title))throw Error('OBSERVED_SECTION_TITLE_REQUIRED');

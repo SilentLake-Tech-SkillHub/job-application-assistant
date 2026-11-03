@@ -7,7 +7,7 @@ const profile=()=>({schemaVersion:1,entities:{},sources:{},facts:{},companyForms
 test('each observed field persists full content/component/actions/readback even when construction blocked',()=>{
  const t=template();t.pages[0].fields[0].actions=[];t.pages[0].fields[0].constructionBlockers=['CONTROL_DRIVER_REQUIRED'];const p=profile();
  registerTemplateContract(p,{companyId:'synthetic',template:t,templateHash:'hash',stage:'construction'});
- const stored=Object.values(p.companyForms)[0].executionContract;assert.equal(stored.status,'construction_incomplete');assert.deepEqual(stored.fields[0].constructionBlockers,['CONTROL_DRIVER_REQUIRED']);assert.equal(stored.fields[0].inventoryType,'combobox');assert.equal(stored.storageAudit.ready,false);
+ const stored=Object.values(p.companyForms)[0].draftExecutionContract;assert.equal(stored.status,'construction_incomplete');assert.deepEqual(stored.fields[0].constructionBlockers,['CONTROL_DRIVER_REQUIRED']);assert.equal(stored.fields[0].inventoryType,'combobox');assert.equal(stored.storageAudit.ready,false);
  assert.throws(()=>registerTemplateContract(p,{companyId:'synthetic',template:t,templateHash:'hash'}),/COMPLETE_EXECUTION_CONTRACT_REQUIRED/);
 });
 test('interactive school cannot be parked as readonly text or ordinary user action',()=>{

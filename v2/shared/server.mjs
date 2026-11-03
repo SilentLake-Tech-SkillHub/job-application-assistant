@@ -1,5 +1,9 @@
 import {withTaskRecords,taskRecordScope,TaskRecords} from './task-records.mjs';
 import {evaluateBusinessAuthorization,businessAuthorizationSwitch} from './business-authorization.mjs';
+import {registerFormDraft,constructionTemplate,promoteSealedTemplate} from './template-lifecycle.mjs';
+import {storedSeal,assertReaRequired,recertifyContract} from './seal-state.mjs';
+import {retainControlChoices,bindControlChoices,formScope} from './control-choice-store.mjs';
+import {assertCurrentStructure,originalStructureCapture} from './acquisition-chain.mjs';
 import {runConditionProbe} from './condition-probe-context.mjs';
 import {authorizedPrivacyContext,applyAuthorizedPrivacyFields} from './privacy-fill.mjs';
 import {createSamplingVisionReviewer,createSocketVisionReviewer} from './attachment-visual-review.mjs';
@@ -96,12 +100,12 @@ async function resolveInputs(profile,template,decisions,companyId,task={}){
  const complete={...resolved,privacyFillContext,agreementPolicy:{businessAuthorization:businessAuthorizationSwitch(profile)},profileFillContext:authorizedProfileContext(profile,template,{materialContext,companyId,roleId:materialContext.roleId,pageUrl,officialOrigin:company?.origin})};
  return complete;
 }
-async function boundRole(args){
+async function boundRole(args,{construction=false,templateHash}={}){
   if(!queues)throw Error('PRIVATE_PROFILE_REQUIRED');
   const {q,t}=await queues.task(args),state=await queues.read(t.taskId);
   assertBoundRoleState(q,t,state);
   const c=catalog.companies.find(c=>c.id===t.companyId),templateId=c?.roleTemplates?.[t.roleId]||c?.templateId;if(!templateId)throw Error('COMPANY_NOT_COVERED');
-  const template=await store.get('templates',templateId),plan=template.pages.find(p=>new URL(state.returnUrl).pathname.startsWith(p.pathPrefix));
+  const template=construction?await constructionTemplate(store,templateId,templateHash):await store.get('templates',templateId),plan=template.pages.find(p=>new URL(state.returnUrl).pathname.startsWith(p.pathPrefix));
   if(!plan||plan.roleTitle!==t.title)throw Error('CONFIRMED_ROLE_TITLE_TEMPLATE_MISMATCH');
   const login=JSON.parse(await readFile(directory.loginFile(t.companyId),'utf8'));
   const snapshot=await browser.request('roleSnapshot',{pageId:state.pageId,roleSelector:plan.roleSelector,accountSelector:login.account.selector,loginRoot:login.fields?.root,roleIdentity:plan.roleIdentity});
@@ -218,9 +222,9 @@ registerTool('form_search_choices',{description:'通用控件目标闭环：只�
  const capture=await store.get('runs',a.captureId);if(capture.companyId!==a.companyId)throw Error('CHOICE_CAPTURE_SCOPE_MISMATCH');
  await assertCapturedAcquisition(store,{companyId:a.companyId,captureId:a.captureId});
  const field=capture.controls.find(c=>c.selector===a.selector);if(!field||!isChoiceControl(field))throw Error('ORDINARY_CAPTURED_CHOICE_REQUIRED');
- const id=formAssetKeys(capture.formId).choices;let prior=[];try{const old=await store.get('runs',id);if(old.captureHash===captureContentHash(capture))prior=old.choices||[];}catch(e){if(e.code!=='ENOENT')throw e;}
+ const id=formAssetKeys(capture.formId).choices;let prior=[];try{const old=await store.get('runs',id);prior=retainControlChoices(old,capture);}catch(e){if(e.code!=='ENOENT')throw e;}
  const result=await discoverMappedChoice({profile:await loadProfile(profileFile),capture,selector:a.selector,prior,choicesId:id,inspect:async(field,query)=>inspectCapturedChoice(await browser.existingPage(capture.pageUrl),capture,field,query)});
- await store.put('runs',id,{id,companyId:a.companyId,pageUrl:capture.pageUrl,captureId:a.captureId,formId:capture.formId,captureHash:captureContentHash(capture),choices:result.choices,readAt:new Date().toISOString()});
+ await store.put('runs',id,{id,companyId:a.companyId,pageUrl:capture.pageUrl,captureId:a.captureId,formId:capture.formId,captureHash:captureContentHash(capture),...bindControlChoices({capture,choices:result.choices,previous:{choices:prior}}),readAt:new Date().toISOString()});
  const {choices,...summary}=result;return {choicesId:id,...summary,continuation:{state:'construct',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:result.resolution?['form_build_template']:['form_resolve_choices','form_build_template']},submission:'not_performed'};
 })),false);
 registerTool('role_submit',{description:'仅凭用户对具体岗位及当前表单的最终提交授权执行一次官网提交。绑定模板和已通过核验的reviewRunId，离开填写页前独立重核全部字段、主档来源和附件；网站有“预览并提交”时直接点进摘要页，摘要页不做任何内容比对；摘要页尚未勾选的条款框按主档业务授权开关处理（1直接勾选，0返回needs_user_consent交用户勾选后再调用本工具）。先落提交尝试再点击真实按钮，官网回执才算成功。返回固定回传供application_closeout，不改主表；不确定禁止自动重试。',inputSchema:{...queueTask,authorization:z.object({submit:z.literal(true),templateHash:z.string().length(64),reviewRunId:z.string().uuid(),evidence:z.string().min(1)})}},wrap(async a=>{
@@ -243,29 +247,30 @@ registerTool('role_prepare_profile_fields',{description:'按私有主档的globa
 registerTool('runtime_info',{description:'只读返回当前实际运行版本与能力，识别旧安装端；不连接浏览器。',annotations:{readOnlyHint:true}},wrap(async()=>({runtime:residentRuntime,version:packageInfo.version,compilerVersion:3,controlCapabilities:controlCapabilities(),pipelineRevision:'rea-contract-6',capabilities:['mandatory_acquisition_chain','mcp_draft_only_registration','run_evidence_handoff','live_choice_event_witness','goal_bound_choice_search','retrieval_identity_separation','mandatory_choice_goals','current_autocomplete_entity_proof','global_profile_fill','profile_reference_only_freeze','captured_date_ranges','authorized_attachment_removal','locked_enum_presentation','canonical_live_inventory','scoped_material_preparation','external_material_mapping_gate','business_material_first','selector_identity_reconciliation','scoped_ongoing_asof','collector_mapping_guard','verified_user_decision_wait','readiness_presence','captured_date_options','major_real_first','disabled_selected_readback','empty_search_evidence','sourced_ongoing_dates','string_array_fact_ingestion','mandatory_role_materials','material_amendment_preserves_pages','business_required_referral','company_batch','form_route','workflow_next','role_bindings','frozen_plan','independent_readback','fixed_closeout','official_form_definition','semantic_question_locators','rea_form_structure','generic_form_construction','typed_continuation','explicit_construction_provider','rendered_choice_options','draft_reference_registration','mandatory_workflow_contract','persisted_field_contract','observed_choice_resolution','incremental_choice_evidence','choice_resolution_pending_diagnostics','field_bound_choice_audit','dropdown_reopen_selection_proof'],browserAccess:false,visionVerification:{mode:process.env.RECRUITING_VISION_SOCKET?'host_socket':'mcp_sampling',available:await visionReviewer.isAvailable()},browserEnvironment:await browser.executionCapabilities?.()}),false));
 registerTool('workflow_next',{description:'确定性调用路由：先判断公司资产，复用则离线映射与编译；缺失或失效才返回增量建库接口。只返回下一调用及真实阻塞，不替模型宣称完成。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),roleId:z.string().optional()},annotations:{readOnlyHint:true}},wrap(async task=>{
  const route=await engine.formRoute(task);
- if(route.route==='acquire'){let hasDefinitionRecipe=false;try{hasDefinitionRecipe=!!directory.definitionFile(task.companyId);}catch(e){if(e.message!=='UNKNOWN_COMPANY')throw e;}return {...route,definitionFirst:hasDefinitionRecipe,continuation:continuationFor({route}),nextTools:[...(hasDefinitionRecipe?['capture_form_definition']:[]),'capture_rea_structure','form_mapping_candidates','profile_map_questions','form_search_choices','capture_choice_options','form_build_template','template_register','probe_conditions','template_finalize','prepare_plan'],submission:'not_performed'};}
+ if(route.route!=='reuse')return {...route,continuation:{state:route.route==='migrate'?'repair':'construct',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:route.nextTools},submission:'not_performed'};
  const profile=await loadProfile(profileFile),company=engine.companyForTask(task),template=await store.get('templates',company.templateId);
  try{assertQuestionsMapped(profile,task.companyId,task.pageUrl);}catch{return {...route,nextStage:'local_mapping',continuation:{state:'map',owner:'agent',requiresUser:false,shouldContinue:true},nextTools:['form_mapping_candidates','profile_map_questions'],submission:'not_performed'};}
  const plan=await engine.preparePlan({...task,templateHash:hash(template),...await resolveInputs(profile,template,{},task.companyId,task)});
  return {...route,...plan,continuation:continuationFor({route,plan,template,profile}),nextTools:plan.constructionBlockers?.length?['capture_controls','template_register']:plan.counts?.needs_user?['profile_status','profile_record_answers']:['batch_prepare','verify_current'],submission:'not_performed'};
 }));
+registerTool('form_migrate_contract',{description:'离线重新认证证据完整、仅格式变化的封存表单。必须匹配原始建库回执与真实探测证明；不打开浏览器、不构造现场证明。',inputSchema:{companyId:z.string(),roleId:z.string().optional()}},wrap(args=>engine.withCompanyLease(args.companyId,async()=>{const c=engine.companyForTask(args);if(!c?.templateId)throw Error('COMPANY_NOT_COVERED');return recertifyContract(store,await store.get('templates',c.templateId),args.companyId);})));
 registerTool('form_route',{description:'先做本地IF判断：公司已有覆盖当前页面的可用表单则复用并转资料预检；没有、未完成或路径不匹配才进入增量建库。不打开网页、不重新采集已有表单、不填写。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),roleId:z.string().optional()},annotations:{readOnlyHint:true}},wrap(a=>engine.formRoute(a)));
 registerTool('capture_repeat_slots',{description:'内部建库：按已观察的重复栏目容器和添加按钮准备目标总条数的空白条目（count不是新增条数），不填写个人数据、不上传或提交；随后须重新采集全部字段。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),groupSelector:z.string().describe('只匹配该栏目每一条记录，不匹配其他栏目；可使用已观察标题绑定的phoenixq repeatRecords'),addSelector:z.string(),addLabel:z.string().optional(),count:z.number().int().min(1).max(20).describe('本栏目期望的最终总条数，不是新增条数'),authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1)})}},wrap(a=>engine.withCompanyLease(a.companyId,async()=>{const p=await browser.existingPage(a.pageUrl),before=await p.observe({fields:[],groups:[{id:'records',selector:a.groupSelector}]});const currentEntries=before.groups?.records;if(currentEntries>a.count){const error=Error('EXCESS_REPEAT_ENTRIES_REQUIRE_REVIEW');error.details={currentEntries,expectedEntries:a.count,countMeaning:'target_total_records',reason:'observed_selector_matches_more_records_than_target'};throw error;}await p.ensureGroups([{id:'construction-slots',selector:a.groupSelector,addSelector:a.addSelector,addLabel:a.addLabel,count:a.count}]);return {status:'slots_created_require_recapture',count:a.count,submission:'not_performed'};})),false);
 registerTool('capture_choice_options',{description:'内部建库：读取已采集单选/原生select的真实选项，对已采集的UD、Ant及ATS下拉逐个展开读取并恢复，不更改原选择；保存私有选项资产。selectors限定本次需补采的已捕获控件，不改变完整问题登记。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),captureId:z.string(),selectors:z.array(z.string()).min(1).optional(),searchQueries:z.record(z.string()).optional()}},wrap(args=>engine.withCompanyLease(args.companyId,async()=>{
  const capture=await store.get('runs',args.captureId);if(capture.companyId!==args.companyId||capture.pageUrl!==args.pageUrl)throw Error('CHOICE_CAPTURE_SCOPE_MISMATCH');
  await assertCapturedAcquisition(store,{companyId:args.companyId,captureId:args.captureId,pageUrl:args.pageUrl});
- const checkpointId=formAssetKeys(capture.formId).choices;let accumulated=[];try{const prior=await store.get('runs',checkpointId);if(prior.companyId===args.companyId&&prior.captureId===args.captureId&&prior.captureHash===captureContentHash(capture))accumulated=prior.choices||[];}catch(e){if(e.code!=='ENOENT')throw e;}
+ const checkpointId=formAssetKeys(capture.formId).choices;let accumulated=[];try{const prior=await store.get('runs',checkpointId);accumulated=retainControlChoices(prior,capture);}catch(e){if(e.code!=='ENOENT')throw e;}
  const page=await browser.existingPage(args.pageUrl),choices=[];if(capture.provider==='feishu')await page.inventory({provider:'feishu'});
  const candidates=capture.controls.filter(f=>isChoiceControl(f)||args.selectors?.includes(f.selector)&&isDateControl(f));
  if(args.selectors?.some(s=>!candidates.some(f=>f.selector===s)))throw Error('CHOICE_SELECTOR_NOT_CAPTURED');
- for(const f of candidates.filter(f=>!args.selectors||args.selectors.includes(f.selector))){
+ for(const f of candidates.filter(f=>(!args.selectors||args.selectors.includes(f.selector))&&!accumulated.some(c=>c.selector===f.selector&&c.restored===true))){
   const root=f.questionSelector||`.ud-formily-item:has(:is(${f.selector})):not(:has(.ud-formily-item :is(${f.selector})))`;
   const result=isDateControl(f)?await page.act({method:f.renderer==='phoenix_date_picker'?'phoenix_date':'ant_day',operation:'inspect',selector:f.selector,labelSelector:f.labelSelector,...(f.inlineOngoing?{ongoingSelector:f.inlineOngoing.selector}:{})},null,{}):await inspectCapturedChoice(page,capture,f,args.searchQueries?.[f.selector]);
   choices.push({query:args.searchQueries?.[f.selector]||null,selector:f.selector,label:f.label,fieldKey:f.fieldKey,group:f.group,repeatIndex:f.repeatIndex,...result});
-  accumulated=mergeObservedChoices(accumulated,[choices.at(-1)]);await store.put('runs',checkpointId,{id:checkpointId,...args,formId:capture.formId,captureHash:captureContentHash(capture),choices:accumulated,readAt:new Date().toISOString(),status:'in_progress'});
+  accumulated=mergeObservedChoices(accumulated,[choices.at(-1)]);await store.put('runs',checkpointId,{id:checkpointId,...args,formId:capture.formId,captureHash:captureContentHash(capture),...bindControlChoices({capture,choices:accumulated,previous:{choices:accumulated}}),readAt:new Date().toISOString(),status:'in_progress'});
   if(!result.restored)throw Error('CHOICE_INSPECTION_NOT_RESTORED');
  }
- const id=checkpointId;await store.put('runs',id,{id,...args,formId:capture.formId,captureHash:captureContentHash(capture),choices:accumulated,readAt:new Date().toISOString()});return {captureId:args.captureId,choicesId:id,choices,capturedTotal:accumulated.length};
+ const id=checkpointId;await store.put('runs',id,{id,...args,formId:capture.formId,captureHash:captureContentHash(capture),...bindControlChoices({capture,choices:accumulated,previous:{choices:accumulated}}),readAt:new Date().toISOString()});return {captureId:args.captureId,choicesId:id,choices,capturedTotal:accumulated.length};
 })),false);
 registerTool('inspect_choice',{description:'按真实捕获字段直接核验下拉：分别读取搜索input值和已选span文字，打开绑定菜单采真实候选、实际值和选中标记，再恢复原状态。默认保存该字段的截图。只作核验，不点选候选、不填写或提交，不将搜索文字当成已选结果。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),captureId:z.string(),selector:z.string(),query:z.string().optional(),screenshot:z.boolean().default(true)},annotations:{readOnlyHint:true}},wrap(a=>engine.withCompanyLease(a.companyId,async()=>{
  const capture=await store.get('runs',a.captureId);if(capture.companyId!==a.companyId||capture.pageUrl!==a.pageUrl)throw Error('CHOICE_CAPTURE_SCOPE_MISMATCH');
@@ -281,7 +286,7 @@ registerTool('inspect_choice',{description:'按真实捕获字段直接核验下
 registerTool('form_resolve_choices',{description:'离线按已捕获真实选项进行别名与模糊候选匹配，结果覆盖保存到该次选项资产。已确认主档别名可自动映射；模糊结果只排序，不直接硬选。指定实际选项须提供语义等价证据，未知或歧义不得伪造用户答案。',inputSchema:{companyId:z.string(),choicesId:z.string(),resolutions:z.array(z.object({selector:z.string(),factKey:z.string(),selectedOption:z.string().optional(),evidence:z.string().optional()})).min(1)}},wrap(async a=>{
  const asset=await store.get('runs',a.choicesId);if(asset.companyId!==a.companyId)throw Error('CHOICE_CAPTURE_SCOPE_MISMATCH');
  const paired=await assertCapturedAcquisition(store,{companyId:a.companyId,captureId:asset.captureId,pageUrl:asset.pageUrl});
- if(asset.captureHash!==captureContentHash(paired.capture))throw Error('CHOICE_CAPTURE_SCOPE_MISMATCH');
+ if(!retainControlChoices(asset,paired.capture).length)throw Error('CHOICE_CAPTURE_SCOPE_MISMATCH');
  const profile=await loadProfile(profileFile),form=lookupCompanyForm(profile,a.companyId,asset.pageUrl).form;const results=[],pending=[];
  for(const item of a.resolutions){const choice=asset.choices.find(c=>c.selector===item.selector),mapping=Object.values(form?.mappings||{}).find(m=>m.selector===item.selector&&m.active!==false);
   if(!choice){pending.push({selector:item.selector,status:'needs_option_capture',nextTool:'capture_choice_options'});continue;}
@@ -296,7 +301,7 @@ registerTool('material_import_prepare',{description:'首次建库：对已捕获
 registerTool('material_import_run',{description:'执行已冻结的简历导入，真实上传前核对控件、简历容器和本地文件版本元数据；尝试先落账，不自动重试。结果仍须重新采集并核验网站解析。',inputSchema:{planId:z.string().uuid(),planHash:z.string().length(64),authorization:z.object({uploads:z.literal(true),evidence:z.string().min(1)})}},wrap(a=>materials.run(a),false));
 const batchRef={batchId:z.string().uuid(),batchHash:z.string().length(64)};
 registerTool('company_batch_refresh_materials',{description:'仅消费搜索端按作用域重新确认的同批公司（只改材料 materials_only / 链接变更 links_only，记有上一版指纹）；逐家核对上一版指纹与选岗不变，只换这几家的确认版本，保留任务ID；只改材料时撤销旧核验结果，链接变更时作废已打开页面状态、从打开岗位重新开始；返回新队列Hash。',inputSchema:{...batchRef,authorizationRef:z.string().min(1)}},wrap(a=>companyBatches.refreshMaterials(a),false));
-registerTool('company_batch_create',{description:'离线从用户正向评审确认后的各公司宽表 岗位交接/公司/<公司编码>.json 取公司，保存公司批次（不接受旧公司方案文件）；通道为本批 browserChannels 要求与执行宿主投递能力的交集；交集为空自动使用可用通道并报告原因，重复创建保留本批要求；默认通道取浏览器能力文件（双开时 Chrome/IAB 各最多10家，否则只用用户 Chrome），缺文件返回 BROWSER_CAPABILITY_DETECTION_REQUIRED；同公司多岗位只占一个公司名额。不转换Excel、不打开网页。',inputSchema:{rolesFile:z.string().optional(),companyPlan:z.record(z.unknown()).optional(),companyOrder:z.array(z.string()).optional(),authorizationRef:z.string().min(1),companiesPerChannel:z.number().int().min(1).max(10).default(10),parallelRoles:z.boolean().default(false),browserChannels:z.array(z.enum(['chrome','iab'])).min(1).max(2).optional()}},wrap(async a=>{if(!companyBatches)throw Error('PRIVATE_PROFILE_REQUIRED');const created=await companyBatches.create(a);await refreshBindings();const assets=await formAssetStatus({handoffDir:directory.handoffDir,catalog:catalog.companies,store,profile:await readProfileFile(profileFile)});return {...created,formAssets:{ready:assets.ready,incomplete:assets.incomplete,rule:'缺表单模板的公司先按建库路线 capture→template_register→probe_conditions→template_finalize 补齐，再 prepare；不得手工填表代替'}};},false));
+registerTool('company_batch_create',{description:'离线从用户正向评审确认后的各公司宽表 岗位交接/公司/<公司编码>.json 取公司，保存公司批次（不接受旧公司方案文件）；通道为本批 browserChannels 要求与执行宿主投递能力的交集；交集为空自动使用可用通道并报告原因，重复创建保留本批要求；默认通道取浏览器能力文件（双开时 Chrome/IAB 各最多10家，否则只用用户 Chrome），缺文件返回 BROWSER_CAPABILITY_DETECTION_REQUIRED；同公司多岗位只占一个公司名额。不转换Excel、不打开网页。',inputSchema:{rolesFile:z.string().optional(),companyPlan:z.record(z.unknown()).optional(),companyOrder:z.array(z.string()).optional(),authorizationRef:z.string().min(1),companiesPerChannel:z.number().int().min(1).max(10).default(10),parallelRoles:z.boolean().default(false),browserChannels:z.array(z.enum(['chrome','iab'])).min(1).max(2).optional()}},wrap(async a=>{if(!companyBatches)throw Error('PRIVATE_PROFILE_REQUIRED');const created=await companyBatches.create(a);await refreshBindings();const assets=await formAssetStatus({handoffDir:directory.handoffDir,catalog:catalog.companies,store,profile:await readProfileFile(profileFile)});return {...created,formAssets:{ready:assets.ready,incomplete:assets.incomplete,routes:assets.detail.map(({companyId,sites})=>({companyId,sites:sites.map(({siteId,roleAssets})=>({siteId,roleAssets}))}))}};},false));
 registerTool('company_batch_take',{description:'原子领取并切分公司到能力文件记录的可用通道，每通道最多10家；保留公司/平台登录范围亲和性与已确认岗位顺序。返回宿主实际执行任务，不把派发当成功。',inputSchema:batchRef},wrap(a=>{if(!companyBatches)throw Error('PRIVATE_PROFILE_REQUIRED');return companyBatches.take(a);},false));
 registerTool('company_batch_record',{description:'按公司租约收回实际运行状态；可独立等待用户，准备完成必须提供所有岗位的真实填写核验运行证据。',inputSchema:{...batchRef,companyId:z.string(),channel:z.enum(['chrome','iab']),leaseToken:z.string().uuid(),status:z.enum(['running','waiting_for_user','ready_for_user_review','blocked']),reason:z.string().optional(),runIds:z.array(z.string()).optional()}},wrap(a=>{if(!companyBatches)throw Error('PRIVATE_PROFILE_REQUIRED');return companyBatches.record(a);},false));
 registerTool('company_batch_status',{description:'只读双通道公司批次的等待、阻塞及核验结果，不返回租约令牌。',inputSchema:batchRef,annotations:{readOnlyHint:true}},wrap(a=>{if(!companyBatches)throw Error('PRIVATE_PROFILE_REQUIRED');return companyBatches.status(a);},false));
@@ -306,7 +311,7 @@ async function prepareRole(args){
   const queued=await queues.task(args),queuedState=await queues.read(queued.t.taskId);
   if(!queuedState.returnUrl)throw Error('ROLE_NOT_READY_FOR_FILL');
   const formRoute=await engine.formRoute({companyId:queued.t.companyId,roleId:queued.t.roleId,pageUrl:queuedState.returnUrl});
-  if(formRoute.route==='acquire')return {status:'needs_form_acquisition',...formRoute,submission:'not_performed'};
+  if(formRoute.route!=='reuse')return {status:'needs_form_acquisition',...formRoute,submission:'not_performed'};
   const {t,state,template}=await boundRole(args),profile=await loadProfile(profileFile);
   assertQuestionsMapped(profile,t.companyId,state.returnUrl);
   const task={companyId:t.companyId,roleId:t.roleId,pageUrl:state.returnUrl,pageId:state.pageId,browserBinding:state.browserBinding,taskId:t.taskId,templateHash:hash(template),...await resolveInputs(profile,template,{},t.companyId,{roleId:t.roleId,pageUrl:state.returnUrl}),roleQueueArgs:{queueId:args.queueId,queueHash:args.queueHash,taskId:args.taskId}};
@@ -345,7 +350,7 @@ registerTool('role_prepare_fields',{description:'从当前完整冻结计划补�
 }));
 registerTool('workflow_advance',{description:'连续推进已确认队列中多个公司，每家公司调用完整岗位准备和读回链；一家公司待用户不会停止其它公司。只执行已封存模板，不自动重试失败写入，不提交。',inputSchema:{tasks:z.array(z.object(queueTask)).min(1).max(20),concurrency:z.number().int().min(1).max(5).default(2),authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1),sensitiveFields:z.boolean().default(false),uploads:z.boolean().default(false),allowPartialPreparation:z.boolean().default(false)})}},wrap(async a=>{const identities=await Promise.all(a.tasks.map(t=>queues.task(t)));if(new Set(identities.map(x=>x.t.companyId)).size!==identities.length)throw Error('ONE_CURRENT_ROLE_PER_COMPANY_REQUIRED');return advanceCompanies(a.tasks,async task=>{
  const queued=await queues.task(task),state=await queues.read(queued.t.taskId),route=await engine.formRoute({companyId:queued.t.companyId,roleId:queued.t.roleId,pageUrl:state.returnUrl||queued.t.url});
- if(route.route==='acquire')return {status:'needs_form_acquisition',route,continuation:continuationFor({route})};
+ if(route.route!=='reuse')return {status:'needs_form_acquisition',route,continuation:continuationFor({route})};
  return prepareRole({...task,authorization:a.authorization});
 },{concurrency:a.concurrency,affinity:task=>catalog.companies.find(c=>c.id===identities.find(x=>x.t.taskId===task.taskId).t.companyId).origin});}));
 registerTool('roles_prepare_batch',{description:'按已确认并发模式，在共享账号独占批次内并发准备独立岗位页；全部计划先编译、逐岗位核验，不登录、不提交。',inputSchema:{queueId:z.string().uuid(),queueHash:z.string().length(64),taskIds:z.array(z.string().uuid()).min(1).max(5),concurrency:z.number().int().min(1).max(5).default(3),authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1),sensitiveFields:z.boolean().default(false),uploads:z.boolean().default(false),allowPartialPreparation:z.boolean().default(false)})}},wrap(async args=>{
@@ -355,7 +360,7 @@ registerTool('roles_prepare_batch',{description:'按已确认并发模式，在�
   if(sameCompanyMultiRole&&(q.executionMode!=='parallel_roles'&&!q.parallelRoles))throw Error('PARALLEL_ROLE_AUTHORIZATION_REQUIRED');
   if(!sameCompanyMultiRole&&!['parallel_roles','parallel_companies'].includes(q.executionMode)&&!q.parallelRoles)throw Error('PARALLEL_ROLE_AUTHORIZATION_REQUIRED');
   const tasks=[],bound=[];
-  for(const taskId of args.taskIds){const a={queueId:args.queueId,queueHash:args.queueHash,taskId};const queued=await queues.task(a),state=await queues.read(taskId);const route=await engine.formRoute({companyId:queued.t.companyId,roleId:queued.t.roleId,pageUrl:state.returnUrl||queued.t.applyUrl||queued.t.url});if(route.route==='acquire')return {status:'needs_form_acquisition',...route,taskId,submission:'not_performed'};const b=await boundRole(a),profile=await loadProfile(profileFile);assertQuestionsMapped(profile,b.t.companyId,b.state.returnUrl);
+  for(const taskId of args.taskIds){const a={queueId:args.queueId,queueHash:args.queueHash,taskId};const queued=await queues.task(a),state=await queues.read(taskId);const route=await engine.formRoute({companyId:queued.t.companyId,roleId:queued.t.roleId,pageUrl:state.returnUrl||queued.t.applyUrl||queued.t.url});if(route.route!=='reuse')return {status:'needs_form_acquisition',...route,taskId,submission:'not_performed'};const b=await boundRole(a),profile=await loadProfile(profileFile);assertQuestionsMapped(profile,b.t.companyId,b.state.returnUrl);
     const task={companyId:b.t.companyId,roleId:b.t.roleId,pageUrl:b.state.returnUrl,pageId:b.state.pageId,browserBinding:b.state.browserBinding,taskId:b.t.taskId,templateHash:hash(b.template),...await resolveInputs(profile,b.template,{},b.t.companyId,{roleId:b.t.roleId,pageUrl:b.state.returnUrl}),roleQueueArgs:a};
     const plan=await engine.preparePlan(task);if(!plan.readyForExecution&&!(args.authorization.allowPartialPreparation&&plan.status==='needs_answers'&&!plan.constructionBlockers?.length))return {...plan,status:plan.status,submission:'not_performed'};tasks.push({...task,planId:plan.planId,planHash:plan.planHash});bound.push(b);
   }
@@ -409,7 +414,7 @@ registerTool('browser_open',{description:'在共用的 MCP Chrome 中打开已�
   if(u.origin!==c.origin||!t.pages.some(p=>u.pathname.startsWith(p.pathPrefix)))throw Error('COMPANY_FORM_SCOPE_MISMATCH');
   return engine.withCompanyLease(companyId,()=>browser.request('openPage',{pageUrl}));
 }));
-registerTool('probe_conditions',{description:'内部条件探测。具体岗位须传queueId/queueHash/taskId，内核从原任务核对账号、岗位和页面并派生绑定，不接受Agent声明浏览器身份。按已捕获选项展开并恢复原表单，不写个人事实、不上传、不提交；仅已验证且恢复成功的探测可以封存。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),roleId:z.string().optional(),queueId:queueTask.queueId.optional(),queueHash:queueTask.queueHash.optional(),taskId:queueTask.taskId.optional(),templateHash:z.string(),authorization:z.object({probe:z.literal(true),evidence:z.string().min(1)})}},wrap(args=>runConditionProbe(args,{boundRole,engine,store,assertAcquisition:assertAcquisitionChain,refreshBindings})));
+registerTool('probe_conditions',{description:'内部条件探测。具体岗位须传queueId/queueHash/taskId，内核从原任务核对账号、岗位和页面并派生绑定，不接受Agent声明浏览器身份。按已捕获选项展开并恢复原表单，不写个人事实、不上传、不提交；仅已验证且恢复成功的探测可以封存。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),roleId:z.string().optional(),queueId:queueTask.queueId.optional(),queueHash:queueTask.queueHash.optional(),taskId:queueTask.taskId.optional(),templateHash:z.string(),authorization:z.object({probe:z.literal(true),evidence:z.string().min(1)})}},wrap(args=>runConditionProbe(args,{boundRole:a=>boundRole(a,{construction:true,templateHash:args.templateHash}),engine,store,assertAcquisition:assertAcquisitionChain,refreshBindings})));
 registerTool('capture_form_definition',{description:'内部建库：按公司已核实的官网模板读取接口获取全部栏目、隐藏条件问题和选项字典，强制登记个人JSON；不读取候选人答案，不填写、不提交。',inputSchema:{companyId:z.string(),pageUrl:z.string().url()}},wrap(args=>engine.withCompanyLease(args.companyId,async()=>{
  const company=catalog.companies.find(c=>c.id===args.companyId);if(!company||new URL(args.pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
  const recipeFile=directory.definitionFile(args.companyId);if(!recipeFile)throw Error('FORM_DEFINITION_NOT_CONFIGURED');const recipe=JSON.parse(await readFile(recipeFile,'utf8'));
@@ -424,8 +429,8 @@ registerTool('capture_form_definition',{description:'内部建库：按公司已
 async function captureCompanyControls({companyId,pageUrl,pageId,compact,provider}){
   const c=catalog.companies.find(c=>c.id===companyId);if(!c||new URL(pageUrl).origin!==c.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
   if(!profileFile)throw Error('PROFILE_REQUIRED_FOR_NEW_QUESTIONS');
-  const candidates=await Promise.all([...new Set([c.templateId,...Object.values(c.roleTemplates||{})].filter(Boolean))].map(id=>store.get('templates',id)));
-  const matches=candidates.filter(t=>t.pages.some(p=>matchesPageIdentity(p,pageUrl)));if(matches.length>1)throw Error('AMBIGUOUS_ROLE_TEMPLATE');
+  const candidates=await Promise.all([...new Set([c.templateId,...Object.values(c.roleTemplates||{})].filter(Boolean))].map(async id=>{try{return await constructionTemplate(store,id);}catch(e){if(e.code==='ENOENT')return null;throw e;}}));
+  const matches=candidates.filter(t=>t?.pages.some(p=>matchesPageIdentity(p,pageUrl)));if(matches.length>1)throw Error('AMBIGUOUS_ROLE_TEMPLATE');
   let template=matches[0]||null;try{if(template)validateTemplate(template);}catch{template=null;}const plan=template?.pages.find(p=>matchesPageIdentity(p,pageUrl));
   const p=await browser.existingPage(pageUrl,pageId?{pageId,readOnly:true}:undefined);
   const collectionPlan=await detectedAcquisitionPlan(p,plan,provider);
@@ -468,6 +473,9 @@ registerTool('form_remove_attachment',{description:'仅按用户针对本岗位�
 }));
 registerTool('capture_rea_structure',{description:'内部建库：REA只读采集选定原页面，再用同一浏览器实时控件清单交叉核对。只使用当前宿主能力，不启动、导航或切换浏览器；不填写。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),pageId:z.string().regex(/^(iab|chrome):.+$/),provider:z.enum(['ant','feishu','phoenix']).optional(),authorization:z.object({acquire:z.literal(true),evidence:z.string().min(1)})}},wrap(a=>engine.withCompanyLease(a.companyId,async()=>{
  const company=catalog.companies.find(c=>c.id===a.companyId);if(!company||new URL(a.pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
+ const existingId=company.templateId;let existing=null;if(existingId)try{existing=await store.get('templates',existingId);}catch(e){if(e.code!=='ENOENT')throw e;}
+ const knownForm=lookupCompanyForm(await loadProfile(profileFile),a.companyId,a.pageUrl).form;
+ await assertReaRequired({store,template:existing,companyId:a.companyId,formId:knownForm?.formId});
  const expectedChannel=typeof browser.channel==='function'?await browser.channel({pageUrl:a.pageUrl}):'chrome';
  if(!a.pageId.startsWith(expectedChannel+':'))throw Error('BROWSER_PAGE_CHANNEL_MISMATCH');
  const result=await browser.request('reaInspect',a);
@@ -494,15 +502,16 @@ registerTool('form_build_template',{description:'统一控件合集按真实采�
  const profile=await loadProfile(profileFile),form=lookupCompanyForm(profile,a.companyId,capture.pageUrl).form;
  if(!form)throw Error('FORM_QUESTIONS_NOT_REGISTERED');if(form.formId!==capture.formId)throw Error('FORM_IDENTITY_BINDING_CHANGED');const choices=[];
  const canonicalChoicesId=formAssetKeys(capture.formId).choices,choiceIds=new Set([...a.choiceIds,canonicalChoicesId]);
- let canonical;try{canonical=await store.get('runs',canonicalChoicesId);if(canonical.captureHash!==captureContentHash(capture))canonical=null;}catch(e){if(e.code!=='ENOENT')throw e;}
+ let canonical;try{canonical=await store.get('runs',canonicalChoicesId);canonical={...canonical,choices:retainControlChoices(canonical,capture)};}catch(e){if(e.code!=='ENOENT')throw e;}
  // Native options are already actual evidence from this capture. Save them in
  // the same choice asset; do not ask the model to copy labels or invent IDs.
  const native=capture.controls.filter(c=>!canonical?.choices?.some(x=>x.selector===c.selector)).map(c=>({selector:c.selector,label:c.label,...capturedChoiceOptions(c)})).filter(c=>c.status==='captured');
- if(native.length)await store.put('runs',canonicalChoicesId,{...(canonical||{}),id:canonicalChoicesId,companyId:a.companyId,pageUrl:capture.pageUrl,captureId,formId:capture.formId,captureHash:captureContentHash(capture),choices:[...(canonical?.choices||[]),...native],readAt:new Date().toISOString()});
- for(const id of choiceIds){let asset;try{asset=await store.get('runs',id);}catch(e){if(id===canonicalChoicesId&&e.code==='ENOENT')continue;throw e;}if(asset.companyId!==a.companyId||asset.pageUrl!==capture.pageUrl||asset.captureId!==captureId||asset.captureHash!==captureContentHash(capture))throw Error('CHOICE_CAPTURE_SCOPE_MISMATCH');choices.push(...asset.choices.map(c=>({...c,choicesId:id,captureId})));}
+ if(native.length)await store.put('runs',canonicalChoicesId,{...(canonical||{}),id:canonicalChoicesId,companyId:a.companyId,pageUrl:capture.pageUrl,captureId,formId:capture.formId,captureHash:captureContentHash(capture),...bindControlChoices({capture,choices:[...(canonical?.choices||[]),...native],previous:canonical}),readAt:new Date().toISOString()});
+ for(const id of choiceIds){let asset;try{asset=await store.get('runs',id);}catch(e){if(id===canonicalChoicesId&&e.code==='ENOENT')continue;throw e;}if(asset.companyId!==a.companyId||formScope(asset.pageUrl)!==formScope(capture.pageUrl)||asset.formId!==capture.formId)throw Error('CHOICE_CAPTURE_SCOPE_MISMATCH');choices.push(...asset.choices.map(c=>({...c,choicesId:id,captureId})));}
  if(reaStructure.operation!=='rea_form_structure'||reaStructure.structure?.provider!=='rea'||reaStructure.reaEvidenceHash!==reaStructure.structure.evidenceHash)throw Error('REA_STRUCTURE_EVIDENCE_REQUIRED');
- if(reaStructure&&reaStructure.captureId!==capture.captureId)throw Error('REA_CONTROL_CAPTURE_SCOPE_MISMATCH');
- const built=buildFormTemplate({capture,profile,mappings:Object.values(form.mappings),choices,page:a.page,templateId:capture.formId,version:a.version,reaStructure,reaReconciliation:a.reaReconciliation});
+ await assertCurrentStructure(store,reaStructure,capture,a.companyId);
+ const baseline=originalStructureCapture(reaStructure,capture),currentSelectors=new Set(capture.controls.map(c=>c.selector)),retained=baseline.controls.filter(c=>!currentSelectors.has(c.selector)&&c.repeatIndex>0&&c.group);
+ const built=buildFormTemplate({capture:{...capture,controls:[...capture.controls,...retained]},profile,mappings:Object.values(form.mappings),choices,page:a.page,templateId:capture.formId,version:a.version,reaStructure,reaReconciliation:a.reaReconciliation});
  await recordAcquisitionChain(store,{companyId:a.companyId,structureId:a.structureId,structure:reaStructure,capture,template:built.template});
  for(const id of new Set(built.choices.map(c=>c.choicesId).filter(Boolean)))await store.update('runs',id,asset=>({...asset,choices:asset.choices.map(choice=>{const updated=built.choices.find(c=>c.choicesId===id&&c.selector===choice.selector);return updated?{...choice,...(updated.resolutions?{resolutions:updated.resolutions}:{}),...(updated.goal?{goal:updated.goal}:{})}:choice;})}));
  await updateProfile(profileFile,p=>registerTemplateContract(p,{companyId:a.companyId,template:built.template,templateHash:hash(built.template),stage:'construction'}));
@@ -515,11 +524,10 @@ registerTool('form_template_audit',{description:'只读逐字段区分技术建�
  return {templateId:t.id,issues:templateConstructionIssues(t),fields:t.pages.flatMap(p=>p.fields.map(f=>({id:f.id,label:f.inventoryLabel||f.label,source:f.source,...classifyPending(f,profile,{fields:t.pages.flatMap(page=>page.fields)})}))),submission:'not_performed'};
 }));
 registerTool('template_finalize',{description:'只接受匹配当前资产Hash、全部声明分支通过并恢复的真实探测回执；代码检查实际控件覆盖和类型后封存公司资产。不把资料缺失或页面填写当作完成。',inputSchema:{companyId:z.string(),roleId:z.string().optional(),templateHash:z.string(),probeRunId:z.string()}},wrap(args=>engine.withCompanyLease(args.companyId,async()=>{
- const c=engine.companyForTask(args),t=await store.get('templates',c.templateId);if(hash(t)!==args.templateHash)throw Error('TEMPLATE_VERSION_CHANGED');
+ const c=engine.companyForTask(args),t=await constructionTemplate(store,c.templateId,args.templateHash);if(hash(t)!==args.templateHash)throw Error('TEMPLATE_VERSION_CHANGED');
  await assertAcquisitionChain(t,{store,companyId:args.companyId});
- const probe=await reconcileSelectorMappings(args.companyId,t,await store.get('runs',args.probeRunId));await updateProfile(profileFile,p=>retireLegacyQuestionMappings(p,{companyId:args.companyId,template:t,probe}));const profile=await loadProfile(profileFile);assertQuestionsMapped(profile,args.companyId,t.evidence.sourceUrl);assertDefinitionMapped(profile,args.companyId,t);
- const channel=await browser.channel({pageUrl:t.evidence.sourceUrl});const sealed=sealFormTemplate(t,probe,{companyId:args.companyId,profileMapped:true,channel});validateTemplate(sealed);
- await updateProfile(profileFile,p=>registerTemplateContract(p,{companyId:args.companyId,template:sealed,templateHash:hash(sealed)}));await store.put('templates',sealed.id,sealed);
+ const probe=await reconcileSelectorMappings(args.companyId,t,await store.get('runs',args.probeRunId));await updateProfile(profileFile,p=>retireLegacyQuestionMappings(p,{companyId:args.companyId,template:t,probe}));const profile=await loadProfile(profileFile);assertQuestionsMapped(profile,args.companyId,t.evidence.sourceUrl,t);assertDefinitionMapped(profile,args.companyId,t);
+ const channel=await browser.channel({pageUrl:t.evidence.sourceUrl});const sealed=await promoteSealedTemplate(store,{companyId:args.companyId,template:t,probe,channel,validate:validateTemplate,beforeCommit:async sealed=>{const prior=new Map();await updateProfile(profileFile,p=>{for(const [id,form]of Object.entries(p.companyForms||{}))if(form.companyId===args.companyId)prior.set(id,structuredClone(form.executionContract));return registerTemplateContract(p,{companyId:args.companyId,template:sealed,templateHash:hash(sealed)});});return ()=>updateProfile(profileFile,p=>{for(const [id,contract]of prior)if(contract===undefined)delete p.companyForms[id].executionContract;else p.companyForms[id].executionContract=contract;return p;});}});
  assertStoredExecutionContract(await loadProfile(profileFile),args.companyId,await store.get('templates',sealed.id));
  return {templateId:sealed.id,templateHash:hash(sealed),status:'asset_sealed_require_profile_preflight',probeRunId:probe.id,browserAccess:false,submission:'not_performed'};
 })));
@@ -551,18 +559,15 @@ registerTool('template_register',{description:'持久化已采集并确定的操
   await assertStoredChoiceGoals(t,{store,companyId,profile:await loadProfile(profileFile),required:true});
   await assertStoredChoiceResolutions(t,{store,companyId,profile:await loadProfile(profileFile)});
   if(!profileFile)throw Error('PROFILE_REQUIRED_FOR_NEW_QUESTIONS');
-  await store.update('templates',t.id,async previous=>{
-    if(previous.evidence?.sourceUrl&&new URL(previous.evidence.sourceUrl).origin!==c.origin)throw Error('SHARED_TEMPLATE_ORIGIN_MISMATCH');
-    await updateProfile(profileFile,p=>registerTemplateContract(p,{companyId,template:t,templateHash:hash(t)}));
-    return t;
-  });
+  await registerFormDraft(store,{companyId,template:t});
+  await updateProfile(profileFile,p=>registerTemplateContract(p,{companyId,template:t,templateHash:hash(t),stage:'construction'}));
   // Persist company-to-template binding privately; shipped catalog contains no user answers.
   if(roleId)await store.update('templates','role-bindings',bindings=>({...bindings,[companyId]:{...(bindings[companyId]||{}),[roleId]:t.id}}));
   else await store.update('templates','company-bindings',bindings=>({...bindings,[companyId]:t.id}));
   await refreshBindings();
-  const [saved,personal]=await Promise.all([store.get('templates',t.id),loadProfile(profileFile)]);
+  const [saved,personal]=await Promise.all([constructionTemplate(store,t.id),loadProfile(profileFile)]);
   if(hash(saved)!==hash(t))throw Error('TEMPLATE_STORAGE_READBACK_FAILED');
-  for(const page of t.pages){const original=new URL(t.evidence.sourceUrl),pageUrl=original.pathname.startsWith(page.pathPrefix)?original.href:new URL(page.pathPrefix,original).href,contract=lookupCompanyForm(personal,companyId,pageUrl).form?.executionContract;
+  for(const page of t.pages){const original=new URL(t.evidence.sourceUrl),pageUrl=original.pathname.startsWith(page.pathPrefix)?original.href:new URL(page.pathPrefix,original).href,contract=lookupCompanyForm(personal,companyId,pageUrl).form?.draftExecutionContract;
    if(contract?.templateHash!==hash(t)||hash((contract.fields||[]).map(({index,...f})=>f))!==hash(page.fields))throw Error('PROFILE_CONTRACT_STORAGE_READBACK_FAILED');}
   return {templateId:t.id,templateHash:hash(t),status:'captured_not_live_verified',storageAudit:contractAuditSummary(auditStoredContract(saved)),storageReadback:'verified'};
 })));
@@ -571,7 +576,7 @@ registerTool('prepare_plan',{description:'正式填写前编译并保存全部�
   const profile=await loadProfile(profileFile),plans=[];
   for(const task of tasks){
     const formRoute=await engine.formRoute(task);
-    if(formRoute.route==='acquire'){plans.push({...formRoute,status:'needs_form_acquisition',readyForExecution:false});continue;}
+    if(formRoute.route!=='reuse'){plans.push({...formRoute,status:'needs_form_acquisition',readyForExecution:false});continue;}
     assertQuestionsMapped(profile,task.companyId,task.pageUrl);
     const company=engine.companyForTask(task);if(!company?.templateId)throw Error('COMPANY_NOT_COVERED');
     const template=await store.get('templates',company.templateId);

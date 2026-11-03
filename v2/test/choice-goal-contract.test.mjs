@@ -67,3 +67,14 @@ test('registration rereads the paired capture and current options; freeze reject
  asset.choices[0].optionRecords[0].value='changed-id';await assert.rejects(assertStoredChoiceGoals(template,{store,companyId:'sample',profile:args.profile}),/CHOICE_GOAL_(INCOMPLETE|EVIDENCE_CHANGED)/);
  delete template.evidence.choiceGoalContract;await assert.rejects(assertStoredChoiceGoals(template,{store,companyId:'sample',profile:args.profile,required:true}),/CONTRACT_REQUIRES_REBUILD/);
 });
+
+test('sealed choices retain the certified complete capture when extra repeat rows are not rendered',async()=>{
+ const args=observed(fixture());Object.assign(args.capture,{captureId:'capture-F000001',formId:'F000001',companyId:'sample',pageUrl:'https://sample.test/form'});args.capture.controls=[{selector:'#base',label:'Base',type:'text'},{selector,label:'School',type:'select',group:'Education',repeatIndex:1}];args.choices[0].captureId=args.capture.captureId;
+ const evaluated=evaluateChoiceGoals(args),template={id:'F000001',evidence:{formId:'F000001',choiceGoalContract:1,captureId:args.capture.captureId,sourceUrl:args.capture.pageUrl},pages:[{fields:[{...args.fields[0],choiceGoal:evaluated.goals[0]}]}]};
+ const digest=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex'),baseline=structuredClone(args.capture),latest={...args.capture,controls:[args.capture.controls[0]]};
+ const record={operation:'form_seal',templateHash:digest(template),certifiedCapture:baseline};
+ const asset={companyId:'sample',formId:'F000001',pageUrl:args.capture.pageUrl,captureId:args.capture.captureId,choices:evaluated.choices};
+ const store={get:async(_,id)=>id==='capture-F000001'?latest:id==='seal-F000001'?record:asset};
+ await assertStoredChoiceGoals(template,{store,companyId:'sample',profile:args.profile});
+ latest.controls=[{...latest.controls[0],label:'Actually changed'}];await assert.rejects(assertStoredChoiceGoals(template,{store,companyId:'sample',profile:args.profile}),/CHOICE_GOAL_INCOMPLETE/);
+});

@@ -100,13 +100,23 @@
     "workflow_next": [
       "route",
       [
-        "form_route"
+        "form_route",
+        "form_migrate_contract",
+        "capture_controls",
+        "capture_rea_structure",
+        "form_build_template",
+        "prepare_plan"
       ]
     ],
     "form_route": [
       "route",
       [
-        "workflow_next"
+        "form_route",
+        "form_migrate_contract",
+        "capture_controls",
+        "capture_rea_structure",
+        "form_build_template",
+        "prepare_plan"
       ]
     ],
     "form_resolve_choices": [
@@ -417,6 +427,13 @@
         "workflow_next",
         "role_prepare",
         "role_verify"
+      ]
+    ],
+    "form_migrate_contract": [
+      "construct",
+      [
+        "form_route",
+        "prepare_plan"
       ]
     ]
   }
