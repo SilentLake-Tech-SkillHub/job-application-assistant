@@ -76,6 +76,20 @@ test('REA invocation is a bounded argument array, captures no storage/scripts, a
  assert.equal(call[0],'node');assert.ok(call[1].includes('--include-accessibility-text'));assert.ok(call[1].includes('--include-script-sources'));assert.equal(call[1].includes('--include-storage-keys'),false);assert.equal(call[2].shell,undefined);
  await assert.rejects(inspectRea({endpoint:'https://remote.example',targetId:'target',pageUrl:'https://alpha.example/form'}),/LOCAL_ENDPOINT/);
 });
+test('REA still runs after its broker working directory is removed',async()=>{
+ const {execFile}=await import('node:child_process');
+ const {promisify}=await import('node:util');
+ const {tmpdir}=await import('node:os');
+ const script=`
+  import {mkdtemp,rm} from 'node:fs/promises';
+  import {tmpdir} from 'node:os';
+  import {inspectRea} from ${JSON.stringify(new URL('../shared/rea-structure.mjs',import.meta.url).href)};
+  const dir=await mkdtemp(tmpdir()+'/rea-detached-cwd-');process.chdir(dir);await rm(dir,{recursive:true});
+  const result=await inspectRea({endpoint:'http://127.0.0.1:9222',targetId:'target',pageUrl:'https://alpha.example/form',command:[process.execPath,'-e','process.stdout.write(JSON.stringify({cwd:process.cwd()}))']});
+  process.stdout.write(JSON.stringify(result));`;
+ const {stdout}=await promisify(execFile)(process.execPath,['--input-type=module','-e',script]);
+ assert.equal(JSON.parse(stdout).cwd,(await import('node:fs')).realpathSync(tmpdir()));
+});
 test('continuation keeps technical work with the agent and distinguishes real user decisions',async()=>{
  assert.equal(continuationFor({route:{route:'acquire'}}).requiresUser,false);
  assert.equal(continuationFor({verification:{status:'needs_attention',checks:[{id:'x',status:'unmapped',reason:'NEW_SECTION'}]}}).state,'repair');

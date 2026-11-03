@@ -1,5 +1,6 @@
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
+import {tmpdir} from 'node:os';
 import {createHash} from 'node:crypto';
 import {bindNativeDom,correlateNativeControls} from './structure-dom-binding.mjs';
 const run=promisify(execFile);
@@ -18,7 +19,7 @@ export async function inspectRea({endpoint,targetId,pageUrl,allowedOrigins=[new 
  if(!Array.isArray(base)||!base.length||base.some(x=>typeof x!=='string'||!x))throw Error('REA_COMMAND_CONFIGURATION_INVALID');
  if(!targetId||new URL(pageUrl).protocol!=='https:')throw Error('REA_PAGE_BINDING_REQUIRED');
  if(!allowedOrigins.includes(new URL(pageUrl).origin)||allowedOrigins.some(origin=>{try{const u=new URL(origin);return u.protocol!=='https:'||u.origin!==origin;}catch{return true;}}))throw Error('REA_SCRIPT_ORIGIN_SCOPE_INVALID');
- const {stdout}=await execute(base[0],[...base.slice(1),'inspect-web-page',endpoint,targetId,...allowedOrigins.flatMap(origin=>['--allowed-origins',origin]),'--include-accessibility-text','--include-script-sources','--observation-ms','500','--format','json'],{timeout:120000,maxBuffer:64*1024*1024,encoding:'utf8'});
+ const {stdout}=await execute(base[0],[...base.slice(1),'inspect-web-page',endpoint,targetId,...allowedOrigins.flatMap(origin=>['--allowed-origins',origin]),'--include-accessibility-text','--include-script-sources','--observation-ms','500','--format','json'],{cwd:tmpdir(),timeout:120000,maxBuffer:64*1024*1024,encoding:'utf8'});
  let evidence;try{evidence=JSON.parse(stdout);}catch{throw Error('REA_COMPLETE_JSON_REQUIRED');}
  return evidence;
 }
