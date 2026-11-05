@@ -9,7 +9,7 @@ import {keyOK} from './ids.mjs';
 //   公司/<公司编码>.json   每家公司一份宽表：「站点」「岗位」是主表投影，「批次」是本轮选岗、确认与进度
 //   投递回传.json          投递组件唯一写入的文件（结果与链接观察）
 // 身份一律用固定编码：公司 C00001、站点 S0001、岗位 J000001。链接、名称都是值，执行时现读宽表，不复制保存。
-// 第 2 步完成前，各站点的登录配置仍在原公司文件夹 公司/<地区>/<公司>/登录[@域名].json，按站点域名对应。
+// 主数据的 login_configs 按公司编码、来源站点编码定位登录配置。
 export const CODE={company:/^C\d{5}$/,site:/^S\d{4}$/,role:/^J\d{6}$/};
 const ASSET=/^(登录|表单定义)(?:@([^/\\]+))?\.json$/;
 const HANDED=['已交接','进行中'];
@@ -62,15 +62,19 @@ export async function readCompanyFiles(handoffDir=handoffDirFromEnv()){
 }
 
 export class CompanyDirectory{
- constructor({handoffDir=handoffDirFromEnv(),store=null,readAsset=async file=>JSON.parse(await readFile(file,'utf8'))}={}){this.handoffDir=path.resolve(handoffDir);this.base=path.join(this.handoffDir,'公司');this.store=store;this.readAsset=readAsset;}
+ constructor({handoffDir=handoffDirFromEnv(),store=null,readAsset=async file=>JSON.parse(await readFile(file,'utf8'))}={}){this.handoffDir=path.resolve(handoffDir);this.base=path.join(this.handoffDir,'公司');this.masterFile=path.join(this.handoffDir,'工作簿全量.json');this.store=store;this.readAsset=readAsset;}
+ async loginConfigs(){
+  try{return JSON.parse(await readFile(this.masterFile,'utf8')).login_configs;}
+  catch(error){if(error.code==='ENOENT')return undefined;throw error;}
+ }
  // 一家公司一个目录项；站点信息仅作来源值保留。
  async load(){
-  const logins={},definitions={},companyFiles=await readCompanyFiles(this.handoffDir);
+  const logins={},definitions={},companyFiles=await readCompanyFiles(this.handoffDir),mainLogins=await this.loginConfigs();
   for(const region of (await entries(this.base)).filter(d=>d.isDirectory()))
    for(const firm of (await entries(path.join(this.base,region.name))).filter(d=>d.isDirectory())){
     const dir=path.join(this.base,region.name,firm.name);
     for(const f of (await entries(dir)).filter(d=>d.isFile())){
-     const m=ASSET.exec(f.name);if(!m)continue;
+     const m=ASSET.exec(f.name);if(!m||m[1]==='登录'&&mainLogins!==undefined)continue;
      const file=path.join(dir,f.name),asset=await this.readAsset(file);
      const origin=asset.origin?new URL(asset.origin).origin:(m[2]?'https://'+m[2]:null);
      if(m[2]&&origin&&new URL(origin).host!==m[2])throw Error('COMPANY_ASSET_HOST_MISMATCH');
@@ -94,20 +98,28 @@ export class CompanyDirectory{
     if(ids.has(s['站点编码']))throw Error('DUPLICATE_SITE_CODE:'+s['站点编码']);ids.add(s['站点编码']);
     const origin=new URL(s['站点']).origin;
     sites.push({siteId:s['站点编码'],origin,status:s['状态']||'在用',loginUrl:s['登录链接']||null,accountPageUrl:s['账号核对页']||null,
-     loginFile:logins[code]?.[origin]||null,definitionFile:definitions[code]?.[origin]||null});
+     loginFile:logins[code]?.[origin]||null,loginConfigured:!!(mainLogins?.[code]?.[s['站点编码']]||logins[code]?.[origin]),definitionFile:definitions[code]?.[origin]||null});
    }
    // The company is the identity. Source site codes and URLs are retained as
    // values, so unresolved upstream data is not silently merged or discarded.
-   const configured=sites.filter(s=>s.loginFile),primary=sites.length===1?sites[0]:configured.length===1?configured[0]:null;
+   const configured=sites.filter(s=>s.loginConfigured),primary=sites.length===1?sites[0]:configured.length===1?configured[0]:null;
    out.push({id:code,companyId:code,name:doc['公司名称'],channel:'campus',templateId:null,file,sites,
     origins:[...new Set(sites.map(s=>s.origin))],siteId:primary?.siteId||null,origin:primary?.origin||null,
     loginUrl:primary?.loginUrl||null,accountPageUrl:primary?.accountPageUrl||null,
-    loginFile:primary?.loginFile||null,definitionFile:primary?.definitionFile||null});
+    loginFile:primary?.loginFile||null,loginConfigured:primary?.loginConfigured||false,definitionFile:primary?.definitionFile||null});
   }
   this.companies=out;return out;
  }
  entry(id,context={}){const e=(this.companies||[]).find(c=>c.id===id);if(!e)throw Error('UNKNOWN_COMPANY');return companyContext(e,context);}
  loginFile(id,context={}){const f=this.entry(id,context).loginFile;if(!f)throw Error('COMPANY_LOGIN_NOT_CONFIGURED');return f;}
+ async loginConfig(id,context={}){
+  const entry=this.entry(id,context),configs=await this.loginConfigs();
+  if(configs===undefined)return this.readAsset(this.loginFile(id,context));
+  const config=configs?.[id]?.[entry.siteId];
+  if(!config)throw Error('COMPANY_LOGIN_NOT_CONFIGURED');
+  if(config.companyId!==id||config.origin!==entry.origin)throw Error('COMPANY_LOGIN_CONFIG_SCOPE_MISMATCH');
+  return config;
+ }
  definitionFile(id,context={}){return this.entry(id,context).definitionFile;}
 
 }

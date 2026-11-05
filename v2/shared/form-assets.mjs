@@ -59,10 +59,10 @@ export async function formAssetStatus({handoffDir,catalog,store,companyIds,profi
     const seal=await storedSeal(store,template);assets.push({...requiredRole,...seal,status:template?(contractRebuildRequired(profile,hash(template))?'requires_rebuild':seal.status):'missing',reasonCode:seal.reason});}
    const template=!assets.length?'not_applicable':assets.every(a=>a.status==='sealed')?'sealed':assets.some(a=>a.status==='requires_rebuild')?'requires_rebuild':assets.some(a=>a.status==='unsealed')?'unsealed':'missing';
    const noUrl=roles.filter(r=>r.siteId===e.siteId&&!r.applicationUrl).length,gaps=[];
-   if(!e.loginFile)gaps.push('登录配置');
+   if(!(e.loginConfigured??e.loginFile))gaps.push('登录配置');
    if(template!=='sealed'&&template!=='not_applicable')gaps.push(template==='unsealed'?`表单模板：${[...new Set(assets.map(a=>a.reasonCode))].join('、')}`:template==='requires_rebuild'?'表单模板需重建':'表单模板');
    if(noUrl)gaps.push(`投递链接（${noUrl} 个岗位缺）`);
-   sites.push({siteId:e.siteId,assetKey:e.id,origin:e.origin,login:!!e.loginFile,template,reasonCodes:[...new Set(assets.map(a=>a.reasonCode))],routes:[...new Set(assets.map(a=>a.route))],roleAssets:assets,gaps});}
+   sites.push({siteId:e.siteId,assetKey:e.id,origin:e.origin,login:!!(e.loginConfigured??e.loginFile),template,reasonCodes:[...new Set(assets.map(a=>a.reasonCode))],routes:[...new Set(assets.map(a=>a.route))],roleAssets:assets,gaps});}
   const missingSites=[...used].filter(s=>!entries.some(e=>e.siteId===s));
   const gaps=[...missingSites.map(s=>`${s}：站点不在目录`),...sites.filter(s=>s.gaps.length).map(s=>`${s.siteId}：${s.gaps.join('、')}`)];
   rows.push({companyId:id,name:doc['公司名称'],status:gaps.length?'incomplete':'ready',gaps,sites,roles});

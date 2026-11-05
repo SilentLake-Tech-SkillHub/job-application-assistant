@@ -125,3 +125,18 @@ test('renaming a company display value does not detach its code-owned configurat
  assert.match(directory.loginFile('C00120'),/Original label/);
  assert.equal(directory.entry('C00120').name,'Renamed label');
 });
+
+test('master login configuration owns the site and is read fresh without a legacy copy',async()=>{
+ const dir=await workspace(),file=path.join(dir,'工作簿全量.json'),code='C00007',siteId='S0004';
+ const config={...login(code,'https://campus.game.163.com'),companyId:code};
+ const save=async current=>writeFile(file,JSON.stringify({login_configs:{[code]:{[siteId]:current}}}));
+ await save(config);
+ const directory=new CompanyDirectory({handoffDir:dir});
+ await directory.load();
+ assert.deepEqual(await directory.loginConfig(code,{siteId}),config);
+ await assert.rejects(directory.loginConfig(code,{siteId:'S0003'}),/COMPANY_LOGIN_NOT_CONFIGURED/);
+ await save({...config,loginPath:'/new'});
+ assert.equal((await directory.loginConfig(code,{siteId})).loginPath,'/new');
+ await save({...config,companyId:'C00008'});
+ await assert.rejects(directory.loginConfig(code,{siteId}),/COMPANY_LOGIN_CONFIG_SCOPE_MISMATCH/);
+});

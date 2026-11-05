@@ -13,8 +13,8 @@ const now=()=>new Date().toISOString();
 const smsCountdown=o=>o.sendDisabled&&/(?:\d{1,3}\s*(?:秒|s)|(?:重试|重发).*\d{1,3})/i.test(o.sendLabel||'');
 const handoff={operator:'user',automaticSolve:false,automaticResend:false,nextTool:'login_resume_verification'};
 export class LoginEngine{
-  constructor({companyRoot,loginFile,privateRoot,profileFile,browser,leaseRoot=defaultLeaseRoot()}){Object.assign(this,{companyRoot,loginFile,profileFile,browser,leaseRoot});this.store=new PrivateStore(privateRoot);}
-  async company(id,context={}){if(!keyOK(id))throw Error('INVALID_COMPANY_ID');const file=this.loginFile?this.loginFile(id,context):path.join(this.companyRoot,id+'.login.json');return validateCompany({...JSON.parse(await readFile(file,'utf8')),companyId:id});}
+  constructor({companyRoot,loginFile,loginConfig,privateRoot,profileFile,browser,leaseRoot=defaultLeaseRoot()}){Object.assign(this,{companyRoot,loginFile,loginConfig,profileFile,browser,leaseRoot});this.store=new PrivateStore(privateRoot);}
+  async company(id,context={}){if(!keyOK(id))throw Error('INVALID_COMPANY_ID');const config=this.loginConfig?await this.loginConfig(id,context):JSON.parse(await readFile(this.loginFile?this.loginFile(id,context):path.join(this.companyRoot,id+'.login.json'),'utf8'));return validateCompany({...config,companyId:id});}
   async profile(){return JSON.parse(await readFile(this.profileFile,'utf8'));}
   async planState(c,p){const url=p.taskContext?(await this.browser.broker.request('pageIdentity',{pageId:p.taskContext.pageId})).pageUrl:p.pageUrl;return this.state(c,url);}
   async open({companyId}){const c=await this.company(companyId);return this.locked(c,async()=>{const result=await this.browser.open(c.origin+c.loginPath);await this.browser.ready(c,result.pageUrl);return {...result,companyId,ready:true,applicationSubmission:'not_performed'};});}

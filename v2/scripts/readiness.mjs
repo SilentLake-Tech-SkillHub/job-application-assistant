@@ -43,7 +43,7 @@ for(const c of handoff?.input.companies||[]){
   if(r.applicationStatus&&r.applicationStatus!=='岗位待投递'||done.has(r.roleId)){rr.verdict='已处理';rr.reasons.push(r.applicationStatus&&r.applicationStatus!=='岗位待投递'?r.applicationStatus:'批次进度显示已处理');row.roles.push(rr);continue;}
   const entry=companyContext(catalog.find(e=>e.id===c.companyId),{siteId:r.siteId});
   if(!entry){rr.reasons.push(`站点 ${r.siteId} 不在目录`);rr.verdict='不可执行';row.roles.push(rr);continue;}
-  if(!logins.has(entry.id)){const login=entry.loginFile?await tryJson(entry.loginFile):null;logins.set(entry.id,login);
+  if(!logins.has(entry.id)){const login=await directory.loginConfig(entry.id,{siteId:entry.siteId}).catch(error=>{if(error.message==='COMPANY_LOGIN_NOT_CONFIGURED')return null;throw error;});logins.set(entry.id,login);
    if(!login)row.problems.push(`${entry.id}（${entry.origin}）没有登录配置，需先建档`);
    for(const u of unstableLocators(login||{}))row.notes.push(`${entry.id} 定位依赖生成式样式类名：${u.where}（${u.token}），需重新采集`);
    // 入口配置必须对本站所有岗位通用（岗位编号只能写 $roleId）；不合格时该站点不能进入申请页，用 scripts/site-entry.mjs 修正。

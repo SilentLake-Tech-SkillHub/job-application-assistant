@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Preview first. Only original standalone execution plans with no runtime or
-// handoff references are candidates; evidence, current task slots and imports
-// are outside this operation.
+// Preview first. Only standalone plans with no runtime or handoff references
+// are candidates. Current material plans and attempts remain protected.
 import {createHash} from 'node:crypto';
 import {readFile,readdir,unlink} from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {stableTaskId} from '../shared/role-queue.mjs';
 
 const digest=data=>createHash('sha256').update(data).digest('hex');
 const uuid=/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}/g;
@@ -27,7 +27,8 @@ export async function previewLegacyPlans(workspace){
   const id=path.basename(file,'.json');
   if(!id.match(uuid)?.includes(id))continue;
   const bytes=await readFile(file),plan=JSON.parse(bytes);
-  if(plan.id===id&&Number.isInteger(plan.compilerVersion))candidates.set(id,{file:path.relative(workspace,file),bytes:bytes.length,sha256:digest(bytes)});
+  const legacyMaterial=plan.captureId&&plan.fileDescriptor&&plan.preflightHash&&typeof plan.companyId==='string'&&id!==stableTaskId('material-import',plan.companyId);
+  if(plan.id===id&&(Number.isInteger(plan.compilerVersion)||legacyMaterial))candidates.set(id,{file:path.relative(workspace,file),bytes:bytes.length,sha256:digest(bytes),...(legacyMaterial?{kind:'legacy_material_preflight'}:{})});
  }
  for(const directory of ['application/plans','application/runs','application/templates','role-queue','login'].map(name=>path.join(runtime,name)).concat(path.join(workspace,'岗位交接'))){
   for await(const file of jsonFiles(directory)){

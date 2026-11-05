@@ -23,10 +23,10 @@ const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 if(!process.env.RECRUITING_PROFILE_JSON||!process.env.RECRUITING_LOGIN_PRIVATE_DIR)throw Error('PRIVATE_LOGIN_CONFIGURATION_REQUIRED');
 const channelStore=new Store(process.env.RECRUITING_PRIVATE_DIR||path.join(path.dirname(process.env.RECRUITING_PROFILE_JSON),'application'));
 const browser=new LoginBrowser(process.env.RECRUITING_BROWSER_SOCKET,{broker:new RoutedBrowserAdapter({chromeSocket:process.env.RECRUITING_BROWSER_SOCKET,iabSocket:process.env.RECRUITING_IAB_SOCKET,store:channelStore})});
-// 目录项 = 站点（站点编码），来自工作区 岗位交接/公司/<公司编码>.json；登录配置（过渡）仍按域名取 岗位交接/公司/<地区>/<公司>/登录[@域名].json，第 2 步迁入登录模块。
+// 目录项 = 站点（站点编码），来自工作区 岗位交接/公司/<公司编码>.json；登录配置通过公司和来源站点编码从主数据读取。
 const directory=new CompanyDirectory({store:channelStore});
 const catalog=await directory.load();
-const engine=new LoginEngine({loginFile:(id,context)=>directory.loginFile(id,context),privateRoot:process.env.RECRUITING_LOGIN_PRIVATE_DIR,profileFile:process.env.RECRUITING_PROFILE_JSON,browser});
+const engine=new LoginEngine({loginConfig:(id,context)=>directory.loginConfig(id,context),privateRoot:process.env.RECRUITING_LOGIN_PRIVATE_DIR,profileFile:process.env.RECRUITING_PROFILE_JSON,browser});
 const queues=queueFromEnv(catalog);engine.roleQueues=queues;
 const appStore=new Store(process.env.RECRUITING_PRIVATE_DIR||path.join(path.dirname(process.env.RECRUITING_PROFILE_JSON),'application'));
 const flow=new RoleFlow({queues,login:engine,browser:browser.broker,templates:async companyId=>{try{return await appStore.get('templates',companyId);}catch(error){if(error.code==='ENOENT')return null;throw error;}},onObservation:o=>recordObservation({...o,handoffDir:directory.handoffDir})});
@@ -40,7 +40,7 @@ const plan={planId:z.string(),planHash:z.string().length(64)};
 const authorization=z.object({login:z.literal(true),evidence:z.string().min(1)});
 const queueTask={queueId:z.string().uuid(),queueHash:z.string().length(64),taskId:z.string().uuid()};
 registerTool('runtime_info',{description:'只读当前登录MCP实际版本，不连接或重启浏览器。',annotations:{readOnlyHint:true}},wrap(()=>({runtime:residentRuntime,version:packageInfo.version,capabilities:['role_queue_import','role_open','role_resume','role_enter_application','role_report_link_failure','role_close_extra_pages','role_reload_page','human_verification','user_operated_session_identity'],browserAccess:false})));
-registerTool('role_queue_import',{description:'读取用户正向评审确认后的各公司宽表 岗位交接/公司/<公司编码>.json（不接受旧公司方案文件或对象），按用户次序冻结队列；任务只存公司/站点/岗位编码，链接执行时现读并核对确认指纹；不处理Excel。',inputSchema:{rolesFile:z.string().optional(),companyPlan:z.record(z.unknown()).optional(),companyOrder:z.array(z.string()).optional(),parallelRoles:z.boolean().optional(),authorizationRef:z.string().optional()}},wrap(a=>queues.import(a)));
+registerTool('role_queue_import',{description:'读取用户正向评审确认后的各公司宽表 岗位交接/公司/<公司编码>.json（不接受旧公司方案文件或对象），按用户次序冻结队列；任务只存公司/站点/岗位编码，链接执行时现读并核对确认指纹；不处理Excel。',inputSchema:{rolesFile:z.string().optional(),companyPlan:z.record(z.string(), z.unknown()).optional(),companyOrder:z.array(z.string()).optional(),parallelRoles:z.boolean().optional(),authorizationRef:z.string().optional()}},wrap(a=>queues.import(a)));
 registerTool('role_open',{description:'按冻结队列顺序直接打开岗位；需要登录时返回绑定原岗位的登录计划，不从公司首页选岗。',inputSchema:queueTask},wrap(a=>flow.open(a)));
 registerTool('role_resume',{description:'用户完成登录后，返回原岗位原标签并核对账号、岗位标题和完整URL；仅用户明确允许恢复丢失页面时可按队列既存申请URL重开，清除旧填写/核验就绪证明并重新核对账号，不猜URL、不提交。',inputSchema:{...queueTask,authorization:z.object({restoreLostPage:z.literal(true),evidence:z.string().min(1)}).optional()}},wrap(a=>flow.resume(a)));
 registerTool('role_enter_application',{description:'在冻结队列的岗位详情页点击真实投递入口并核对返回的申请页；投递链接为空时把核对到的申请页地址记为观察（投递回传.json，用户确认后才写主表）；要求已有同账号登录，不发码、不提交简历。',inputSchema:queueTask},wrap(a=>flow.enter(a)));
