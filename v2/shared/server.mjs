@@ -245,7 +245,7 @@ registerTool('role_prepare_profile_fields',{description:'按私有主档的globa
   const {state,template}=await boundRole(a),resolved=await resolveInputs(await loadProfile(profileFile),template,{},t.companyId,{roleId:t.roleId,pageUrl:state.returnUrl,confirmedOfficialId:state.siteRoleId||t.officialId});
   if(!resolved.profileFillContext)throw Error('GLOBAL_PROFILE_FILL_NOT_AUTHORIZED');
   const task={companyId:t.companyId,roleId:t.roleId,pageUrl:state.returnUrl,pageId:state.pageId,browserBinding:state.browserBinding,taskId:t.taskId,templateHash:hash(template),...resolved,roleQueueArgs:{queueId:a.queueId,queueHash:a.queueHash,taskId:a.taskId}};
-  const plan=await engine.preparePlan(task);if(!plan.readyForExecution)throw Error('PROFILE_FILL_PREFLIGHT_REQUIRED');
+  const plan=await engine.preparePlan(task,{leaseHeld:true});if(!plan.readyForExecution)throw Error('PROFILE_FILL_PREFLIGHT_REQUIRED');
   await assertPreparedPlan(await store.get('plans',plan.planId),template,{...task,planId:plan.planId,planHash:plan.planHash},a.authorization,{scope:'authorized_profile_fields'});
   const current=await boundRole(a);if(hash(current.template)!==hash(template)||current.state.pageId!==state.pageId)throw Error('PROFILE_FILL_ROLE_OR_TEMPLATE_CHANGED');
   const page=await browser.existingPage(state.returnUrl,{pageId:state.pageId,roleBinding:state.browserBinding});await engine.profileProofs(task,template,page,true);const proofs=await engine.profileProofs(task,template,page);
@@ -342,7 +342,7 @@ registerTool('role_prepare_fields',{description:'从当前完整冻结计划补�
   const {t,state,template}=await boundRole(args),profile=await loadProfile(profileFile);
   assertQuestionsMapped(profile,t.companyId,state.returnUrl);
   const task={companyId:t.companyId,roleId:t.roleId,pageUrl:state.returnUrl,pageId:state.pageId,browserBinding:state.browserBinding,taskId:t.taskId,templateHash:hash(template),...await resolveInputs(profile,template,{},t.companyId,{roleId:t.roleId,pageUrl:state.returnUrl,confirmedOfficialId:state.siteRoleId||t.officialId})};
-  const plan=await engine.preparePlan(task),frozenTask={...task,planId:plan.planId,planHash:plan.planHash};
+  const plan=await engine.preparePlan(task,{leaseHeld:true}),frozenTask={...task,planId:plan.planId,planHash:plan.planHash};
   if(!plan.planId)return {...plan,submission:'not_performed'};
   const prepared=await store.get('plans',plan.planId);
   await assertPreparedPlan(prepared,template,frozenTask,args.authorization,{scope:'selected_fields',fieldIds:args.fieldIds});
@@ -367,13 +367,13 @@ registerTool('roles_prepare_batch',{description:'按已确认并发模式，在�
   const sameCompanyMultiRole=new Set(selectedTasks.filter(Boolean).map(t=>t.companyId)).size!==selectedTasks.filter(Boolean).length;
   if(sameCompanyMultiRole&&(q.executionMode!=='parallel_roles'&&!q.parallelRoles))throw Error('PARALLEL_ROLE_AUTHORIZATION_REQUIRED');
   if(!sameCompanyMultiRole&&!['parallel_roles','parallel_companies'].includes(q.executionMode)&&!q.parallelRoles)throw Error('PARALLEL_ROLE_AUTHORIZATION_REQUIRED');
-  const tasks=[],bound=[];
+  const tasks=[],bound=[],preparedPlans=[];
   for(const taskId of args.taskIds){const a={queueId:args.queueId,queueHash:args.queueHash,taskId};const queued=await queues.task(a),state=await queues.read(taskId);const route=await engine.formRoute({companyId:queued.t.companyId,roleId:queued.t.roleId,pageUrl:state.returnUrl||queued.t.applyUrl||queued.t.url});if(route.route!=='reuse')return {status:'needs_form_acquisition',...route,taskId,submission:'not_performed'};const b=await boundRole(a),profile=await loadProfile(profileFile);assertQuestionsMapped(profile,b.t.companyId,b.state.returnUrl);
     const task={companyId:b.t.companyId,roleId:b.t.roleId,pageUrl:b.state.returnUrl,pageId:b.state.pageId,browserBinding:b.state.browserBinding,taskId:b.t.taskId,templateHash:hash(b.template),...await resolveInputs(profile,b.template,{},b.t.companyId,{roleId:b.t.roleId,pageUrl:b.state.returnUrl}),roleQueueArgs:a};
-    const plan=await engine.preparePlan(task);if(!plan.readyForExecution&&!(args.authorization.allowPartialPreparation&&plan.status==='needs_answers'&&!plan.constructionBlockers?.length))return {...plan,status:plan.status,submission:'not_performed'};tasks.push({...task,planId:plan.planId,planHash:plan.planHash});bound.push(b);
+    const {compiled,...plan}=await engine.preparePlan(task,{transient:true});if(!plan.readyForExecution&&!(args.authorization.allowPartialPreparation&&plan.status==='needs_answers'&&!plan.constructionBlockers?.length))return {...plan,status:plan.status,submission:'not_performed'};tasks.push({...task,planId:plan.planId,planHash:plan.planHash});bound.push(b);preparedPlans.push(compiled);
   }
   if(new Set(bound.map(b=>b.state.pageId)).size!==bound.length)throw Error('DUPLICATE_ROLE_PAGE');
-  const run=await engine.prepare({tasks,concurrency:args.concurrency,authorization:args.authorization,parallelRoles:true});
+  const run=await engine.prepare({tasks,concurrency:args.concurrency,authorization:args.authorization,parallelRoles:true,preparedPlans});
   const results=new Array(bound.length);
   // Group post-fill verification by origin so distinct companies/channels verify in parallel while same-origin roles serialize cleanly.
   const origins=[...new Set(bound.map(b=>new URL(b.state.returnUrl).origin))],groups=origins.map(origin=>bound.map((b,i)=>({b,i})).filter(({b})=>new URL(b.state.returnUrl).origin===origin));
@@ -393,7 +393,7 @@ registerTool('roles_prepare_batch',{description:'按已确认并发模式，在�
 registerTool('roles_patch_text',{description:'按已冻结岗位和当前私有JSON，仅修正指定普通文本字段；全部计划先编译，旧值有用户改动则阻断，逐岗全表只读复核，不上传不提交。',inputSchema:{queueId:z.string().uuid(),queueHash:z.string().length(64),taskIds:z.array(z.string().uuid()).min(1).max(5),fieldIds:z.array(z.string()).min(1).max(20),expectedPrevious:z.string(),authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1),sensitiveFields:z.boolean().default(false),uploads:z.boolean().default(false),allowPartialPreparation:z.boolean().default(false)})}},wrap(async args=>{
  if(new Set(args.taskIds).size!==args.taskIds.length)throw Error('DUPLICATE_ROLE_TASK');
  const jobs=[];for(const taskId of args.taskIds){const b=await boundRole({...args,taskId}),task={companyId:b.t.companyId,roleId:b.t.roleId,pageUrl:b.state.returnUrl,pageId:b.state.pageId,browserBinding:b.state.browserBinding,taskId:b.t.taskId,templateHash:hash(b.template),...await resolveInputs(await loadProfile(profileFile),b.template,{},b.t.companyId,{roleId:b.t.roleId,pageUrl:b.state.returnUrl})};
-  const compiled=await engine.preparePlan(task);if(!compiled.readyForExecution)throw Error('ROLE_PROFILE_PREPARATION_REQUIRED');const saved=await store.get('plans',compiled.planId),fields=saved.pages.flatMap(p=>p.fields).filter(f=>args.fieldIds.includes(f.id));
+  const compiled=await engine.preparePlan(task,{transient:true});if(!compiled.readyForExecution)throw Error('ROLE_PROFILE_PREPARATION_REQUIRED');const fields=compiled.compiled.pages.flatMap(p=>p.fields).filter(f=>args.fieldIds.includes(f.id));
   if(fields.length!==args.fieldIds.length||fields.some(f=>f.kind!=='text'||f.disposition!=='fill'||f.actions.some(a=>a.method!=='fill')))throw Error('TEXT_PATCH_SCOPE_INVALID');if(fields.some(f=>f.sensitive&&!args.authorization.sensitiveFields))throw Error('SENSITIVE_FIELD_AUTHORIZATION_REQUIRED');jobs.push({b,task,fields});
  }
  const release=await engine.acquireCompanies(jobs.map(j=>catalog.companies.find(c=>c.id===j.b.t.companyId)));
@@ -596,6 +596,7 @@ registerTool('template_register',{description:'持久化已采集并确定的操
 })));
 registerTool('prepare_plan',{description:'正式填写前编译并保存全部字段的类型、位置、动作、依赖、选项和预期读回。严格校验个人JSON类型与本地附件；不访问浏览器。返回冻结计划ID与Hash，未通过不得开始填写。',inputSchema:{tasks:z.array(z.object({companyId:z.string(),pageUrl:z.string().url(),roleId:z.string().optional(),templateHash:z.string(),decisions:z.record(z.string(), z.unknown()).optional()})).min(1).max(20)}},wrap(async({tasks})=>{
   if(!profileFile)throw Error('PROFILE_REQUIRED_FOR_NEW_QUESTIONS');
+  if(new Set(tasks.map(task=>task.companyId)).size!==tasks.length)throw Error('ONE_CURRENT_ROLE_PER_COMPANY_REQUIRED');
   const profile=await loadProfile(profileFile),plans=[];
   for(const task of tasks){
     const formRoute=await engine.formRoute(task);

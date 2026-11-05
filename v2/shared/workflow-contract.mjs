@@ -28,6 +28,9 @@ export function contractAuditSummary(audit){const {fields,ready,...summary}=audi
 // also consumed by the host Hook; nextTools alone is not a lifecycle contract.
 export function workflowEnvelope(data){
  if(!data||typeof data!=='object')return data;
+ if(['PREPARED_PLAN_NOT_FOUND','PREPARED_PLAN_HASH_MISMATCH'].includes(data.error)){
+  return {...data,completion:{complete:false,status:'company_plan_refresh_required',scope:'preparation'},continuation:{state:'prepare',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['prepare_plan'],reason:data.error}};
+ }
  if(['PROFILE_FILL_RUNTIME_CONTEXT_REFRESH_REQUIRED','PRIVACY_RUNTIME_CONTEXT_REFRESH_REQUIRED'].includes(data.error))return {...data,completion:{complete:false,status:'runtime_context_refresh_required',scope:'preparation'},continuation:{state:'prepare',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['prepare_plan'],reason:data.error}};
  // Switch turned to 0 after a plan was frozen: recompile so those items become user-operated;
  // every other field keeps going. The switch itself is never re-asked.

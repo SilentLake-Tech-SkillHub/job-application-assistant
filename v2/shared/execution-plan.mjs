@@ -3,7 +3,7 @@ import {wasBuilt} from './form-seal.mjs';
 import {withProfileRecords} from './repeat-groups.mjs';
 import {materialAudit,effectiveRequired} from './business-materials.mjs';
 import {assertApplicationText} from './application-text.mjs';
-import {createHash,randomUUID} from 'node:crypto';
+import {createHash} from 'node:crypto';
 import {stat} from 'node:fs/promises';
 import {compileExpected} from './observation.mjs';
 import {assertContentPolicy} from './content-policy.mjs';
@@ -18,6 +18,7 @@ export const isPhotoField=(f,asset)=>f.kind==='file'&&(PHOTO_LABEL.test([f.label
 
 const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const json=v=>JSON.parse(JSON.stringify(v));
+export const executionPlanId=companyId=>'execution-plan-'+companyId;
 export function orderedFillIds(fields,requiredMaterials=[]){
  const fill=fields.filter(f=>f.disposition==='fill'&&f.kind!=='file'&&!f.prepareBeforeGroups),required=new Set(requiredMaterials.map(r=>r.fieldId)),done=new Set(),visiting=new Set(),order=[];
  const visit=field=>{if(done.has(field.id))return;if(visiting.has(field.id))throw Error('CYCLIC_FIELD_DEPENDENCY');visiting.add(field.id);
@@ -132,7 +133,7 @@ export async function compileExecutionPlan(storedTemplate,task){
   if(template.coverage?.allDriversSupported!==true)constructionBlockers.push('CONTROL_DRIVERS_NOT_SUPPORTED');
   const body=json({schemaVersion:1,compilerVersion:3,taskId:task.taskId||task.roleQueueArgs?.taskId||null,companyId:task.companyId,pageUrl:task.pageUrl,templateHash:task.templateHash,inputHash:digest(inputSnapshot(template,task)),files:inputSnapshot(template,task).files,fileMetadata,profileFillContext:task.profileFillContext||null,privacyFillContext:task.privacyFillContext||null,pages,counts,materialCoverage,constructionBlockers,unstableFields,readyForExecution:constructionBlockers.length===0&&counts.needs_user===0,allKnown:counts.needs_user===0&&counts.user_only===0});
   const planHash=digest(body);
-  const id=body.taskId?[planHash.slice(0,8),planHash.slice(8,12),'5'+planHash.slice(13,16),'8'+planHash.slice(17,20),planHash.slice(20,32)].join('-'):randomUUID();
+  const id=executionPlanId(body.companyId);
   return {id,createdAt:new Date().toISOString(),...body,planHash};
 }
 

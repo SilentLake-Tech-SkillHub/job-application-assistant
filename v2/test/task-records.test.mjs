@@ -17,17 +17,19 @@ test('task writes replace their current operation, keep independent operations a
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
-test('execution plans from different tools share a slot without overwriting material import plans or other roles',async()=>{
+test('one current execution plan per company across tools and role tasks',async()=>{
  const root=await mkdtemp(path.join(os.tmpdir(),'task-plans-')),store=new Store(root);
  try{
-  await withTaskRecords({taskId:'a',tool:'prepare_plan'},()=>store.put('plans','old',{compilerVersion:3}));
-  await withTaskRecords({taskId:'a',tool:'material_import_prepare'},()=>store.put('plans','material',{captureId:'capture'}));
-  await withTaskRecords({taskId:'a',tool:'workflow_next'},()=>store.put('plans','current',{compilerVersion:3}));
-  await withTaskRecords({taskId:'b',tool:'prepare_plan'},()=>store.put('plans','other-role',{compilerVersion:3}));
-  await assert.rejects(store.get('plans','old'),{code:'ENOENT'});
-  assert.equal((await store.get('plans','current')).compilerVersion,3);
-  assert.equal((await store.get('plans','material')).captureId,'capture');
-  assert.equal((await store.get('plans','other-role')).compilerVersion,3);
-  assert.deepEqual((await readdir(path.join(root,'runs'))).sort(),['task-a.json','task-b.json','task-record-index.json']);
+  const first={id:'execution-plan-C00001',companyId:'C00001',compilerVersion:3,taskId:'role-a',planHash:'first'};
+  const second={...first,taskId:'role-b',planHash:'second'};
+  const other={...first,id:'execution-plan-C00002',companyId:'C00002'};
+  await withTaskRecords({taskId:'role-a',tool:'prepare_plan'},()=>store.put('plans',first.id,first));
+  await withTaskRecords({taskId:'role-b',tool:'workflow_next'},()=>store.put('plans',second.id,second));
+  await store.put('plans',other.id,other);
+  await store.put('plans','material',{captureId:'capture'});
+  await assert.rejects(store.put('plans','extra-copy',first),/EXECUTION_PLAN_STORAGE_KEY_MISMATCH/);
+  assert.deepEqual((await readdir(path.join(root,'plans'))).sort(),[first.id+'.json',other.id+'.json','material.json']);
+  assert.deepEqual(await store.get('plans',first.id),second);
+  assert.deepEqual(await store.get('plans',other.id),other);
  }finally{await rm(root,{recursive:true,force:true});}
 });

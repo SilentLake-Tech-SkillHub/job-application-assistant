@@ -1,6 +1,6 @@
 {
   "name": "job-application-suite-v2",
-  "version": "2.0.0-alpha.11",
+  "version": "2.0.0-alpha.12",
   "private": true,
   "type": "module",
   "files": [

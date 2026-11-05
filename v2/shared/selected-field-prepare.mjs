@@ -41,7 +41,7 @@ export async function prepareSelectedFields({store,page,task,template,prepared,f
  if(!Array.isArray(fillOrder)||new Set(fillOrder).size!==fillOrder.length||selected.some(f=>!fillOrder.includes(f.id)))throw Error('SELECTED_FIELD_EXECUTION_ORDER_REQUIRED');
  const ordered=fillOrder.filter(id=>fieldIds.includes(id)).map(id=>selected.find(f=>f.id===id));
  const selectionHash=hash({planHash:prepared.planHash,fieldIds:ordered.map(f=>f.id)});
- const run={id:randomUUID(),operation:'selected_field_prepare',companyId:task.companyId,roleId:task.roleId||null,pageUrl:task.pageUrl,templateHash:task.templateHash,...(task.planId?{planId:task.planId}:{}),planHash:prepared.planHash,selectionHash,fieldIds:ordered.map(f=>f.id),startedAt:new Date().toISOString(),status:'running',fields:[],actions:[],fullFormVerified:false,submission:'not_performed'};
+ const run={id:randomUUID(),operation:'selected_field_prepare',companyId:task.companyId,roleId:task.roleId||null,pageUrl:task.pageUrl,templateHash:task.templateHash,...(task.planId?{planId:task.planId}:{}),planHash:prepared.planHash,...(prepared.readyForExecution===true&&prepared.counts?.needs_user===0?{preparedFiles:{files:prepared.files,fileMetadata:prepared.fileMetadata}}:{}),selectionHash,fieldIds:ordered.map(f=>f.id),startedAt:new Date().toISOString(),status:'running',fields:[],actions:[],fullFormVerified:false,submission:'not_performed'};
  const checkpoint=()=>store.put('runs',run.id,run);
  const observe=async fields=>{const o=await page.observe({...plan,fields});assertObservation(o,task,plan);return o;};
  const inventory=async()=>{const current=await liveControls(page,plan);if(controlContractChanges(plan,current).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');return current;};

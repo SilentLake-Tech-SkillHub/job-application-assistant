@@ -21,12 +21,11 @@ export async function prepareRoleMaterials({args,boundRole,resolveContext,engine
  if(fields.some(f=>f.kind!=='text'||f.userOnly||f.sensitive||f.when||f.readonly||f.actions?.some(a=>a.method!=='fill')))throw Error('MATERIAL_DEPENDENCY_OR_DRIVER_REQUIRED');
  const scopedPage={...pagePlan,fields,sections:undefined,sectionDiscovery:undefined,groups:[]},scopedTemplate={...template,pages:[scopedPage]};
  const plan=await compileExecutionPlan(scopedTemplate,task);if(!plan.readyForExecution)throw Error('ROLE_MATERIAL_PREPARATION_INCOMPLETE');
- await store.put('plans',plan.id,plan);
  const scope={id:randomUUID(),operation:'prepare_role_materials',scope:'known_role_materials_only',queueId:args.queueId,queueHash:args.queueHash,taskId:args.taskId,templateId:template.id,templateHash:hash(template),planId:plan.id,planHash:plan.planHash,fieldIds:fields.map(f=>f.id),materialContextHash:hash(context),fullFormVerified:false};
- scope.scopeHash=hash(scope);await store.put('plans',scope.id,scope);
+ scope.scopeHash=hash(scope);
  const current=await boundRole(args);if(hash(current.template)!==scope.templateHash||current.state.pageId!==state.pageId)throw Error('MATERIAL_PREPARATION_SCOPE_CHANGED');
  if(hash(await resolveContext(current.t,current.state))!==scope.materialContextHash)throw Error('ROLE_INPUT_CHANGED');
- const saved=await store.get('plans',plan.id);await assertPreparedPlan(saved,scopedTemplate,{...task,planId:plan.id,planHash:plan.planHash},args.authorization);
+ const saved=plan;await assertPreparedPlan(saved,scopedTemplate,{...task,planId:plan.id,planHash:plan.planHash},args.authorization);
  const page=await browser.existingPage(task.pageUrl),company=engine.companyForTask(task);await page.assertLocation(company.origin,pagePlan.pathPrefix);await page.wait(pagePlan.readySelector);
  const inventory=await liveControls(page,pagePlan),changes=controlContractChanges(pagePlan,inventory);if(changes.length){if(engine.onInventory)await engine.onInventory(t.companyId,task.pageUrl,inventory,pagePlan);const error=Error('FORM_CONTROL_CONTRACT_CHANGED');error.details={fields:changes};throw error;}
  const before=await page.observe(scopedPage),written=[];
@@ -40,7 +39,7 @@ export async function prepareRoleMaterials({args,boundRole,resolveContext,engine
  const observed=attachInventory(await page.observe(scopedPage),scopedPage,selectedInventory),verification=verifyForm(compileExpected(scopedPage,task),observed);
  verification.readbackStable=hash(firstRead.fields)===hash(observed.fields);
  if(!verification.readbackStable){verification.status='needs_attention';verification.checks.push({id:'material:stability',status:'unverified',reason:'MATERIAL_READBACK_NOT_STABLE'});if(verification.materialCoverage)verification.materialCoverage.complete=false;}
- const id='material-prepare-'+t.taskId,result={id,operation:'prepare_role_materials',companyId:t.companyId,roleId:t.roleId,pageUrl:task.pageUrl,scope:'known_role_materials_only',scopeId:scope.id,scopeHash:scope.scopeHash,planId:plan.id,planHash:plan.planHash,writtenFields:written,verification,screenshot,screenshotError,fullFormVerified:false,save:'not_verified',submission:'not_performed',completion:{complete:false,status:verification.status==='verified'?'material_fields_prepared':'in_progress'},continuation:{state:'prepare',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['workflow_next','role_prepare','role_verify']}};
+ const id='material-prepare-'+t.taskId,result={id,operation:'prepare_role_materials',companyId:t.companyId,roleId:t.roleId,pageUrl:task.pageUrl,scope:'known_role_materials_only',scopeId:scope.id,scopeHash:scope.scopeHash,frozenScope:scope,planId:plan.id,planHash:plan.planHash,writtenFields:written,verification,screenshot,screenshotError,fullFormVerified:false,save:'not_verified',submission:'not_performed',completion:{complete:false,status:verification.status==='verified'?'material_fields_prepared':'in_progress'},continuation:{state:'prepare',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['workflow_next','role_prepare','role_verify']}};
  await store.put('runs',id,result);
  if(state.verifyRunId){delete state.verifyRunId;delete state.verifiedAt;state.status='ready_to_fill';}
  state.materialPreparationRunId=id;await queues.put(t.taskId,state);return result;

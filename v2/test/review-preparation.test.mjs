@@ -8,3 +8,16 @@ for(const scenario of ['partial','different_role','different_template','missing_
  if(scenario==='partial')f.run.status='needs_attention';if(scenario==='different_role')f.run.roleId='other';if(scenario==='different_template')f.run.templateHash='other';if(scenario==='missing_plan')delete f.run.planId;if(scenario==='unknown_answers')f.plan.counts.needs_user=1;if(scenario==='changed_file')f.files={resume:{paths:[path.join(f.root,'other.pdf')],displayNames:['other.pdf'],revision:'r2'}};if(scenario==='tampered_plan')f.plan.files={resume:{paths:['/wrong.pdf']}};if(scenario==='unhashed_change')f.plan.untrusted='changed after freezing';if(scenario==='missing_metadata')delete f.plan.fileMetadata;if(scenario==='changed_source')await writeFile(f.file,'a changed local source');await assert.rejects(reviewedPreparationFiles(f));
 }));
 test('a full preparation uses the same current file metadata boundary',()=>fixture(async f=>{delete f.state.selectedFieldRunId;f.state.fillRunId='full';f.store.get=async(kind)=>kind==='plans'?f.plan:{results:[{...f.role,planId:'plan'}]};assert.equal(await reviewedPreparationFiles(f),f.plan);}));
+
+test('a prepared role checks its own attachment evidence after another role replaces the company plan',()=>fixture(async f=>{
+ delete f.state.selectedFieldRunId;
+ f.state.fillRunId='full';
+ const preparedFiles={files:f.plan.files,fileMetadata:f.plan.fileMetadata};
+ f.store.get=async kind=>{
+  assert.equal(kind,'runs');
+  return {results:[{...f.role,pageUrl:f.state.returnUrl,templateHash:f.templateHash,planHash:'previous-fingerprint',preparedFiles}]};
+ };
+ assert.deepEqual(await reviewedPreparationFiles(f),preparedFiles);
+ await writeFile(f.file,'changed after review');
+ await assert.rejects(reviewedPreparationFiles(f),/SUBMISSION_APPROVED_FILE_CHANGED/);
+}));

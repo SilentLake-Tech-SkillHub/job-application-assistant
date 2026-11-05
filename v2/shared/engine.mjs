@@ -20,7 +20,7 @@ import { mkdir, readFile, writeFile, rename, realpath, unlink } from 'node:fs/pr
 import path from 'node:path';
 import { verifyForm } from './verifier.mjs';
 import { compileExpected, attachInventory } from './observation.mjs';
-import {compileExecutionPlan,assertPreparedPlan} from './execution-plan.mjs';
+import {compileExecutionPlan,assertPreparedPlan,executionPlanId} from './execution-plan.mjs';
 import {validateControlContract} from './value-contract.mjs';
 import {acquireLease,leasePath,defaultLeaseRoot} from './leases.mjs';
 import {assertSealContract,wasBuilt} from './form-seal.mjs';
@@ -140,7 +140,9 @@ export class Store {
       let files=[];try{files=await readdir(path.join(this.root,'templates'));}catch(e){if(e.code!=='ENOENT')throw e;}
       for(const f of files.filter(f=>f.endsWith('.json'))){const t=JSON.parse(await readFile(path.join(this.root,'templates',f),'utf8'));if(t.coverage?.proof?.runId!==id)continue;let old;try{old=await this.get('runs',id);}catch(e){if(e.code!=='ENOENT')throw e;}if(old&&hash(old)!==hash(value))throw Error('SEALED_EVIDENCE_PROTECTED');}
     }
-    if(await this.taskRecords.put(group,id,value))return;
+    if(group==='plans'&&Number.isInteger(value.compilerVersion)){
+      if(id!==executionPlanId(value.companyId))throw Error('EXECUTION_PLAN_STORAGE_KEY_MISMATCH');
+    }else if(await this.taskRecords.put(group,id,value))return;
     const dir = path.join(this.root, group); await mkdir(dir, {recursive:true, mode:0o700});
     const dest = path.join(dir, `${id}.json`), temp = `${dest}.${randomUUID()}.tmp`;
     await writeFile(temp, JSON.stringify(value,null,2), {mode:0o600}); await rename(temp,dest);
@@ -219,7 +221,8 @@ export class Engine {
       return {id:run.id,companyId:company.id,status:run.status,errorCode:run.errorCode||null,...(run.errorDetails?{errorDetails:run.errorDetails}:{}),restoration:run.restoration,branchCount:run.branches?.length||0,branches:run.branches?.map(({source,value,status,newQuestions})=>({source,value,status,newQuestions})),submission:'not_performed',scope:'internal_declared_conditions_only'};
     });
   }
-  async preparePlan(task){
+  async preparePlan(task,{transient=false,leaseHeld=false}={}){
+    if(!transient&&!leaseHeld)return this.withCompanyLease(task.companyId,()=>this.preparePlan(task,{leaseHeld:true}));
     const route=await this.formRoute(task);
     if(route.route!=='reuse')return {...route,status:'needs_form_acquisition',readyForExecution:false};
     const company=this.companyForTask(task);
@@ -229,8 +232,8 @@ export class Engine {
     if(hash(template)!==task.templateHash)throw Error('TEMPLATE_VERSION_CHANGED');
     if(!template.pages.some(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix)))throw Error('PLAN_PAGE_NOT_COVERED');
     const plan=await compileExecutionPlan(template,task);
-    await this.store.put('plans',plan.id,plan);
-    return {companyId:task.companyId,route:route.route,nextStage:route.nextStage,routeReason:route.reason,planId:plan.id,planHash:plan.planHash,templateHash:plan.templateHash,counts:plan.counts,allKnown:plan.allKnown,readyForExecution:plan.readyForExecution,constructionBlockers:plan.constructionBlockers,status:plan.constructionBlockers.length?'blocked_construction':plan.counts.needs_user?'needs_answers':plan.counts.user_only?'ready_with_user_steps':'ready',browserAccess:false,pending:plan.pages.flatMap(p=>p.fields).filter(f=>f.disposition==='needs_user').map(f=>({id:f.id,source:f.source,label:f.label,required:!!f.required,...(task.sources?.[f.source]?.datePrecisionGap?{datePrecisionGap:task.sources[f.source].datePrecisionGap}:{})}))};
+    if(!transient)await this.store.put('plans',plan.id,plan);
+    return {...(transient?{compiled:plan}:{}),companyId:task.companyId,route:route.route,nextStage:route.nextStage,routeReason:route.reason,planId:plan.id,planHash:plan.planHash,templateHash:plan.templateHash,counts:plan.counts,allKnown:plan.allKnown,readyForExecution:plan.readyForExecution,constructionBlockers:plan.constructionBlockers,status:plan.constructionBlockers.length?'blocked_construction':plan.counts.needs_user?'needs_answers':plan.counts.user_only?'ready_with_user_steps':'ready',browserAccess:false,pending:plan.pages.flatMap(p=>p.fields).filter(f=>f.disposition==='needs_user').map(f=>({id:f.id,source:f.source,label:f.label,required:!!f.required,...(task.sources?.[f.source]?.datePrecisionGap?{datePrecisionGap:task.sources[f.source].datePrecisionGap}:{})}))};
   }
   async coverage(ids) {
     return Promise.all(ids.map(async id => {
@@ -249,10 +252,11 @@ export class Engine {
       } catch { return {companyId:id,status:'invalid_or_missing_template'}; }
     }));
   }
-  async prepare({tasks,concurrency=3,authorization,parallelRoles=false,independentVerificationFollows=false}) {
+  async prepare({tasks,concurrency=3,authorization,parallelRoles=false,independentVerificationFollows=false,preparedPlans=null}) {
     if (!Array.isArray(tasks)||!tasks.length||tasks.length>20) throw Error('INVALID_BATCH_SIZE');
     if (!Number.isInteger(concurrency)||concurrency<1||concurrency>5) throw Error('INVALID_CONCURRENCY');
     if (!authorization?.prepare || !authorization?.evidence) throw Error('PREPARATION_AUTHORIZATION_REQUIRED');
+    if(preparedPlans&&(!parallelRoles||preparedPlans.length!==tasks.length))throw Error('INVALID_TRANSIENT_PLAN_BATCH');
     if(parallelRoles&&tasks.some(t=>!t.roleQueueArgs||!t.roleId))throw Error('ROLE_BOUND_BATCH_REQUIRED');
     const keys=tasks.map(t=>t.companyId);
     if ((!parallelRoles&&new Set(keys).size!==keys.length) || keys.some(k=>this.locks.has(k))) throw Error('COMPANY_ALREADY_RUNNING');
@@ -263,7 +267,7 @@ export class Engine {
     assertIndependentDrafts(tasks);
     const jobs=[];
     // Resolve every plan before any page is changed.
-    for (const task of tasks) {
+    for (const [index,task] of tasks.entries()) {
       if(task.profileFillContext&&!task.roleQueueArgs)throw Error('PROFILE_FILL_ROLE_BINDING_REQUIRED');
       const company=this.companyForTask(task);
       if (!company?.templateId) throw Error(`COMPANY_NOT_COVERED:${task.companyId}`);
@@ -271,7 +275,11 @@ export class Engine {
       const template=validateTemplate(await this.store.get('templates',company.templateId));
       if (task.templateHash!==hash(template)) throw Error('TEMPLATE_VERSION_CHANGED');
       if(!task.planId||!task.planHash)throw Error('PREPARED_PLAN_REQUIRED');
-      let prepared;try{prepared=await this.store.get('plans',task.planId);}catch{throw Error('PREPARED_PLAN_NOT_FOUND');}
+      let prepared=preparedPlans?.[index];
+      if(!prepared){
+        if(task.planId!==executionPlanId(task.companyId))throw Error('PREPARED_PLAN_NOT_FOUND');
+        try{prepared=await this.store.get('plans',task.planId);}catch{throw Error('PREPARED_PLAN_NOT_FOUND');}
+      }
       await assertPreparedPlan(prepared,template,task,authorization);
       if(authorization.uploadFieldIds&&(new Set(authorization.uploadFieldIds).size!==authorization.uploadFieldIds.length||authorization.uploadFieldIds.some(id=>!prepared.pages.some(page=>page.fields.some(field=>field.id===id&&field.kind==='file'&&field.disposition==='fill')))))throw Error('UPLOAD_FIELD_SCOPE_INVALID');
       if((await this.formRoute(task)).route!=='reuse')throw Error('FORM_ASSET_NOT_SEALED');
@@ -288,11 +296,19 @@ export class Engine {
       const current=this.companyForTask(job.task);
       if(!current?.templateId||current.templateId!==job.template.id||hash(await this.store.get('templates',current.templateId))!==job.task.templateHash)throw Error('TEMPLATE_VERSION_CHANGED');
       if((await this.formRoute(job.task)).route!=='reuse')throw Error('FORM_ASSET_NOT_SEALED');
+      if(!preparedPlans){
+        const currentPlan=await this.store.get('plans',job.task.planId);
+        if(currentPlan.planHash!==job.prepared.planHash)throw Error('PREPARED_PLAN_HASH_MISMATCH');
+      }
       if(this.resolveTask){
         const fresh=await this.resolveTask(job.task,job.template);
         await assertPreparedPlan(job.prepared,job.template,fresh,authorization);
         job.task=fresh;
       }
+    }
+    if(preparedPlans){
+      const latest=new Map(jobs.map(job=>[job.company.id,job.prepared]));
+      for(const plan of latest.values())await this.store.put('plans',plan.id,plan);
     }
     const queueIds=[...new Set(jobs.map(j=>j.task.roleQueueArgs?.queueId).filter(Boolean))];
     const batchOwner=queueIds.length===0?jobs[0].task.taskId:null;
@@ -376,7 +392,7 @@ export class Engine {
   }
   async runCompany({task,company,template,prepared,deferFinalVerification=false},authorization) {
     const started=performance.now();
-    const result={companyId:company.id,roleId:task.roleId||null,pageUrl:task.pageUrl,startedAt:new Date().toISOString(),templateHash:hash(template),planId:prepared.id,planHash:prepared.planHash,profileHash:task.profileHash,status:'needs_attention',fields:[],pageChecks:[],submission:'not_performed',save:'not_verified'};
+    const result={companyId:company.id,roleId:task.roleId||null,pageUrl:task.pageUrl,startedAt:new Date().toISOString(),templateHash:hash(template),planId:prepared.id,planHash:prepared.planHash,preparedFiles:{files:prepared.files,fileMetadata:prepared.fileMetadata},profileHash:task.profileHash,status:'needs_attention',fields:[],pageChecks:[],submission:'not_performed',save:'not_verified'};
     let activePage,activePlan,activeField;
     try {
       const page=await this.taskPage(task);
