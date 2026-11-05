@@ -36,7 +36,7 @@ function moveField(field,section,occurrence){
  moved.id=fieldId(moved.inventorySelectors?.[0]||moved.read?.selector,moved.label);
  return moved;
 }
-function renameRecord(field,fromPrefix,toPrefix,parents){
+function renameRecord(field,fromPrefix,toPrefix,parents,ongoingSources){
  const rename=source=>{
   if(typeof source!=='string')return source;
   if(source.startsWith(fromPrefix+'.'))return toPrefix+source.slice(fromPrefix.length);
@@ -46,6 +46,10 @@ function renameRecord(field,fromPrefix,toPrefix,parents){
  };
  const next=structuredClone(field);next.source=rename(next.source);
  if(next.ongoingSource)next.ongoingSource=rename(next.ongoingSource);
+ if(!next.ongoingSource&&next.kind==='date'&&next.actions?.some(action=>['ud_date','feishu_month'].includes(action.method))){
+  const ongoing=next.source.replace(/\.(?:end|endDate|dateEnd|endMonth)$/u,'.ongoing');
+  if(ongoing!==next.source&&ongoingSources?.includes(ongoing))next.ongoingSource=ongoing;
+ }
  if(next.when?.source)next.when.source=rename(next.when.source);
  if(next.compose?.sources)next.compose.sources=next.compose.sources.map(rename);
  // What was resolved or searched for the sibling says nothing about this record.
@@ -74,7 +78,11 @@ export function recordPlanOf(profile){
  }
  for(const [family,keys]of inferred)entities[family]=[...keys];
  const parents=recordParentsFromProfile(profile);
- return {entities,projects:profile?.applicationSelections?.projects?.projectIds||null,...(Object.keys(parents).length?{parents}:{})};
+ const ongoingSources=Object.entries(profile?.facts||{})
+  .filter(([key,fact])=>key.endsWith('.ongoing')&&fact?.status==='known'&&fact.value===true)
+  .map(([key])=>key);
+ return {entities,projects:profile?.applicationSelections?.projects?.projectIds||null,
+  ...(Object.keys(parents).length?{parents}:{}),...(ongoingSources.length?{ongoingSources}:{})};
 }
 const inProfile=(owner,plan)=>{
  const listed=plan.entities[owner.family];
@@ -128,7 +136,7 @@ export function withProfileRecords(template,plan){
     for(const field of record.fields)replaced.set(field,occurrence===record.occurrence?field:moveField(field,section,occurrence));
    });
    for(const record of records)if(!kept.includes(record))for(const field of record.fields)replaced.set(field,null);
-   const fresh=additions.flatMap(({owner,pattern},index)=>pattern.fields.map(field=>moveField(renameRecord(field,pattern.owner.record,owner.record,parents),section,base+kept.length+index)));
+   const fresh=additions.flatMap(({owner,pattern},index)=>pattern.fields.map(field=>moveField(renameRecord(field,pattern.owner.record,owner.record,parents,plan.ongoingSources),section,base+kept.length+index)));
    if(fresh.length){const last=records.at(-1).fields.at(-1);appended.set(last,fresh);}
    if(kept.length!==records.length||kept.some((r,i)=>r.occurrence!==base+i)||fresh.length)pageChanged=true;
    if(group&&group.count!==kept.length+additions.length){group.count=kept.length+additions.length;pageChanged=true;}

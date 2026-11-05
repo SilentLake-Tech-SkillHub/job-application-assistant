@@ -206,3 +206,14 @@ test('an Ant template with a single mapped record requests discovery before expa
  assert.deepEqual(expanded.fields.map(field=>field.source),['education.first.school','education.second.school']);
  assert.equal(expanded.groups[0].count,2);
 });
+
+test('a cloned completed project date uses the new project’s confirmed ongoing fact when the driver supports it',()=>{
+ const end={...field('Project',0,'projects.old','end','结束时间'),kind:'date',precision:'month',actions:[{method:'ud_date'}]};
+ const t=form([end],[group('Project',1)]);
+ const recordPlan=recordPlanOf({entities:{projects:['old','new','unknown']},facts:{'projects.new.ongoing':{status:'known',value:true}}});
+ const fields=withProfileRecords(t,recordPlan).pages[0].fields;
+ assert.equal(fields.find(f=>f.source==='projects.new.end').ongoingSource,'projects.new.ongoing');
+ assert.equal(fields.find(f=>f.source==='projects.unknown.end').ongoingSource,undefined);
+ const native=form([{...end,actions:[{method:'native_date'}]}],[group('Project',1)]);
+ assert.equal(withProfileRecords(native,recordPlan).pages[0].fields.find(f=>f.source==='projects.new.end').ongoingSource,undefined);
+});
