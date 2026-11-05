@@ -80,3 +80,18 @@ test('material-only queue upgrade preserves tasks and pages, rejects selection e
   await assert.rejects(queues.refreshMaterials({...after,authorizationRef:'synthetic'}),/CONFIRMED_MATERIAL_AMENDMENT_REQUIRED/);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('a known role material binds only the selected branch of a shared source question',async()=>{
+ const t=template(),job=task(),primary=t.pages[0].fields[0];
+ primary.when={source:'channel',equals:'Employee referral'};
+ const alternate={...field(),id:'alternate',source:'companyAnswers.alpha.ambassadorCode',when:{source:'channel',equals:'Ambassador'}};
+ t.pages[0].fields.push(alternate);
+ job.values.channel='Employee referral';
+ const plan=await compileExecutionPlan(t,job);
+ assert.deepEqual(plan.materialCoverage.requirements.map(row=>row.fieldId),[primary.id]);
+ assert.equal(plan.readyForExecution,true);
+ assert.equal(plan.pages[0].fields[1].disposition,'inactive');
+ assert.equal(plan.pages[0].fields[1].effectiveRequired,false);
+ delete job.values.channel;
+ assert.ok(materialAudit(t.pages[0].fields,job).blockers.includes('REQUIRED_MATERIAL_NOT_EXECUTABLE'));
+});

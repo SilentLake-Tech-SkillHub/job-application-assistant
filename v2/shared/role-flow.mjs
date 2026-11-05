@@ -1,5 +1,6 @@
+import {samePage} from './page-scope.mjs';
 import {transitionLocationMatches,transitionRoleIdFromLocation,canonicalLocationUrl} from './entry-transition.mjs';
-import {matchesRole,readRoleIdentity,bindRoleTitleProof} from './role-identity.mjs';
+import {matchesRole,readRoleIdentity,bindRoleTitleProof,rolePageContract} from './role-identity.mjs';
 import {resolveEntry,matchEntryPath} from './entry-recipe.mjs';
 import {matchesAccount,resolveAccount,assertScope} from '../login/contracts.mjs';
 // 一个岗位任务 = 一张绑定的标签（任务记录里的 pageId）。所有步骤只操作这张标签；网址只用来判断它现在走到了哪一步，
@@ -42,7 +43,7 @@ export class RoleFlow{
   try{state.linkObservation=(await this.onObservation({kind:'role',code:x.t.roleId,field:'岗位链接',value:state.landedDetailUrl,evidence:'岗位链接跳转后岗位编号由 '+x.t.officialId+' 变为 '+state.siteRoleId+'；页面岗位名与确认岗位名一致'})).status;}catch(err){state.linkObservation='write_failed:'+(/^[A-Z_]+$/.test(err.message)?err.message:'UNKNOWN');}}
  entryOnlyPlan(c,entry,template){return {entryOnly:true,readySelector:entry?.detailReadySelector||c.account.selector,roleSelector:entry?.roleSelector||template?.pages[0]?.roleSelector};}
  async base(args){
-  let {q,t}=await this.queues.task(args);const c=await this.login.company(t.companyId),entry=resolveEntry(c),recipe=entry&&RECIPES.has(entry.kind)?entry:null;let template;
+  let {q,t}=await this.queues.task(args);const c=await this.login.company(t.companyId,t),entry=resolveEntry(c),recipe=entry&&RECIPES.has(entry.kind)?entry:null;let template;
   try{template=await this.templates?.(t.companyId,t.roleId);}catch(e){if(e.code!=='ENOENT')throw e;}
   let prior;try{prior=await this.queues.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
   // 已报“投递链接打不开”的任务改从岗位链接进入，到达申请页后再报新地址。
@@ -66,7 +67,7 @@ export class RoleFlow{
    if(!plan&&recipe)plan=this.entryOnlyPlan(c,entry,template);
   }
   if(!plan)throw Error('ROLE_ENTRY_RECIPE_REQUIRED');
-  if(!plan.entryOnly&&plan.roleTitle!==t.title)throw Error('CONFIRMED_ROLE_TITLE_TEMPLATE_MISMATCH');
+  if(!plan.entryOnly)plan=rolePageContract(plan,{title:t.title,officialId:this.roleId(t,prior)});
   return {q,t,c,entry,recipe,template,plan,target,prior};
  }
  // 账号只在这张绑定的标签上读；读不到时才看站点登记的账号核对页（login_open_identity 打开并登记）。
@@ -135,22 +136,22 @@ export class RoleFlow{
     state.status='authenticated_at_role';state.accountMatched=true;state.pageKind=kind;await this.queues.put(x.t.taskId,state);
     return {status:state.status,taskId:state.taskId,pageId:state.pageId,companyId:x.t.companyId,roleId:x.t.roleId,pageUrl:s.pageUrl,pageKind:kind,accountMatched:true,nextTools:['role_enter_application'],...(state.siteRoleId?{siteRoleId:state.siteRoleId,linkObservation:state.linkObservation||null}:{}),formAssetRequiredBeforeFill:true,submission:'not_performed'};
    }
-   if(s.pageUrl!==state.returnUrl&&x.recipe){
+   if(!samePage(s.pageUrl,state.returnUrl)&&x.recipe){
     // 有入口配方的站点：已进入过申请页、但标签现在不在申请页（例如登录过期后被送到别处）：不直接打开申请页地址，
     // 回到岗位链接重新点进入；原有的填写、核验证明作废，进入后重新核验。
     if(!allowNavigation)throw Error('ROLE_BOUND_PAGE_LOCATION_CHANGED');
     for(const key of ['fillRunId','verifyRunId','verifiedAt','selectedFieldRunId','previewAttempt','entryStarted','applicationUrl'])delete state[key];
     state.returnUrl=x.t.url;return this.assess({...x,target:x.t.url,plan:this.entryOnlyPlan(x.c,x.entry,x.template)},state,{allowNavigation});
    }
-   if(s.pageUrl!==state.returnUrl){if(!allowNavigation)throw Error('ROLE_BOUND_PAGE_LOCATION_CHANGED');await this.browser.request('openPage',{pageId:state.pageId,pageUrl:state.returnUrl,readySelectors:[x.plan.readySelector,x.c.fields?.root].filter(Boolean)});}
+   if(!samePage(s.pageUrl,state.returnUrl)){if(!allowNavigation)throw Error('ROLE_BOUND_PAGE_LOCATION_CHANGED');await this.browser.request('openPage',{pageId:state.pageId,pageUrl:state.returnUrl,readySelectors:[x.plan.readySelector,x.c.fields?.root].filter(Boolean)});}
    if(x.plan.entryOnly){
     state.status='authenticated_at_role';state.accountMatched=true;await this.queues.put(x.t.taskId,state);
     return {status:state.status,taskId:state.taskId,pageId:state.pageId,companyId:x.t.companyId,roleId:x.t.roleId,pageUrl:state.returnUrl,accountMatched:true,nextTools:['role_enter_application'],formAssetRequiredBeforeFill:true,submission:'not_performed'};
    }
    await this.browser.request('wait',{pageUrl:state.returnUrl,selector:x.plan.readySelector});
    const restored=await this.snapshot(x,state.pageId);
-   if(restored.pageUrl!==state.returnUrl||!matchesRole(x.plan,restored)||restored.loginFormPresent||!matchesAccount(restored.account,account))throw Error('LOGIN_RETURN_ROLE_VERIFICATION_FAILED');
-   if(state.browserBinding&&(state.browserBinding.pageId!==state.pageId||state.browserBinding.pageUrl&&state.browserBinding.pageUrl!==state.returnUrl))invalidateRolePageProofs(state);
+   if(!samePage(restored.pageUrl,state.returnUrl)||!matchesRole(x.plan,restored)||restored.loginFormPresent||!matchesAccount(restored.account,account))throw Error('LOGIN_RETURN_ROLE_VERIFICATION_FAILED');
+   if(state.browserBinding&&(state.browserBinding.pageId!==state.pageId||state.browserBinding.pageUrl&&!samePage(state.browserBinding.pageUrl,state.returnUrl)))invalidateRolePageProofs(state);
    state.status='ready_to_fill';state.restoredAt=restored.readAt;state.accountMatched=true;await this.queues.put(x.t.taskId,state);
    return {status:state.status,taskId:state.taskId,pageId:state.pageId,companyId:x.t.companyId,roleId:x.t.roleId,roleTitle:restored.roleTitle,pageUrl:restored.pageUrl,accountMatched:true,originalRoleRestored:true,submission:'not_performed'};
   }
@@ -281,7 +282,7 @@ export class RoleFlow{
   if(!['岗位链接','投递链接'].includes(field))throw Error('INVALID_OBSERVATION');if(!evidence)throw Error('OBSERVATION_EVIDENCE_REQUIRED');
   const failed=field==='岗位链接'?t.url:t.applyUrl;if(!failed)throw Error('ROLE_LINK_NOT_SET');
   if(!this.onObservation)throw Error('OBSERVATION_RECORDER_REQUIRED');
-  const c=await this.login.company(t.companyId);
+  const c=await this.login.company(t.companyId,t);
   return this.login.locked(c,async()=>{
    let prior;try{prior=await this.queues.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
    if(prior?.queueId&&prior.queueId!==q.id)throw Error('ROLE_TASK_STATE_CHANGED');

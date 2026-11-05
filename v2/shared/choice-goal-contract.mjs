@@ -103,7 +103,7 @@ export async function assertStoredChoiceGoals(template,{store,companyId,profile,
  // Use the certified capture only when every currently rendered definition
  // still matches; new or changed controls continue to block the plan.
  const formId=template.evidence.formId||template.id;
- if(/^F\d{6}$/.test(formId||'')){
+ if(/^C\d{5}$/.test(formId||'')){
   let seal;try{seal=await store.get('runs','seal-'+formId);}catch(e){if(e.code!=='ENOENT')throw e;}
   const baseline=seal?.certifiedCapture;
   if(seal?.operation==='form_seal'&&seal.templateHash===hash(template)&&baseline?.companyId===companyId&&baseline.formId===formId&&formScope(baseline.pageUrl)===formScope(capture.pageUrl)&&compatibleInventory(baseline,capture))capture=baseline;

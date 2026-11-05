@@ -27,11 +27,11 @@ test('python-compatible digest matches company_store.py content_sha',()=>{
  assert.equal(pyJson({b:[1,'中'],a:null}),'{"a": null, "b": [1, "中"]}');
 });
 
-test('one directory entry per site code; transitional logins are matched by origin',async()=>{
+test('one directory entry per company code; source sites remain values',async()=>{
  const dir=await workspace(),d=new CompanyDirectory({handoffDir:dir}),list=await d.load();
- assert.deepEqual(list.map(c=>[c.id,c.companyId,c.origin,c.loginUrl]),[['S0003','C00007','https://campus.163.com',null],['S0004','C00007','https://campus.game.163.com','https://campus.game.163.com/login'],['S0005','C00007','https://leihuo.163.com',null]]);
- assert.match(d.loginFile('S0004'),/登录@campus\.game\.163\.com\.json$/);
- assert.throws(()=>d.loginFile('S0005'),/COMPANY_LOGIN_NOT_CONFIGURED/);
+ assert.equal(list.length,1);assert.equal(list[0].id,'C00007');assert.deepEqual(list[0].sites.map(s=>s.siteId),['S0003','S0004','S0005']);assert.equal(list[0].origin,null);
+ assert.match(d.loginFile('C00007',{siteId:'S0004'}),/登录@campus\.game\.163\.com\.json$/);
+ assert.throws(()=>d.loginFile('C00007',{siteId:'S0005'}),/COMPANY_LOGIN_NOT_CONFIGURED/);
  assert.throws(()=>d.loginFile('netease'),/UNKNOWN_COMPANY/);
  await saveLogin(dir,'网易','登录@leihuo.163.com.json',login('x','https://campus.163.com'));
  await assert.rejects(new CompanyDirectory({handoffDir:dir}).load(),/COMPANY_ASSET_HOST_MISMATCH/);
@@ -77,7 +77,7 @@ test('queue stores only codes and order; links are read from the company file at
  const q=await queues.import({});
  assert.equal(q.inputKind,'confirmed-handoff-batch');
  const stored=JSON.parse(await readFile(path.join(dir,'queue',q.queueId+'.json'),'utf8'));
- assert.deepEqual(stored.tasks.map(t=>[t.companyId,t.companyCode,t.roleId]),[['S0003','C00007','J000012'],['S0004','C00007','J000011']]);
+ assert.deepEqual(stored.tasks.map(t=>[t.companyId,t.companyCode,t.roleId]),[['C00007','C00007','J000012'],['C00007','C00007','J000011']]);
  assert.ok(stored.tasks.every(t=>!('url' in t)&&!('title' in t)&&!('materials' in t)));assert.equal(stored.input,undefined);
  const {t}=await queues.task({...q,taskId:stored.tasks[0].taskId});
  assert.deepEqual([t.url,t.title,t.officialId],['https://campus.163.com/job/88','平台产品经理 “AI”','88']);
@@ -92,7 +92,36 @@ test('company directory uses company and site codes without consulting old asset
  const {Store}=await import('../shared/engine.mjs');const dir=await workspace(),store=new Store(path.join(dir,'private'));
  await store.put('templates','site-asset-keys',{S0003:'old-name',S0004:'old-other'});
  const catalog=await new CompanyDirectory({handoffDir:dir,store}).load();
- assert.deepEqual(catalog.map(c=>[c.id,c.siteId,c.companyId]),[['S0003','S0003','C00007'],['S0004','S0004','C00007'],['S0005','S0005','C00007']]);
+ assert.deepEqual(catalog.map(c=>[c.id,c.companyId]),[['C00007','C00007']]);
  await saveCompany(dir,confirm(netease()));const queues=new RoleQueue({root:path.join(dir,'queue'),catalog,inputAdapter:handoffInput(dir)}),q=await queues.import({});
- assert.deepEqual(q.tasks.map(t=>[t.companyId,t.siteId,t.roleId]),[['S0003','S0003','J000012'],['S0004','S0004','J000011']]);
+ assert.deepEqual(q.tasks.map(t=>[t.companyId,t.siteId,t.roleId]),[['C00007','S0003','J000012'],['C00007','S0004','J000011']]);
+});
+
+test('shared ATS origin never lends another company its login or form definition',async()=>{
+ const origin='https://shared-ats.example';
+ const alpha=companyDoc({code:'C00101',name:'Alpha',sites:[site('S0101',origin)],roles:[]});
+ const beta=companyDoc({code:'C00102',name:'Beta',sites:[site('S0102',origin)],roles:[]});
+ const dir=await handoffWorkspace([alpha,beta]);
+ await saveLogin(dir,'Alpha','登录.json',login('old-alpha',origin));
+ await saveLogin(dir,'Alpha','表单定义.json',{origin,recipe:'alpha-definition'});
+ let directory=new CompanyDirectory({handoffDir:dir}),entries=await directory.load();
+ assert.ok(entries.find(e=>e.companyId==='C00101').loginFile);
+ assert.equal(entries.find(e=>e.companyId==='C00102').loginFile,null);
+ assert.equal(entries.find(e=>e.companyId==='C00102').definitionFile,null);
+ await saveLogin(dir,'Beta','登录.json',login('old-beta',origin));
+ await saveLogin(dir,'Beta','表单定义.json',{origin,recipe:'beta-definition'});
+ directory=new CompanyDirectory({handoffDir:dir});entries=await directory.load();
+ assert.match(directory.loginFile('C00101'),/Alpha/);
+ assert.match(directory.loginFile('C00102'),/Beta/);
+ assert.match(directory.definitionFile('C00101'),/Alpha/);
+ assert.match(directory.definitionFile('C00102'),/Beta/);
+});
+
+test('renaming a company display value does not detach its code-owned configuration',async()=>{
+ const doc=companyDoc({code:'C00120',name:'Original label',sites:[site('S0120','https://shared.example')],roles:[]});
+ const dir=await handoffWorkspace([doc]);await saveLogin(dir,'Original label','登录.json',login('legacy-name','https://shared.example'));
+ await saveCompany(dir,{...doc,'公司名称':'Renamed label'});
+ const directory=new CompanyDirectory({handoffDir:dir});await directory.load();
+ assert.match(directory.loginFile('C00120'),/Original label/);
+ assert.equal(directory.entry('C00120').name,'Renamed label');
 });

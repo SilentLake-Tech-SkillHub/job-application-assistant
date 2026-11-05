@@ -24,12 +24,12 @@ test('technical errors cannot silently clear the continuation',()=>{
  const result=stageResult('form_build_template',{error:'DRIVER_MISSING'});assert.equal(result.continuation.shouldContinue,true);assert.equal(result.completion.complete,false);
 });
 
-test('allocated form codes keep role-specific routes apart and survive recapture',async()=>{
+test('company form identity survives role changes and recapture',async()=>{
  const {formLocation,registerObservedQuestions}=await import('../shared/profile.mjs');
  const a='https://example.test/e/?id=1#/job/1/apply',b='https://example.test/e/?id=2#/job/2/apply';assert.notEqual(formLocation(a),formLocation(b));
  const p=profile();const first=registerObservedQuestions(p,{companyId:'same',pageUrl:a,fields:[],observedAt:'first'});
- const r=registerObservedQuestions(p,{companyId:'same',pageUrl:a,fields:[],observedAt:'observed'});assert.equal(r.pageKey,first.pageKey);assert.match(r.pageKey,/^F[0-9]{6}$/);
- const second=registerObservedQuestions(p,{companyId:'same',pageUrl:b,fields:[],observedAt:'other'});assert.notEqual(second.pageKey,r.pageKey);
+ const r=registerObservedQuestions(p,{companyId:'same',pageUrl:a,fields:[],observedAt:'observed'});assert.equal(r.pageKey,first.pageKey);assert.equal(r.pageKey,'same');
+ const second=registerObservedQuestions(p,{companyId:'same',pageUrl:b,fields:[],observedAt:'other'});assert.equal(second.pageKey,r.pageKey);
 });
 
 test('coverage flags and an old probe cannot seal changed content/component/operation contracts',async()=>{
@@ -58,10 +58,10 @@ test('document type choices are ordinary controls while actual document numbers 
  assert.equal(humanActionReason({label:'身份证号码',type:'text'}),'sensitive_identity');assert.equal(normalizeControlPolicy([{label:'身份证号码',type:'text',userOnly:true}])[0].userOnly,true);
 });
 
-test('form lookup resolves its site and route without deriving or changing the fixed key',async()=>{
- const {lookupCompanyForm,formLocation}=await import('../shared/profile.mjs'),p=profile(),url='https://one.test/e/#/job/1/apply';p.companyForms.legacy={companyId:'same',pageUrl:url,mappings:{}};
- assert.equal(lookupCompanyForm(p,'same',url).storedKey,'legacy');assert.equal(lookupCompanyForm(p,'same','https://one.test/e/#/job/2/apply').form,undefined);assert.notEqual(formLocation(url),formLocation('https://two.test/e/#/job/1/apply'));
- const r=lookupCompanyForm(p,'same',url);assert.equal(r.pageKey,'legacy');assert.ok(p.companyForms[r.pageKey]);
+test('form lookup uses its company key independently of role routes',async()=>{
+ const {lookupCompanyForm,formLocation}=await import('../shared/profile.mjs'),p=profile(),url='https://one.test/e/#/job/1/apply';p.companyForms.same={companyId:'same',pageUrl:url,mappings:{}};
+ assert.equal(lookupCompanyForm(p,'same',url).storedKey,'same');assert.equal(lookupCompanyForm(p,'same','https://one.test/e/#/job/2/apply').form,p.companyForms.same);assert.notEqual(formLocation(url),formLocation('https://two.test/e/#/job/1/apply'));
+ const r=lookupCompanyForm(p,'same',url);assert.equal(r.pageKey,'same');assert.ok(p.companyForms[r.pageKey]);
 });
 
 test('recapture with an old template cannot overwrite a newly confirmed semantic mapping',async()=>{

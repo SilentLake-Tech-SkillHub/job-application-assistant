@@ -2,7 +2,7 @@ import {readFileSync} from 'node:fs';
 import {humanActionReason,isAgreementCheckbox,templateConstructionIssues} from './field-policy.mjs';
 import {validateControlContract} from './value-contract.mjs';
 import {hostRole,maintainerRefusal} from './host-role.mjs';
-import {stopLossBlocked,recordOutcome,stopLossRefusal} from './stop-loss.mjs';
+import {recordOutcome} from './stop-loss.mjs';
 import {evaluateBusinessAuthorization} from './business-authorization.mjs';
 import {recordCall} from './call-metrics.mjs';
 
@@ -87,11 +87,10 @@ export function registerWorkflowTool(server,tool,definition,handler,env=process.
  const handle=async(args,extra)=>{
   if(role==='maintainer'&&!inspections.has(tool))return {isError:true,content:[{type:'text',text:JSON.stringify(stageResult(tool,maintainerRefusal(tool)))}]};
   if(inspections.has(tool))return handler(args,extra);
-  const phase=stages[tool][0],blocked=await stopLossBlocked({tool,phase,args,env});
-  if(blocked)return {isError:true,content:[{type:'text',text:JSON.stringify({...stopLossRefusal(tool,blocked,isTechnicalFailure(blocked.reasons)),workflowContract:{revision:1,tool,phase,tracked:true}})}]};
+  const phase=stages[tool][0];
   const result=await handler(args,extra);
   const block=result.content?.find(x=>x.type==='text');if(!block)throw Error('WORKFLOW_RESPONSE_ENVELOPE_REQUIRED');
-  const staged=await recordOutcome({tool,phase,args,result:stageResult(tool,JSON.parse(block.text)),env,technical:isTechnicalFailure});
+  const staged=await recordOutcome({tool,phase,args,result:stageResult(tool,JSON.parse(block.text)),env});
   return {...result,content:[{type:'text',text:JSON.stringify(staged)}]};
  };
  return server.registerTool(tool,definition,async(args,extra)=>{

@@ -67,6 +67,17 @@ export class PageAdapter {
    const raw=await this.page.evaluate(plan?.provider==='feishu'?inventoryFeishuDOM:await currentNative());return plan?.provider==='feishu'&&!plan.rawKeys?canonicalizeInventory(raw).fields:raw;
   }
   async observe(plan){plan=await this.resolveSpec(plan,{readback:true});const result=await this.page.evaluate(await currentNative(),plan.provider==='feishu'&&!plan.selectorsResolved?await this.page.evaluate(remapFeishuSpecDOM,plan):plan);if(plan.roleIdentity)result.roleIdentity=readRoleIdentity(plan.roleIdentity,result.pageUrl);return result;}
+  async repeatDiscovery(titles){
+    const args={operation:'repeatDiscovery',titles};
+    const native=await this.page.evaluate(await currentNative(),args);
+    const unresolved=titles.filter(title=>!native.some(item=>item.title===title));
+    if(!unresolved.length)return native;
+    const ant=await this.page.evaluate(await currentAnt(),{...args,titles:unresolved}).catch(error=>{
+     if(!String(error.message).includes('ANT_FORM_NOT_OBSERVED'))throw error;
+     return [];
+    });
+    return [...native,...ant];
+  }
   async ensureGroups(groups){
     if(groups?.length)await this.assertSingleEditor();
     for(const group of groups||[]){
@@ -75,7 +86,7 @@ export class PageAdapter {
       if(count>group.count)throw Error('EXCESS_REPEAT_ENTRIES_REQUIRE_REVIEW');
       while(count<group.count){
         const addLabel=group.addLabel||'添加';
-        const add=this.page.locator(await this.resolveSelector(group.addSelector)).filter({hasText:new RegExp('^'+addLabel+'$')});
+        const add=this.page.locator(await this.resolveSelector(group.addSelector)).filter({hasText:new RegExp('^'+addLabel.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$')});
         if(await add.count()!==1||(await add.innerText()).trim()!==addLabel)throw Error('REPEAT_ADD_CONTROL_CHANGED');
         await add.click({timeout:10000});
         const next=await this.page.locator(await groupSelector()).count();

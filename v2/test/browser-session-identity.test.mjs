@@ -5,9 +5,9 @@ test('native Chrome target IDs survive broker tracking reset and do not select a
  assert.equal(await b.trackPage(a),'native-original');b.pageIds.clear();assert.equal((await b.pageIdentity('native-original')).generation,'document-1');assert.equal(await b.trackedPage('native-original'),a);
  b.pageIds.clear();b.connection={contexts:()=>[{pages:()=>[other]}]};await assert.rejects(b.trackedPage('native-original'),/ROLE_BROWSER_PAGE_LOST/);
 });
-test('bound writes refuse navigation even with an unchanged visible URL',async()=>{
+test('a refreshed bound page stays usable: the document changing is not a new page',async()=>{
  const a=page('native-original','new-document'),b=new BrowserAdapter('http://127.0.0.1:1');b.state='connected';b.connection={contexts:()=>[{pages:()=>[a]}]};b.executor={verified:true,sessionId:'actual-browser'};
- await assert.rejects(b.existingPage(a.url(),{pageId:'native-original',roleBinding:{kind:'verified_role',taskId:'task',pageId:'native-original',pageUrl:a.url(),sessionId:'actual-browser',generation:'old-document'}}),/DOCUMENT_CHANGED_REBIND_REQUIRED/);
+ assert.ok(await b.existingPage(a.url(),{pageId:'native-original',roleBinding:{kind:'verified_role',taskId:'task',pageId:'native-original',pageUrl:a.url(),sessionId:'actual-browser',generation:'old-document'}}));
 });
 test('fake managed IAB and everyday Chrome discovery are rejected before any connector or launch',async()=>{
  let calls=0;for(const endpoint of ['managed-iab','chrome-default']){const b=new BrowserAdapter(endpoint,{connector:async()=>{calls++;},launcher:async()=>{calls++;}});await assert.rejects(b.connect(),/IAB_HOST_BRIDGE_REQUIRED|EXPLICIT_BROWSER_SESSION_REQUIRED/);}assert.equal(calls,0);

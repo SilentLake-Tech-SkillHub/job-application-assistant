@@ -1,3 +1,4 @@
+import {companyContext} from './company-directory.mjs';
 import {TaskRecords,withTaskRecords} from './task-records.mjs';
 import {keyOK} from './ids.mjs';
 import {isRecoverableControlReason} from './control-recovery.mjs';
@@ -12,7 +13,7 @@ import {attachProfileFillProofs} from './profile-fill-authorization.mjs';
 import {templateMethods} from './control-registry.mjs';
 import {templateConstructionIssues,humanActionReason} from './field-policy.mjs';
 import {continuationFor} from './workflow-continuation.mjs';
-import {matchesRole} from './role-identity.mjs';
+import {matchesRole,rolePageContract} from './role-identity.mjs';
 import {assertIndependentDrafts} from './shared-record.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename, realpath, unlink } from 'node:fs/promises';
@@ -22,8 +23,11 @@ import { compileExpected, attachInventory } from './observation.mjs';
 import {compileExecutionPlan,assertPreparedPlan} from './execution-plan.mjs';
 import {validateControlContract} from './value-contract.mjs';
 import {acquireLease,leasePath,defaultLeaseRoot} from './leases.mjs';
-import {assertSealContract} from './form-seal.mjs';
+import {assertSealContract,wasBuilt} from './form-seal.mjs';
 import {constructionTemplate} from './template-lifecycle.mjs';
+import {samePage} from './page-scope.mjs';
+import {withProfileRecords,sectionsWithoutAdd,groupFromDiscovery,groupSection,scopeOf,occurrenceBase} from './repeat-groups.mjs';
+import {recordRealFillFailure} from './seal-state.mjs';
 import {readdir} from 'node:fs/promises';
 import {probeConditions} from './condition-probe.mjs';
 import {enrichControlContext,liveControls} from './control-context.mjs';
@@ -37,7 +41,17 @@ export const hash = value => createHash('sha256').update(JSON.stringify(value)).
 export function plannedRepeatFieldIds(plan){
  const ids=new Set(),parse=selector=>{try{return JSON.parse(selector.slice(9));}catch{throw Error('PHOENIX_REFERENCE_INVALID');}};
  for(const group of plan.groups||[]){
-  if(!group.selector?.startsWith('phoenixq:'))continue;
+  if(!group.selector?.startsWith('phoenixq:')){
+   if(!group.addSelector||!group.sectionKey)continue;
+   const members=plan.fields.flatMap(field=>(field.inventorySelectors||[field.read?.selector]).flatMap(selector=>{
+    const scope=scopeOf(selector);
+    return scope?.[0]===group.sectionKey?[{id:field.id,index:scope[1]-occurrenceBase(selector)}]:[];
+   }));
+   const indices=new Set(members.map(member=>member.index));
+   if(indices.size!==group.count||[...indices].some(index=>index<0||index>=group.count))throw Error('REPEAT_GROUP_FIELD_COVERAGE_CHANGED');
+   for(const member of members)ids.add(member.id);
+   continue;
+  }
   const reference=parse(group.selector),add=group.addSelector?.startsWith('phoenixq:')?parse(group.addSelector):null;
   const scope=r=>JSON.stringify(Object.fromEntries(Object.entries(r||{}).filter(([key])=>key!=='part').sort(([a],[b])=>a.localeCompare(b))));
   if(reference.part!=='repeatRecords'||!reference.title||add?.part!=='repeatAdd'||scope(reference)!==scope(add)||group.addLabel!==reference.addLabel)throw Error('REPEAT_GROUP_SCOPE_CHANGED');
@@ -46,7 +60,7 @@ export function plannedRepeatFieldIds(plan){
    const references=(field.inventorySelectors||[field.read?.selector]).filter(s=>s?.startsWith('phoenixq:')).map(parse).filter(r=>r.section===reference.title);
    if(references.length){if(references.some(r=>!Number.isInteger(r.occurrence)||r.occurrence<0))throw Error('REPEAT_GROUP_FIELD_COVERAGE_CHANGED');members.push({id:field.id,last:Math.max(...references.map(r=>r.occurrence))});}
   }
-  if(!members.length||Math.max(...members.map(member=>member.last))+1!==group.count)throw Error('REPEAT_GROUP_FIELD_COVERAGE_CHANGED');
+  if(!members.length||Number.isInteger(group.count)&&Math.max(...members.map(member=>member.last))+1!==group.count)throw Error('REPEAT_GROUP_FIELD_COVERAGE_CHANGED');
   for(const member of members)ids.add(member.id);
  }
  return ids;
@@ -69,7 +83,8 @@ export function canContinueAfterRecoveredControl(error,field){
  return d?.phase==='restored_control_failure'&&d.expectedValueHash===expected&&d.readbackAvailable===true&&d.popupClosed===true&&d.stableReadback===true&&d.pageUnchanged===true&&(d.valueMatches===true&&d.observedValueHash===expected||d.unchangedFromBefore===true&&d.observedValueHash===d.originalValueHash);
 }
 export function validateTemplate(t) {
-  if(templateConstructionIssues(t).length)throw Error('FORM_CONSTRUCTION_GAPS_REQUIRE_REPAIR');
+  // Rules added after a form was built must not invalidate it (A5).
+  if(!wasBuilt(t)&&templateConstructionIssues(t).length)throw Error('FORM_CONSTRUCTION_GAPS_REQUIRE_REPAIR');
   if (!idOK(t.id) || !Number.isInteger(t.version) || t.version < 1) throw Error('INVALID_TEMPLATE_ID_OR_VERSION');
   if (!Array.isArray(t.pages) || !t.pages.length) throw Error('EMPTY_TEMPLATE');
   if (!t.evidence?.sourceUrl || !t.evidence?.observedAt) throw Error('MISSING_CAPTURE_EVIDENCE');
@@ -80,7 +95,7 @@ export function validateTemplate(t) {
     if(p.rolePrefix!==undefined&&(typeof p.rolePrefix!=='string'||!p.rolePrefix.trim()||/[\r\n\u2028\u2029]/u.test(p.rolePrefix)||typeof p.roleSelector!=='string'||!p.roleSelector.trim()))throw Error('ROLE_PREFIX_CONTRACT_REQUIRED');
     if(!p.sections?.length||!p.sectionDiscovery?.selector||!p.sectionDiscovery?.titleSelector)throw Error('SECTION_COVERAGE_PLAN_REQUIRED');
     if(p.sections.some(section=>typeof section?.title!=='string'||!section.title.trim()))throw Error('SECTION_TITLES_REQUIRED');
-    for(const g of p.groups||[])if(!idOK(g.id)||!g.selector||!Number.isInteger(g.count)||g.count<0)throw Error('INVALID_REPEAT_GROUP');
+    for(const g of p.groups||[])if(!idOK(g.id)||!g.selector||g.count!==undefined&&(!Number.isInteger(g.count)||g.count<0))throw Error('INVALID_REPEAT_GROUP');
     if(p.provider&&!['feishu','ant','phoenix'].includes(p.provider))throw Error('UNKNOWN_PROVIDER');
     for (const f of p.fields) {
       if (!idOK(f.id) || fields.has(f.id)) throw Error('DUPLICATE_OR_INVALID_FIELD');
@@ -155,11 +170,11 @@ export function compare(actual, expected) {
 }
 
 export class Engine {
-  constructor({store,companies,browser,onInventory,refreshCompanies,resolveTask,profileFields,loadProfile,attachmentCapture,visionReviewer,privacyFields,leaseRoot=defaultLeaseRoot()}) { Object.assign(this,{store,companies,browser,onInventory,refreshCompanies,resolveTask,profileFields,loadProfile,attachmentCapture,visionReviewer,privacyFields,leaseRoot}); this.locks = new Set(); }
+  constructor({store,companies,browser,onInventory,onTemplateUpdated,refreshCompanies,resolveTask,profileFields,loadProfile,attachmentCapture,visionReviewer,privacyFields,leaseRoot=defaultLeaseRoot()}) { Object.assign(this,{store,companies,browser,onInventory,onTemplateUpdated,refreshCompanies,resolveTask,profileFields,loadProfile,attachmentCapture,visionReviewer,privacyFields,leaseRoot}); this.locks = new Set(); }
   async taskPage(task){
     const pageId=task.pageId||task.browserBinding?.pageId,binding=task.browserBinding;
-    if((task.roleId||task.roleQueueArgs)&&(!pageId||!binding?.sessionId||binding.generation===undefined||binding.generation===null))throw Error('VERIFIED_ROLE_PAGE_BINDING_REQUIRED');
-    if(binding&&((task.pageId&&binding.pageId!==task.pageId)||(binding.pageUrl&&binding.pageUrl!==task.pageUrl)||(binding.companyId&&binding.companyId!==task.companyId)))throw Error('ROLE_PAGE_BINDING_MISMATCH');
+    if((task.roleId||task.roleQueueArgs)&&(!pageId||!binding))throw Error('VERIFIED_ROLE_PAGE_BINDING_REQUIRED');
+    if(binding&&((task.pageId&&binding.pageId!==task.pageId)||(binding.pageUrl&&!samePage(binding.pageUrl,task.pageUrl))||(binding.companyId&&binding.companyId!==task.companyId)))throw Error('ROLE_PAGE_BINDING_MISMATCH');
     const taskId=task.roleQueueArgs?.taskId||task.taskId;if(binding?.taskId&&taskId&&binding.taskId!==taskId)throw Error('ROLE_PAGE_BINDING_MISMATCH');
     return this.browser.existingPage(task.pageUrl,{...(pageId?{pageId}:{}),...(binding?{roleBinding:binding}:{})});
   }
@@ -167,9 +182,9 @@ export class Engine {
   async privacyProofs(task,template,page,prepare=false){if(!task.privacyFillContext)return {};if(!this.privacyFields)throw Error('PRIVACY_FILL_KERNEL_REQUIRED');return this.privacyFields({task,template,page,prepare});}
   attachPrivacyProofs(observation,proofs){for(const[id,proof]of Object.entries(proofs))if(observation.fields?.[id])observation.fields[id].privacyFillProof=proof;return observation;}
   formRoute(task){return new FormRouter({store:this.store,companies:this.companies,validateTemplate,...(this.loadProfile?{loadProfile:this.loadProfile}:{})}).resolve(task);}
-  companyForTask(task){const c=this.companies.find(c=>c.id===task.companyId);return c?{...c,templateId:c.roleTemplates?.[task.roleId]||c.templateId}:null;}
+  companyForTask(task){const c=this.companies.find(c=>c.id===task.companyId);return c?{...companyContext(c,task),templateId:c.templateId}:null;}
   async acquireCompanies(companies){
-    const origins=[...new Set(companies.map(c=>new URL(c.origin).origin))].sort(),releases=[];
+    const origins=[...new Set(companies.flatMap(c=>c.origins||[c.origin]).filter(Boolean).map(origin=>new URL(origin).origin))].sort(),releases=[];
     try{
       for(const origin of origins)releases.push(await acquireLease(leasePath(this.leaseRoot,'recruiting-origin:'+origin),{busyCode:'COMPANY_ALREADY_RUNNING'}));
     }catch(error){for(const release of releases.reverse())await release();throw error;}
@@ -323,9 +338,9 @@ export class Engine {
     const template=validateTemplate(await this.store.get('templates',company.templateId));
     if(task.templateHash!==hash(template))throw Error('TEMPLATE_VERSION_CHANGED');
     if((await this.formRoute(task)).route!=='reuse')throw Error('FORM_ASSET_NOT_SEALED');
-    const matches=template.pages.filter(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix));
+    const matches=withProfileRecords(template,task.recordPlan).pages.filter(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix));
     if(matches.length!==1)throw Error('AMBIGUOUS_VERIFICATION_PAGE');
-    const plan=matches[0],page=await this.taskPage(task);
+    const plan=rolePageContract(matches[0],task.confirmedRole),page=await this.taskPage(task);
     await page.assertLocation(company.origin,plan.pathPrefix);await page.wait(plan.readySelector);
     const inventory=await liveControls(page,plan);
     let mappingError=null;
@@ -344,6 +359,19 @@ export class Engine {
     const run={id:randomUUID(),operation:'verify_current',taskId:task.taskId||task.roleQueueArgs?.taskId||null,companyId:company.id,roleId:task.roleId||null,pageUrl:task.pageUrl,templateHash:hash(template),profileHash:task.profileHash,observationRunId,...result};
     await this.store.put('runs',run.id,run);return run;
   }
+  // A section with planned records and no way to add one: read that section once and
+  // keep what it shows on the company's template. Nothing has been written to the form.
+  async learnRepeatContract(page,template,plan,live){
+    const titles=sectionsWithoutAdd(plan,live);
+    if(!titles.length||typeof page.repeatDiscovery!=='function'||!template.id)return;
+    const found=(await page.repeatDiscovery(titles)).filter(item=>titles.includes(item.title));
+    if(!found.length)return;
+    const stored=await this.store.get('templates',template.id),target=stored.pages.find(p=>p.pathPrefix===plan.pathPrefix);
+    target.groups=[...(target.groups||[]).filter(group=>!found.some(item=>item.title===groupSection(group))),...found.map(groupFromDiscovery)];
+    await this.store.put('templates',template.id,stored);
+    await this.onTemplateUpdated?.(stored);
+    throw Object.assign(Error('REPEAT_CONTRACT_LEARNED'),{details:{sections:found.map(item=>item.title),nextTools:['prepare_plan','batch_prepare']}});
+  }
   async runCompany({task,company,template,prepared,deferFinalVerification=false},authorization) {
     const started=performance.now();
     const result={companyId:company.id,roleId:task.roleId||null,pageUrl:task.pageUrl,startedAt:new Date().toISOString(),templateHash:hash(template),planId:prepared.id,planHash:prepared.planHash,profileHash:task.profileHash,status:'needs_attention',fields:[],pageChecks:[],submission:'not_performed',save:'not_verified'};
@@ -351,13 +379,15 @@ export class Engine {
     try {
       const page=await this.taskPage(task);
       activePage=page;
-      for (const [pageIndex,plan] of template.pages.entries()) {
+      for (const [pageIndex,storedPage] of withProfileRecords(template,task.recordPlan).pages.entries()) {
+        const plan=rolePageContract(storedPage,task.confirmedRole);
         const compiled=prepared.pages[pageIndex],frozenFields=compiled.fields;
         activePlan=plan;
         await page.assertLocation(company.origin,plan.pathPrefix);
         await page.wait(plan.readySelector);
         const inventory=()=>liveControls(page,plan);
         const live=await inventory();
+        await this.learnRepeatContract(page,template,plan,live);
         assertMaterialDestinationsRemainAbsent(prepared.materialCoverage,live);
         if(this.onInventory)await this.onInventory(company.id,task.pageUrl,live,plan);
         const mapped=new Set(plan.fields.flatMap(f=>f.inventorySelectors||[f.read.selector]));
@@ -365,13 +395,16 @@ export class Engine {
         result.pageChecks.push({pathPrefix:plan.pathPrefix,unmapped:missing.map(f=>({selector:f.selector,label:f.label,required:f.required}))});
         if(missing.length)throw Error('UNMAPPED_FORM_FIELDS');
         if(controlContractChanges(plan,live).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
-        const repeatFields=plannedRepeatFieldIds(plan),rendered=new Set(live.map(field=>field.selector));
-        const beforeExpansion={...plan,fields:plan.fields.filter(field=>!repeatFields.has(field.id)||(field.inventorySelectors||[field.read.selector]).some(selector=>rendered.has(selector)))};
-        let initial=await page.observe(beforeExpansion);
-        if(initial.pageUrl!==task.pageUrl||!matchesRole(plan,initial))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
+        // The frozen repeat contract is still validated before any write. Observation only
+        // reads what is on the page: a strict reference to an absent record throws instead of
+        // reporting it, and records are only added further down.
+        const repeatFieldIds=plannedRepeatFieldIds(plan);
+        const uncontracted=sectionsWithoutAdd(plan,live).filter(section=>plan.groups?.some(group=>groupSection(group)===section&&!group.addSelector));
+        if(uncontracted.length)throw Object.assign(Error('REPEAT_ADD_CONTROL_NOT_OBSERVED'),{details:{sections:uncontracted}});
+        const renderedFields=controls=>{const rendered=new Set(controls.map(control=>control.selector));return plan.fields.filter(field=>(field.inventorySelectors||[field.read.selector]).some(selector=>rendered.has(selector)||!repeatFieldIds.has(field.id)&&!selector?.startsWith('phoenixq:')));};
+        let initial=await page.observe({...plan,fields:renderedFields(live)});
+        if(!samePage(initial.pageUrl,task.pageUrl)||!matchesRole(plan,initial))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
         const canActivate=f=>{if(!f.when||!template.coverage?.proof)return false;const parent=frozenFields.find(p=>p.source===f.when.source);return parent?.disposition==='fill'&&parent.value===f.when.equals&&parent.control?.options?.includes(parent.value)&&initial.fields[parent.id]?.present===true&&initial.fields[parent.id]?.selected===true&&frozenFields.indexOf(parent)<frozenFields.indexOf(f);};
-        const unavailable=frozenFields.filter(f=>!['inactive','omitted','user_only'].includes(f.disposition)&&!initial.fields[f.id]?.present&&!repeatFields.has(f.id)&&!canActivate(f));
-        if(unavailable.length)throw Error('PLANNED_FIELDS_MISSING_BEFORE_WRITE');
         // Upload first because parsing may replace the form; then create the planned records.
         const uploads=frozenFields.filter(f=>f.kind==='file'&&f.disposition==='fill'&&(!authorization.uploadFieldIds||authorization.uploadFieldIds.includes(f.id)));
         let materialWrites=0;
@@ -397,17 +430,21 @@ export class Engine {
         if(expanded.some(f=>!mapped.has(f.selector)))throw Error('UNMAPPED_FORM_FIELDS_AFTER_EXPANSION');
         if(controlContractChanges(plan,expanded).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
         if(materialWrites||plan.groups?.length){
-          const beforeMaterial=initial;initial=await page.observe(plan);
-          if(initial.pageUrl!==task.pageUrl||!matchesRole(plan,initial))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
+          const beforeMaterial=initial;initial=await page.observe({...plan,fields:renderedFields(expanded)});
+          if(!samePage(initial.pageUrl,task.pageUrl)||!matchesRole(plan,initial))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
           result.pageChecks.at(-1).postMaterialReadAt=initial.readAt;
           result.pageChecks.at(-1).changedAfterMaterial=plan.fields.filter(f=>!f.userOnly&&JSON.stringify(beforeMaterial.fields[f.id]?.value)!==JSON.stringify(initial.fields[f.id]?.value)).map(f=>f.id);
-          if(frozenFields.some(f=>!['inactive','omitted','user_only'].includes(f.disposition)&&!initial.fields[f.id]?.present&&!canActivate(f)))throw Error('PLANNED_FIELDS_MISSING_AFTER_MATERIAL');
         }
         const fillOrder=compiled.executionOrder?.find(step=>step.stage==='fill')?.fieldIds;
         const fillFields=fillOrder?fillOrder.map(id=>frozenFields.find(f=>f.id===id)):frozenFields;
         const unverifiedSources=new Set(),completedWrites=new Set();
+        // Records are in place now. A control still absent means the company changed it:
+        // mark only those fields for repair and fill everything else on the page.
+        const notOnPage=frozenFields.filter(f=>!['inactive','omitted','user_only'].includes(f.disposition)&&!initial.fields[f.id]?.present&&!canActivate(f));
+        if(notOnPage.length)await recordRealFillFailure(this.store,template,company.id,notOnPage.map(f=>f.id));
+        for(const f of notOnPage){unverifiedSources.add(f.source);(result.deferredControls??=[]).push({id:f.id,source:f.source,kind:f.kind,label:f.label,status:'not_on_page',reason:'CONTROL_NOT_ON_PAGE'});}
         for(const f of fillFields){
-          if(f.disposition!=='fill'||f.kind==='file'||f.prepareBeforeGroups)continue;
+          if(f.disposition!=='fill'||f.kind==='file'||f.prepareBeforeGroups||notOnPage.includes(f))continue;
           activeField={id:f.id,source:f.source,kind:f.kind,label:f.label};
           if(f.when&&unverifiedSources.has(f.when.source)){
             unverifiedSources.add(f.source);(result.deferredControls??=[]).push({...activeField,status:'blocked_dependency',reason:'UNVERIFIED_CONTROL_DEPENDENCY',dependsOn:f.when.source});continue;
@@ -417,7 +454,7 @@ export class Engine {
           // An upload/parser or earlier field may have changed the form. Never
           // skip a write based on an observation made before those operations.
           const latest=await page.observe({...plan,fields:[f]});
-          if(latest.pageUrl!==task.pageUrl||!matchesRole(plan,latest))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
+          if(!samePage(latest.pageUrl,task.pageUrl)||!matchesRole(plan,latest))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
           const current=latest.fields[f.id];
           try{
           if(f.control?.type==='searchable_text'&&current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'){
@@ -456,17 +493,19 @@ export class Engine {
         if(this.onInventory)await this.onInventory(company.id,task.pageUrl,finalInventory,plan);
         if(controlContractChanges(plan,finalInventory).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
         if(materialWrites){
-          const afterMaterial=await page.observe(plan),corrected=[];
+          const afterMaterial=await page.observe({...plan,fields:renderedFields(finalInventory)}),corrected=[];
           for(const f of frozenFields){
             if(f.disposition!=='fill'||f.kind!=='text'||f.control?.type!=='text'||f.userOnly||f.sensitive||f.actions?.length!==1||f.actions[0].method!=='fill'||typeof f.value!=='string'||!afterMaterial.fields[f.id]?.present||compare(afterMaterial.fields[f.id].value,f.value)==='match'||!completedWrites.has(f.id)&&!result.skippedMatchingFields?.includes(f.id))continue;
             const current=await page.observe({...plan,fields:[f]});
-            if(current.pageUrl!==task.pageUrl||!matchesRole(plan,current))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
+            if(!samePage(current.pageUrl,task.pageUrl)||!matchesRole(plan,current))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
             if(current.fields[f.id]?.value!==afterMaterial.fields[f.id].value)continue;
             await page.act(f.actions[0],f.value,prepared.files);corrected.push(f.id);
           }
           if(corrected.length){result.lateMaterialCorrections=corrected;finalInventory=await inventory();if(this.onInventory)await this.onInventory(company.id,task.pageUrl,finalInventory,plan);if(controlContractChanges(plan,finalInventory).length||finalInventory.some(c=>!mapped.has(c.selector)))throw Error('FORM_CONTROL_CONTRACT_CHANGED');}
         }
         if(deferFinalVerification){result.pageChecks.at(-1).independentVerificationPending=true;result.status='prepared_pending_verification';break;}
+        // Verification reads every planned field and is the read-only verify_current's job here.
+        if(notOnPage.length){result.fields.push(...notOnPage.map(f=>({id:f.id,label:f.label,status:'unverified',reason:'CONTROL_NOT_ON_PAGE'})));break;}
         const choiceProofs=await verifyDropdownSelections(page,plan,task);
         const dateProofs=await verifyDateRanges(page,plan,task);
         const profileProofs=await this.profileProofs(task,template,page),privacyProofs=await this.privacyProofs(task,template,page),searchableProofs=await verifySearchableCommits({store:this.store,page,plan,task});

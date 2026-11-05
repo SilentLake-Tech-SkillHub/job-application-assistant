@@ -49,7 +49,7 @@ test('Chrome explicit read-only capture uses its tracked original page and check
  const url='https://forms.example/resume/edit',page={url:()=>url,isClosed:()=>false};
  const b=new BrowserAdapter('managed-chrome');b.state='connected';b.connection={};b.pageIds.set('one',page);
  assert.equal((await b.existingPage(url,{pageId:'one',readOnly:true})).page,page);
- await assert.rejects(b.existingPage(url+'?different=1',{pageId:'one',readOnly:true}),/EXPLICIT_PAGE_URL_MISMATCH/);
+ await assert.rejects(b.existingPage(new URL('/other',url).href,{pageId:'one',readOnly:true}),/EXPLICIT_PAGE_URL_MISMATCH/);
  await assert.rejects(b.existingPage(url,{pageId:'missing',readOnly:true}),/ROLE_BROWSER_PAGE_LOST/);
  await assert.rejects(b.existingPage(url,{pageId:'one'}),/VERIFIED_ROLE_PAGE_BINDING_REQUIRED/);
 });

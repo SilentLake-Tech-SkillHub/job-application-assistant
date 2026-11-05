@@ -28,3 +28,11 @@ export async function bindRoleTitleProof(browser,plan,pageId,snapshot){
  Object.assign(snapshot,{roleTitle:title.roleTitle,rawRoleTitle:title.rawRoleTitle,prefixApplied:title.prefixApplied});
  return snapshot;
 }
+
+// The company template owns control structure. The confirmed role owns the
+// title/job identity for this execution; independent observation still checks it.
+export function rolePageContract(page,confirmedRole){
+ if(!confirmedRole?.title)return page;
+ return {...page,roleTitle:confirmedRole.title,
+  ...(page.roleIdentity&&confirmedRole.officialId?{roleIdentity:{...page.roleIdentity,value:String(confirmedRole.officialId)}}:{})};
+}

@@ -19,7 +19,7 @@ const loginFor=()=>({company:async()=>({companyId:'S0001',origin:'https://exampl
 const onlyA=()=>sample({selected:['J000001']});
 
 test('queue uses the confirmed 志愿顺序 rather than file order and blocks jumping ahead',()=>fixture(async({queues})=>{
- const q=await queues.import({});assert.deepEqual(q.tasks.map(t=>[t.companyId,t.companyCode,t.roleId]),[['S0001','C00001','J000001'],['S0001','C00001','J000002']]);
+ const q=await queues.import({});assert.deepEqual(q.tasks.map(t=>[t.companyId,t.companyCode,t.roleId]),[['C00001','C00001','J000001'],['C00001','C00001','J000002']]);
  await assert.rejects(queues.task({...q,taskId:q.tasks[1].taskId}),/CONFIRMED_ROLE_ORDER_BLOCKED/);
  await queues.put(q.tasks[0].taskId,{status:'ready_for_user_review'});assert.equal((await queues.task({...q,taskId:q.tasks[1].taskId})).t.roleId,'J000002');
 }));
@@ -40,7 +40,7 @@ test('duplicate order, a role off its site and an unknown site fail before brows
  await fixture(async({queues})=>{await assert.rejects(queues.import({}),/INVALID_CONFIRMED_ROLE_ORDER/);},dup);
  const off=sample();off['岗位'][0]['岗位链接']='https://other.example/role';
  await fixture(async({queues})=>{await assert.rejects(queues.import({}),/INVALID_CONFIRMED_ROLE_URL/);},off);
- await fixture(async({dir,queues})=>{queues.catalog=queues.catalog.map(c=>({...c,siteId:'S0009'}));await assert.rejects(queues.import({}),/INVALID_CONFIRMED_ROLE_URL/);});
+ await fixture(async({dir,queues})=>{queues.catalog=queues.catalog.map(c=>({...c,sites:c.sites.map(s=>({...s,siteId:'S0009'}))}));await assert.rejects(queues.import({}),/INVALID_CONFIRMED_ROLE_URL/);});
 });
 
 test('roles with a recorded outcome are protected by role code until the user reviews them',()=>fixture(async({dir,queues})=>{

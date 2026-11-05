@@ -14,7 +14,12 @@
 //   connect?: async (hostContext) => ({agent:{browsers:{list,get}}, fileUpload, screenshot})  only when some exposure is 'code'
 export const HOST_IDS=['codex','claude-code','antigravity','kimi-code','zcode','dsh'];
 export async function loadAdapter(id){
- if(!HOST_IDS.includes(id))throw Error('UNKNOWN_HOST_ADAPTER');
+ if(!/^[a-z][a-z0-9-]{1,31}$/.test(id||''))throw Error('UNKNOWN_HOST_ADAPTER');
+ if(!HOST_IDS.includes(id))return {
+  id,displayName:id,mcpConfig:{format:'json',project:'.runtime/agent-mcp/'+id+'.json',serversPath:['mcpServers']},
+  browsers:{iab:{declared:false,exposure:'unverified',evidence:'No installed adapter exposes this host browser.'}},
+  vision:{sampling:'unverified',evidence:'No installed adapter exposes sampling.'}
+ };
  const {adapter}=await import(new URL('./'+id+'.mjs',import.meta.url).href);
  validateAdapter(adapter,id);return adapter;
 }

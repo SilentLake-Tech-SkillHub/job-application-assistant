@@ -6,7 +6,7 @@ function fixture(){
  const value='Example University',scope={companyId:'sample',roleId:'J000001',pageId:'chrome:one',pageUrl:'https://sample.test/form?jobId=one'};
  const field={selector:'#school',labelSelector:'#school-label',label:'学校名称',renderer:'phoenix_autocomplete',type:'combobox'};
  const capture={captureId:'capture',...scope,controls:[field]};
- const profile={schemaVersion:1,entities:{},sources:{user:{kind:'user_reply'}},facts:{school:{value,status:'known',sourceIds:['user']}},companyForms:{form:{companyId:scope.companyId,pageUrl:scope.pageUrl,mappings:{school:{selector:field.selector,factKey:'school',status:'mapped',active:true}}}}};
+ const profile={schemaVersion:1,entities:{},sources:{user:{kind:'user_reply'}},facts:{school:{value,status:'known',sourceIds:['user']}},companyForms:{sample:{companyId:scope.companyId,pageUrl:scope.pageUrl,mappings:{school:{selector:field.selector,factKey:'school',status:'mapped',active:true}}}}};
  const args={selector:field.selector,authorization:{restage:true,evidence:'user authorized preparation recovery'}};
  return {value,scope,field,capture,profile,args,authorization:args.authorization,selector:field.selector};
 }
@@ -24,8 +24,8 @@ for(const scenario of ['no_authority','wrong_page','unknown_source','sensitive_l
  if(scenario==='wrong_page')f.scope.pageId='chrome:other';
  if(scenario==='unknown_source')f.profile.facts.school.sourceIds=[];
  if(scenario==='sensitive_label')f.field.label='身份证号码';
- if(scenario==='sensitive_source'){f.profile.companyForms.form.mappings.school.factKey='identity.idCard.number';f.profile.facts['identity.idCard.number']=f.profile.facts.school;}
- if(scenario==='unmapped')f.profile.companyForms.form.mappings.school.status='needs_semantic_mapping';
+ if(scenario==='sensitive_source'){f.profile.companyForms.sample.mappings.school.factKey='identity.idCard.number';f.profile.facts['identity.idCard.number']=f.profile.facts.school;}
+ if(scenario==='unmapped')f.profile.companyForms.sample.mappings.school.status='needs_semantic_mapping';
  if(scenario==='disabled')f.field.disabled=true;
  if(scenario==='readonly')f.field.readonly=true;
  if(scenario==='duplicate')f.capture.controls.push({...f.field});

@@ -18,17 +18,16 @@ import {acquireLease,leasePath,defaultLeaseRoot} from './leases.mjs';
 import {validDate,ingestFactValue,matchesValueType} from './value-contract.mjs';
 import {auditStoredContract} from './workflow-contract.mjs';
 import {assertDefinitionMapped} from './definition-coverage.mjs';
-import {allocateFormCode} from './form-identity.mjs';
 
 export function lookupCompanyForm(profile,companyId,pageUrl,{create=false,companyCode=null}={}){
- const location=formLocation(pageUrl),matches=Object.entries(profile.companyForms||{}).filter(([,f])=>(f.siteId||f.companyId)===companyId&&f.pageUrl&&formLocation(f.pageUrl)===location);
- if(matches.length>1)throw Error('FORM_IDENTITY_AMBIGUOUS');
- if(matches.length){const [pageKey,form]=matches[0];return {pageKey,storedKey:pageKey,form};}
+ const pageKey=companyCode||companyId,form=profile.companyForms?.[pageKey];
+ if(form)return {pageKey,storedKey:pageKey,form};
  if(!create)return {pageKey:null,storedKey:null,form:undefined};
- const pageKey=allocateFormCode(profile),form={formId:pageKey,siteId:companyId,companyId,companyCode,pageUrl,mappings:{}};
- profile.companyForms??={};profile.companyForms[pageKey]=form;
- return {pageKey,storedKey:pageKey,form};
+ const created={formId:pageKey,companyId:pageKey,companyCode:pageKey,pageUrl,mappings:{}};
+ profile.companyForms??={};profile.companyForms[pageKey]=created;
+ return {pageKey,storedKey:pageKey,form:created};
 }
+
 const forbidden = /(?:^|\.)(?:password|otp|cookie|accessToken|idNumber|passportNumber|bankAccount)(?:\.|$)/i;
 export function validateProfile(profile) {
   if(profile.schemaVersion!==1 || !profile.facts || !profile.sources || !profile.entities)throw Error('INVALID_PROFILE');
@@ -84,6 +83,7 @@ export function contractQuestionChanges(contract,questions){
 const privacyGrant=(profile,field)=>isAgreementCheckbox(field)?evaluateBusinessAuthorization(profile,{operation:'recruiting_privacy',phase:'classify',field}):{decision:'out_of_scope',reason:'NOT_AN_AGREEMENT_CHECKBOX'};
 const sensitiveMappingStatus=(profile,field,fields)=>authorizedProfileField(profile,field,{fields})?'authorized_profile':privacyGrant(profile,field).decision==='allow'?'authorized_privacy':'user_only';
 export function registerObservedQuestions(profile,{companyId,companyCode=null,pageUrl,fields,observedAt,coverageRequired=false}){
+ companyId=companyCode||companyId;
   profile.companyForms??={}; profile.fieldRegistry??={};
   const {pageKey,form:old}=lookupCompanyForm(profile,companyId,pageUrl,{create:true,companyCode});
   const questions=fields.filter(f=>!['button','submit','reset','hidden'].includes(f.type));
@@ -182,7 +182,6 @@ export function assertStoredExecutionContract(profile,companyId,template){
 export function resolveProfile(profile, template, decisions={}, companyId, materialContext) {
   validateProfile(profile);
   assertChoiceGoalSources(template,profile);
-  if(companyId)assertStoredExecutionContract(profile,companyId,template);
   assertDefinitionMapped(profile,companyId,template);
   const material=materialContext?resolveMaterialValues(materialContext):null;
   const dateRepresentations={},values={...material?.values},missing=[],sources={...material?.sources},omissions={...decisions.omissions};

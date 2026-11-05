@@ -1,5 +1,6 @@
 import {readFile,writeFile,rename,mkdir,rm,mkdtemp} from 'node:fs/promises';
-import {tmpdir} from 'node:os';import path from 'node:path';import http from 'node:http';import {randomUUID} from 'node:crypto';
+import {tmpdir} from 'node:os';import path from 'node:path';
+import {acquireLease,leasePath,defaultLeaseRoot} from './leases.mjs';import http from 'node:http';import {randomUUID} from 'node:crypto';
 import {readChromeProcessInventory} from './browser-environment.mjs';
 import {cloneConfig,cloneRecord,readChromeVersion,fetchTabs} from './chrome-clone.mjs';
 export {readChromeVersion};
@@ -35,8 +36,13 @@ const channelsFor=(chrome,iab)=>{const c=chrome?.result==='usable',i=iab?.result
 const modeOf=channels=>channels.length===2?'dual':channels.length===1?'single':'none';
 // The view every caller uses: the host's iab record merged with the machine-wide clone record.
 // A host whose profile/port differ from the recorded clone is a configuration error, not a second Chrome.
+export function capabilityRecordKey(host,env){
+ const id=env?.RECRUITING_AGENT_ID;
+ if(id&&!/^A\d{4}$/.test(id))throw Error('INVALID_RECRUITING_AGENT_ID');
+ return id||host;
+}
 export async function hostCapability({file,host,env}){
- const doc=await readCapabilities(file),own=doc.hosts[host];
+ const doc=await readCapabilities(file),own=doc.hosts[capabilityRecordKey(host,env)];
  if(!own||!doc.chrome)return {status:'detection_required',host,entry:null,reason:'BROWSER_CAPABILITY_DETECTION_REQUIRED'};
  if(env){let config=null;try{config=cloneConfig(env);}catch{}if(config&&(config.profileDir!==doc.chrome.profileDir||config.port!==doc.chrome.cdpPort))return {status:'config_mismatch',host,entry:null,reason:'CHROME_CLONE_CONFIG_MISMATCH',expected:{profileDir:doc.chrome.profileDir,cdpPort:doc.chrome.cdpPort},actual:{profileDir:config.profileDir,cdpPort:config.port}};}
  const usage=iabUsage(own.iab),channels=channelsFor(doc.chrome,{result:usage.application.usable?'usable':'unavailable'}),searchChannels=channelsFor(doc.chrome,{result:usage.search.usable?'usable':'unavailable'});
@@ -92,7 +98,7 @@ export async function detectBrowserCapability({file,host,agent,adapter,fileUploa
  if(adapter&&adapter.id!==host)throw Error('HOST_ADAPTER_MISMATCH');
  // Detection runs once per host: an existing record of this detector version is returned unchanged.
  // Only scripts/browser-capability.mjs reset (with the user's words) clears it for a new detection.
- {const existing=await readCapabilities(file);const own=existing.hosts[host];if(own?.detectorVersion===DETECTOR_VERSION&&existing.chrome){const view=await hostCapability({file,host});return {...view.entry,alreadyDetected:true};}}
+ {const existing=await readCapabilities(file);const own=existing.hosts[capabilityRecordKey(host,env)];if(own?.detectorVersion===DETECTOR_VERSION&&existing.chrome){const view=await hostCapability({file,host,env});return {...view.entry,alreadyDetected:true};}}
  const chrome=await recordChromeClone({file,env,...(now?{now}:{}),...(versionReader?{versionReader}:{}),...(exists?{exists}:{})});
  const fixed=adapterIabRecord(adapter);
  let listed=[];if(!fixed){try{listed=typeof agent?.browsers?.list==='function'?await agent.browsers.list():[];}catch{listed=[];}}
@@ -114,7 +120,10 @@ export async function detectBrowserCapability({file,host,agent,adapter,fileUploa
   }finally{await probe.close();await rm(dir,{recursive:true,force:true});}
  }else record.iab=fixed||{declared:false,result:'not_declared'};
  record.iab={...record.iab,...iabUsage(record.iab)};
- const doc=await readCapabilities(file);doc.hosts[host]=record;await writeCapabilities(file,doc);
+ const release=await acquireLease(leasePath(defaultLeaseRoot(),'capability:'+path.resolve(file)),{waitMs:30000,busyCode:'BROWSER_CAPABILITY_BUSY'});
+ try{
+  const doc=await readCapabilities(file);doc.hosts[capabilityRecordKey(host,env)]=record;await writeCapabilities(file,doc);
+ }finally{await release();}
  const channels=channelsFor(chrome,record.iab);
  return {...record,chrome,channels,applicationChannels:channels,searchChannels:channelsFor(chrome,{result:record.iab.search.usable?'usable':'unavailable'}),mode:modeOf(channels)};
 }

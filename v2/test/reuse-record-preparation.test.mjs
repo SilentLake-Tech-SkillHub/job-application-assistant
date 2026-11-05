@@ -4,8 +4,8 @@ import {Engine} from '../shared/engine.mjs';
 import {compileExpected} from '../shared/observation.mjs';
 
 const ref=(occurrence,part='native')=>'phoenixq:'+JSON.stringify({section:'Experience',label:'Organization',occurrence,part,controlIndex:0});
-function fixture({warm=false,missingOther=false,count=2}={}){
- let records=warm?2:1;const writes=[],values={first:warm?'Alpha':'',second:warm?'Beta':''};
+function fixture({warm=false,missingOther=false,count=2,cap=Infinity,secondEmpty=false}={}){
+ let records=warm?2:1;const writes=[],values={first:warm?'Alpha':'',second:warm&&!secondEmpty?'Beta':''};
  const field=(id,occurrence)=>({id,source:id,label:'Organization',kind:'text',required:true,inventorySelectors:[ref(occurrence)],inventoryLabel:'Organization',inventoryType:'text',control:{type:'text',valueType:'string',readbackType:'string'},read:{selector:ref(occurrence),kind:'value'},actions:[{method:'fill',selector:ref(occurrence)}]});
  const fields=[field('first',0),field('second',1)];
  if(missingOther)fields.push({...field('other',0),label:'Other',inventoryLabel:'Other',inventorySelectors:['#other'],read:{selector:'#other',kind:'value'},actions:[{method:'fill',selector:'#other'}]});
@@ -19,10 +19,10 @@ function fixture({warm=false,missingOther=false,count=2}={}){
    if(records<2&&spec.fields.some(f=>f.id==='second'))throw Error('PHOENIX_QUESTION_NOT_FOUND');
    return {source:'live_dom',readAt:new Date().toISOString(),pageUrl:url,roleTitle:'Product',groups:{experience:records},fields:Object.fromEntries(spec.fields.map(f=>[f.id,{present:f.id!=='other',value:values[f.id]??null,errors:[]}]))};
   },
-  ensureGroups:async groups=>{if(records<groups[0].count){records=groups[0].count;writes.push('expand:'+records);}},
+  ensureGroups:async groups=>{const target=Math.min(groups[0].count,cap);if(records<target){records=target;writes.push('expand:'+records);}},
   act:async(action,value)=>{const f=fields.find(f=>f.read.selector===action.selector);values[f.id]=value;writes.push('fill:'+f.id);}
  };
- const engine=new Engine({store:{put:async()=>{}},companies:[],browser:{existingPage:async()=>page}});
+ const engine=new Engine({store:{put:async()=>{},get:async()=>{throw Object.assign(Error('none'),{code:'ENOENT'});}},companies:[],browser:{existingPage:async()=>page}});
  const prepared={id:'plan',planHash:'fixture',files:{},pages:[{fields:fields.map(f=>({...f,value:task.values[f.source],disposition:'fill'})),expected:compileExpected(plan,task)}]};
  return {run:()=>engine.runCompany({task,company:{id:'sample',origin:'https://fixture.test'},template:{pages:[plan]},prepared},{}),writes};
 }
@@ -32,8 +32,22 @@ test('a fresh reused form creates the frozen repeat records before observing and
 test('a warm reused form preserves matching fields and does not recreate existing records',async()=>{
  const f=fixture({warm:true}),result=await f.run();assert.equal(result.status,'verified');assert.deepEqual(f.writes,[]);
 });
-test('a missing ordinary field outside the repeat contract blocks before any record or answer is written',async()=>{
- const f=fixture({missingOther:true}),result=await f.run();assert.equal(result.errorCode,'PLANNED_FIELDS_MISSING_BEFORE_WRITE');assert.deepEqual(f.writes,[]);
+test('a control still absent after records are added is marked for repair while every present field is filled',async()=>{
+ const f=fixture({missingOther:true}),result=await f.run();
+ assert.equal(result.errorCode,undefined);assert.equal(result.status,'needs_attention');
+ assert.deepEqual(f.writes,['expand:2','fill:first','fill:second']);
+ assert.deepEqual(result.deferredControls.map(c=>[c.id,c.status,c.reason]),[['other','not_on_page','CONTROL_NOT_ON_PAGE']]);
+ assert.deepEqual(result.fields.map(c=>[c.id,c.status,c.reason]),[['other','unverified','CONTROL_NOT_ON_PAGE']]);
+ assert.equal(result.continuation.state,'repair');assert.deepEqual(result.continuation.technical,[{id:'other',reason:'CONTROL_NOT_ON_PAGE'}]);
+});
+test('a repeat control absent after expansion does not abort the fill through the strict locator',async()=>{
+ const f=fixture({count:2,cap:1}),result=await f.run();
+ assert.equal(result.errorCode,undefined);assert.equal(result.status,'needs_attention');
+ assert.deepEqual(f.writes,['fill:first']);assert.deepEqual(result.deferredControls.map(c=>c.id),['second']);
+});
+test('a half-filled form keeps its records and existing answers and only continues the rest',async()=>{
+ const f=fixture({warm:true,secondEmpty:true}),result=await f.run();
+ assert.equal(result.status,'verified');assert.deepEqual(f.writes,['fill:second']);
 });
 test('a repeat count not covered by the frozen field occurrences is not allowed to create records',async()=>{
  const f=fixture({count:3}),result=await f.run();assert.equal(result.errorCode,'REPEAT_GROUP_FIELD_COVERAGE_CHANGED');assert.deepEqual(f.writes,[]);

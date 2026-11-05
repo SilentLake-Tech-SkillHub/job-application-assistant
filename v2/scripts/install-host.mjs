@@ -9,11 +9,13 @@
 //   node scripts/install-host.mjs --host <id> --workspace <工作区绝对路径> [--role executor|maintainer] [--scope project|user] [--node <node 路径>] [--write] [--expect-sha <sha>]
 //   （适配器同时有工作区配置和用户配置时默认写工作区配置）
 import {pathToFileURL,fileURLToPath} from 'node:url';
-import {readFile,writeFile,rename,mkdir} from 'node:fs/promises';
+import {readFile,writeFile,rename,mkdir,unlink} from 'node:fs/promises';
 import {createHash,randomUUID} from 'node:crypto';
 import {homedir} from 'node:os';
 import path from 'node:path';
 import {loadAdapter} from '../host/adapters/registry.mjs';
+import {acquireLease,defaultLeaseRoot,leasePath} from '../shared/leases.mjs';
+import {registerAgent} from '../shared/agent-registry.mjs';
 import {DEFAULT_CDP_PORT} from '../shared/chrome-clone.mjs';
 export const SERVER_NAMES={login:'recruiting-login-v2',application:'recruiting-application-v2'};
 // Keys that no code reads any more, or that would override the capability file. Removed on install.
@@ -205,29 +207,68 @@ export function yamlPreview({serversPath,entries}){
  for(const [name,e] of Object.entries(entries)){lines.push(ind(base)+name+':',ind(base+2)+'command: '+q(e.command),ind(base+2)+'args: ['+e.args.map(q).join(', ')+']',ind(base+2)+'env:');for(const [k,v] of Object.entries(e.env))lines.push(ind(base+4)+k+': '+q(v));}
  return lines.join('\n')+'\n';
 }
-export async function installHost({host,workspace,role,node=process.execPath,component=path.resolve(fileURLToPath(new URL('..',import.meta.url))),write=false,expectSha=null,home=homedir(),uid,scope,configFile}){
+export async function installHost({host,workspace,role,node=process.execPath,component=path.resolve(fileURLToPath(new URL('..',import.meta.url))),write=false,expectSha=null,home=homedir(),uid,scope,configFile,agent}){
  const adapter=await loadAdapter(host),cfg=adapter.mcpConfig;
  if(scope&&!['project','user'].includes(scope)||scope==='project'&&!cfg.project||scope==='user'&&!cfg.user)throw Error('HOST_CONFIG_SCOPE_UNAVAILABLE');
- const inWorkspace=scope?scope==='project':!!cfg.project,target=configFile||(inWorkspace?path.join(workspace,cfg.project):path.join(home,cfg.user.replace(/^~\//,'')));
+ const project=scope?scope==='project':!!cfg.project;
+ const target=configFile?path.resolve(configFile):project?path.join(workspace,cfg.project):path.join(home,cfg.user.replace(/^~\//,''));
+ const relative=path.relative(workspace,target),inWorkspace=project&&!relative.startsWith('..'+path.sep)&&relative!=='..'&&!path.isAbsolute(relative);
  const current=await readFile(target,'utf8').catch(e=>{if(e.code==='ENOENT')return '';throw e;}),currentSha=sha(current);
+ if(agent&&cfg.format!=='yaml'){
+  const agentKey='RECRUITING_AGENT_ID';
+  let existing;
+  if(cfg.format==='json'){
+   let servers=current.trim()?JSON.parse(current):{};
+   for(const key of cfg.serversPath)servers=servers?.[key];
+   existing=Object.values(SERVER_NAMES).map(name=>servers?.[name]?.env?.[agentKey]).filter(Boolean);
+  }else existing=Object.values(SERVER_NAMES).flatMap(name=>tomlSettingValue(tomlSettings(current),[...cfg.serversPath,name,'env',agentKey])).filter(Boolean);
+  if(existing.some(id=>id!==agent.id))throw Error('AGENT_CONFIG_BOUND_TO_OTHER_INSTANCE');
+ }
  const oldRoles=role===undefined?existingRoles(current,cfg):[];
  if(oldRoles.some(value=>!['executor','maintainer'].includes(value))||new Set(oldRoles).size>1)throw Error('HOST_ROLE_CONFIG_CONFLICT: choose --role executor|maintainer explicitly');
  const roleSource=role!==undefined?'explicit':oldRoles.length?'existing':'default';
- const env=hostEnv({host,workspace,role:role??oldRoles[0]??'executor',...(uid!==undefined?{uid}:{})}),entries=serverEntries({adapter,env,node,component});
+ const env=hostEnv({host,workspace,role:role??oldRoles[0]??'executor',...(uid!==undefined?{uid}:{})});
+ if(agent){
+  if(agent.host!==host||!/^A\d{4}$/.test(agent.id))throw Error('AGENT_HOST_IDENTITY_MISMATCH');
+  env.RECRUITING_AGENT_ID=agent.id;
+ }
+ const entries=serverEntries({adapter,env,node,component});
  const shellEnvironment={RECRUITING_HOST_ROLE:env.RECRUITING_HOST_ROLE};
  if(cfg.format==='yaml')return {host,target,format:'yaml',written:false,currentSha,roleSource,shellEnvironment,preview:cfg.yamlShape==='dsh_plugin_list'?dshPluginEntries({entries,workspace}):yamlPreview({serversPath:cfg.serversPath,entries}),note:'paste under the existing structure by hand; YAML files are never rewritten by this script; set the same role in the host Hook/shell environment'};
  let next=cfg.format==='json'?mergeJson(current,{serversPath:cfg.serversPath,entries}):mergeToml(current,{serversPath:cfg.serversPath,entries});
- if(cfg.shellRolePath)next=mergeShellRole(next,cfg.shellRolePath,env.RECRUITING_HOST_ROLE);
+ if(cfg.shellRolePath){
+  next=mergeShellRole(next,cfg.shellRolePath,env.RECRUITING_HOST_ROLE);
+  if(agent){
+   next=mergeShellRole(next,[...cfg.shellRolePath.slice(0,-1),'RECRUITING_AGENT_ID'],agent.id);
+   next=mergeShellRole(next,[...cfg.shellRolePath.slice(0,-1),'RECRUITING_HOST_ID'],host);
+  }
+ }
  const result={host,target,format:cfg.format,inWorkspace,currentSha,changed:next!==current,env,roleSource,shellEnvironment,shellEnvironmentManaged:!!cfg.shellRolePath};
  if(!write)return {...result,written:false,preview:next};
  if(!inWorkspace&&expectSha!==currentSha)throw Error('USER_CONFIG_CHANGED_OR_SHA_REQUIRED');
  if(next===current)return {...result,written:false};
- await mkdir(path.dirname(target),{recursive:true});const temp=target+'.'+randomUUID()+'.tmp';await writeFile(temp,next);await rename(temp,target);
+ const release=await acquireLease(leasePath(defaultLeaseRoot(),'host-config:'+path.resolve(target)),{waitMs:30000,busyCode:'HOST_CONFIG_BUSY'});
+ let temp;
+ try{
+  const fresh=await readFile(target,'utf8').catch(error=>{if(error.code==='ENOENT')return '';throw error;});
+  if(sha(fresh)!==currentSha)throw Error('HOST_CONFIG_CHANGED_RETRY');
+  await mkdir(path.dirname(target),{recursive:true});
+  temp=target+'.'+randomUUID()+'.tmp';
+  await writeFile(temp,next);
+  await rename(temp,target);
+ }finally{
+  try{if(temp)await unlink(temp).catch(error=>{if(error.code!=='ENOENT')throw error;});}
+  finally{await release();}
+ }
  return {...result,written:true,newSha:sha(next)};
 }
 if(import.meta.url===pathToFileURL(process.argv[1]||'').href){
  const args=process.argv.slice(2),flag=n=>{const i=args.indexOf('--'+n);return i>=0?args[i+1]:undefined;};
- try{const r=await installHost({host:flag('host'),workspace:flag('workspace'),role:flag('role'),...(flag('node')?{node:flag('node')}:{}),write:args.includes('--write'),expectSha:flag('expect-sha')||null,...(flag('scope')?{scope:flag('scope')}:{})});
+ try{
+  const workspace=flag('workspace'),host=flag('host'),instance=flag('instance'),configFile=flag('config-file'),write=args.includes('--write');
+  if(instance&&write&&instance!=='default'&&!configFile)throw Error('AGENT_INSTANCE_CONFIG_FILE_REQUIRED');
+  const agent=instance&&write?await registerAgent({workspace,host,instance,mode:flag('mode')||'independent',group:flag('group')||null}):undefined;
+  const r=await installHost({agent,configFile,host:flag('host'),workspace:flag('workspace'),role:flag('role'),...(flag('node')?{node:flag('node')}:{}),write:args.includes('--write'),expectSha:flag('expect-sha')||null,...(flag('scope')?{scope:flag('scope')}:{})});
   const {preview,...rest}=r;console.log(JSON.stringify(rest,null,1));if(preview)console.log('\n--- preview ---\n'+preview);
  }catch(error){console.error(error.message);process.exitCode=1;}
 }

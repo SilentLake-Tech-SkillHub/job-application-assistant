@@ -3,10 +3,9 @@ import {hash} from '../../shared/engine.mjs';
 import {scriptCoverage} from '../../shared/page-structure.mjs';
 import {acquisitionReceiptId,acquisitionContractHash,acquisitionStructureId,captureContentHash} from '../../shared/acquisition-chain.mjs';
 import {formAssetKeys} from '../../shared/form-identity.mjs';
-let formSequence=0;
 export function acquisitionFixture(template,companyId){
  const pageUrl=template.evidence.sourceUrl,pageId='chrome:synthetic',targetId='synthetic-target',observedAt=new Date().toISOString();
- const formId=template.evidence.formId||'F'+String(++formSequence).padStart(6,'0'),keys=formAssetKeys(formId),captureId=keys.capture,structureId=keys.structure;
+ const formId=template.evidence.formId||companyId,keys=formAssetKeys(formId),captureId=keys.capture,structureId=keys.structure;
  const controls=template.pages.flatMap(page=>page.fields.flatMap(field=>(field.inventorySelectors||[field.read.selector]).map(selector=>({selector,label:field.inventoryLabel||field.label,type:field.inventoryType||field.kind,required:!!field.required}))));
  const capture={captureId,formId,companyId,pageUrl,pageId,provider:null,observedAt,controls};
  const rawEvidence={operation:'inspect_web_page',predicate_type:'rea.web-page-inspection',evidence_id:'synthetic-'+template.id,normalized_result:{scripts:{items:[]}}};

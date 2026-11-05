@@ -61,8 +61,8 @@ const server=http.createServer(async(req,res)=>{
     else if(method==='closePage')data=await browser.closePage(args.pageId);
     else{
       if(method!=='existingPage'&&!methods.has(method))throw Error('UNKNOWN_BROWSER_HOST_METHOD');
-      if(args.pageId&&args.readOnly&&!['existingPage','inventory','observe','assertLocation','wait'].includes(method))throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');
-      if(args.pageId&&!args.readOnly&&(!args.roleBinding||args.roleBinding.pageId!==args.pageId||args.roleBinding.pageUrl!==args.pageUrl||args.roleBinding.sessionId!==browser.executor.sessionId||!browser.executor.verified))throw Error('VERIFIED_ROLE_PAGE_BINDING_REQUIRED');
+      if(args.pageId&&args.readOnly&&!['existingPage','inventory','observe','assertLocation','wait','repeatDiscovery'].includes(method))throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');
+      if(args.pageId&&!args.readOnly&&(!args.roleBinding||args.roleBinding.pageId!==args.pageId||!browser.executor.verified))throw Error('VERIFIED_ROLE_PAGE_BINDING_REQUIRED');
       const page=await browser.existingPage(args.pageUrl,{pageId:args.pageId,readOnly:args.readOnly,roleBinding:args.roleBinding});
       if(method==='existingPage'){const id=await browser.trackPage(page.page),identity=await browser.pageIdentity(id);data={found:true,...identity,executor:{...browser.executor}};}
       if(method==='assertLocation')data=await page.assertLocation(args.origin,args.prefix);
@@ -70,6 +70,7 @@ const server=http.createServer(async(req,res)=>{
       if(method==='inventory')data=await page.inventory(args.plan);
       if(method==='observe')data=await page.observe(args.plan);
       if(method==='act')data=await page.act(args.action,args.value,args.files);
+      if(method==='repeatDiscovery')data=await page.repeatDiscovery(args.titles);
       if(method==='ensureGroups')data=await page.ensureGroups(args.groups);
       if(method==='verificationInspect')data=await inspectVerification(page);
     }

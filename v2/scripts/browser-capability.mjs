@@ -8,16 +8,16 @@
 //   node scripts/browser-capability.mjs refresh-version                # Chrome 升级后只更新记录的版本号
 //   node scripts/browser-capability.mjs reset --quote "<用户原话>"     # 用户要求重新检测时清除本执行端记录
 import {pathToFileURL} from 'node:url';import {readFile,writeFile,rename} from 'node:fs/promises';import {randomUUID} from 'node:crypto';
-import {capabilityFile,capabilityHostId,hostCapability,refreshChromeVersion,readCapabilities,detectBrowserCapability} from '../shared/browser-capability.mjs';
+import {capabilityFile,capabilityHostId,capabilityRecordKey,hostCapability,refreshChromeVersion,readCapabilities,detectBrowserCapability} from '../shared/browser-capability.mjs';
 import {loadAdapter} from '../host/adapters/registry.mjs';
 export async function detectWithoutHostSdk({file,host,env=process.env}){
  const adapter=await loadAdapter(host);
  if(adapter.browsers.iab?.exposure==='code')throw Error('RUN_DETECTION_INSIDE_HOST');
  return detectBrowserCapability({file,host,adapter,env});
 }
-export async function resetHost({file,host,quote,now=()=>new Date().toISOString()}){
+export async function resetHost({file,host,quote,env,now=()=>new Date().toISOString()}){
  if(typeof quote!=='string'||!quote.trim())throw Error('USER_QUOTE_REQUIRED');
- const doc=await readCapabilities(file);delete doc.replacedSchema;const had=!!doc.hosts[host];delete doc.hosts[host];(doc.resets??=[]).push({host,quote:quote.trim(),at:now()});doc.resets=doc.resets.slice(-20);
+ const doc=await readCapabilities(file);delete doc.replacedSchema;const key=capabilityRecordKey(host,env),had=!!doc.hosts[key];delete doc.hosts[key];(doc.resets??=[]).push({host,quote:quote.trim(),at:now()});doc.resets=doc.resets.slice(-20);
  const temp=file+'.'+randomUUID()+'.tmp';await writeFile(temp,JSON.stringify(doc,null,1),{mode:0o600});await rename(temp,file);return {host,cleared:had};
 }
 if(import.meta.url===pathToFileURL(process.argv[1]||'').href){
@@ -26,7 +26,7 @@ if(import.meta.url===pathToFileURL(process.argv[1]||'').href){
   if(args[0]==='status')console.log(JSON.stringify(await hostCapability({file,host,env:process.env}),null,1));
   else if(args[0]==='detect')console.log(JSON.stringify(await detectWithoutHostSdk({file,host}),null,1));
   else if(args[0]==='refresh-version')console.log(JSON.stringify(await refreshChromeVersion({file}),null,1));
-  else if(args[0]==='reset')console.log(JSON.stringify(await resetHost({file,host,quote:flag('quote')}),null,1));
+  else if(args[0]==='reset')console.log(JSON.stringify(await resetHost({file,host,quote:flag('quote'),env:process.env}),null,1));
   else throw Error('USAGE: status | detect | refresh-version | reset --quote "<用户原话>"');
  }catch(error){console.error(error.message);process.exitCode=1;}
 }

@@ -14,9 +14,9 @@ const doc=()=>confirm(companyDoc({code:'C00001',name:'样例',sites:[site('S0001
 async function fixture(fn){
  const dir=await handoffWorkspace([doc()]),companyFile=path.join(dir,'公司','C00001.json');
  const art=path.join(dir,'receipt.png');await writeFile(art,'synthetic receipt image');
- const ev={schemaVersion:1,event:'submission_confirmed',batchId:'B1',companyId:'S0001',roleId:'J000001',roleUrl:role['岗位链接'],roleTitle:role['岗位名称'],observedAt:new Date().toISOString(),sourceUrl:'https://example.com/campus/delivered',result:'official_receipt_confirmed',reviewer:'user',artifacts:[{file:art,sha256:sha(await readFile(art))}]};
+ const ev={schemaVersion:1,event:'submission_confirmed',batchId:'B1',companyId:'C00001',roleId:'J000001',roleUrl:role['岗位链接'],roleTitle:role['岗位名称'],observedAt:new Date().toISOString(),sourceUrl:'https://example.com/campus/delivered',result:'official_receipt_confirmed',reviewer:'user',artifacts:[{file:art,sha256:sha(await readFile(art))}]};
  const evFile=path.join(dir,'evidence.json');
- const event=async(over={},evOver={})=>{const e={...ev,...evOver};await writeFile(evFile,JSON.stringify(e));return {schemaVersion:1,eventId:randomUUID(),event:e.event,batchId:'B1',companyId:'S0001',roleId:'J000001',roleUrl:role['岗位链接'],roleTitle:role['岗位名称'],evidence:{file:evFile,sha256:sha(await readFile(evFile))},...over};};
+ const event=async(over={},evOver={})=>{const e={...ev,...evOver};await writeFile(evFile,JSON.stringify(e));return {schemaVersion:1,eventId:randomUUID(),event:e.event,batchId:'B1',companyId:'C00001',roleId:'J000001',roleUrl:role['岗位链接'],roleTitle:role['岗位名称'],evidence:{file:evFile,sha256:sha(await readFile(evFile))},...over};};
  await fn({dir,companyFile,event,art});
 }
 const outcomes=async dir=>JSON.parse(await readFile(path.join(dir,'投递回传.json'),'utf8')).roles;

@@ -4,13 +4,17 @@
 // 用法：node scripts/readiness.mjs --workspace <工作区> [--host-config <宿主 MCP 配置文件> ...] [--json]
 // 三个强制时点：门禁变更合并前、批次内容变化后、执行宿主开工前（见 docs/maintenance.md）。
 import {readFile,readdir} from 'node:fs/promises';import path from 'node:path';
-import {readHandoffBatch,readCompanyFiles,CompanyDirectory} from '../shared/company-directory.mjs';
+import {readHandoffBatch,readCompanyFiles,CompanyDirectory,companyContext} from '../shared/company-directory.mjs';
 import {Store,hash} from '../shared/engine.mjs';
 import {FormRouter} from '../shared/form-route.mjs';
 import {unstableLocators} from '../shared/selector-stability.mjs';
 import {resolveEntry} from '../shared/entry-recipe.mjs';
 import {recordSourceBindingIssues,recordParentsFromProfile} from '../shared/record-source-binding.mjs';
 import {placementFindings,nonRecordMembers} from '../shared/record-placement.mjs';
+import {recordPlanOf,withProfileRecords} from '../shared/repeat-groups.mjs';
+import {withMaterialDispositions} from '../shared/material-disposition.mjs';
+import {resolveProfile} from '../shared/profile.mjs';
+import {compileExecutionPlan} from '../shared/execution-plan.mjs';
 const argv=process.argv.slice(2),all=k=>argv.flatMap((a,i)=>a===k?[argv[i+1]]:[]),one=k=>all(k)[0];
 const W=path.resolve(one('--workspace')||process.env.RECRUITING_WORKSPACE_ROOT||'.'),asJson=argv.includes('--json');
 const handoffDir=path.join(W,'岗位交接'),privateDir=path.join(W,'.runtime/application'),queueDir=path.join(W,'.runtime/role-queue');
@@ -28,7 +32,7 @@ const outcomes=await tryJson(path.join(handoffDir,'投递回传.json'));report.l
 report.layers.queues={current:queues.filter(q=>q.current).length,stale:queues.filter(q=>!q.current).map(q=>q.id)};
 // 4 公司资产
 const store=new Store(privateDir);const directory=new CompanyDirectory({handoffDir,store});const catalog=await directory.load();
-let bindings={},roleBindings={};try{bindings=await store.get('templates','company-bindings');}catch{}try{roleBindings=await store.get('templates','role-bindings');}catch{}
+
 const rules=target?.['履历栏目放置']?.['结构化']||[],parents=recordParentsFromProfile(profile);
 const progress=Object.fromEntries((await readCompanyFiles(handoffDir).catch(()=>[])).map(f=>[f.code,f.doc['批次']?.['进度']||null]));
 for(const c of handoff?.input.companies||[]){
@@ -37,14 +41,14 @@ for(const c of handoff?.input.companies||[]){
  for(const r of c.roles){
   const rr={role:r.title,roleId:r.roleId,siteId:r.siteId,verdict:null,reasons:[]};
   if(r.applicationStatus&&r.applicationStatus!=='岗位待投递'||done.has(r.roleId)){rr.verdict='已处理';rr.reasons.push(r.applicationStatus&&r.applicationStatus!=='岗位待投递'?r.applicationStatus:'批次进度显示已处理');row.roles.push(rr);continue;}
-  const entry=catalog.find(e=>e.siteId===r.siteId);
+  const entry=companyContext(catalog.find(e=>e.id===c.companyId),{siteId:r.siteId});
   if(!entry){rr.reasons.push(`站点 ${r.siteId} 不在目录`);rr.verdict='不可执行';row.roles.push(rr);continue;}
   if(!logins.has(entry.id)){const login=entry.loginFile?await tryJson(entry.loginFile):null;logins.set(entry.id,login);
    if(!login)row.problems.push(`${entry.id}（${entry.origin}）没有登录配置，需先建档`);
    for(const u of unstableLocators(login||{}))row.notes.push(`${entry.id} 定位依赖生成式样式类名：${u.where}（${u.token}），需重新采集`);
    // 入口配置必须对本站所有岗位通用（岗位编号只能写 $roleId）；不合格时该站点不能进入申请页，用 scripts/site-entry.mjs 修正。
    if(login?.entry)try{resolveEntry(login);}catch(err){row.problems.push(`${entry.id}（${entry.origin}）入口配置不可用：${err.message}，需用 scripts/site-entry.mjs 修正（预览 → 用户原话 → 写入）`);}}
-  const templateId=roleBindings[entry.id]?.[r.roleId]||bindings[entry.id]||null;
+  const templateId=await tryJson(path.join(privateDir,'templates',entry.id+'.json'))?entry.id:null;
   if(!templateId){rr.reasons.push('没有表单模板，需建库');}
   else{
    let template=null;try{template=await store.get('templates',templateId);}catch{}
@@ -55,6 +59,14 @@ for(const c of handoff?.input.companies||[]){
     if(route.route!=='reuse')rr.reasons.push(`表单模板不可执行：${route.reason}${route.blockers?.length?'（'+route.blockers.slice(0,3).join(',')+'）':''}`);
     const binding=recordSourceBindingIssues({...template,evidence:{...template.evidence,recordParents:{...parents,...(template.evidence?.recordParents||{})}}});if(binding.length)rr.reasons.push(`记录归属错位 ${binding.length} 处`);
     const placement=placementFindings(template,rules,{...parents,...(template.evidence?.recordParents||{})});if(placement.length)rr.reasons.push('栏目放置不符合你的规则：'+placement.map(p=>`${p.section}#${p.index} 放了 ${p.family}`).join('；'));
+    // 真编译一次本岗的计划（不开浏览器、不写文件）：能不能开工以这个为准。
+    if(route.route==='reuse')try{
+     const recordPlan=recordPlanOf(profile),materialContext=withMaterialDispositions(profile,{batchId:handoff.input.batchId,contentSha256:'readiness',companyId:entry.id,roleId:r.roleId,officialId:r.officialId,roleUrl:r.url,materials:r.materials});
+     const resolved=resolveProfile(profile,withProfileRecords(template,recordPlan),{},entry.id,materialContext);
+     const plan=await compileExecutionPlan(template,{...resolved,recordPlan,companyId:entry.id,roleId:r.roleId,pageUrl,templateHash:hash(template)});
+     if(plan.constructionBlockers.length)rr.reasons.push('计划有阻塞项：'+plan.constructionBlockers.join('、'));
+     if(plan.counts.needs_user)row.notes.push(`${r.title}：${plan.counts.needs_user} 个字段主档没有答案，开工时要问你`);
+    }catch(err){rr.reasons.push(`计划编译失败：${err.message}`);}
     const undeclared=nonRecordMembers(template);if(undeclared.length)row.notes.push(`模板 ${templateId}：${undeclared.length} 个记录内字段不取自该记录，需在整条记录绑定时声明`);
    }
   }

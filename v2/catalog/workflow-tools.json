@@ -101,7 +101,7 @@
       "route",
       [
         "form_route",
-        "form_migrate_contract",
+        "form_repair_fields",
         "capture_controls",
         "capture_rea_structure",
         "form_build_template",
@@ -112,7 +112,7 @@
       "route",
       [
         "form_route",
-        "form_migrate_contract",
+        "form_repair_fields",
         "capture_controls",
         "capture_rea_structure",
         "form_build_template",
@@ -429,7 +429,7 @@
         "role_verify"
       ]
     ],
-    "form_migrate_contract": [
+    "form_repair_fields": [
       "construct",
       [
         "form_route",

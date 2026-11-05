@@ -26,10 +26,10 @@ const browser=new LoginBrowser(process.env.RECRUITING_BROWSER_SOCKET,{broker:new
 // 目录项 = 站点（站点编码），来自工作区 岗位交接/公司/<公司编码>.json；登录配置（过渡）仍按域名取 岗位交接/公司/<地区>/<公司>/登录[@域名].json，第 2 步迁入登录模块。
 const directory=new CompanyDirectory({store:channelStore});
 const catalog=await directory.load();
-const engine=new LoginEngine({loginFile:id=>directory.loginFile(id),privateRoot:process.env.RECRUITING_LOGIN_PRIVATE_DIR,profileFile:process.env.RECRUITING_PROFILE_JSON,browser});
+const engine=new LoginEngine({loginFile:(id,context)=>directory.loginFile(id,context),privateRoot:process.env.RECRUITING_LOGIN_PRIVATE_DIR,profileFile:process.env.RECRUITING_PROFILE_JSON,browser});
 const queues=queueFromEnv(catalog);engine.roleQueues=queues;
 const appStore=new Store(process.env.RECRUITING_PRIVATE_DIR||path.join(path.dirname(process.env.RECRUITING_PROFILE_JSON),'application'));
-const flow=new RoleFlow({queues,login:engine,browser:browser.broker,templates:async (companyId,roleId)=>{const bindings=await appStore.get('templates','company-bindings');let roles={};try{roles=await appStore.get('templates','role-bindings');}catch(e){if(e.code!=='ENOENT')throw e;}const templateId=roles[companyId]?.[roleId]||bindings[companyId];return templateId?appStore.get('templates',templateId):null;},onObservation:o=>recordObservation({...o,handoffDir:directory.handoffDir})});
+const flow=new RoleFlow({queues,login:engine,browser:browser.broker,templates:async companyId=>{try{return await appStore.get('templates',companyId);}catch(error){if(error.code==='ENOENT')return null;throw error;}},onObservation:o=>recordObservation({...o,handoffDir:directory.handoffDir})});
 const packageInfo=JSON.parse(await readFile(path.join(root,'package.json'),'utf8'));
 const server=new McpServer({name:'recruiting-login-v2',version:packageInfo.version});
 const registerTool=(name,definition,handler)=>registerWorkflowTool(server,name,definition,args=>withTaskRecords({taskId:args.taskId,queueId:args.queueId,tool:name},()=>handler(args)));
@@ -64,6 +64,6 @@ registerTool('login_verify_otp',{description:'仅使用用户本次提供的临�
 registerTool('login_resume_verification',{description:'用户手动完成图形验证码后只读核验；验证码仍在则继续交接，消失后核实短信倒计时。不拖动、不重发短信。',inputSchema:{...plan,challengeId:z.string().uuid()},annotations:{readOnlyHint:true}},wrap(a=>engine.resumeVerification(a)));
 registerTool('login_batch_prepare',{description:'一次调用准备多个公司的登录；同账号 origin 串行，集中返回需用户参与的步骤。不会批量请求短信。',inputSchema:{tasks:z.array(z.object(plan)).min(1).max(20),concurrency:z.number().int().min(1).max(5).default(3),authorization}},wrap(a=>engine.batch(a)));
 registerTool('login_run_status',{description:'读取私有登录结果，不返回手机号或验证码。',inputSchema:{runId:z.string().uuid()},annotations:{readOnlyHint:true}},wrap(a=>engine.store.get('runs',a.runId)));
-const verificationScope=async a=>{const c=await engine.company(a.companyId);if(new URL(a.pageUrl).origin!==c.origin)throw Error('LOGIN_PAGE_SCOPE_MISMATCH');return engine.locked(c,()=>browser.broker.request(a.method,a));};
+const verificationScope=async a=>{const c=await engine.company(a.companyId,a);if(new URL(a.pageUrl).origin!==c.origin)throw Error('LOGIN_PAGE_SCOPE_MISMATCH');return engine.locked(c,()=>browser.broker.request(a.method,a));};
 registerTool('login_verification_inspect',{description:'只读当前影石验证码 iframe 的可见说明和控件几何，不读取隐藏答案、不操作挑战。需要 V2 broker。',inputSchema:location,annotations:{readOnlyHint:true}},wrap(a=>verificationScope({...a,method:'verificationInspect'})));
 await server.connect(new StdioServerTransport());

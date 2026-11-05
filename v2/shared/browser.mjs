@@ -1,3 +1,4 @@
+import {samePage} from './page-scope.mjs';
 import {pageFailureState,missingPageFailureState} from './page-failure-state.mjs';
 import {inspectEntryPage} from './entry-inspection.mjs';
 import {executeTransition} from './entry-transition.mjs';
@@ -143,20 +144,17 @@ export class BrowserAdapter {
     if(authorization?.restore!==true||!authorization.evidence?.trim())throw Error('BROWSER_RESTORE_USER_AUTHORIZATION_REQUIRED');
     if(this.state==='connected')return {...this.status(),restored:false,reason:'already_connected'};
     if(this.connecting)throw Error('BROWSER_RESTORE_CONNECTION_IN_PROGRESS');
-    if(this.recoveryAttempted)throw Error('BROWSER_RESTORE_ALREADY_ATTEMPTED');
     await this.assertPrivateProfile();
     const forbidden=path.join(homedir(),'Library/Application Support/Google/Chrome');
     if(!this.profileDir||!path.isAbsolute(this.profileDir)||path.resolve(this.profileDir)===forbidden||path.resolve(this.profileDir).startsWith(forbidden+path.sep))throw Error('PRIVATE_AUTOMATION_PROFILE_REQUIRED');
     if(!(await stat(path.join(this.profileDir,'Local State')).catch(()=>null))?.isFile())throw Error('EXISTING_AUTOMATION_PROFILE_REQUIRED');
     if(this.endpoint==='managed-chrome'){
-      if(this.recoveryAttempted)throw Error('BROWSER_RESTORE_ALREADY_ATTEMPTED');this.recoveryAttempted=true;
       this.state='new';this.connection=null;this.connecting=null;const context=await this.launcher(this.profileDir,{channel:'chrome',headless:false,viewport:null,args:['--restore-last-session']});
       this.connection={contexts:()=>[context],on:(event,fn)=>{if(event==='disconnected')context.on('close',fn);}};context.on('close',()=>{this.state='disconnected';this.connection=null;});this.state='connected';this.connectionAttempts++;await this.identifyConnection({owned:true});return {...this.status(),restored:true,profileReused:true,requiresRoleReadback:true};
     }
     const endpoint=new URL(this.endpoint);
     if(endpoint.protocol!=='http:'||!['127.0.0.1','localhost'].includes(endpoint.hostname)||!endpoint.port||endpoint.username||endpoint.password)throw Error('EXISTING_LOCAL_CDP_ENDPOINT_REQUIRED');
-    if(this.recoveryAttempted)throw Error('BROWSER_RESTORE_ALREADY_ATTEMPTED');
-    this.recoveryAttempted=true;this.state='connecting';this.connectionAttempts++;
+    this.state='connecting';this.connectionAttempts++;
     try{
       // Manual, explicitly authorized recovery of the configured private
       // profile. Ordinary connect() still never retries or launches on loss.
@@ -294,9 +292,9 @@ export class BrowserAdapter {
     return {pageId,pageUrl:page.url(),roleTitle:expectedTitle,entryClicked:detail,accountMatched:true,submission:'not_performed'};
   }
   async existingPage(url,{pageId,readOnly=false,roleBinding}={}){
-    if(pageId&&!readOnly&&(!roleBinding||!['navigation','verified_role'].includes(roleBinding.kind)||roleBinding.pageId!==pageId||roleBinding.pageUrl!==url||roleBinding.sessionId!==this.executor.sessionId||!this.executor.verified))throw Error('VERIFIED_ROLE_PAGE_BINDING_REQUIRED');
+    if(pageId&&!readOnly&&(!roleBinding||!['navigation','verified_role'].includes(roleBinding.kind)||roleBinding.pageId!==pageId||!this.executor.verified))throw Error('VERIFIED_ROLE_PAGE_BINDING_REQUIRED');
     if(!this.connection&&this.state==='new')throw Error('EXISTING_BROWSER_SESSION_REQUIRED');
-    if(pageId){const page=await this.trackedPage(pageId);if(page.url()!==url)throw Error('EXPLICIT_PAGE_URL_MISMATCH');if(roleBinding?.generation&&roleBinding.generation!==await this.documentGeneration(page))throw Error('BROWSER_DOCUMENT_CHANGED_REBIND_REQUIRED');return new PageAdapter(page);}
+    if(pageId){const page=await this.trackedPage(pageId);if(!samePage(page.url(),url))throw Error('EXPLICIT_PAGE_URL_MISMATCH');return new PageAdapter(page);}
     const browser=await this.connect();
     const pages=browser.contexts().flatMap(c=>c.pages()).filter(p=>p.url()===url);
     if(pages.length!==1)throw Error(pages.length?'AMBIGUOUS_PAGE':'EXISTING_PAGE_NOT_FOUND');

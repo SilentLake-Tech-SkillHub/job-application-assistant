@@ -10,7 +10,7 @@ export function controlDefinition(control){
 export const controlDefinitionHash=c=>hash(controlDefinition(c));
 export const controlInventoryHash=c=>hash((c.controls||[]).map(controlDefinition));
 export function retainControlChoices(asset,capture){
- if(!asset||asset.companyId!==capture.companyId||asset.formId!==capture.formId||formScope(asset.pageUrl)!==formScope(capture.pageUrl))return [];
+ if(!asset||asset.companyId!==capture.companyId||asset.formId!==capture.formId)return [];
  return (asset.choices||[]).filter(choice=>{
   const field=capture.controls.find(c=>c.selector===choice.selector);
   return field?choice.definitionHash===controlDefinitionHash(field):Number.isInteger(choice.definition?.repeatIndex)&&choice.definition.repeatIndex>0&&!!choice.definition.group;

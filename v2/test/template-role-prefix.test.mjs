@@ -1,9 +1,10 @@
+import {samePage} from '../shared/page-scope.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFile} from 'node:fs/promises';
 import {controlDOM} from '../shared/control-dom.mjs';
-import {matchesRole,bindRoleTitleProof} from '../shared/role-identity.mjs';
+import {matchesRole,bindRoleTitleProof,rolePageContract} from '../shared/role-identity.mjs';
 import {compileExpected} from '../shared/observation.mjs';
 import {validateTemplate} from '../shared/engine.mjs';
 import {verifyForm} from '../shared/verifier.mjs';
@@ -54,7 +55,7 @@ test('bound role reads prefix proof from the exact original page without replaci
   const snapshot={pageUrl:url,roleTitle:prefix?'Applying for: Product':'Product',roleIdentity:{parameter:'id',value:snapshotId},account,loginFormPresent:false};
   const state={pageId:'chrome:original',returnUrl:url};
   const context={queues:{task:async()=>({q:{},t:{taskId:'task',companyId:'fixture',roleId:'job',title:'Product'}}),read:async()=>state},assertBoundRoleState:()=>{},catalog:{companies:[{id:'fixture',templateId:'form'}]},store:{get:async()=>({pages:[plan]})},directory:{loginFile:()=>'/fixture/login.json'},readFile:async()=>JSON.stringify({...(userOperated?{loginMethod:'user_operated',origin:'https://fixture.test'}:{}),account:{selector:'#account',pageUrl:'https://fixture.test/account'}}),browser:{request:async()=>snapshot,existingPage:async(...args)=>{calls.push(args);if(args[0]!==url)throw Error('PROOF_PAGE_MUST_NOT_OVERRIDE_CURRENT_ACCOUNT');return {observe:async spec=>{assert.deepEqual(Object.keys(spec).sort(),['fields','rolePrefix','roleSelector']);return {source:proofSource,pageUrl:proofUrl,rawRoleTitle:'Applying for: Product',roleTitle:'Product',prefixApplied:true,account:'Evil',roleIdentity:{parameter:'id',value:'evil'}};}};}},matchesRole,loadProfile:async()=>({}),profileFile:'fixture',resolveAccount:()=>{},matchesAccount:value=>value==='User'};
-  const execute=vm.runInNewContext(body+';boundRole',{...context,URL,bindRoleTitleProof,observeUserOperatedSession});
+  const execute=vm.runInNewContext(body+';boundRole',{...context,URL,samePage,bindRoleTitleProof,rolePageContract,observeUserOperatedSession});
   const result=await execute({});return {result,calls};
  }
  const good=await run();assert.equal(good.calls[0][0],url);assert.equal(good.calls[0][1].pageId,'chrome:original');assert.equal(good.calls[0][1].readOnly,true);

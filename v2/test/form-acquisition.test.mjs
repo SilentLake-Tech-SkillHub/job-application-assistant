@@ -16,9 +16,9 @@ test('a Phoenix form rejects a guessed Feishu collector before empty capture can
  assert.equal((await detectedAcquisitionPlan(page,{})).provider,'phoenix');
  await assert.rejects(detectedAcquisitionPlan(page,{},'feishu'),/PROVIDER_EVIDENCE_MISMATCH/);
 });
-test('capture identity is the allocated form code; content changes only its hash',()=>{
- const id=captureContentId('F000001');assert.equal(id,'capture-F000001');assert.equal(id,captureContentId('F000001'));
- assert.notEqual(id,captureContentId('F000002'));assert.throws(()=>captureContentId('arbitrary-name'),/FORM_CODE_REQUIRED/);
+test('capture identity is the company key; content changes only its hash',()=>{
+ const id=captureContentId('C00001');assert.equal(id,'capture-C00001');assert.equal(id,captureContentId('C00001'));
+ assert.notEqual(id,captureContentId('C00002'));assert.throws(()=>captureContentId('../outside'),/COMPANY_CODE_REQUIRED/);
 });
 
 test('explicit construction provider overrides an obsolete template without dropping its page contract',()=>{

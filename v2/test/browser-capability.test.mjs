@@ -80,7 +80,8 @@ import {detectWithoutHostSdk} from '../scripts/browser-capability.mjs';
 test('every listed host has a valid adapter that describes only its built-in browser and never decides routing',async()=>{
  assert.deepEqual(HOST_IDS,['codex','claude-code','antigravity','kimi-code','zcode','dsh']);
  for(const id of HOST_IDS){const a=await loadAdapter(id);assert.equal(a.id,id);assert.equal('channels' in a,false);assert.equal('mode' in a,false);assert.deepEqual(Object.keys(a.browsers),['iab']);}
- await assert.rejects(loadAdapter('unknown-host'),/UNKNOWN_HOST_ADAPTER/);
+ const fallback=await loadAdapter('unknown-host');assert.equal(fallback.browsers.iab.declared,false);assert.equal(fallback.mcpConfig.format,'json');
+ await assert.rejects(loadAdapter('../unknown-host'),/UNKNOWN_HOST_ADAPTER/);
  assert.throws(()=>validateAdapter({id:'x',displayName:'X',mcpConfig:{format:'json',project:'.x.json',serversPath:['mcpServers']},browsers:{iab:{declared:true,exposure:'code',evidence:'e'}}},'x'),/CONNECT_REQUIRED/);
  assert.throws(()=>validateAdapter({id:'x',displayName:'X',mcpConfig:{format:'json',project:'.x.json',serversPath:['mcpServers']},browsers:{iab:{declared:false,evidence:'e'},chrome:{declared:true,exposure:'agent_only',evidence:'plugin'}}},'x'),/BROWSER_INVALID/);
 });

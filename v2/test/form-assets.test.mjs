@@ -29,7 +29,7 @@ test('submission is recorded only for a role filled from a sealed site template 
  const {dir}=await workspace(confirm(jia()));const root=await mkdtemp(path.join(os.tmpdir(),'form-gate-')),store=new Store(path.join(root,'private'));
  const catalog=(await new CompanyDirectory({handoffDir:dir}).load()).map(c=>({...c,templateId:'jia-formal',roleTemplates:{}}));
  const queues=new RoleQueue({root:path.join(root,'queue'),catalog,inputAdapter:handoffInput(dir)});
- const outcome={event:'submission_confirmed',batchId:'B1',companyId:'S0001',roleId:'J000001'};
+ const outcome={event:'submission_confirmed',batchId:'B1',companyId:'C00001',roleId:'J000001'};
  const check=()=>assertSubmissionPrepared({queues,store,catalog,outcome});
  assert.equal(await assertSubmissionPrepared({queues,store,catalog,outcome:{...outcome,event:'role_closed'}}),null);
  await assert.rejects(check(),/SUBMISSION_ROLE_NOT_IN_MCP_QUEUE/);
@@ -50,7 +50,7 @@ test('submission is recorded only for a role filled from a sealed site template 
  await store.put('templates','jia-formal',{...template,coverage:{allControlsMapped:true}});
  await assert.rejects(check(),/SUBMISSION_COMPANY_TEMPLATE_NOT_SEALED/);
  await store.put('templates','jia-formal',{...template,pages:[]});
- await assert.rejects(check(),/SUBMISSION_COMPANY_TEMPLATE_NOT_SEALED/);
+ await assert.rejects(check(),/SUBMISSION_TEMPLATE_CHANGED_AFTER_VERIFY/);
 });
 
 test('form asset status reports login, sealed template and 投递链接 gaps per site code for the batch companies',async()=>{
@@ -61,7 +61,7 @@ test('form asset status reports login, sealed template and 投递链接 gaps per
  await saveLogin(dir,'甲公司','登录.json',login('jia','https://jobs.example.cn'));catalog=await new CompanyDirectory({handoffDir:dir}).load();
  catalog[0].templateId='jia-formal';await store.put('templates','jia-formal',{...sealedTemplate(),coverage:{}});
  s=await formAssetStatus({handoffDir:dir,catalog,store});
- assert.deepEqual(s.incomplete[0].gaps,['S0001：表单模板：not_built_or_evidence_missing、投递链接（1 个岗位缺）']);
+ assert.deepEqual(s.incomplete[0].gaps,['S0001：表单模板：never_built、投递链接（1 个岗位缺）']);
  assert.deepEqual(s.detail[0].roles.map(r=>[r.roleId,r.siteId,!!r.applicationUrl]),[['J000001','S0001',true],['J000002','S0001',false]]);
  s=await formAssetStatus({handoffDir:dir,catalog,store,companyIds:['C00009']});assert.deepEqual(s.incomplete,[{companyId:'C00009',name:undefined,gaps:['unknown_company']}]);
 });
@@ -71,12 +71,12 @@ test('a template bound to a profile contract marked requires_rebuild is never re
  const profile={companyForms:{a:{executionContract:{templateHash:'h1',status:'requires_rebuild',validForCurrentInventory:false,rebuildReason:'question_definition_changed'}},legacy:{executionContract:{templateHash:'h4',status:'requires_rebuild',validForCurrentInventory:false}},b:{executionContract:{templateHash:'h2',status:'registered',validForCurrentInventory:true}}}};
  assert.equal(contractRebuildRequired(profile,'h1'),true);assert.equal(contractRebuildRequired(profile,'h2'),false);assert.equal(contractRebuildRequired(profile,'h3'),false);assert.equal(contractRebuildRequired(null,'h1'),false);assert.equal(contractRebuildRequired(profile,'h4'),false);
  const {FormRouter}=await import('../shared/form-route.mjs'),{hash}=await import('../shared/engine.mjs');
- const t=sealedTemplate(),companies=[{id:'S0001',origin:new URL(apply).origin,templateId:'jia-formal'}];
+ const t=sealedTemplate(),companies=[{id:'C00001',origin:new URL(apply).origin,templateId:'jia-formal'}];
  const store={get:async(kind,id)=>{if(kind==='templates')return t;throw Object.assign(Error('missing'),{code:'ENOENT'});}};
- const marked={companyForms:{x:{executionContract:{templateHash:hash(t),status:'requires_rebuild',validForCurrentInventory:false,rebuildReason:'major_policy_changed'}}}};
- const route=await new FormRouter({store,companies,validateTemplate:()=>true,loadProfile:async()=>marked}).resolve({companyId:'S0001',pageUrl:apply});
- const plain=await new FormRouter({store,companies,validateTemplate:()=>true,loadProfile:async()=>null}).resolve({companyId:'S0001',pageUrl:apply});
- assert.equal(route.reasonCode,'page_changed');assert.equal(route.route,'incremental');assert.ok(route.blockers.includes('PROFILE_EXECUTION_CONTRACT_REQUIRES_REBUILD'));
+ const marked={companyForms:{x:{executionContract:{templateHash:hash(t),status:'requires_rebuild',validForCurrentInventory:false,rebuildReason:'question_definition_changed'}}}};
+ const route=await new FormRouter({store,companies,validateTemplate:()=>true,loadProfile:async()=>marked}).resolve({companyId:'C00001',pageUrl:apply});
+ const plain=await new FormRouter({store,companies,validateTemplate:()=>true,loadProfile:async()=>null}).resolve({companyId:'C00001',pageUrl:apply});
+ assert.equal(route.reasonCode,'real_fill_failure');assert.equal(route.route,'incremental');assert.ok(route.blockers.includes('PROFILE_EXECUTION_CONTRACT_REQUIRES_REBUILD'));
 });
 
 test('filling a form does not mark its contract for rebuild; a question the contract does not cover does',async()=>{

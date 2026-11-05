@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {controlInventoryHash,compatibleInventory,formScope} from './control-choice-store.mjs';
 import {formAssetKeys} from './form-identity.mjs';
+import {samePage} from './page-scope.mjs';
 import {assertRecordSourceBindings} from './record-source-binding.mjs';
 import {canonicalControlSpec} from './control-registry.mjs';
 import {scriptCoverage} from './page-structure.mjs';
@@ -46,7 +47,7 @@ export async function assertCapturedAcquisition(store,{companyId,captureId,pageU
  if(!captureId&&!formId)throw Error('FORM_CODE_OR_CAPTURE_REQUIRED');
  const capture=await store.get('runs',captureId||formAssetKeys(formId).capture);
  if(!capture.formId)throw Error('MCP_ACQUISITION_CHAIN_REQUIRED');
- if(pageUrl&&capture.pageUrl!==pageUrl)throw Error('ACQUISITION_CAPTURE_SCOPE_CHANGED');
+ if(pageUrl&&!samePage(capture.pageUrl,pageUrl))throw Error('ACQUISITION_CAPTURE_SCOPE_CHANGED');
  const keys=formAssetKeys(capture.formId);let structure;
  try{structure=await store.get('runs',keys.structure);}catch(error){if(error.code==='ENOENT')throw Error('MCP_ACQUISITION_CHAIN_REQUIRED');throw error;}
  await assertCurrentStructure(store,structure,capture,companyId);

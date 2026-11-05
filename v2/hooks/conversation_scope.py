@@ -111,11 +111,22 @@ def update_scope(file, operation, *, policy_file=None, authorization_ref=None, t
             sha = hashlib.sha256(policy_file.read_bytes()).hexdigest()
             prune_expired(data, now)
             previous = data.setdefault('sessions', {}).get(conversation)
+            agent_id = os.environ.get('RECRUITING_AGENT_ID')
+            if agent_id:
+                registry_file = file.parent.parent.parent / '.runtime' / 'agents.json'
+                registry = json.loads(registry_file.read_text(encoding='utf-8'))
+                agent = registry.get('agents', {}).get(agent_id)
+                if not agent or agent.get('host') != os.environ.get('RECRUITING_HOST_ID'):
+                    raise ValueError('AGENT_HOST_IDENTITY_MISMATCH')
+                if previous and previous.get('agentId') not in {None, agent_id}:
+                    raise ValueError('CONVERSATION_AGENT_IDENTITY_CHANGED')
             record = {
                 'workflow': 'job-application-assistant-v2', 'policy_path': str(policy_file),
                 'policy_sha256': sha, 'authorization_ref': str(authorization_ref),
                 'registeredAt': now, 'expiresAt': now + REGISTRATION_SECONDS,
             }
+            if agent_id or (previous and previous.get('agentId')):
+                record['agentId'] = agent_id or previous['agentId']
             if previous:
                 record['registeredAt'], record['expiresAt'] = previous['registeredAt'], previous['expiresAt']
             data['sessions'][conversation] = record

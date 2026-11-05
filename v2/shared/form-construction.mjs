@@ -1,3 +1,4 @@
+import {inheritPageContract,inheritFields} from './repeat-groups.mjs';
 import {formScope} from './control-choice-store.mjs';
 import {recordParentsFromProfile} from './record-source-binding.mjs';
 import {resolveDateRepresentation} from './date-representation.mjs';
@@ -101,13 +102,13 @@ function fieldFromControl(c,m,choice){
  return f;
 }
 // One generator for every company. Company identities occur only in private input.
-export function buildFormTemplate({capture,profile,mappings=[],choices=[],page,templateId,version=1,reaStructure,reaReconciliation=[]}){
+export function buildFormTemplate({capture,profile,mappings=[],choices=[],page,templateId,version=1,reaStructure,reaReconciliation=[],previous=[]}){
  if(!capture?.controls?.length||!capture.pageUrl||!capture.observedAt)throw Error('CURRENT_CONTROL_CAPTURE_REQUIRED');
  if(!page?.roleTitle||!page.readySelector||!page.sections?.length||!page.sectionDiscovery)throw Error('OBSERVED_PAGE_CONTRACT_REQUIRED');
  if(page.roleIdentity&&readRoleIdentity(page.roleIdentity,capture.pageUrl)?.value!==page.roleIdentity.value)throw Error('OBSERVED_ROLE_IDENTITY_MISMATCH');
  if(reaStructure&&(formScope(reaStructure.pageUrl)!==formScope(capture.pageUrl)||reaStructure.companyId!==capture.companyId))throw Error('REA_CONTROL_CAPTURE_SCOPE_MISMATCH');
  if(page.provider&&capture.provider&&page.provider!==capture.provider)throw Error('FORM_PROVIDER_EVIDENCE_MISMATCH');
- page={...page,sections:page.sections.map(section=>typeof section==='string'?{title:section}:section),...(capture.provider?{provider:capture.provider}:{})};
+ page=inheritPageContract({...page,sections:page.sections.map(section=>typeof section==='string'?{title:section}:section),...(capture.provider?{provider:capture.provider}:{})},previous);
  if(page.sections.some(section=>!section?.title))throw Error('OBSERVED_SECTION_TITLE_REQUIRED');
  const sectionSelectors=[...new Set(capture.controls.map(c=>c.sectionSelector).filter(Boolean))];
  if(capture.provider==='ant'&&sectionSelectors.length)page.sectionDiscovery={...page.sectionDiscovery,selectors:sectionSelectors};
@@ -115,6 +116,8 @@ export function buildFormTemplate({capture,profile,mappings=[],choices=[],page,t
  for(const c of capture.controls){const identity=c.type==='radio'&&c.questionSelector?c.questionSelector:c.selector;const prior=groups.get(identity);if(prior&&c.type!=='radio')throw Error('DUPLICATE_CAPTURED_SELECTOR');if(prior)prior.inventorySelectors.push(c.selector);else groups.set(identity,{...c,inventorySelectors:[c.selector]});}
  let fields=[...groups.values()].map(c=>{
   const f=fieldFromControl(c,mappings.find(m=>m.active!==false&&c.inventorySelectors.includes(m.selector)),choices.find(x=>x.selector===c.selector));
+  const priorWhen=previous.flatMap(t=>t?.pages||[]).flatMap(p=>p.fields||[]).find(x=>x.when&&x.read?.selector===f.read?.selector)?.when;
+  if(priorWhen&&!f.when)f.when=structuredClone(priorWhen);
   const ongoing=f.source.replace(/\.(?:end|endDate|dateEnd|endMonth)$/u,'.ongoing');
   if(f.kind==='date'&&ongoing!==f.source&&profile.facts?.[ongoing]?.status==='known'&&typeof profile.facts[ongoing].value==='boolean')f.ongoingSource=ongoing;
   if(f.ongoingSource&&profile.facts[ongoing].value===true){
@@ -127,6 +130,7 @@ export function buildFormTemplate({capture,profile,mappings=[],choices=[],page,t
   }
   return f;
  });
+ fields=inheritFields(fields,previous,page.pathPrefix||'/');
  const choiceGoals=evaluateChoiceGoals({capture,profile,fields,choices});
  fields=fields.map(f=>{
   const goal=choiceGoals.goals.find(g=>g.fieldId===f.id);

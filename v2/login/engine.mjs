@@ -14,7 +14,7 @@ const smsCountdown=o=>o.sendDisabled&&/(?:\d{1,3}\s*(?:秒|s)|(?:重试|重发).
 const handoff={operator:'user',automaticSolve:false,automaticResend:false,nextTool:'login_resume_verification'};
 export class LoginEngine{
   constructor({companyRoot,loginFile,privateRoot,profileFile,browser,leaseRoot=defaultLeaseRoot()}){Object.assign(this,{companyRoot,loginFile,profileFile,browser,leaseRoot});this.store=new PrivateStore(privateRoot);}
-  async company(id){if(!keyOK(id))throw Error('INVALID_COMPANY_ID');const file=this.loginFile?this.loginFile(id):path.join(this.companyRoot,id+'.login.json');return validateCompany({...JSON.parse(await readFile(file,'utf8')),companyId:id,siteId:id});}
+  async company(id,context={}){if(!keyOK(id))throw Error('INVALID_COMPANY_ID');const file=this.loginFile?this.loginFile(id,context):path.join(this.companyRoot,id+'.login.json');return validateCompany({...JSON.parse(await readFile(file,'utf8')),companyId:id});}
   async profile(){return JSON.parse(await readFile(this.profileFile,'utf8'));}
   async planState(c,p){const url=p.taskContext?(await this.browser.broker.request('pageIdentity',{pageId:p.taskContext.pageId})).pageUrl:p.pageUrl;return this.state(c,url);}
   async open({companyId}){const c=await this.company(companyId);return this.locked(c,async()=>{const result=await this.browser.open(c.origin+c.loginPath);await this.browser.ready(c,result.pageUrl);return {...result,companyId,ready:true,applicationSubmission:'not_performed'};});}
@@ -26,9 +26,9 @@ export class LoginEngine{
   async registerIdentityPage(c,opened){try{await this.store.put('runs','identity-page-'+c.companyId,{companyId:c.companyId,pageId:opened.pageId,pageUrl:c.account.pageUrl,at:now()});}catch(e){if(e.message!=='INVALID_LOGIN_STORAGE_KEY')throw e;}}
   async state(c,preferred){const url=await this.browser.locate(c,preferred);assertScope(c,url);const o=await this.browser.observe(c,url),account=resolveAccount(await this.profile(),c);return {...o,accountMatched:matchesAccount(o.account,account),accountMismatch:!!o.account&&!matchesAccount(o.account,account),unknownPopup:o.dialogs>0&&o.popupTitle!==c.popups?.[0]?.title};}
   publicState(o){return {pageUrl:o.url,readAt:o.readAt,status:o.accountMismatch?'account_mismatch':o.accountMatched&&!o.form?'authenticated':o.challenges?'needs_user_verification':o.unknownPopup?'unknown_popup':o.form?'logged_out':'unknown',accountMatched:o.accountMatched,loginFormAbsent:!o.form,popup:o.dialogs?{title:o.popupTitle,known:!o.unknownPopup}:null,applicationSubmission:'not_performed'};}
-  async inspect({companyId,pageUrl}){const c=await this.company(companyId);assertScope(c,pageUrl);return this.locked(c,async()=>{const o=await this.state(c,pageUrl);return this.publicState(o);});}
+  async inspect({companyId,pageUrl}){const c=await this.company(companyId,{pageUrl});assertScope(c,pageUrl);return this.locked(c,async()=>{const o=await this.state(c,pageUrl);return this.publicState(o);});}
   async capture({companyId,pageUrl,evidence}){
-    const c=await this.company(companyId);assertScope(c,pageUrl);if(!evidence)throw Error('CAPTURE_EVIDENCE_REQUIRED');
+    const c=await this.company(companyId,{pageUrl});assertScope(c,pageUrl);if(!evidence)throw Error('CAPTURE_EVIDENCE_REQUIRED');
     return this.locked(c,async()=>{
       const o=await this.state(c,pageUrl),controls=await this.browser.inventory(c,o.url),id='login-capture-'+companyId;
       await updateProfile(this.profileFile,p=>{p.loginForms??={};p.loginForms[companyId]={companyId,version:c.version,assetHash:hash(c),observedAt:now(),fields:Object.entries(c.fields).filter(([k])=>!k.endsWith('Label')).map(([key,selector])=>({key,selector,source:key==='phone'?c.account.source:null,storage:key==='otp'?'never_store_authentication_secret':'company_definition'})),observedControls:controls.map(({selector,type,placeholder,required,disabled})=>({selector,type,placeholder,required,disabled})),evidence};});
@@ -36,12 +36,12 @@ export class LoginEngine{
     });
   }
   async compile({companyId,pageUrl,taskContext}){
-    const c=await this.company(companyId);assertScope(c,pageUrl);const a=resolveAccount(await this.profile(),c);
+    const c=await this.company(companyId,{pageUrl});assertScope(c,pageUrl);const a=resolveAccount(await this.profile(),c);
     const plan={id:taskContext?.taskId||taskRecordScope().taskId?randomUUID():'login-plan-'+companyId,companyId,pageUrl,assetHash:hash(c),accountFingerprint:a.fingerprint,createdAt:now(),steps:c.loginMethod==='user_operated'?['check_current_session','user_login_handoff_if_required','verify_exact_account_at_session_page']:['check_current_session','inspect_and_dismiss_known_popups','select_actual_country_option','fill_phone_from_private_profile','require_privacy_acceptance','request_sms_once','handoff_verification_if_present','consume_ephemeral_user_otp','click_login_only','verify_account_and_absent_login_form'],applicationSubmission:'forbidden'};
     if(taskContext)plan.taskContext=taskContext;
     plan.planHash=hash(plan);await this.store.put('plans',plan.id,plan);return {planId:plan.id,planHash:plan.planHash,companyId,assetHash:plan.assetHash,stepCount:plan.steps.length,browserAccess:false};
   }
-  async plan(args){const p=await this.store.get('plans',args.planId),h=p.planHash;delete p.planHash;if(hash(p)!==h||args.planHash!==h)throw Error('LOGIN_PLAN_HASH_MISMATCH');p.planHash=h;if(p.taskContext){if(!this.roleQueues)throw Error('ROLE_QUEUE_REQUIRED');await this.roleQueues.task(p.taskContext);bindTaskRecordScope(p.taskContext.taskId);}const c=await this.company(p.companyId),a=resolveAccount(await this.profile(),c);if(hash(c)!==p.assetHash)throw Error('LOGIN_ASSET_CHANGED');if(a.fingerprint!==p.accountFingerprint)throw Error('LOGIN_ACCOUNT_CHANGED');return {p,c,a};}
+  async plan(args){const p=await this.store.get('plans',args.planId),h=p.planHash;delete p.planHash;if(hash(p)!==h||args.planHash!==h)throw Error('LOGIN_PLAN_HASH_MISMATCH');p.planHash=h;if(p.taskContext){if(!this.roleQueues)throw Error('ROLE_QUEUE_REQUIRED');await this.roleQueues.task(p.taskContext);bindTaskRecordScope(p.taskContext.taskId);}const c=await this.company(p.companyId,{pageUrl:p.pageUrl}),a=resolveAccount(await this.profile(),c);if(hash(c)!==p.assetHash)throw Error('LOGIN_ASSET_CHANGED');if(a.fingerprint!==p.accountFingerprint)throw Error('LOGIN_ACCOUNT_CHANGED');return {p,c,a};}
   async record(c,operation,result){const run={id:taskRecordScope().taskId?randomUUID():'login-'+c.companyId+'-'+operation,companyId:c.companyId,operation,finishedAt:now(),...result,applicationSubmission:'not_performed'};await this.store.put('runs',run.id,run);return run;}
   async dismiss(c,o){
     if(!o.dialogs)return o;if(o.unknownPopup||o.dialogs!==1)throw Error('UNKNOWN_LOGIN_POPUP');
@@ -70,7 +70,7 @@ export class LoginEngine{
     const acceptedAt=now(),reused={id:'acceptance-'+c.companyId,companyId:c.companyId,planId:p.id,assetHash:p.assetHash,evidenceHash:hash({mode:'business_authorization_switch',origin:c.origin,authorizationRef:decision.authorizationRef}),acceptedAt,reusedAt:acceptedAt,scope:'global'};await this.store.put('acceptances',reused.id,reused);
     return this.record(c,'prepare',{status:'ready_to_request_sms',privacyScope:'global',acceptanceId:reused.id,privacyReused:true,accountMatched:false,phoneReadback:'match',countryReadback:'match',popupHandling:'not_opened_business_switch_on',businessAuthorization,smsSent:false});
   });}
-  async acceptance(id,p){if(!id)return null;const a=await this.store.get('acceptances',id);if(a.planId!==p.id||a.assetHash!==p.assetHash)throw Error('PRIVACY_ACCEPTANCE_SCOPE_MISMATCH');const c=await this.company(p.companyId),permission=evaluateBusinessAuthorization(await this.profile(),{operation:'recruiting_privacy',phase:'classify',stage:'login',companyId:c.companyId,officialOrigin:c.origin,field:{label:c.consent.title}});if(permission.decision==='revoked')throw Error(permission.reason);return a;}
+  async acceptance(id,p){if(!id)return null;const a=await this.store.get('acceptances',id);if(a.planId!==p.id||a.assetHash!==p.assetHash)throw Error('PRIVACY_ACCEPTANCE_SCOPE_MISMATCH');const c=await this.company(p.companyId,{pageUrl:p.pageUrl}),permission=evaluateBusinessAuthorization(await this.profile(),{operation:'recruiting_privacy',phase:'classify',stage:'login',companyId:c.companyId,officialOrigin:c.origin,field:{label:c.consent.title}});if(permission.decision==='revoked')throw Error(permission.reason);return a;}
   async send(args){const {p,c,a}=await this.plan(args);return this.locked(c,async()=>{
     const o=await this.planState(c,p);beforeLoginStep({step:'prepare',state:o,authorization:args.authorization});
     if(o.accountMatched&&!o.form)return this.record(c,'request_sms',{...this.publicState(o),reusedSession:true,smsSent:false});
@@ -126,7 +126,7 @@ export class LoginEngine{
     const results=new Array(tasks.length),groups=new Map();
     for(const [index,t]of tasks.entries()){
       let key=`idx:${index}`;
-      try{const p=await this.store.get('plans',t.planId),c=await this.company(p.companyId);key=c.origin;}catch{}
+      try{const p=await this.store.get('plans',t.planId),c=await this.company(p.companyId,{pageUrl:p.pageUrl});key=c.origin;}catch{}
       if(!groups.has(key))groups.set(key,[]);groups.get(key).push({t,index});
     }
     const queues=[...groups.values()];let cursor=0;

@@ -1,7 +1,7 @@
 // Pure rendered-DOM reader/resolver. Logical question references are persisted;
 // DOM hierarchy paths are generated only for the current operation, never stored
 // as a company's execution identity.
-export function antDOM({operation='inventory',reference,references}={}){
+export function antDOM({operation='inventory',reference,references,titles=[]}={}){
  const visible=n=>!!n?.getClientRects().length&&getComputedStyle(n).visibility!=='hidden';
  const formNodes=[...document.querySelectorAll('form.ant-form')].filter(visible);if(!formNodes.length)throw Error('ANT_FORM_NOT_OBSERVED');
  const clean=s=>(s||'').replace(/[＊*？?\s]+$/gu,'').trim();
@@ -39,6 +39,12 @@ export function antDOM({operation='inventory',reference,references}={}){
  const resolve=reference=>{
   const x=JSON.parse(decode(reference.slice(5))),forms=x.formKey?formNodes.filter(f=>formKey(f)===x.formKey):formNodes;
   if(forms.length!==1)return null;const form=forms[0],qs=questions.filter(q=>formOf(q)===form&&sectionOf(q)===x.section&&label(q)===x.label),q=qs[x.occurrence];
+  if(x.part==='repeatAdd'){
+   const sections=[...form.children].filter(s=>sectionTitle(s)===x.section);
+   if(sections.length!==1||!qs.length)return null;
+   const buttons=[...sections[0].querySelectorAll('button[type="button"],[role="button"]')].filter(n=>visible(n)&&n.innerText?.trim()===x.addLabel);
+   return buttons.length===1?physical(buttons[0]):null;
+  }
   if(x.part==='section'||x.part==='add'){const sections=[...form.children].filter(s=>sectionTitle(s)===x.section);if(sections.length!==1)return null;if(x.part==='section')return physical(sections[0]);const nodes=[...sections[0].querySelectorAll('*')].filter(n=>visible(n)&&n.textContent.trim()===x.addLabel&&!n.querySelector('*'));return nodes.length===1?physical(nodes[0]):null;}
   if(x.part==='allQuestions')return qs.map(physical).join(',')||null;
   if(!q)return null;let n;
@@ -55,6 +61,22 @@ export function antDOM({operation='inventory',reference,references}={}){
   }
   return n?physical(n):null;
  };
+ if(operation==='repeatDiscovery'){
+  const found=[];
+  for(const title of titles){
+   const sections=formNodes.flatMap(form=>[...form.children].filter(s=>sectionTitle(s)===title));
+   if(sections.length!==1)continue;
+   const scope=sections[0],buttons=[...scope.querySelectorAll('button[type="button"],[role="button"]')].filter(n=>visible(n)&&/^(?:添加|新增|Add)(?:$|\s|[\p{Script=Han}])/iu.test(n.innerText?.trim()||''));
+   if(buttons.length!==1)continue;
+   const anchor=questions.find(q=>section(q)===scope&&label(q)&&peers(q).length>1&&
+    peers(q).every(peer=>row(peer).parentElement===buttons[0].parentElement&&!row(peer).contains(buttons[0])));
+   if(!anchor)continue;
+   const {occurrence,index,part,...base}=JSON.parse(ref(anchor).slice(5));
+   const addLabel=buttons[0].innerText.trim();
+   found.push({title,selector:encode({...base,part:'allQuestions'}),addSelector:encode({...base,part:'repeatAdd',addLabel}),addLabel});
+  }
+  return found;
+ }
  if(operation==='resolve')return references?references.map(resolve):resolve(reference);
  return all.filter(n=>question(n)).map(n=>{
   const q=question(n),cs=controls(q),i=cs.indexOf(n),qlabel=label(q),s=section(q),r=row(q),picker=n.closest('.ant-calendar-picker,.ant-picker');

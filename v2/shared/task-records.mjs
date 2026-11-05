@@ -28,7 +28,7 @@ export class TaskRecords{
   const scope=context.getStore()||{},taskId=value.taskId||scope.taskId;
   if(!taskId||!['runs','plans'].includes(group)||id.startsWith('batch-prepare-')||durableAsset.test(id)||['internal_condition_probe','form_seal'].includes(value.operation))return false;
   if(!keyOK(taskId))throw Error('INVALID_TASK_RECORD_KEY');
-  const operation=value.operation||scope.tool||group;
+  const operation=group==='plans'&&Number.isInteger(value.compilerVersion)?'execution_plan':value.operation||scope.tool||group;
   const identity=value.fieldId||value.selector||value.projectId||value.binding?.fieldId||(operation==='live_observation'?value.observation?.pageUrl:'')||'';
   const slot=JSON.stringify([group,operation,identity]);
   const release=await acquireLease(leasePath(defaultLeaseRoot(),'task-records:'+path.resolve(this.root)),{waitMs:30000,busyCode:'TASK_RECORD_BUSY'});

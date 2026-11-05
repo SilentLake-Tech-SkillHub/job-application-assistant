@@ -3,6 +3,8 @@ import {validateControlContract} from './value-contract.mjs';
 import {templateConstructionIssues} from './field-policy.mjs';
 import {auditStoredContract} from './workflow-contract.mjs';
 const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
+// Built once means complete coverage and a proof run were recorded when it was sealed.
+export const wasBuilt=t=>['allConditionalBranchesVerified','allControlsMapped','allDriversSupported'].every(k=>t?.coverage?.[k]===true)&&!!t.coverage.proof?.runId;
 export const sealedContractHash=t=>digest({id:t.id,version:t.version,evidence:t.evidence,pages:t.pages});
 export function assertSealContract(template,probe,companyId){
  if(!auditStoredContract(template).ready)throw Error('COMPLETE_EXECUTION_CONTRACT_REQUIRED');

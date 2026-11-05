@@ -6,3 +6,13 @@ test('changed asset, failed restoration, unknown control and unmapped profile ca
 test('registration always removes model-authored readiness and prior proof',()=>{const {t}=fixture();t.coverage={allControlsMapped:true,allConditionalBranchesVerified:true,allDriversSupported:true,proof:{runId:'copied'}};const next=unsealedTemplate(t);assert.equal(next.coverage.allControlsMapped,false);assert.equal(next.coverage.proof,undefined);assert.equal(t.coverage.allControlsMapped,true);});
 
 test('a green summary cannot seal missing or duplicated actual branch evidence',()=>{for(const mutate of [x=>x.p.branches[0].roleMatched=false,x=>x.p.branches.push({...x.p.branches[0]}),x=>x.t.pages[0].fields.push({...x.t.pages[0].fields[0],id:'conditional',when:{source:'name',equals:'yes'}})]){const x=fixture();mutate(x);x.p.templateHash=hash(x.t);assert.throws(()=>sealFormTemplate(x.t,x.p,x.options),/BRANCH_PROOF|CONDITION_PARENT/);}});
+test('a section with several records seals without a stored count or add control',()=>{
+ const ref=occurrence=>'phoenixq:'+JSON.stringify({section:'Work',label:'Name',occurrence,part:'native',controlIndex:0});
+ const scope={title:'Work',headingSelector:'#h',containerSelector:'.c',recordSelector:'.r',addSelector:'#a',addLabel:'Add'};
+ const repeated=groups=>{const {t,p,options}=fixture(),base=t.pages[0].fields[0],field=(id,occurrence)=>({...base,id,source:id,inventorySelectors:[ref(occurrence)],read:{...base.read,selector:ref(occurrence)},actions:[{method:'fill',selector:ref(occurrence)}]});
+  t.pages[0]={fields:[field('first',0),field('second',1)],...(groups?{groups}:{})};
+  p.templateHash=hash(t);p.branches[0].inventory=[0,1].map(i=>({selector:ref(i),label:'Name',type:'text',required:true}));return {t,p,options};};
+ const none=repeated();assert.ok(sealFormTemplate(none.t,none.p,none.options));
+ const group={id:'work',selector:'phoenixq:'+JSON.stringify({...scope,part:'repeatRecords'}),addSelector:'phoenixq:'+JSON.stringify({...scope,part:'repeatAdd'}),addLabel:'Add',count:2};
+ const ok=repeated([group]);assert.equal(sealFormTemplate(ok.t,ok.p,ok.options).pages[0].groups[0].count,2);
+});

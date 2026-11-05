@@ -1,5 +1,7 @@
+import {after} from 'node:test';
+const fixtureDirectories=new Set();after(async()=>{await Promise.all([...fixtureDirectories].map(dir=>rm(dir,{recursive:true,force:true})));});
 // 测试用交接区：岗位交接/公司/<公司编码>.json（schemaVersion 3），与搜索端 company_store.py 写出的结构一致。
-import {mkdtemp,mkdir,writeFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,readdir,rm} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,6 +29,10 @@ export function confirm(doc,{quote='确认交接',state='已交接',scope='selec
 }
 export async function saveCompany(dir,doc){await mkdir(path.join(dir,'公司'),{recursive:true});await writeFile(path.join(dir,'公司',doc['公司编码']+'.json'),JSON.stringify(doc,null,2));}
 // 第 2 步前登录配置仍在 公司/<地区>/<公司>/登录[@域名].json。
-export async function saveLogin(dir,firm,file,login){const d=path.join(dir,'公司','中国大陆',firm);await mkdir(d,{recursive:true});await writeFile(path.join(d,file),JSON.stringify(login));}
-export async function handoffWorkspace(docs=[]){const dir=await mkdtemp(path.join(os.tmpdir(),'handoff-'));for(const d of docs)await saveCompany(dir,d);return dir;}
+export async function saveLogin(dir,firm,file,login){
+ const companyDir=path.join(dir,'公司'),docs=await Promise.all((await readdir(companyDir)).filter(n=>/^C\d{5}\.json$/.test(n)).map(n=>readFile(path.join(companyDir,n),'utf8').then(JSON.parse)));
+ const owner=docs.find(d=>d['公司名称']===firm);if(!owner)throw Error('FIXTURE_COMPANY_OWNER_REQUIRED');
+ const d=path.join(companyDir,'中国大陆',firm);await mkdir(d,{recursive:true});await writeFile(path.join(d,file),JSON.stringify({...login,companyId:owner['公司编码']}));
+}
+export async function handoffWorkspace(docs=[]){const dir=await mkdtemp(path.join(os.tmpdir(),'handoff-'));fixtureDirectories.add(dir);for(const d of docs)await saveCompany(dir,d);return dir;}
 export const login=(companyId,origin,extra={})=>({schemaVersion:1,companyId,version:1,origin,loginPath:'/login',allowedPaths:['/'],account:{selector:'.a',source:'phone',countryCode:'+86',mask:'first4_last3'},fields:{},...extra});

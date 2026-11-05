@@ -178,6 +178,13 @@ export function controlDOM(spec){
  }
  const phoenixResolve=reference=>{
   let r;try{r=JSON.parse(reference.slice(9));}catch{throw Error('PHOENIX_REFERENCE_INVALID');}
+  if(r.part==='scopedRepeatAdd'){
+   const rows=[...document.querySelectorAll(r.recordSelector)].filter(visible);
+   if(!rows.length||rows.some(row=>row.parentElement!==rows[0].parentElement))throw Error('REPEAT_SECTION_NOT_FOUND');
+   const candidates=[...rows[0].parentElement.querySelectorAll('button[type="button"],[role="button"]')].filter(node=>visible(node)&&!rows.some(row=>row.contains(node))&&node.innerText?.trim()===r.addLabel);
+   if(candidates.length!==1)throw Error('REPEAT_ADD_CONTROL_CHANGED');
+   return diagnosticSelector(candidates[0]);
+  }
   if(['repeatRecords','repeatAdd'].includes(r.part)){
    if(!r.title||!r.headingSelector||!r.containerSelector||!r.recordSelector?.startsWith(':scope > ')||r.recordSelector.includes(','))throw Error('REPEAT_CAPTURED_SCOPE_REQUIRED');
    const headings=[...document.querySelectorAll(r.headingSelector)].filter(n=>visible(n)&&n.innerText?.trim()===r.title);
@@ -198,6 +205,35 @@ export function controlDOM(spec){
   if(part.length!==1)throw Error('PHOENIX_CONTROL_CHANGED');
   return diagnosticSelector(part[0].node);
  };
+ if(spec?.operation==='repeatDiscovery'){
+  // Read only. A section heading and its add button are tied by the id the form framework gives them.
+  const found=[];
+  for(const add of document.querySelectorAll('[id$="_addButton"]')){
+   if(!visible(add))continue;
+   const headingId=add.id.slice(0,-'_addButton'.length),heading=document.getElementById(headingId),title=heading?.innerText?.trim(),root=heading?.parentElement,addLabel=add.innerText?.trim();
+   if(!title||!addLabel||!visible(heading)||!(spec.titles||[]).includes(title)||!root?.contains(add))continue;
+   const path=[];
+   for(let node=add.parentElement;node&&node!==root;node=node.parentElement){
+    const tag=node.tagName.toLowerCase(),same=[...node.parentElement.children].filter(n=>n.tagName===node.tagName);
+    path.unshift(same.length>1?`${tag}:nth-of-type(${same.indexOf(node)+1})`:tag);
+   }
+   const exact=`[id="${headingId}"]`;
+   found.push({title,headingSelector:exact,containerSelector:`div:has(> ${exact})`,recordSelector:[':scope',...path,'div:not([id$="_addButton"])'].join(' > '),addSelector:`[id="${add.id}"]`,addLabel});
+  }
+  for(const title of spec.titles||[]){
+   if(!/^[A-Za-z][A-Za-z0-9_]*$/.test(title))continue;
+   const selectors=[`.resumeEditForm-item.resumeEditForm-${title}`,`#formily-item-${title}_list [class^="apply-form-array-card__"]`];
+   for(const selector of selectors){
+    const rows=[...document.querySelectorAll(selector)].filter(visible);
+    if(!rows.length||!rows[0].parentElement||rows.some(row=>row.parentElement!==rows[0].parentElement))continue;
+    const candidates=[...rows[0].parentElement.querySelectorAll('button[type="button"],[role="button"]')].filter(node=>visible(node)&&!rows.some(row=>row.contains(node))&&/^(?:添加|新增|Add)(?:$|\s|[\p{Script=Han}])/iu.test(node.innerText?.trim()||''));
+    if(candidates.length!==1)continue;
+    const addLabel=candidates[0].innerText.trim();
+    found.push({title,selector,addLabel,addSelector:'phoenixq:'+JSON.stringify({part:'scopedRepeatAdd',recordSelector:selector,addLabel})});
+   }
+  }
+  return found.filter(item=>found.filter(other=>other.title===item.title).length===1);
+ }
  if(spec?.operation==='resolvePhoenix')return (spec.references||[]).map(phoenixResolve);
  // Optional aliases and readback report an absent question as missing.
  // This never grants presence, equivalence or a successful field check.

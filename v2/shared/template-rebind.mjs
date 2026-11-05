@@ -1,4 +1,4 @@
-import {FORM_CODE} from './form-identity.mjs';
+import {COMPANY_CODE} from './form-identity.mjs';
 import {unsealedTemplate} from './form-seal.mjs';
 import {compareControlStructures} from './control-structure.mjs';
 const key=c=>JSON.stringify([c.group||null,c.repeatIndex??null,c.fieldKey||null,c.controlIndex??null,c.type,c.label]);
@@ -17,7 +17,7 @@ export function rebindTemplate({template,baseline,current,roleId,confirmedTitle}
  for(const c of baseline.controls){const n=byKey.get(key(c));if(!n||n.locatorStrategy!=='anchored_unique')throw Error('REBIND_STABLE_CONTROL_REQUIRED');for(const prop of ['selector','questionSelector','rowSelector','groupSelector'])if(c[prop]&&n[prop]){if(replacements.has(c[prop])&&replacements.get(c[prop])!==n[prop])throw Error('REBIND_AMBIGUOUS_CONTAINER');replacements.set(c[prop],n[prop]);}}
  const pairs=[...replacements].sort((a,b)=>b[0].length-a[0].length);
  const replace=v=>typeof v==='string'?pairs.reduce((s,[a,b])=>s.includes(a)?s.split(a).join(b):s,v):Array.isArray(v)?v.map(replace):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,replace(x)])):v;
- if(!FORM_CODE.test(current.formId))throw Error('REBIND_FORM_CODE_REQUIRED');
+ if(!COMPANY_CODE.test(current.formId))throw Error('REBIND_COMPANY_CODE_REQUIRED');
  const result=replace(structuredClone(template));
  result.id=current.formId;result.version=template.version+1;
  result.evidence={...result.evidence,formId:current.formId,captureId:current.captureId,sourceUrl:current.pageUrl,observedAt:current.observedAt,reboundFrom:template.id,baselineCaptureId:baseline.captureId,targetCaptureId:current.captureId};

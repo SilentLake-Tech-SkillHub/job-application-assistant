@@ -20,7 +20,7 @@ export function changedFields(current,patch){const lines=[];for(const k of Objec
 export async function siteEntry({workspace,site,patch,quote=null,expectedSha=null,now=()=>new Date().toISOString()}){
  const keys=Object.keys(patch||{});if(!keys.length||keys.some(k=>!['entry','loginPath'].includes(k)))throw Error('SITE_ENTRY_PATCH_KEYS: 只能改 entry、loginPath');
  const directory=new CompanyDirectory({handoffDir:path.join(workspace,'岗位交接')});const catalog=await directory.load();
- const e=catalog.find(x=>x.siteId===site);if(!e)throw Error('UNKNOWN_SITE');if(!e.loginFile)throw Error('COMPANY_LOGIN_NOT_CONFIGURED');
+ const e=catalog.flatMap(c=>(c.sites||[c]).map(s=>({...c,...s,id:c.id,companyId:c.companyId}))).find(x=>x.siteId===site);if(!e)throw Error('UNKNOWN_SITE');if(!e.loginFile)throw Error('COMPANY_LOGIN_NOT_CONFIGURED');
  const raw=await readFile(e.loginFile,'utf8'),current=JSON.parse(raw),fingerprint=sha(raw);
  const next={...current,...patch};
  if('loginPath' in patch)checkLoginPath(patch.loginPath);

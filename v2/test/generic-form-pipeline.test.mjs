@@ -54,7 +54,7 @@ test('ordinary userOnly cannot bypass routing or preflight even with known answe
  t.pages[0].fields[1].userOnly=true;t.pages[0].fields[1].actions=[];t.coverage={allControlsMapped:true,allDriversSupported:true,allConditionalBranchesVerified:true};
  assert.throws(()=>validateTemplate(t),/CONSTRUCTION_GAPS/);
  const route=await new FormRouter({store:{get:async()=>t},companies:[{id:'alpha',origin:'https://alpha.example',templateId:'alpha'}],validateTemplate}).resolve({companyId:'alpha',pageUrl:'https://alpha.example/form'});
- assert.equal(route.route,'acquire');assert.equal(route.requiresUser,false);assert.ok(route.blockers.includes('ORDINARY_FIELD_MARKED_USER_ONLY'));
+ assert.equal(route.route,'acquire');assert.equal(route.requiresUser,false);assert.ok(route.blockers.includes('FORM_BUILD_NOT_COMPLETED'));
  assert.ok((await compileExecutionPlan(t,{values:{name:'Applicant',gender:'女'}})).constructionBlockers.includes('ORDINARY_FIELD_MARKED_USER_ONLY'));
 });
 test('mapping suggestions preserve multiple school records for semantic resolution',()=>{
@@ -66,7 +66,7 @@ const binding=()=>({pageId:'iab:1',targetId:'target',beforeUrl:'https://alpha.ex
 test('REA evidence preserves exact bound page identity, never turns AX IDs into selectors',()=>{
  const s=normalizeReaStructure(evidence(),binding());assert.equal(s.executableSelectors,false);assert.equal(s.accessibility[0].value,undefined);assert.equal(s.pageUrl,binding().beforeUrl);
  const c={...capture('alpha','.ant-form-item'),pageUrl:s.pageUrl,pageId:'iab:1'};const j=bindStructureControls(s,c);assert.deepEqual(j.controls[0].reaCandidates,[]);assert.deepEqual(j.uncorrelatedControls.map(n=>n.nodeId),['n1']);assert.equal(j.controls[0].selector,'#name');
- assert.throws(()=>bindStructureControls(s,{...c,pageId:'iab:2'}),/SCOPE_MISMATCH/);
+ assert.throws(()=>bindStructureControls(s,{...c,pageUrl:'https://other.example/form'}),/SCOPE_MISMATCH/);
 });
 test('REA rejects stale, cross-target, partial and changed-page evidence',()=>{
  for(const change of [x=>x.e.parameters.target_id='other',x=>x.b.afterUrl='https://alpha.example/other',x=>x.e.normalized_result.capture_window.ended_at='2020-01-01T00:00:00Z',x=>x.e.normalized_result.completeness.truncated_sections=['dom']]){const x={e:evidence(),b:binding()};change(x);assert.throws(()=>normalizeReaStructure(x.e,x.b));}

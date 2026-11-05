@@ -1,3 +1,4 @@
+import {samePage} from './page-scope.mjs';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {tmpdir} from 'node:os';
@@ -39,9 +40,7 @@ export function normalizeReaStructure(evidence,binding,{now=Date.now(),maxAgeMs=
  return structure;
 }
 export function bindStructureControls(structure,capture){
- if(structure.pageUrl!==capture.pageUrl||capture.pageId&&structure.pageId!==capture.pageId)throw Error('REA_CONTROL_CAPTURE_SCOPE_MISMATCH');
- const elapsed=Math.abs(Date.parse(capture.observedAt)-Date.parse(structure.observedAt));
- if(!Number.isFinite(elapsed)||elapsed>120000)throw Error('REA_CONTROL_CAPTURE_TOO_FAR_APART');
+ if(!samePage(structure.pageUrl,capture.pageUrl))throw Error('REA_CONTROL_CAPTURE_SCOPE_MISMATCH');
  // Names are context, never a substitute for current backend DOM identity.
  const {controls,bound}=correlateNativeControls(structure.accessibility,capture.controls);
  const excluded=correlateNativeControls(structure.accessibility,(capture.scopeExclusions||[]).filter(e=>e.kind==='navigation'&&e.reason==='outside_application_form'));

@@ -1,3 +1,6 @@
+import {rolePageContract} from './role-identity.mjs';
+import {wasBuilt} from './form-seal.mjs';
+import {withProfileRecords} from './repeat-groups.mjs';
 import {materialAudit,effectiveRequired} from './business-materials.mjs';
 import {assertApplicationText} from './application-text.mjs';
 import {createHash,randomUUID} from 'node:crypto';
@@ -51,13 +54,15 @@ async function validateFile(ref,files){
 // Pure form compilation plus local-file checks; never acquires a browser page.
 // All fields (including inactive branches and unanswered optional fields) retain
 // their position, source, type, action, constraints and readback specification.
-export async function compileExecutionPlan(template,task){
+export async function compileExecutionPlan(storedTemplate,task){
+  const template=withProfileRecords(storedTemplate,task.recordPlan);
   if(task.values?.[PROTECTED_IDENTITY_SOURCE]!=null)throw Error('PROTECTED_PROFILE_VALUE_FORBIDDEN');
   assertContentPolicy(task.values,task.contentPolicy);assertApplicationText(task.values);
   const pages=[],counts={fill:0,observe:0,needs_user:0,omitted:0,user_only:0,authorized_profile:0,authorized_privacy:0,inactive:0};
   const materialCoverage=materialAudit(template.pages.flatMap(p=>p.fields),task);
   const checkedFiles=new Set(),fileMetadata={};
-  for(const page of template.pages){
+  for(const storedPage of template.pages){
+    const page=rolePageContract(storedPage,task.confirmedRole);
     const fields=[];
     for(const f of page.fields){
       validateControlContract(f);
@@ -112,7 +117,7 @@ export async function compileExecutionPlan(template,task){
   }
   // Captured/mapped does not mean construction is complete. Preserve explicit
   // failures in the frozen plan so every entry path rejects them before I/O.
-  const constructionBlockers=[...new Set([...templateConstructionIssues(template).map(x=>x.reason),...materialCoverage.blockers])];
+  const constructionBlockers=[...new Set([...(wasBuilt(template)?[]:templateConstructionIssues(template).map(x=>x.reason)),...materialCoverage.blockers])];
   for(const f of template.pages.flatMap(p=>p.fields))if(f.kind==='date'&&f.ongoingSource&&task.values?.[f.ongoingSource]===true){
    const representation=task.dateRepresentations?.[f.id];
    if(f.dateRepresentation&&(!representation||representation.source!==f.dateRepresentation.source))constructionBlockers.push('DATE_REPRESENTATION_AUTHORIZATION_CHANGED');
@@ -127,10 +132,12 @@ export async function compileExecutionPlan(template,task){
   if(template.coverage?.allDriversSupported!==true)constructionBlockers.push('CONTROL_DRIVERS_NOT_SUPPORTED');
   const body=json({schemaVersion:1,compilerVersion:3,taskId:task.taskId||task.roleQueueArgs?.taskId||null,companyId:task.companyId,pageUrl:task.pageUrl,templateHash:task.templateHash,inputHash:digest(inputSnapshot(template,task)),files:inputSnapshot(template,task).files,fileMetadata,profileFillContext:task.profileFillContext||null,privacyFillContext:task.privacyFillContext||null,pages,counts,materialCoverage,constructionBlockers,unstableFields,readyForExecution:constructionBlockers.length===0&&counts.needs_user===0,allKnown:counts.needs_user===0&&counts.user_only===0});
   const planHash=digest(body);
-  return {id:randomUUID(),createdAt:new Date().toISOString(),...body,planHash};
+  const id=body.taskId?[planHash.slice(0,8),planHash.slice(8,12),'5'+planHash.slice(13,16),'8'+planHash.slice(17,20),planHash.slice(20,32)].join('-'):randomUUID();
+  return {id,createdAt:new Date().toISOString(),...body,planHash};
 }
 
-export async function assertPreparedPlan(prepared,template,task,authorization,{scope='full',fieldIds=[]}={}){
+export async function assertPreparedPlan(prepared,storedTemplate,task,authorization,{scope='full',fieldIds=[]}={}){
+  const template=withProfileRecords(storedTemplate,task.recordPlan);
   if(!['full','authorized_profile_fields','authorized_privacy_fields','selected_fields'].includes(scope))throw Error('INVALID_EXECUTION_SCOPE');
   if(!prepared||!task.planId||!task.planHash)throw Error('PREPARED_PLAN_REQUIRED');
   const {id,createdAt,planHash,...body}=prepared;

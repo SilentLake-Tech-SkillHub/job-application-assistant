@@ -17,10 +17,8 @@ export function preferRealMajorMappings(profile,{evidence}){
   delete profile.facts[key];delete profile.fieldRegistry[key];moved.push({old:key,target,real});
  }
  for(const form of Object.values(profile.companyForms||{})){
-  let changed=false;
-  for(const m of Object.values(form.mappings||{})){const major=majorFacts(profile,m.factKey);if(major&&m.factKey!==major.realKey){m.factKey=major.realKey;m.mappingEvidence=evidence;changed=true;}}
-  for(const field of form.executionContract?.fields||[]){const major=majorFacts(profile,field.source);if(major&&field.source!==major.realKey){field.source=major.realKey;delete field.enumMap;delete field.choiceResolution;changed=true;}}
-  if(changed&&form.executionContract)Object.assign(form.executionContract,{validForCurrentInventory:false,status:'requires_rebuild',rebuildReason:'major_policy_changed'});
+  for(const m of Object.values(form.mappings||{})){const major=majorFacts(profile,m.factKey);if(major&&m.factKey!==major.realKey){m.factKey=major.realKey;m.mappingEvidence=evidence;}}
+  for(const field of form.executionContract?.fields||[]){const major=majorFacts(profile,field.source);if(major&&field.source!==major.realKey){field.source=major.realKey;delete field.enumMap;delete field.choiceResolution;}}
  }
  return {moved};
 }

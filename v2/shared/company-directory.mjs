@@ -62,40 +62,63 @@ export async function readCompanyFiles(handoffDir=handoffDirFromEnv()){
 }
 
 export class CompanyDirectory{
- constructor({handoffDir=handoffDirFromEnv(),store=null}={}){this.handoffDir=path.resolve(handoffDir);this.base=path.join(this.handoffDir,'公司');this.store=store;}
- // 目录项以站点编码为 id/siteId，所属公司以 companyId 保存公司编码。
+ constructor({handoffDir=handoffDirFromEnv(),store=null,readAsset=async file=>JSON.parse(await readFile(file,'utf8'))}={}){this.handoffDir=path.resolve(handoffDir);this.base=path.join(this.handoffDir,'公司');this.store=store;this.readAsset=readAsset;}
+ // 一家公司一个目录项；站点信息仅作来源值保留。
  async load(){
-  const logins={},definitions={};
+  const logins={},definitions={},companyFiles=await readCompanyFiles(this.handoffDir);
   for(const region of (await entries(this.base)).filter(d=>d.isDirectory()))
    for(const firm of (await entries(path.join(this.base,region.name))).filter(d=>d.isDirectory())){
     const dir=path.join(this.base,region.name,firm.name);
     for(const f of (await entries(dir)).filter(d=>d.isFile())){
      const m=ASSET.exec(f.name);if(!m)continue;
-     const file=path.join(dir,f.name),asset=JSON.parse(await readFile(file,'utf8'));
+     const file=path.join(dir,f.name),asset=await this.readAsset(file);
      const origin=asset.origin?new URL(asset.origin).origin:(m[2]?'https://'+m[2]:null);
      if(m[2]&&origin&&new URL(origin).host!==m[2])throw Error('COMPANY_ASSET_HOST_MISMATCH');
      if(!origin)throw Error(m[1]==='登录'?'LOGIN_ORIGIN_REQUIRED':'DEFINITION_ORIGIN_REQUIRED');
-     const target=m[1]==='登录'?logins:definitions;if(target[origin])throw Error('DUPLICATE_SITE_ASSET:'+origin);target[origin]=file;
+     // The persisted company code owns this configuration. Folder names and ATS
+     // hostnames are values; neither can change its owner or lend it to another company.
+     const owners=companyFiles.filter(({code,doc})=>code===asset.companyId&&(doc['站点']||[]).some(s=>new URL(s['站点']).origin===origin));
+     if(owners.length!==1)continue;
+     const code=owners[0].code,target=m[1]==='登录'?logins:definitions;
+     target[code]??={};
+     if(target[code][origin])throw Error('DUPLICATE_SITE_ASSET:'+code+':'+origin);
+     target[code][origin]=file;
     }
    }
   const out=[],ids=new Set();
-  for(const {code,file,doc} of await readCompanyFiles(this.handoffDir)){
+  for(const {code,file,doc} of companyFiles){
    if(doc['公司编码']!==code)throw Error('COMPANY_FILE_CODE_MISMATCH');
+   const sites=[];
    for(const s of doc['站点']||[]){
     if(!CODE.site.test(s['站点编码']))throw Error('INVALID_SITE_CODE');
     if(ids.has(s['站点编码']))throw Error('DUPLICATE_SITE_CODE:'+s['站点编码']);ids.add(s['站点编码']);
     const origin=new URL(s['站点']).origin;
-    const id=s['站点编码'];
-    if(out.some(e=>e.id===id))throw Error('DUPLICATE_SITE_ASSET_KEY:'+id);
-    out.push({id,siteId:s['站点编码'],companyId:code,name:doc['公司名称'],origin,status:s['状态']||'在用',loginUrl:s['登录链接']||null,accountPageUrl:s['账号核对页']||null,
-     channel:'campus',templateId:null,file,loginFile:logins[origin]||null,definitionFile:definitions[origin]||null});
+    sites.push({siteId:s['站点编码'],origin,status:s['状态']||'在用',loginUrl:s['登录链接']||null,accountPageUrl:s['账号核对页']||null,
+     loginFile:logins[code]?.[origin]||null,definitionFile:definitions[code]?.[origin]||null});
    }
+   // The company is the identity. Source site codes and URLs are retained as
+   // values, so unresolved upstream data is not silently merged or discarded.
+   const configured=sites.filter(s=>s.loginFile),primary=sites.length===1?sites[0]:configured.length===1?configured[0]:null;
+   out.push({id:code,companyId:code,name:doc['公司名称'],channel:'campus',templateId:null,file,sites,
+    origins:[...new Set(sites.map(s=>s.origin))],siteId:primary?.siteId||null,origin:primary?.origin||null,
+    loginUrl:primary?.loginUrl||null,accountPageUrl:primary?.accountPageUrl||null,
+    loginFile:primary?.loginFile||null,definitionFile:primary?.definitionFile||null});
   }
   this.companies=out;return out;
  }
- entry(id){const e=(this.companies||[]).find(c=>c.id===id);if(!e)throw Error('UNKNOWN_COMPANY');return e;}
- loginFile(id){const f=this.entry(id).loginFile;if(!f)throw Error('COMPANY_LOGIN_NOT_CONFIGURED');return f;}
- definitionFile(id){return this.entry(id).definitionFile;}
+ entry(id,context={}){const e=(this.companies||[]).find(c=>c.id===id);if(!e)throw Error('UNKNOWN_COMPANY');return companyContext(e,context);}
+ loginFile(id,context={}){const f=this.entry(id,context).loginFile;if(!f)throw Error('COMPANY_LOGIN_NOT_CONFIGURED');return f;}
+ definitionFile(id,context={}){return this.entry(id,context).definitionFile;}
+
+}
+
+// A task supplies the source-site value or current URL. It never changes the
+// company's identity or chooses between unrelated companies on a shared ATS.
+export function companyContext(company,{siteId,pageUrl,url}={}){
+ if(!company?.sites)return company;
+ const current=pageUrl||url,origin=current?new URL(current).origin:null;
+ const site=siteId?company.sites.find(s=>s.siteId===siteId):origin?company.sites.find(s=>s.origin===origin):null;
+ return site?{...company,...site,id:company.id,companyId:company.companyId}:company;
 }
 
 // 本轮已确认交接的公司文件（每家各自核对：确认后被改动的那一家才拒绝）。

@@ -5,7 +5,7 @@ test('a shared fact retires only the unique observed replacement of the same sem
  const companyId='fixture',pageUrl='https://example.test/form';
  const selector=(label,occurrence,section='项目经历')=>'phoenixq:'+JSON.stringify({section,label,occurrence,part:'native',controlIndex:0});
  const fields=['职务','项目中职责'].map(label=>({source:'projects.example.role',label,inventorySelectors:[selector(label,8)],read:{selector:selector(label,8)}}));
- const template={evidence:{sourceUrl:pageUrl},pages:[{fields}]},key=hash({companyId,pageUrl}).slice(0,20);
+ const template={evidence:{sourceUrl:pageUrl},pages:[{fields}]},key=companyId;
  const profile={facts:{'projects.example.role':{value:'Owner'}},companyForms:{[key]:{companyId,pageUrl,mappings:Object.fromEntries(['职务','项目中职责'].map((label,i)=>['old'+i,{status:'mapped',active:false,coverageRequired:true,factKey:'projects.example.role',selector:selector(label,9)}]))}}};
  const probe={operation:'internal_condition_probe',companyId,templateHash:hash(template),status:'verified',restoration:'verified',branches:[{status:'verified',newQuestions:0,inventory:fields.map(f=>({selector:f.read.selector}))}]};
  const original=structuredClone(profile);
@@ -42,7 +42,7 @@ test('collector aliases need the same unique actual DOM node; labels, hidden nod
  assert.deepEqual(JSON.parse(JSON.stringify(result)),{pairs:[{alternativeIndex:0,referenceIndex:0}],valuesRead:false});
 });
 test('inactive unmapped locator records retire only with page/template-bound live equivalence, unresolved conditional records remain',()=>{
- const companyId='sample',url='https://sample.test/form',template={evidence:{sourceUrl:url},pages:[{fields:[{source:'name',inventorySelectors:['semantic-name'],read:{selector:'semantic-name'}}]}]},key=hash({companyId,pageUrl:formLocation(url)}).slice(0,20);
+ const companyId='sample',url='https://sample.test/form',template={evidence:{sourceUrl:url},pages:[{fields:[{source:'name',inventorySelectors:['semantic-name'],read:{selector:'semantic-name'}}]}]},key=companyId;
  const profile={facts:{name:{value:'Keep real fact'}},companyForms:{[key]:{companyId,pageUrl:url,mappings:{duplicate:{factKey:'unmapped.duplicate',status:'needs_semantic_mapping',selector:'#old-name',active:false,coverageRequired:true},unseen:{factKey:'unmapped.unseen',status:'needs_semantic_mapping',selector:'#conditional-unseen',active:false,coverageRequired:true}}}}};
  const probe={operation:'internal_condition_probe',companyId,templateHash:hash(template),status:'verified',restoration:'verified',branches:[{status:'verified',newQuestions:0,inventory:[{selector:'semantic-name'}]}],selectorEquivalences:{companyId,pageUrl:url,templateHash:hash(template),pairs:[{selector:'#old-name',reference:'semantic-name'}]}};
  assert.equal(retireLegacyQuestionMappings(profile,{companyId,template,probe}).retired,1);assert.ok(profile.companyForms[key].mappings.unseen);assert.equal(profile.facts.name.value,'Keep real fact');

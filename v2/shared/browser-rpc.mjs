@@ -23,7 +23,7 @@ export class BrokerBrowserAdapter {
 }
 class BrokerPage {
   constructor(browser,pageUrl,{pageId,readOnly=false,roleBinding}={}){Object.assign(this,{browser,pageUrl,pageId,readOnly,roleBinding});}
-  call(method,args={}){if(this.readOnly&&!['inventory','observe','assertLocation','wait'].includes(method))throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');return this.browser.request(method,{pageUrl:this.pageUrl,...args,...(this.pageId?{pageId:this.pageId,readOnly:this.readOnly,...(this.roleBinding?{roleBinding:this.roleBinding}:{})}:{})});}
+  call(method,args={}){if(this.readOnly&&!['inventory','observe','assertLocation','wait','repeatDiscovery'].includes(method))throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');return this.browser.request(method,{pageUrl:this.pageUrl,...args,...(this.pageId?{pageId:this.pageId,readOnly:this.readOnly,...(this.roleBinding?{roleBinding:this.roleBinding}:{})}:{})});}
   assertLocation(origin,prefix){return this.call('assertLocation',{origin,prefix});}
   async wait(selector){
     // Readiness means a visible match exists. It is not an action locator and
@@ -48,5 +48,6 @@ class BrokerPage {
   }
   async assertSingleEditor(){const key=sharedRecordKey(this.pageUrl);if(!key)return;const tabs=await this.browser.tabs();if(tabs.some(t=>t.url!==this.pageUrl&&sharedRecordKey(t.url)===key))throw Error('SHARED_RESUME_HAS_OTHER_OPEN_EDITORS');}
   async act(action,value,files){if(!this.pageId||!this.roleBinding)throw Error('BROWSER_BOUND_PAGE_REQUIRED');if(this.readOnly)throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');if(!['capture_wecruit_schema','wait','dropdown_inspect','ant_dropdown_inspect','ud_dropdown_inspect','ant_dropdown_verify','ud_dropdown_verify','dropdown_verify'].includes(action.method))await this.assertSingleEditor();return this.call('act',{action:action.provider==='feishu'?{...remapSpec(action,this.rowKeys||{}),selectorsResolved:true}:action,value,files});}
+  async repeatDiscovery(titles){return this.call('repeatDiscovery',{titles});}
   async ensureGroups(groups){if(!this.pageId||!this.roleBinding)throw Error('BROWSER_BOUND_PAGE_REQUIRED');if(this.readOnly)throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');if(groups?.length)await this.assertSingleEditor();return this.call('ensureGroups',{groups});}
 }

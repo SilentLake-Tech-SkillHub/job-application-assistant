@@ -111,3 +111,22 @@ test('a server defined through dotted keys or an inline table in a parent table 
  // An unrelated server in the same parent table is fine.
  const ok=mergeToml('[mcp_servers]\nother.command = "/x"\n',{serversPath:['mcp_servers'],entries});assert.ok(ok.includes('[mcp_servers."recruiting-login-v2"]'));
 });
+
+test('agent registration serializes allocation and keeps member identity across sessions',async()=>{
+ const {registerAgent}=await import('../shared/agent-registry.mjs');
+ const workspace=await mkdtemp(path.join(os.tmpdir(),'recruiting-agents-'));
+ try{
+  const first={workspace,host:'other-agent',instance:'member-one',mode:'multi_agent',group:'project-team'};
+  const second={...first,instance:'member-two'};
+  const agents=await Promise.all([registerAgent(first),registerAgent(second),registerAgent(first)]);
+  assert.deepEqual(agents[0],agents[2]);
+  assert.deepEqual(agents.slice(0,2).map(a=>a.id).sort(),['A0001','A0002']);
+  assert.equal(agents[1].mode,'multi_agent');
+  const configFile=path.join(workspace,'agent-mcp.json');
+  const installed=await installHost({...first,agent:agents[0],configFile,write:true});
+  assert.equal(installed.written,true);
+  const conf=JSON.parse(await readFile(configFile,'utf8'));
+  assert.equal(conf.mcpServers['recruiting-login-v2'].env.RECRUITING_AGENT_ID,agents[0].id);
+  await assert.rejects(installHost({...second,agent:agents[1],configFile,write:true}),/AGENT_CONFIG_BOUND_TO_OTHER_INSTANCE/);
+ }finally{await rm(workspace,{recursive:true,force:true});}
+});

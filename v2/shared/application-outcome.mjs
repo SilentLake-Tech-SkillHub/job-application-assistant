@@ -31,16 +31,16 @@ async function writeOutcomes(dir,fn){
   return result?.value;
  }finally{if(tmp)await unlink(tmp).catch(()=>{});await handle.close();await unlink(lock).catch(()=>{});}
 }
-// catalog：投递目录（站点资产键 → 站点编码）；不传时 companyId 按站点编码对应。
+// 回传直接按公司编码与岗位编码核对；站点编码只是主表来源值。
 export async function recordApplicationOutcome({outcome,handoffDir=handoffDirFromEnv(),catalog=null}){
  const e=outcomeSchema.parse(outcome),dir=path.resolve(handoffDir);
- const siteId=catalog?catalog.find(c=>c.id===e.companyId)?.siteId:e.companyId;
- if(!CODE.site.test(siteId||''))throw Error('OUTCOME_ROLE_IDENTITY_MISMATCH');
+ if(!CODE.company.test(e.companyId))throw Error('OUTCOME_ROLE_IDENTITY_MISMATCH');
  const {batchId,files}=await readHandoffCompanies({handoffDir:dir,states:['已交接','进行中','等待反向评审']});
  if(batchId!==e.batchId)throw Error('OUTCOME_BATCH_MISMATCH');
  const matches=files.flatMap(f=>(f.doc['岗位']||[]).filter(r=>f.doc['批次']['选中岗位'].includes(r['岗位编码'])).map(r=>({companyCode:f.code,...r})))
-  .filter(r=>r['岗位编码']===e.roleId&&r['站点编码']===siteId&&r['岗位链接']===e.roleUrl&&r['岗位名称']===e.roleTitle);
+  .filter(r=>r.companyCode===e.companyId&&r['岗位编码']===e.roleId&&r['岗位链接']===e.roleUrl&&r['岗位名称']===e.roleTitle);
  if(matches.length!==1)throw Error('OUTCOME_ROLE_IDENTITY_MISMATCH');
+ const siteId=matches[0]['站点编码'];
  const key=e.roleId,eventHash=sha(JSON.stringify(e));
  return writeOutcomes(dir,async out=>{
   const prior=out.roles[key];

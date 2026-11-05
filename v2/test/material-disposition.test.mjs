@@ -12,7 +12,7 @@ function fixture(){
  const field={id:'name',source:'name',label:'Name',kind:'text',required:true,control:{type:'text',valueType:'string',readbackType:'string'},read:{selector:'#name',kind:'value'},actions:[{method:'fill',selector:'#name'}]};
  const template={id:'fixture',version:1,evidence:{sourceUrl:pageUrl,observedAt:'fixture'},coverage:{allControlsMapped:true,allConditionalBranchesVerified:true,allDriversSupported:true},pages:[{pathPrefix:'/form',readySelector:'#name',roleTitle:'Product',roleSelector:'h1',sections:[{title:'Basics'}],sectionDiscovery:{selector:'section',titleSelector:'h2'},fields:[field]}]};
  const profile={sources:{},facts:{}},args={context,pageUrl,template,templateHash:hash(template),capture,controls,key:'referralCode',evidence:'User explicitly confirms this role does not use this code because the site has no destination.'};
- const scoped=()=>withMaterialDispositions(profile,context,{pageUrl,templateHash:hash(template)});
+ const scoped=()=>withMaterialDispositions(profile,context);
  const job=ctx=>({companyId:'sample',roleId:'J000001',pageUrl,templateHash:hash(template),...resolveMaterialValues(ctx),values:{...resolveMaterialValues(ctx).values,name:'Example'},sources:{name:{kind:'user_reply'}},files:{}});
  return {profile,args,scoped,job,context,template,pageUrl};
 }
@@ -42,17 +42,29 @@ test('an actual code destination is always mandatory even when an exception was 
   assert.throws(()=>recordMaterialDestinationException(g.profile,g.args),/MATERIAL_DESTINATION_EXISTS_CANNOT_EXEMPT/);
  }
 });
-test('exceptions cannot leak across page, template, role, batch, materials, or withdrawn user source',()=>{
- for(const change of ['page','template','role','batch','materials','source']){
+test('the confirmation belongs to the company form: role, batch, address and template changes keep it; another company or a withdrawn source does not',()=>{
+ for(const change of ['page','template','role','batch','materials']){
   const f=fixture();recordMaterialDestinationException(f.profile,f.args);
-  let context=structuredClone(f.context),pageUrl=f.pageUrl,templateHash=hash(f.template);
-  if(change==='page')pageUrl+='&other=1';if(change==='template')templateHash='a'.repeat(64);if(change==='role')context.roleId='other';if(change==='batch')context.contentSha256='changed';if(change==='materials')context.materials.items[0].value='ChangedCode';if(change==='source')f.profile.sources={};
-  const ctx=withMaterialDispositions(f.profile,context,{pageUrl,templateHash});assert.equal(ctx.dispositions,undefined);
+  let context=structuredClone(f.context);
+  if(change==='role')context.roleId='other';if(change==='batch')context.contentSha256='changed';if(change==='materials')context.materials.items[0].value='ChangedCode';
+  assert.ok(withMaterialDispositions(f.profile,context).dispositions.referralCode,change);
  }
+ for(const change of ['company','source']){
+  const f=fixture();recordMaterialDestinationException(f.profile,f.args);
+  const context=structuredClone(f.context);if(change==='company')context.companyId='other';if(change==='source')f.profile.sources={};
+  assert.equal(withMaterialDispositions(f.profile,context).dispositions,undefined,change);
+ }
+});
+test('a record written before this change, bound to an old template hash, still counts for its company',()=>{
+ const f=fixture();f.profile.sources.old={kind:'user_reply',evidence:'User confirmed'};
+ f.profile.applicationDispositions={sample:{roleMaterials:{oldkey:{kind:'user_confirmed_no_destination',key:'referralCode',companyId:'sample',roleId:'J000001',templateHash:'b'.repeat(64),pageUrl:'https://fixture.test/form?old=1',captureId:'c',inventoryHash:'i',sourceId:'old',recordedAt:'t'}}}};
+ assert.equal(materialAudit(f.template.pages[0].fields,f.job(f.scoped())).complete,true);
+ revokeMaterialDestinationException(f.profile,{context:f.context,key:'referralCode',evidence:'withdraw'});
+ assert.equal(f.scoped().dispositions,undefined);
 });
 test('registration refuses absent confirmation, wrong capture, and unavailable material',()=>{
  for(const change of ['evidence','capture','material']){
-  const f=fixture();if(change==='evidence')f.args.evidence='';if(change==='capture')f.args.capture.pageUrl='https://fixture.test/other';if(change==='material')f.context.materials.items[0].status='absent';
+  const f=fixture();if(change==='evidence')f.args.evidence='';if(change==='capture')f.args.capture.companyId='other';if(change==='material')f.context.materials.items[0].status='absent';
   assert.throws(()=>recordMaterialDestinationException(f.profile,f.args));assert.deepEqual(f.profile.sources,{});
  }
 });

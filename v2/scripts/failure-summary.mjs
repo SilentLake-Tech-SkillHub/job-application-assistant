@@ -34,5 +34,5 @@ if(asJson){console.log(JSON.stringify(report,null,2));process.exit(0);}
 console.log(`失败聚合（${report.since?'自 '+report.since:'全部记录'}）——按出现次数排序，跨公司同类问题优先一次修复`);
 for(const r of rows.slice(0,30))console.log(`${String(r.count).padStart(5)}  ${r.technical?'驱动/宿主':'取值/映射'}  ${r.reason}  [${r.kind}]  公司${r.companies.length}家：${r.companies.slice(0,6).join('、')}${r.companies.length>6?'…':''}  证据：${r.evidence.join(' ')}`);
 console.log(`\n最新一次核验仍未通过的岗位：${stillFailing.length} 个`);for(const v of stillFailing)console.log(`  ${v.companyId}  未通过 ${v.failed} 项  ${v.id}`);
-console.log(`\n当前止损中的调用：${stopLoss.length} 个`);for(const e of stopLoss)console.log(`  ${e.scope}  ${e.tool}  ×${e.count}  ${e.reasons.join(',')}`);
+console.log(`\n同一失败出现两次、待向用户提问的调用：${stopLoss.length} 个`);for(const e of stopLoss)console.log(`  ${e.scope}  ${e.tool}  ×${e.count}  ${e.reasons.join(',')}`);
 console.log(`\n返回量最大的调用（返回字节≈进入模型上下文的量；自启用计量起）：`);for(const m of report.callVolume.slice(0,15))console.log(`  ${(m.resultBytes/1024).toFixed(0).padStart(7)}KB  ${String(m.calls).padStart(4)}次  失败${m.errors}  ${(m.elapsedMs/1000).toFixed(0)}s  ${m.scope}  ${m.tool}`);

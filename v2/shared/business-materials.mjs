@@ -45,11 +45,7 @@ export function resolveMaterialValues(context){
  return {values,sources,omissions,materialContext:context};
 }
 export function materialDispositionApplies(context,record,key){
- const scope=context.dispositionScope;
- return !!scope&&record?.kind==='user_confirmed_no_destination'&&record.revoked!==true&&record.key===key&&!!record.captureId&&!!record.inventoryHash&&!!record.sourceId&&!!record.recordedAt&&
-  scope.companyId===context.companyId&&scope.roleId===String(context.roleId)&&scope.roleUrl===context.roleUrl&&scope.batchId===context.batchId&&scope.contentSha256===context.contentSha256&&scope.materialsHash===digest(context.materials)&&
-  typeof scope.pageUrl==='string'&&new URL(scope.pageUrl).origin===new URL(context.roleUrl).origin&&typeof scope.templateHash==='string'&&/^[a-f0-9]{64}$/.test(scope.templateHash)&&
-  ['companyId','roleId','roleUrl','batchId','contentSha256','materialsHash','pageUrl','templateHash'].every(k=>record[k]===scope[k]);
+ return record?.kind==='user_confirmed_no_destination'&&record.revoked!==true&&record.key===key&&!!record.sourceId&&record.companyId===context.companyId;
 }
 export function materialAudit(fields,task){
  const context=task.materialContext;if(!context)return {enabled:false,complete:true,requirements:[],blockers:[]};
@@ -62,10 +58,12 @@ export function materialAudit(fields,task){
   if(item.status!=='available')continue;
   if(!matches.length){
    const record=context.dispositions?.[item.key];
-   if(materialDispositionApplies(context,record,item.key)&&context.dispositionScope.pageUrl===task.pageUrl&&context.dispositionScope.templateHash===task.templateHash)exceptions.push({key:item.key,kind:record.kind,sourceId:record.sourceId,captureId:record.captureId,inventoryHash:record.inventoryHash});
+   if(materialDispositionApplies(context,record,item.key))exceptions.push({key:item.key,kind:record.kind,sourceId:record.sourceId,captureId:record.captureId,inventoryHash:record.inventoryHash});
    else blockers.push('ROLE_MATERIAL_DESTINATION_REQUIRED');
   }
-  for(const field of matches){
+  const active=matches.filter(field=>!field.when||task.values?.[field.when.source]===field.when.equals);
+  const destinations=matches.filter(field=>!field.when||!active.some(other=>other.when?.source===field.when.source&&other.when.equals!==field.when.equals));
+  for(const field of destinations){
    if(field.source!==source)blockers.push('ROLE_MATERIAL_MAPPING_REQUIRED');
    if(field.userOnly||field.when&&task.values?.[field.when.source]!==field.when.equals)blockers.push('REQUIRED_MATERIAL_NOT_EXECUTABLE');
    if(task.values?.[source]!==item.value)blockers.push('ROLE_MATERIAL_VALUE_NOT_RESOLVED');
@@ -82,7 +80,7 @@ export function assertMaterialDestinationsRemainAbsent(audit,inventory){
 }
 export function effectiveRequired(field,task){
  const key=materialKey(field);
- return !!field.required||!!key&&task.materialContext?.materials?.items.some(item=>item.key===key&&item.status==='available'&&item.requireWhenAvailable);
+ return !!field.required||!!key&&(!field.when||task.values?.[field.when.source]===field.when.equals)&&task.materialContext?.materials?.items.some(item=>item.key===key&&item.status==='available'&&item.requireWhenAvailable);
 }
 export function verifyMaterialCoverage(expected,observed){
  const audit=expected.materialAudit;if(!audit?.enabled)return {enabled:false,complete:true,checks:[]};

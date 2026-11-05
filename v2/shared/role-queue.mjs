@@ -32,12 +32,12 @@ export class RoleQueue{
    const roles=c.roles.filter(r=>r.selected===true),orders=new Set();
    for(const r of roles){if(!Number.isInteger(r.order)||r.order<1||orders.has(r.order))throw Error('INVALID_CONFIRMED_ROLE_ORDER');orders.add(r.order);}
    for(const r of roles.sort((a,b)=>a.order-b.order)){
-    // 任务归属到岗位所在站点（站点编码）的目录项：companyId 是该站点的资产键，siteId 是站点编码；链接只用于核对站点，不进队列。
-    const site=this.catalog.find(x=>x.siteId===r.siteId&&x.companyId===c.companyId),u=new URL(r.url);
+    // 任务按公司编码归属；站点编码仅保留来源值，链接不进入队列。
+    const company=this.catalog.find(x=>x.companyId===c.companyId),site=(company?.sites||[company]).find(x=>x?.siteId===r.siteId),u=new URL(r.url);
     if(!r.roleId||!r.title||!site||u.protocol!=='https:'||u.origin!==site.origin||u.username||u.password||/\/(?:login|sign[-_]?in)\/?$/.test(u.pathname))throw Error('INVALID_CONFIRMED_ROLE_URL');
     if(r.applyUrl){const a=new URL(r.applyUrl);if(a.protocol!=='https:'||a.origin!==site.origin||a.username||a.password)throw Error('INVALID_ROLE_APPLICATION_URL');}
     if(identities.has(r.roleId))throw Error('DUPLICATE_CONFIRMED_ROLE');identities.add(r.roleId);
-    const companyId=site.id,roleId=r.roleId,status=r.applicationStatus;
+    const companyId=company.id,roleId=r.roleId,status=r.applicationStatus;
     if(status==='岗位已投递'){protectedRoles.push({companyId,roleId,reason:'already_submitted'});continue;}
     if(status==='岗位失效/关闭'){protectedRoles.push({companyId,roleId,reason:'role_closed'});continue;}
     if(status!=='岗位待投递')throw Error('ROLE_APPLICATION_STATE_UNRESOLVED');
