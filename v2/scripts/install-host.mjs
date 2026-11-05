@@ -8,6 +8,7 @@
 // 用法：
 //   node scripts/install-host.mjs --host <id> --workspace <工作区绝对路径> [--role executor|maintainer] [--scope project|user] [--node <node 路径>] [--write] [--expect-sha <sha>]
 //   （适配器同时有工作区配置和用户配置时默认写工作区配置）
+import {Document,isMap,isSeq,parseDocument} from 'yaml';
 import {pathToFileURL,fileURLToPath} from 'node:url';
 import {readFile,writeFile,rename,mkdir,unlink} from 'node:fs/promises';
 import {createHash,randomUUID} from 'node:crypto';
@@ -207,6 +208,53 @@ export function yamlPreview({serversPath,entries}){
  for(const [name,e] of Object.entries(entries)){lines.push(ind(base)+name+':',ind(base+2)+'command: '+q(e.command),ind(base+2)+'args: ['+e.args.map(q).join(', ')+']',ind(base+2)+'env:');for(const [k,v] of Object.entries(e.env))lines.push(ind(base+4)+k+': '+q(v));}
  return lines.join('\n')+'\n';
 }
+// Cordis patch layers are sequences of insert groups and id overrides.
+function dshPatch(text){
+ const doc=text.trim()?parseDocument(text):new Document([]);
+ if(doc.errors.length)throw Error('DSH_CONFIG_INVALID');
+ if(!isSeq(doc.contents))return null;
+ const groups=doc.contents.items.filter(isMap).map(node=>node.get('insert')).filter(isSeq);
+ const nodes=[...doc.contents.items,...groups.flatMap(group=>group.items)].filter(isMap);
+ const managed=new Map();
+ for(const name of Object.values(SERVER_NAMES)){
+  const matches=nodes.filter(node=>node.get('id')==='mcp-'+name);
+  if(matches.length>1)throw Error('DSH_MCP_PLUGIN_DUPLICATE');
+  if(!matches.length)continue;
+  const [node]=matches,config=node.get('config'),env=config?.get?.('env');
+  if(node.get('name')!=='@deepseek-ai/dsh-mcp-client'||!isMap(config)||!isMap(env)||config.get('serverName')!==name)throw Error('DSH_MCP_PLUGIN_CONFIG_UNRECOGNIZED');
+  managed.set(name,{node,config,env});
+ }
+ return {doc,managed};
+}
+export function dshRuntimeEnvironment(text){
+ const patch=dshPatch(text);
+ if(!patch||patch.managed.size!==Object.keys(SERVER_NAMES).length)throw Error('DSH_RECRUITING_MCP_CONFIGURATION_REQUIRED');
+ const keys=['RECRUITING_HOST_ID','RECRUITING_HOST_ROLE','RECRUITING_AGENT_ID'];
+ const values={};
+ for(const key of keys){
+  const entries=[...patch.managed.values()].map(({env})=>env.get(key));
+  if(entries.some(value=>typeof value!=='string'||!value)||new Set(entries).size!==1)throw Error('DSH_RECRUITING_ENVIRONMENT_CONFLICT');
+  values[key]=entries[0];
+ }
+ if(values.RECRUITING_HOST_ID!=='dsh'||!['executor','maintainer'].includes(values.RECRUITING_HOST_ROLE)||!/^A\d{4}$/.test(values.RECRUITING_AGENT_ID))throw Error('DSH_RECRUITING_ENVIRONMENT_INVALID');
+ return values;
+}
+function mergeDshPatch(patch,entries,workspace){
+ const {doc,managed}=patch,added=[];
+ for(const [name,entry]of Object.entries(entries)){
+  const {env,...server}=entry;
+  const previous=managed.get(name);
+  if(!previous){
+   added.push({id:'mcp-'+name,name:'@deepseek-ai/dsh-mcp-client',config:{serverName:name,transport:'stdio',...server,cwd:workspace,env}});
+   continue;
+  }
+  for(const [key,value]of Object.entries({...server,cwd:workspace,transport:'stdio'}))previous.config.set(key,value);
+  for(const key of RETIRED_ENV)previous.env.delete(key);
+  for(const [key,value]of Object.entries(env))previous.env.set(key,value);
+ }
+ if(added.length)doc.add({insert:added});
+ return doc.toString();
+}
 export async function installHost({host,workspace,role,node=process.execPath,component=path.resolve(fileURLToPath(new URL('..',import.meta.url))),write=false,expectSha=null,home=homedir(),uid,scope,configFile,agent}){
  const adapter=await loadAdapter(host),cfg=adapter.mcpConfig;
  if(scope&&!['project','user'].includes(scope)||scope==='project'&&!cfg.project||scope==='user'&&!cfg.user)throw Error('HOST_CONFIG_SCOPE_UNAVAILABLE');
@@ -214,6 +262,8 @@ export async function installHost({host,workspace,role,node=process.execPath,com
  const target=configFile?path.resolve(configFile):project?path.join(workspace,cfg.project):path.join(home,cfg.user.replace(/^~\//,''));
  const relative=path.relative(workspace,target),inWorkspace=project&&!relative.startsWith('..'+path.sep)&&relative!=='..'&&!path.isAbsolute(relative);
  const current=await readFile(target,'utf8').catch(e=>{if(e.code==='ENOENT')return '';throw e;}),currentSha=sha(current);
+ const dsh=cfg.yamlShape==='dsh_plugin_list'?dshPatch(current):null;
+ if(agent&&dsh&&[...dsh.managed.values()].some(({env})=>env.has('RECRUITING_AGENT_ID')&&env.get('RECRUITING_AGENT_ID')!==agent.id))throw Error('AGENT_CONFIG_BOUND_TO_OTHER_INSTANCE');
  if(agent&&cfg.format!=='yaml'){
   const agentKey='RECRUITING_AGENT_ID';
   let existing;
@@ -224,7 +274,10 @@ export async function installHost({host,workspace,role,node=process.execPath,com
   }else existing=Object.values(SERVER_NAMES).flatMap(name=>tomlSettingValue(tomlSettings(current),[...cfg.serversPath,name,'env',agentKey])).filter(Boolean);
   if(existing.some(id=>id!==agent.id))throw Error('AGENT_CONFIG_BOUND_TO_OTHER_INSTANCE');
  }
- const oldRoles=role===undefined?existingRoles(current,cfg):[];
+ const oldRoles=role===undefined?(dsh?[...dsh.managed.values()].map(({env})=>{
+  if(!env.has('RECRUITING_HOST_ROLE'))throw Error('YAML_EXISTING_HOST_ROLE_REQUIRED');
+  return env.get('RECRUITING_HOST_ROLE');
+ }):existingRoles(current,cfg)):[];
  if(oldRoles.some(value=>!['executor','maintainer'].includes(value))||new Set(oldRoles).size>1)throw Error('HOST_ROLE_CONFIG_CONFLICT: choose --role executor|maintainer explicitly');
  const roleSource=role!==undefined?'explicit':oldRoles.length?'existing':'default';
  const env=hostEnv({host,workspace,role:role??oldRoles[0]??'executor',...(uid!==undefined?{uid}:{})});
@@ -233,9 +286,10 @@ export async function installHost({host,workspace,role,node=process.execPath,com
   env.RECRUITING_AGENT_ID=agent.id;
  }
  const entries=serverEntries({adapter,env,node,component});
- const shellEnvironment={RECRUITING_HOST_ROLE:env.RECRUITING_HOST_ROLE};
- if(cfg.format==='yaml')return {host,target,format:'yaml',written:false,currentSha,roleSource,shellEnvironment,preview:cfg.yamlShape==='dsh_plugin_list'?dshPluginEntries({entries,workspace}):yamlPreview({serversPath:cfg.serversPath,entries}),note:'paste under the existing structure by hand; YAML files are never rewritten by this script; set the same role in the host Hook/shell environment'};
- let next=cfg.format==='json'?mergeJson(current,{serversPath:cfg.serversPath,entries}):mergeToml(current,{serversPath:cfg.serversPath,entries});
+ const shellEnvironment={RECRUITING_HOST_ROLE:env.RECRUITING_HOST_ROLE,...(agent?{RECRUITING_AGENT_ID:agent.id,RECRUITING_HOST_ID:host}:{})};
+ if(cfg.format==='yaml'&&(!dsh||write&&!inWorkspace&&expectSha===null))return {host,target,format:'yaml',written:false,currentSha,roleSource,shellEnvironment,preview:dsh?mergeDshPatch(dsh,entries,workspace):cfg.yamlShape==='dsh_plugin_list'?dshPluginEntries({entries,workspace}):yamlPreview({serversPath:cfg.serversPath,entries}),note:dsh?'write with --expect-sha after review':'unsupported YAML layout; preview only'};
+ if(dsh&&role!==undefined&&[...dsh.managed.values()].some(({env})=>env.has('RECRUITING_HOST_ROLE')&&env.get('RECRUITING_HOST_ROLE')!==role))throw Error('DSH_HOST_ROLE_CHANGE_REQUIRES_DEPLOYMENT_CONFIGURATION');
+ let next=dsh?mergeDshPatch(dsh,entries,workspace):cfg.format==='json'?mergeJson(current,{serversPath:cfg.serversPath,entries}):mergeToml(current,{serversPath:cfg.serversPath,entries});
  if(cfg.shellRolePath){
   next=mergeShellRole(next,cfg.shellRolePath,env.RECRUITING_HOST_ROLE);
   if(agent){

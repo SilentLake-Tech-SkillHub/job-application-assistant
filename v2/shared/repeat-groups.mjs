@@ -146,7 +146,7 @@ export function withProfileRecords(template,plan){
  return changed?{...template,pages}:template;
 }
 // Sections whose planned records are not on the page and that have no way to add one yet.
-export function sectionsWithoutAdd(page,liveControls){
+export function sectionsWithoutAdd(page,liveControls,recordPlan){
  const contracted=new Set((page.groups||[]).filter(group=>group.addSelector).map(groupSection)),rendered=new Map(),planned=new Map();
  const note=(map,selector)=>{
   const scope=scopeOf(selector);if(!scope)return;
@@ -154,7 +154,15 @@ export function sectionsWithoutAdd(page,liveControls){
  };
  for(const control of liveControls||[])note(rendered,control.selector);
  for(const field of page.fields||[])for(const selector of field.inventorySelectors||[field.read?.selector])note(planned,selector);
- return [...planned].filter(([section,count])=>count>1&&!contracted.has(section)&&(rendered.get(section)||0)<count).map(([section])=>section);
+ const missing=new Set([...planned].filter(([section,count])=>count>1&&!contracted.has(section)&&(rendered.get(section)||0)<count).map(([section])=>section));
+ // A single captured row cannot establish a repeat contract. Ask the live
+ // reader to look only when the master actually has another mapped record.
+ if(recordPlan&&page.provider==='ant')for(const {section,records}of recordsByPage(page,recordPlan.parents||{})){
+  if(contracted.has(section)||records.length!==1)continue;
+  const owner=records[0].owner;
+  if(owner&&recordPlan.entities[owner.family]?.some(key=>key!==owner.key&&inProfile({...owner,key},recordPlan)))missing.add(section);
+ }
+ return [...missing];
 }
 export function groupFromDiscovery(found){
  if(found.selector&&found.addSelector)return {id:found.sectionKey||found.title,sectionKey:found.sectionKey||found.title,selector:found.selector,addSelector:found.addSelector,addLabel:found.addLabel};

@@ -29,7 +29,7 @@ function fixture({icon='download',bundle='entry',wrongLevel=false,state,duplicat
  const read=spec=>JSON.parse(JSON.stringify(vm.runInNewContext('('+controlDOM.toString()+')(spec)',{spec,document:{body,querySelectorAll:s=>body.querySelectorAll(s)},location:{href:'https://fixture.test/form'},Date,URL,CSS:{escape:s=>s},getComputedStyle:()=>({visibility:'visible'}),performance:{getEntriesByType:()=>bundle==='resource'?[{name:library}]:[]}})));
  const ref=part=>'uploadq:'+JSON.stringify({label:'简历附件',occurrence:0,part});
  const resolved=()=>read({operation:'resolveUpload',references:[ref('filenames'),ref('uploaded')]});
- return {read,resolved,observe:()=>{const [names,uploaded]=resolved();return read({roleSelector:'#role',fields:[{id:'resume',kind:'file',read:{selector:'#upload',kind:'files',filenameSelector:names?'#filename':':not(*)',uploadedSelector:uploaded||':not(*)'}}]});}};
+ return {read,ref,resolved,observe:()=>{const [names,uploaded]=resolved();return read({roleSelector:'#role',fields:[{id:'resume',kind:'file',read:{selector:'#upload',kind:'files',filenameSelector:names?'#filename':':not(*)',uploadedSelector:uploaded||':not(*)'}}]});}};
 }
 
 test('Phoenix done-only actions prove upload completion but cannot replace visual content review',()=>{
@@ -60,4 +60,15 @@ test('the live reader records only the unique loaded picture inside its own uplo
  const actual=fixture({images:[{}]}).observe().fields.resume;
  assert.equal(actual.imagePreview.status,'visible');assert.equal(actual.imagePreview.naturalWidth,225);assert.equal(actual.imagePreview.width,90);
  for(const images of [[],[{complete:false}],[{naturalWidth:0}],[{currentSrc:'https://fixture.test/icon.svg'}],[{},{}]])assert.equal(fixture({images}).observe().fields.resume.imagePreview.status,'unavailable');
+});
+
+test('independent attachment readback resolves semantic filename and completion in one rendered observation',()=>{
+ for(const state of [undefined,'progress','error']){
+  const f=fixture({state});
+  const result=f.read({roleSelector:'#role',fields:[{id:'resume',kind:'file',read:{
+   kind:'files',selector:f.ref('container'),filenameSelector:f.ref('filenames'),uploadedSelector:f.ref('uploaded')
+  }}]}).fields.resume;
+  assert.equal(result.uploadState,state?'unverified':'site_rendered_uploaded');
+  assert.deepEqual(result.uploadReadback,{renderedFilenameCount:state?0:1,completionMarker:!state,pending:state==='progress',error:state==='error'});
+ }
 });

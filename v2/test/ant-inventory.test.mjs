@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {antDOM} from '../shared/ant-reference.mjs';
 
-function fixture(titles,repeatButtons=0){
+function fixture(titles,repeatButtons=0,rows=repeatButtons?2:1){
  const make=(kind,tagName,innerText='')=>({kind,tagName,innerText,children:[],classList:{contains:()=>false},getClientRects:()=>[{}],getAttribute:()=>null,
   contains(node){return this===node||this.children.some(c=>c.contains(node));},
   closest(selector){for(let n=this;n;n=n.parentElement)if(selector==='form.ant-form'&&n.kind==='form'||selector==='.ant-form-item'&&n.kind==='question')return n;return null;},
@@ -12,7 +12,7 @@ function fixture(titles,repeatButtons=0){
  const body=make('body','BODY'),forms=titles.map(title=>{
   const form=add(body,make('form','FORM',title)),section=add(form,make('section','DIV','Shared section'));
   form.fields=[];
-  for(let i=0;i<(repeatButtons?2:1);i++){
+  for(let i=0;i<rows;i++){
    const row=add(section,make('row','DIV')),q=add(row,make('question','DIV'));
    q.label=add(q,make('label','LABEL','Same question'));
    const input=add(q,make('control','INPUT'));Object.assign(input,{type:'text',readOnly:false,disabled:false});form.fields.push(input);
@@ -48,6 +48,9 @@ test('Ant discovery returns an add control scoped to the observed rows and rejec
   assert.equal(group.addLabel,'Add record');
   assert.equal(antDOM({operation:'resolve',reference:group.selector}).split(',').length,2);
   assert.match(antDOM({operation:'resolve',reference:group.addSelector}),/button:nth-of-type\(1\)$/);
+  globalThis.document=fixture(['Only'],1,1);
+  const [first]=antDOM({operation:'repeatDiscovery',titles:['Shared section']});
+  assert.equal(antDOM({operation:'resolve',reference:first.selector}).split(',').length,1);
   globalThis.document=fixture(['Only'],2);
   assert.deepEqual(antDOM({operation:'repeatDiscovery',titles:['Shared section']}),[]);
   assert.equal(antDOM({operation:'resolve',reference:group.addSelector}),null);

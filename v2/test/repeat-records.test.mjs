@@ -194,3 +194,15 @@ test('Feishu repeat discovery learns and rechecks the scoped add control',()=>{
  buttons.push({...buttons[0]});
  assert.throws(()=>run({operation:'resolvePhoenix',references:[group.addSelector]}),/REPEAT_ADD_CONTROL_CHANGED/);
 });
+
+test('an Ant template with a single mapped record requests discovery before expanding',()=>{
+ const selector='antq:'+JSON.stringify({section:'Education',label:'School',occurrence:0,part:'control',index:0});
+ const fields=[{id:'school',label:'School',source:'education.first.school',read:{selector},inventorySelectors:[selector]}];
+ const page={provider:'ant',fields},recordPlan={entities:{education:['first','second']}},inventory=[{selector}];
+ assert.deepEqual(sectionsWithoutAdd(page,inventory,recordPlan),['Education']);
+ assert.deepEqual(sectionsWithoutAdd(page,inventory,{entities:{education:['first']}}),[]);
+ const discovered={...page,groups:[{sectionKey:'Education',selector:'#record',addSelector:'#add',addLabel:'Add'}]};
+ const [expanded]=withProfileRecords({pages:[discovered]},recordPlan).pages;
+ assert.deepEqual(expanded.fields.map(field=>field.source),['education.first.school','education.second.school']);
+ assert.equal(expanded.groups[0].count,2);
+});

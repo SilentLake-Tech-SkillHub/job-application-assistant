@@ -68,8 +68,17 @@ export function antDOM({operation='inventory',reference,references,titles=[]}={}
    if(sections.length!==1)continue;
    const scope=sections[0],buttons=[...scope.querySelectorAll('button[type="button"],[role="button"]')].filter(n=>visible(n)&&/^(?:添加|新增|Add)(?:$|\s|[\p{Script=Han}])/iu.test(n.innerText?.trim()||''));
    if(buttons.length!==1)continue;
-   const anchor=questions.find(q=>section(q)===scope&&label(q)&&peers(q).length>1&&
-    peers(q).every(peer=>row(peer).parentElement===buttons[0].parentElement&&!row(peer).contains(buttons[0])));
+   const add=buttons[0],parent=add.parentElement;
+   const recordOf=question=>{
+    let node=question;
+    while(node&&node!==parent&&node.parentElement!==parent)node=node.parentElement;
+    return node&&node!==parent&&node!==question&&!node.contains(add)?node:null;
+   };
+   const anchor=questions.find(q=>{
+    if(section(q)!==scope||!label(q))return false;
+    const records=peers(q).map(recordOf);
+    return records.every(Boolean)&&new Set(records).size===records.length;
+   });
    if(!anchor)continue;
    const {occurrence,index,part,...base}=JSON.parse(ref(anchor).slice(5));
    const addLabel=buttons[0].innerText.trim();

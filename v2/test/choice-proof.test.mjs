@@ -28,9 +28,12 @@ test('an already matching school cannot bypass real choice verification through 
  const sealed=observedSeal(source,'synthetic'),store=new Store(dir);await store.put('templates','school',sealed.template);await sealed.persist(store);await store.put('runs',sealed.probe.id,sealed.probe);
  const inventory=[{selector:'#field',label:'School',type:'combobox',required:false}],observation=()=>({source:'live_dom',readAt:new Date().toISOString(),pageUrl:url,roleTitle:'Role',sections:[{title:'Basics'}],fields:{school:{present:true,value:'University',selected:true,errors:[]}},groups:{}});let writes=0;
  const page={assertLocation:async()=>{},wait:async()=>{},inventory:async()=>inventory,observe:async()=>observation(),act:async a=>{if(a.method.endsWith('_verify'))throw Error('CHOICE_REOPENED_OPTION_NOT_SELECTED');writes++;}};
- const engine=new Engine({store,browser:{existingPage:async()=>page},companies:[{id:'synthetic',origin:'https://fixture.test',templateId:'school'}],leaseRoot:dir}),task={companyId:'synthetic',pageUrl:url,templateHash:hash(sealed.template),values:{school:'University'}};
+ const engine=new Engine({store,browser:{existingPage:async()=>page},companies:[{id:'synthetic',origin:'https://fixture.test',templateId:'school'}],leaseRoot:dir}),task={taskId:'synthetic-role',companyId:'synthetic',pageUrl:url,templateHash:hash(sealed.template),values:{school:'University'}};
  const plan=await engine.preparePlan(task),run=await engine.prepare({tasks:[{...task,planId:plan.planId,planHash:plan.planHash}],authorization:{prepare:true,evidence:'synthetic'}});
  assert.equal(run.results[0].errorCode,'EXISTING_CHOICE_NOT_VERIFIED');assert.equal(writes,0);assert.notEqual(run.results[0].status,'verified');
+ const repeated=await engine.prepare({tasks:[{...task,planId:plan.planId,planHash:plan.planHash}],authorization:{prepare:true,evidence:'synthetic'}});
+ assert.equal(repeated.id,run.id);
+ assert.equal((await store.get('runs',run.id)).results[0].preparationRunId,repeated.results[0].preparationRunId);
  }finally{await rm(dir,{recursive:true,force:true});}
 });
 

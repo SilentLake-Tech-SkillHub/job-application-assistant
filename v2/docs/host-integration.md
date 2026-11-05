@@ -23,9 +23,9 @@ Chrome 通道固定是组件自己的 Chrome 分身（`shared/chrome-clone.mjs`�
 
 `host/adapters/<执行端>.mjs` 每个执行端一份（codex、claude-code、antigravity、kimi-code、zcode、dsh），只回答“这个执行端能把什么交给组件”：MCP 注册配置的位置和格式、有没有内置浏览器、内置浏览器是否对组件代码开放（`code`）、只给模型用（`agent_only`）还是尚未核实（`unverified`）、是否支持 MCP sampling。适配器只描述内置浏览器；Chrome 通道在所有执行端都是同一个分身，日常 Chrome 里的插件不属于投递流程，适配器不描述。适配器不做分流决定；分流规则只读能力文件。`agent_only` 和 `unverified` 不做探测，直接记为不可加载（`node scripts/browser-capability.mjs detect` 即可写入）；只有 `code` 才在执行端内用 `detectHostBrowsers` 跑三步检测。新增执行端只加一个适配器文件，并把公开或实测证据写在 `evidence` 里。
 
-MCP 注册由 `node scripts/install-host.mjs --host <id> --workspace <工作区绝对路径> [--role executor|maintainer]` 生成：所有执行端写入同一个能力文件路径、同一个分身资料目录和端口，只有 `RECRUITING_HOST_ID`、`RECRUITING_HOST_ROLE` 不同，并删除不再使用的 `RECRUITING_BROWSER_MODE`、`RECRUITING_BROWSER_INITIALIZE` 等键。工作区内的配置加 `--write` 直接写；用户目录下的配置先看预览和当前 sha256，`--write --expect-sha <sha>` 才写；YAML（DSH）只出预览，按实际结构人工粘贴；已有 recruiting 条目的 YAML 必须显式传 `--role`，不猜测已有插件树的角色。
+MCP 注册由 `node scripts/install-host.mjs --host <id> --workspace <工作区绝对路径> [--role executor|maintainer]` 生成：所有执行端写入同一个能力文件路径、同一个分身资料目录和端口，只有 `RECRUITING_HOST_ID`、`RECRUITING_HOST_ROLE` 不同，并删除不再使用的 `RECRUITING_BROWSER_MODE`、`RECRUITING_BROWSER_INITIALIZE` 等键。工作区内的配置加 `--write` 直接写；用户目录下的配置先看预览和当前 sha256，`--write --expect-sha <sha>` 才写；DSH 的 Cordis patch 支持预览和带指纹写入，保留原部署角色与非投递插件。未知 YAML 结构只出预览。注册时传 `--instance`，同一实例使用同一编号。
 
-Codex 适配器会将所选角色同时写入两个 MCP 与 `shell_environment_policy.set.RECRUITING_HOST_ROLE`，保留其他 shell 设置。其他适配器会返回 `shellEnvironment`，由对应宿主的安装/启动接线传给 Hook 和 shell；仅改 MCP 环境不算安装完成。输出的 `roleSource` 区分本次显式选择、保留已有配置与新安装默认值。
+Codex 适配器会将所选角色同时写入两个 MCP 与 `shell_environment_policy.set.RECRUITING_HOST_ROLE`，保留其他 shell 设置。其他适配器会返回 `shellEnvironment`，由对应宿主的安装/启动接线传给 Hook 和 shell；仅改 MCP 环境不算安装完成。DSH 使用 `node scripts/launch-dsh.mjs <Cordis patch 绝对路径> -- <DSH 命令> [参数]` 启动，以同一份配置向 shell 与 Hook 提供角色和 Agent 编码。输出的 `roleSource` 区分本次显式选择、保留已有配置与新安装默认值。
 
 迁移到新机器时，按目标工作区、Node 路径和用户选择重新生成配置，再重新核验浏览器能力。复制旧配置会保留旧分工及绝对路径，不能当作通用产品默认安装。安装预览和文件写入都不证明驻留 MCP/Hook 已重载；两个 MCP 的 `runtime_info.runtime.hostId/hostRole` 返回进程启动时实际加载的身份与角色，用于重载后的核对。
 

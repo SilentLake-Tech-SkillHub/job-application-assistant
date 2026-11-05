@@ -1,5 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import os from 'node:os';import path from 'node:path';import {mkdtemp,rm,mkdir,writeFile,readFile} from 'node:fs/promises';
-import {installHost,RETIRED_ENV} from '../scripts/install-host.mjs';
+import {parse} from 'yaml';
+import {dshRuntimeEnvironment,installHost,RETIRED_ENV} from '../scripts/install-host.mjs';
 const toml=`# keep me
 [mcp_servers."recruiting-login-v2"]
 command = "/old/node"
@@ -30,7 +31,7 @@ test('every host gets the same capability file, clone profile and port; only hos
   const pre=await installHost({host:'kimi-code',workspace:ws,node:'/n',component:'/c',uid:501,home,scope:'user'});
   assert.equal((await installHost({host:'kimi-code',workspace:ws,node:'/n',component:'/c',uid:501,home,scope:'user',write:true,expectSha:pre.currentSha})).written,true);
   await assert.rejects(installHost({host:'dsh',workspace:ws,node:'/n',component:'/c',uid:501,home,scope:'project'}),/SCOPE_UNAVAILABLE/);
-  const d=await installHost({host:'dsh',workspace:ws,node:'/n',component:'/c',uid:501,home,write:true});assert.equal(d.written,false);assert.ok(d.preview.includes('RECRUITING_HOST_ID: "dsh"'));assert.ok(d.preview.includes("- id: mcp-recruiting-login-v2"));assert.ok(d.preview.includes('failOnStartupError: false'));assert.ok(d.preview.includes('cwd: '+ws));
+  const d=await installHost({host:'dsh',workspace:ws,node:'/n',component:'/c',uid:501,home,write:true});assert.equal(d.written,false);const [login]=parse(d.preview)[0].insert;assert.equal(login.id,'mcp-recruiting-login-v2');assert.equal(login.config.env.RECRUITING_HOST_ID,'dsh');assert.equal(login.config.failOnStartupError,false);assert.equal(login.config.cwd,ws);
  }finally{await rm(ws,{recursive:true,force:true});}
 });
 import {mergeToml,serverEntries,hostEnv} from '../scripts/install-host.mjs';
@@ -129,4 +130,31 @@ test('agent registration serializes allocation and keeps member identity across 
   assert.equal(conf.mcpServers['recruiting-login-v2'].env.RECRUITING_AGENT_ID,agents[0].id);
   await assert.rejects(installHost({...second,agent:agents[1],configFile,write:true}),/AGENT_CONFIG_BOUND_TO_OTHER_INSTANCE/);
  }finally{await rm(workspace,{recursive:true,force:true});}
+});
+
+test('DSH writes an existing Cordis patch with the preview fingerprint and preserves other plugins and role',async()=>{
+ const home=await mkdtemp(path.join(os.tmpdir(),'dsh-write-')),file=path.join(home,'cordis.patch.yml');
+ const opts={host:'dsh',workspace:home,home,configFile:file,node:'/node',component:'/component'};
+ const original=[{insert:[
+  {id:'unrelated',name:'fixture',config:{preserve:['x','y']}},
+  {id:'mcp-recruiting-login-v2',name:'@deepseek-ai/dsh-mcp-client',config:{serverName:'recruiting-login-v2',env:{RECRUITING_HOST_ROLE:'maintainer',OTHER:'kept'}}}
+ ]}];
+ try{
+  await writeFile(file,JSON.stringify(original));
+  const agent={id:'A0001',host:'dsh'},before=await installHost({...opts,agent});
+  await assert.rejects(installHost({...opts,agent,write:true,expectSha:'stale'}),/SHA_REQUIRED/);
+  const installed=await installHost({...opts,agent,write:true,expectSha:before.currentSha});
+  assert.equal(installed.written,true);assert.equal(installed.roleSource,'existing');
+  const plugins=parse(await readFile(file,'utf8')).flatMap(layer=>layer.insert);
+  assert.deepEqual(plugins[0],original[0].insert[0]);
+  assert.equal(plugins[1].config.env.OTHER,'kept');
+  assert.deepEqual(plugins.slice(1).map(x=>x.config.env.RECRUITING_AGENT_ID),['A0001','A0001']);
+  assert.deepEqual(plugins.slice(1).map(x=>x.config.env.RECRUITING_HOST_ROLE),['maintainer','maintainer']);
+  assert.deepEqual(dshRuntimeEnvironment(await readFile(file,'utf8')),{RECRUITING_HOST_ID:'dsh',RECRUITING_HOST_ROLE:'maintainer',RECRUITING_AGENT_ID:'A0001'});
+  const launch=fileURLToPath(new URL('../scripts/launch-dsh.mjs',import.meta.url));
+  const env=JSON.parse(execFileSync(process.execPath,[launch,file,'--',process.execPath,'-e','console.log(JSON.stringify({role:process.env.RECRUITING_HOST_ROLE,id:process.env.RECRUITING_AGENT_ID,session:process.env.CODEX_THREAD_ID}))'],{env:{...process.env,RECRUITING_HOST_ROLE:'executor',CODEX_THREAD_ID:'parent'},encoding:'utf8'}));
+  assert.deepEqual(env,{role:'maintainer',id:'A0001'});
+  await assert.rejects(installHost({...opts,agent:{id:'A0002',host:'dsh'}}),/BOUND_TO_OTHER_INSTANCE/);
+  assert.equal((await installHost({...opts,agent,write:true,expectSha:installed.newSha})).written,false);
+ }finally{await rm(home,{recursive:true,force:true});}
 });

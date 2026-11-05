@@ -295,7 +295,9 @@ export class Engine {
       }
     }
     const queueIds=[...new Set(jobs.map(j=>j.task.roleQueueArgs?.queueId).filter(Boolean))];
-    run={id:queueIds.length===1?'batch-prepare-'+queueIds[0]:randomUUID(),operation:'batch_prepare',startedAt:new Date().toISOString(),status:'running',results:[],batchPrepareCalls:1,parallelRoles,requestedConcurrency:concurrency,modelRoundTrips:'not_measured'};
+    const batchOwner=queueIds.length===0?jobs[0].task.taskId:null;
+    const batchRunId=queueIds.length===1?'batch-prepare-'+queueIds[0]:batchOwner?'batch-current-'+batchOwner:randomUUID();
+    run={id:batchRunId,...(batchOwner?{taskId:batchOwner}:{}),operation:'batch_prepare',startedAt:new Date().toISOString(),status:'running',results:[],batchPrepareCalls:1,parallelRoles,requestedConcurrency:concurrency,modelRoundTrips:'not_measured'};
     keys.forEach(k=>this.locks.add(k));
       await this.store.put('runs',run.id,run);
       const results=new Array(jobs.length);
@@ -361,8 +363,8 @@ export class Engine {
   }
   // A section with planned records and no way to add one: read that section once and
   // keep what it shows on the company's template. Nothing has been written to the form.
-  async learnRepeatContract(page,template,plan,live){
-    const titles=sectionsWithoutAdd(plan,live);
+  async learnRepeatContract(page,template,plan,live,recordPlan){
+    const titles=sectionsWithoutAdd(plan,live,recordPlan);
     if(!titles.length||typeof page.repeatDiscovery!=='function'||!template.id)return;
     const found=(await page.repeatDiscovery(titles)).filter(item=>titles.includes(item.title));
     if(!found.length)return;
@@ -387,7 +389,7 @@ export class Engine {
         await page.wait(plan.readySelector);
         const inventory=()=>liveControls(page,plan);
         const live=await inventory();
-        await this.learnRepeatContract(page,template,plan,live);
+        await this.learnRepeatContract(page,template,plan,live,task.recordPlan);
         assertMaterialDestinationsRemainAbsent(prepared.materialCoverage,live);
         if(this.onInventory)await this.onInventory(company.id,task.pageUrl,live,plan);
         const mapped=new Set(plan.fields.flatMap(f=>f.inventorySelectors||[f.read.selector]));

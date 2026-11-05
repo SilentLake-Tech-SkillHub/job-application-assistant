@@ -136,7 +136,8 @@ export function controlDOM(spec){
   const rows=uploadRows(entry).filter(item=>item.name.innerText.trim()===spec.filename);if(rows.length!==1)return null;
   return uploadRetrieval(entry,rows[0].row,rows[0].name);
  }
- if(spec?.operation==='resolveUpload')return (spec.references||[]).map(reference=>{const ref=JSON.parse(reference.slice(8)),entry=uploadRoots().filter(x=>x.label===ref.label)[ref.occurrence];if(!entry)return null;const root=diagnosticSelector(entry.root);if(ref.part==='filenames')return uploadRows(entry).map(({name})=>diagnosticSelector(name)).join(',')||null;if(ref.part==='remove'){const rows=uploadRows(entry).filter(({name})=>name.innerText?.trim()===ref.filename);const remove=rows.length===1?removeFor(rows[0].row,entry.layout==='adjacent_title_unique_file'):null;return remove?diagnosticSelector(remove):null;}return ref.part==='container'?root:ref.part==='uploaded'?uploadRows(entry).length?root:null:diagnosticSelector(entry.input);});
+ const resolveUpload=reference=>{const ref=JSON.parse(reference.slice(8)),entry=uploadRoots().filter(x=>x.label===ref.label)[ref.occurrence];if(!entry)return null;const root=diagnosticSelector(entry.root);if(ref.part==='filenames')return uploadRows(entry).map(({name})=>diagnosticSelector(name)).join(',')||null;if(ref.part==='remove'){const rows=uploadRows(entry).filter(({name})=>name.innerText?.trim()===ref.filename);const remove=rows.length===1?removeFor(rows[0].row,entry.layout==='adjacent_title_unique_file'):null;return remove?diagnosticSelector(remove):null;}return ref.part==='container'?root:ref.part==='uploaded'?uploadRows(entry).length?root:null:diagnosticSelector(entry.input);};
+ if(spec?.operation==='resolveUpload')return (spec.references||[]).map(resolveUpload);
  const eligible=n=>visible(n)||!!n&&['checkbox','radio'].includes(n.type)&&visible(n.closest('label'));
  // Phoenix question references are based on rendered section/label identity.
  // Structural selectors are produced only for the current operation.
@@ -254,7 +255,11 @@ export function controlDOM(spec){
   const errors=ss=>(ss||[]).flatMap(s=>[...document.querySelectorAll(s)].filter(visible).map(()=>({selector:s})));
   const fields={};
   for(const f of spec.fields){
-    const r=f.read,n=one(r.selector);
+    const r=f.read.kind==='files'?{...f.read}:f.read;
+    if(r.kind==='files')for(const key of ['selector','filenameSelector','uploadedSelector','presenceSelector']){
+      if(r[key]?.startsWith('uploadq:'))r[key]=resolveUpload(r[key]);
+    }
+    const n=one(r.selector);
     const o={present:!!n && (r.presenceSelector?visible(one(r.presenceSelector)):eligible(n)),value:null,errors:errors(r.errorSelectors)};
     if(f.userOnly){fields[f.id]={present:!!n && eligible(n),userOnly:true};continue;}
     if(n){
@@ -284,7 +289,9 @@ export function controlDOM(spec){
         const names=r.filenameSelector?[...n.querySelectorAll(r.filenameSelector)].filter(visible).map(text):[];
         o.value=names;
         // A file input / FileList can never prove the server rendered an upload.
-        o.uploadState=n.tagName!=='INPUT' && names.length && r.uploadedSelector && visible(one(r.uploadedSelector))&&!uploadPending(n)&&!uploadError(n)?'site_rendered_uploaded':'unverified';
+        const completionMarker=!!r.uploadedSelector&&visible(one(r.uploadedSelector)),pending=uploadPending(n),error=uploadError(n);
+        o.uploadState=n.tagName!=='INPUT'&&names.length&&completionMarker&&!pending&&!error?'site_rendered_uploaded':'unverified';
+        o.uploadReadback={renderedFilenameCount:names.length,completionMarker,pending,error};
         o.imagePreview=imagePreview(n);
         const entry=uploadRoots().find(e=>e.root===n);if(entry)o.uploadEvidence=uploadRows(entry).flatMap(item=>item.evidence?[{filename:item.name.innerText.trim(),...item.evidence}]:[]);
       }

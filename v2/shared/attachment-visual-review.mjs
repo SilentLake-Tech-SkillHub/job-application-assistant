@@ -47,7 +47,7 @@ export async function reviewRoleAttachments({store,items,page,capture=defaultAtt
   pending.push({...item,id,binding,revision});
  }
  if(!pending.length)return proofs;
- const save=async(item,proof,extra={})=>{proofs[item.scope.fieldId]=proof;if(store)await store.put('runs',item.id,{id:item.id,operation:'attachment_review',fieldId:item.scope.fieldId,binding:item.binding,proof,...extra});};
+ const save=async(item,proof,extra={})=>{proofs[item.scope.fieldId]=proof;if(store)await store.put('runs',item.id,{id:item.id,operation:'attachment_review',taskId:item.scope.taskId||null,fieldId:item.scope.fieldId,binding:item.binding,proof,...extra});};
  if(!await visionAvailable(visionReviewer)){for(const item of pending)await save(item,siteState(item,'VISION_UNAVAILABLE_SITE_STATE_ACCEPTED'));return proofs;}
  const batch=[];
  for(const item of pending){
