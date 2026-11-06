@@ -61,3 +61,15 @@ test('native optional readback returns only absent markers and never accepts a m
  const run=()=>vm.runInNewContext('('+controlDOM.toString()+')(input)',context);assert.deepEqual(JSON.parse(JSON.stringify(run())),[null]);
  context.input.references=['phoenixq:invalid'];assert.throws(run,/PHOENIX_REFERENCE_INVALID/);
 });
+
+test('verified company update retires an absent field only inside a still-observed record',()=>{
+ const ref=(label,occurrence=0)=>'phoenixq:'+JSON.stringify({section:'Personal',label,occurrence,part:'native',controlIndex:0});
+ const companyId='C00001',pageUrl='https://example.test/form',live=ref('Name'),gone=ref('Old date'),hidden=ref('Other row',1);
+ const template={id:companyId,evidence:{sourceUrl:pageUrl},pages:[{fields:[{source:'name',inventorySelectors:[live]}]}]};
+ const profile={facts:{name:{value:'Keep'},oldDate:{value:'2027-01'},other:{value:'Keep too'}},companyForms:{[companyId]:{companyId,pageUrl,mappings:{old:{selector:gone,factKey:'oldDate',status:'mapped',active:false,coverageRequired:true},hidden:{selector:hidden,factKey:'other',status:'mapped',active:false,coverageRequired:true}}}}};
+ const probe={operation:'internal_condition_probe',companyId,templateHash:hash(template),status:'verified',restoration:'verified',branches:[{status:'verified',newQuestions:0,inventory:[{selector:live}]}]};
+ const result=retireLegacyQuestionMappings(profile,{companyId,template,probe});
+ assert.equal(result.retired,1);
+ assert.ok(profile.companyForms[companyId].mappings.hidden);
+ assert.equal(profile.facts.oldDate.value,'2027-01');
+});
