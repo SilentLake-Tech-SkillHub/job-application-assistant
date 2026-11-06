@@ -63,7 +63,8 @@ export function classifyPending(field,profile,{fields=[]}={}) {
  if(Object.values(MATERIAL_SOURCES).includes(field.source))return {kind:'ready',owner:'agent',resolution:'confirmed_role_material_required_at_preflight'};
  if(field.ongoingSource&&profile?.facts?.[field.ongoingSource]?.status==='known'&&profile.facts[field.ongoingSource].value===true)return {kind:'ready',owner:'agent',resolution:'sourced_same_record_ongoing'};
  const fact=field.kind==='date'?resolveDateFact(profile,field.source).fact:profile?.facts?.[field.source];
- if(!fact||fact.status==='missing')return {kind:'answer',reason:'CANONICAL_ANSWER_MISSING',owner:'user'};
+ if(!fact)return {kind:'mapping',reason:'SOURCE_NOT_REGISTERED',owner:'agent'};
+ if(fact.status==='missing')return {kind:'answer',reason:'CANONICAL_ANSWER_MISSING',owner:'user'};
  if(fact.status==='conflict')return {kind:'answer',reason:'CANONICAL_ANSWER_CONFLICT',owner:'user'};
  if(field.kind==='date'&&fact.status==='known'){
   const gap=datePrecisionGap(profile,field.source,field.precision);if(gap){const {sourcePrecision,requiredPrecision,missingComponents}=gap;return {kind:'answer',reason:'DATE_SOURCE_PRECISION_INSUFFICIENT',owner:'user',sourcePrecision,requiredPrecision,missingComponents,...(gap.derivedFrom.some(source=>source!==field.source)?{knownDateEvidence:gap}:{})};}
