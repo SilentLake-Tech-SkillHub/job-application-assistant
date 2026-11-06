@@ -1,3 +1,4 @@
+import {supportsOngoing} from './date-representation.mjs';
 import {rolePageContract} from './role-identity.mjs';
 import {wasBuilt} from './template-validation.mjs';
 import {withProfileRecords} from './repeat-groups.mjs';
@@ -121,7 +122,7 @@ export async function compileExecutionPlan(storedTemplate,task){
   const constructionBlockers=[...new Set([...(wasBuilt(template)?[]:templateConstructionIssues(template).map(x=>x.reason)),...materialCoverage.blockers])];
   for(const f of template.pages.flatMap(p=>p.fields))if(f.kind==='date'&&f.ongoingSource&&task.values?.[f.ongoingSource]===true){
    const representation=task.dateRepresentations?.[f.id];
-   if(f.dateRepresentation&&(!representation||representation.source!==f.dateRepresentation.source))constructionBlockers.push('DATE_REPRESENTATION_AUTHORIZATION_CHANGED');
+   if(f.dateRepresentation&&!supportsOngoing(f)&&(!representation||representation.source!==f.dateRepresentation.source))constructionBlockers.push('DATE_REPRESENTATION_AUTHORIZATION_CHANGED');
    if(!representation&&f.actions?.some(a=>a.method==='ant_day'&&!a.ongoingLabel))constructionBlockers.push('ONGOING_DATE_OPTION_REQUIRED');
   }
   const globalPositional = selector => typeof selector==='string' && /^\s*(?:html\s*>\s*)?body\s*>/i.test(selector) && /:nth-(?:of-type|child)\(/.test(selector);

@@ -31,3 +31,26 @@ test('sourced date validation failures retain their own error rather than becomi
   const x=fixture();mutate(x);assert.throws(()=>resolveDateRepresentation(x.profile,x.scope,x.field),error=>error.message==='SOURCED_DATE_REPRESENTATION_REQUIRED');
  }
 });
+
+test('confirmed ongoing with a captured ongoing control takes precedence over a legacy as-of presentation',()=>{
+ const x=fixture();x.field.ongoingSource='projects.example.ongoing';x.profile.facts[x.field.ongoingSource]={status:'known',value:true,sourceIds:['approved-source']};
+ x.field.actions=[{method:'phoenix_date',ongoingSelector:'#ongoing'}];
+ assert.equal(resolveDateRepresentation(x.profile,x.scope,x.field),null);
+ x.field.actions=[{method:'ant_day',ongoingLabel:'至今'}];
+ assert.equal(resolveDateRepresentation(x.profile,x.scope,x.field),null);
+ x.field.actions=[{method:'phoenix_date'}];
+ assert.equal(resolveDateRepresentation(x.profile,x.scope,x.field).value,'2099-12-31');
+ x.field.actions=[{method:'phoenix_date',ongoingSelector:'#ongoing'}];x.profile.facts[x.field.ongoingSource].value=false;
+ assert.equal(resolveDateRepresentation(x.profile,x.scope,x.field).value,'2099-12-31');
+});
+
+test('existing as-of template compiles ongoing without an end-date action and keeps verification ongoing',async()=>{
+ const {compileExecutionPlan}=await import('../shared/execution-plan.mjs');
+ const {verifyDateRanges}=await import('../shared/date-range-verification.mjs');
+ const f={id:'end',source:'projects.example.end',ongoingSource:'projects.example.ongoing',dateRepresentation:{mode:'as_of_date',source:'application.asof'},kind:'date',precision:'month',label:'End',required:false,inventorySelectors:['#end'],read:{selector:'#end',kind:'text',ongoingSelector:'#ongoing'},actions:[{method:'phoenix_date',selector:'#end',labelSelector:'#label',ongoingSelector:'#ongoing'}],control:{type:'month_picker',valueType:'string',readbackType:'string'}};
+ const template={id:'T1',evidence:{sourceUrl:'https://example.test/form'},coverage:{allControlsMapped:true,allDriversSupported:true,allConditionalBranchesVerified:true},pages:[{pathPrefix:'/form',fields:[f]}]};
+ const task={companyId:'sample',pageUrl:'https://example.test/form',templateHash:'h',values:{'projects.example.ongoing':true},sources:{},dateRepresentations:{}};
+ const plan=await compileExecutionPlan(template,task);assert.equal(plan.readyForExecution,true);assert.equal(plan.pages[0].fields[0].value,'至今');assert.deepEqual(plan.constructionBlockers,[]);
+ const proof=await verifyDateRanges({act:async(a,v)=>{assert.equal(v,'至今');assert.equal(a.operation,'verify');return {value:v,selectionVerified:true,precision:'month'};}},template.pages[0],{values:{'projects.example.end':'至今'}});
+ assert.equal(proof.end.status,'verified');
+});
