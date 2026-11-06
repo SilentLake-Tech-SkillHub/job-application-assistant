@@ -41,3 +41,14 @@ test('generic document-number fields require an actually selected identity-docum
  const context=authorizedProfileContext(f.profile,f.template,f.scope);assert.equal(context.fields.length,1);assert.equal(context.fields[0].documentTypeGuard.expected,'身份证');let writes=0;
  await assert.rejects(applyAuthorizedProfileFields({page:{observe:async()=>({fields:{'document-type':{present:true,selected:true,value:'护照'}}}),act:async()=>{writes++;}},profile:f.profile,template:f.template,scope:f.scope,expected:context,prepare:true}),/DOCUMENT_TYPE_NOT_VERIFIED/);assert.equal(writes,0);
 });
+
+test('profile proof resolves the same master record expansion during planning and verification',async()=>{
+ const {withProfileRecords,recordPlanOf}=await import('../shared/repeat-groups.mjs');const f=fixture();
+ f.profile.entities.projects=['one','two'];
+ const selector='phoenixq:'+JSON.stringify({section:'Projects',label:'Name',occurrence:0,part:'native'});
+ f.template.pages[0].fields.push({id:'name',source:'projects.one.name',label:'Name',inventorySelectors:[selector],read:{selector},actions:[]});
+ f.template.pages[0].groups=[{sectionKey:'Projects',selector:'#rows',addSelector:'#add'}];
+ const expanded=withProfileRecords(f.template,recordPlanOf(f.profile));const expected=authorizedProfileContext(f.profile,expanded,f.scope);
+ const result=await applyAuthorizedProfileFields({profile:f.profile,template:f.template,scope:f.scope,expected,page:{observe:async()=>({fields:{identity:{present:true,value:secret}}})}});
+ assert.equal(result.identity.status,'verified');
+});

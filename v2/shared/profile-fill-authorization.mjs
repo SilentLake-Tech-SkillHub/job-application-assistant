@@ -1,8 +1,10 @@
+import {withProfileRecords,recordPlanOf} from './repeat-groups.mjs';
 import {createHash} from 'node:crypto';
 import {authorizedProfileField} from './authorized-profile-field.mjs';
 import {evaluateBusinessAuthorization,businessAuthorizationSwitch} from './business-authorization.mjs';
 const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export function authorizedProfileContext(profile,template,{materialContext,companyId,roleId,pageUrl,officialOrigin}={}){
+ template=withProfileRecords(template,recordPlanOf(profile));
  // Switch 0 or undecided: the ID field is simply not executed by the component (user-operated).
  const grant=evaluateBusinessAuthorization(profile,{operation:'identity_fill',phase:'classify',permissionOnly:true});
  if(grant.decision!=='allow')return null;
