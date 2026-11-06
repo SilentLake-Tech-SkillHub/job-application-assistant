@@ -61,6 +61,16 @@ test('a partial live inventory preserves mapped repeat fields covered by the cur
  assertQuestionsMapped(f.profile,'example',f.capture.pageUrl);
  assert.equal((await assertAcquisitionChain(f.template,{store:f.store,companyId:'example',profile:f.profile})).version,2);
 });
+test('a completed company draft keeps inactive mapped repeat fields during registration',async()=>{
+ const f=partiallyRenderedRepeat();
+ f.form.draftExecutionContract={...structuredClone(f.form.executionContract),status:'construction_complete'};
+ f.form.executionContract.status='requires_rebuild';
+ f.form.executionContract.validForCurrentInventory=false;
+ await assertAcquisitionChain(f.template,{store:f.store,companyId:'example',profile:f.profile});
+ f.form.draftExecutionContract.status='construction_incomplete';
+ await assert.rejects(assertAcquisitionChain(f.template,{store:f.store,companyId:'example',profile:f.profile}),/ACQUISITION_PROFILE_MAPPING_CHANGED/);
+});
+
 test('inactive mappings cannot substitute for absent, stale or changed contract coverage',async()=>{
  const changes=[
   f=>f.repeat.coverageRequired=false,

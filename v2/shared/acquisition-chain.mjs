@@ -99,9 +99,10 @@ export async function assertAcquisitionChain(template,{store,companyId,profile}=
    // A fresh form may render one repeat record or hide a conditional field.
    // Its last mapped source remains required by the exact sealed contract;
    // the engine creates/reveals the field before independent verification.
-   const contract=form.executionContract;
+   const draft=form.draftExecutionContract;
+   const contract=draft?.templateHash===templateHash&&draft.status==='construction_complete'?draft:form.executionContract;
    return mapping.coverageRequired===true&&mapping.status==='mapped'&&
-    contract?.status==='registered'&&contract.validForCurrentInventory!==false&&contract.templateHash===templateHash&&
+    ['registered','construction_complete'].includes(contract?.status)&&contract.validForCurrentInventory!==false&&contract.templateHash===templateHash&&
     contract.fields?.some(field=>field.source===mapping.factKey&&field.inventorySelectors?.includes(mapping.selector));
   }));
   for(const field of fields)if(!field.userOnly&&!mappings.some(mapping=>field.inventorySelectors?.includes(mapping.selector)&&mapping.factKey===field.source))throw Error('ACQUISITION_PROFILE_MAPPING_CHANGED');

@@ -33,7 +33,7 @@ const browser=new BrowserAdapter(hostMode==='cdp'?(process.env.RECRUITING_CDP_UR
 // pageTools：本进程代码支持的标签操作。浏览器主控进程不随 MCP 重载，旧进程没有这些操作；工具调用前按它判断。
 const residentSource=await genericSourceManifest();
 const status=()=>({sourceFingerprint:residentSource.sourceFingerprint,pid:process.pid,brokerPid:process.pid,protocolVersion:4,pageTools:['newPage','reload','closePage'],...browser.status(),runtimeHealth:diagnostics.isDegraded()?'degraded_read_only':'healthy'});
-const methods=new Set(['assertLocation','wait','inventory','observe','act','ensureGroups','verificationInspect']);
+const methods=new Set(['assertLocation','wait','inventory','observe','act','ensureGroups','repeatDiscovery','verificationInspect']);
 const code=browserErrorCode;
 const server=http.createServer(async(req,res)=>{
   res.setHeader('content-type','application/json');

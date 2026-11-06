@@ -108,7 +108,7 @@ export function buildFormTemplate({capture,profile,mappings=[],choices=[],page,t
  if(page.roleIdentity&&readRoleIdentity(page.roleIdentity,capture.pageUrl)?.value!==page.roleIdentity.value)throw Error('OBSERVED_ROLE_IDENTITY_MISMATCH');
  if(reaStructure&&(formScope(reaStructure.pageUrl)!==formScope(capture.pageUrl)||reaStructure.companyId!==capture.companyId))throw Error('REA_CONTROL_CAPTURE_SCOPE_MISMATCH');
  if(page.provider&&capture.provider&&page.provider!==capture.provider)throw Error('FORM_PROVIDER_EVIDENCE_MISMATCH');
- page=inheritPageContract({...page,sections:page.sections.map(section=>typeof section==='string'?{title:section}:section),...(capture.provider?{provider:capture.provider}:{})},previous);
+ page=inheritPageContract({...page,pathPrefix:page.pathPrefix||new URL(capture.pageUrl).pathname,sections:page.sections.map(section=>typeof section==='string'?{title:section}:section),...(capture.provider?{provider:capture.provider}:{})},previous);
  if(page.sections.some(section=>!section?.title))throw Error('OBSERVED_SECTION_TITLE_REQUIRED');
  const sectionSelectors=[...new Set(capture.controls.map(c=>c.sectionSelector).filter(Boolean))];
  if(capture.provider==='ant'&&sectionSelectors.length)page.sectionDiscovery={...page.sectionDiscovery,selectors:sectionSelectors};

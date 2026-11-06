@@ -75,5 +75,6 @@ test('choice definitions retain extra repeat rows without a separate certificate
  const asset={companyId:'sample',formId:'C00001',pageUrl:args.capture.pageUrl,captureId:args.capture.captureId,choices:evaluated.choices.map(choice=>({...choice,definition:baseline.controls.find(control=>control.selector===choice.selector)}))};
  const store={get:async(_,id)=>{assert.ok(!id.startsWith('seal-'));return id==='capture-C00001'?latest:asset;}};
  await assertStoredChoiceGoals(template,{store,companyId:'sample',profile:args.profile});
+ assert.deepEqual(evaluateChoiceGoals({capture:latest,profile:args.profile,fields:template.pages[0].fields,choices:asset.choices}).blockers,[]);
  latest.controls=[...latest.controls,{selector,label:'Changed',type:'text'}];await assert.rejects(assertStoredChoiceGoals(template,{store,companyId:'sample',profile:args.profile}),/CHOICE_GOAL_INCOMPLETE/);
 });

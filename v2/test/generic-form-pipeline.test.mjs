@@ -172,3 +172,19 @@ test('native and Ant multi selections keep array values and full selection readb
  await assert.rejects(compileExecutionPlan(b.template,{values:{locations:['Not offered']}}),/VALUE_OUTSIDE_CAPTURED_OPTIONS/);
  }
 });
+
+test('an omitted pathPrefix inherits the same company repeat fields and group contract',()=>{
+ const ref=i=>'phoenixq:'+JSON.stringify({section:'Education',label:'School',occurrence:i,part:'native',controlIndex:0});
+ const controls=[0,1].map(i=>({selector:ref(i),label:'School',type:'text',tag:'input',group:'Education',repeatIndex:i,contextProvider:'.form-item--phoenix'}));
+ const c={companyId:'C00001',captureId:'capture-C00001',pageUrl:'https://example.test/form',observedAt:'synthetic',controls};
+ const p={facts:{'education.a.school':{status:'known',value:'A'},'education.b.school':{status:'known',value:'B'}}};
+ const maps=controls.map((control,i)=>({selector:control.selector,factKey:'education.'+(i?'b':'a')+'.school'}));
+ const contract={...page,pathPrefix:'/form',sections:[{title:'Education'}],groups:[{id:'edu',sectionKey:'Education',selector:'#records',addSelector:'#add'}]};
+ const old=buildFormTemplate({capture:c,profile:p,mappings:maps,page:contract,templateId:'C00001'}).template;
+ const {pathPrefix,...implicit}=contract;
+ const {groups,...currentPage}=implicit;
+ const next=buildFormTemplate({capture:{...c,controls:[controls[0]]},profile:p,mappings:maps,page:currentPage,templateId:'C00001',previous:[old]}).template;
+ assert.equal(next.pages[0].pathPrefix,'/form');
+ assert.equal(next.pages[0].fields.length,2);
+ assert.deepEqual(next.pages[0].groups,old.pages[0].groups);
+});

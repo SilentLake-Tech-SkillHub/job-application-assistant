@@ -32,6 +32,15 @@ function customEvidence(choice,factKey,fact,capture,sourceHash){
 // Construction decisions only. A resolved goal never certifies a UI selection,
 // a saved form or submission. Choices must carry their asset's captureId.
 export function evaluateChoiceGoals({capture,profile,fields=[],choices=[]}){
+ const retained=new Map();
+ for(const choice of choices){
+  const definition=choice.definition;
+  if(definition?.group&&Number.isInteger(definition.repeatIndex)&&definition.repeatIndex>0&&
+     !capture?.controls?.some(control=>control.selector===definition.selector)){
+   retained.set(definition.selector,definition);
+  }
+ }
+ if(retained.size)capture={...capture,controls:[...(capture.controls||[]),...retained.values()]};
  const output=structuredClone(choices),goals=[],blockers=[],nextGoals=[];
  for(const field of fields){
   const factKey=field.source,fact=profile?.facts?.[factKey];
@@ -109,13 +118,6 @@ export async function assertStoredChoiceGoals(template,{store,companyId,profile,
   }
   choices.push(...asset.choices.map(c=>({...c,choicesId:id,captureId:capture.captureId})));
  }
- // Option records already retain the definitions of extra repeat rows.
- // Reuse those definitions only for rows absent from the rendered capture.
- const retained=choices.map(choice=>choice.definition).filter(definition=>
-  definition?.group&&Number.isInteger(definition.repeatIndex)&&definition.repeatIndex>0&&
-  !capture.controls.some(control=>control.selector===definition.selector)
- );
- capture={...capture,controls:[...capture.controls,...retained]};
  const current=evaluateChoiceGoals({capture,profile,fields,choices});
  if(current.blockers.length)throw Error('CHOICE_GOAL_INCOMPLETE');
  for(const goal of current.goals)if(hash(fields.find(f=>f.id===goal.fieldId).choiceGoal)!==hash(goal))throw Error('CHOICE_GOAL_EVIDENCE_CHANGED');
