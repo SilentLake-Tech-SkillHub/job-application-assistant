@@ -234,7 +234,8 @@ def handle(event):
         handle_continuation({**event, 'hook_event_name': 'PostToolUse', 'tool_response': {'continuation': {'state': 'tool_pending', 'owner': 'agent', 'requiresUser': False, 'shouldContinue': True, 'nextTools': [tool.split('__')[-1]], 'reason': 'STAGE_RESULT_REQUIRED'}}})
     # Source repair, Skill reads and status reporting must remain possible even
     # when an enabled conversation has no same-turn application receipt.
-    if name == 'PreToolUse' and tool.split('__')[-1] not in MUTATIONS:
+    bootstrap = name == 'PreToolUse' and recruiting_tool(tool) and tool.split('__')[-1] == 'runtime_info'
+    if name == 'PreToolUse' and tool.split('__')[-1] not in MUTATIONS and not bootstrap:
         return {}
     body = POLICY.read_bytes()
     sha = hashlib.sha256(body).hexdigest()
@@ -249,7 +250,9 @@ def handle(event):
         raise ValueError('WORKFLOW_EVENT_ID_MISSING')
     STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
     receipt = STATE / (key(session, turn) + '.json') if turn else None
-    if name in INJECT:
+    # A real read-only preflight can load a scope enabled after UserPromptSubmit.
+    # The next mutation sees this same-turn receipt; never synthesize a user event.
+    if name in INJECT or bootstrap and not receipt.exists():
         text = ROUTE.read_text(encoding='utf-8')
         context = ('本轮求职调用入口；后续用户明确修改及上级指令优先。\n'
                    '版本：' + lock['version'] + '；SHA256：' + sha + '\n'

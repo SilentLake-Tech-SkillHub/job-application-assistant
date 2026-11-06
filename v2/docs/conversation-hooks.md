@@ -44,3 +44,7 @@ python3 hooks/conversation_scope.py disable --scope-file <private-scope.json>
 上线时先与执行端核实当前会话并停靠，再由维护对话运行 `conversation_scope.py migrate --scope-file <scope> --retain-session <已核实且已登记的会话> --authorization-ref <依据>`：仅保留该旧登记并从上线时刻计时，已有时间戳不会重置。尚未登记的执行端须自己 enable，维护端不能代为新建执行资格。
 
 维护对话可按明确依据用 `disable --target-session <旧会话> --authorization-ref <依据>` 注销指定旧登记，参数可重复；启用操作不能指定他人身份，正在执行的对话不能管理其它会话。
+
+## 同回合首次启用
+
+作用域在 UserPromptSubmit 之后启用时，执行器先调用任一模块的 runtime_info。该真实 PreToolUse 事件校验指令及路由 Hash、向当前回合注入调用入口并登记加载回执；再进行写操作。重复调用不重复注入，不借用其他会话或回合的回执。未登记、过期及维护角色仍不启用；直接写调用仍不能代替加载。此回执仅表示流程加载，不授予提交或其他业务权限。

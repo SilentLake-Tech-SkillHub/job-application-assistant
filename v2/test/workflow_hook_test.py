@@ -133,3 +133,31 @@ class WorkflowHookTest(unittest.TestCase):
    r=self.invoke(session_id='session-executor',tool_name=tool,tool_input=args);self.assertEqual(r.returncode,2,(tool,r.stderr));self.assertIn('EXECUTOR_MCP_ONLY',r.stderr)
   # Arguments that are not an object never crash the hook.
   r=self.invoke(session_id='session-executor',tool_name='read',tool_input=[workbook]);self.assertIn(r.returncode,(0,2));self.assertNotIn('Traceback',r.stderr)
+
+ def test_midturn_enable_loads_on_first_readonly_runtime_call(self):
+  self.scope.write_text(json.dumps(scope_state([])))
+  self.assertEqual(json.loads(self.invoke(hook_event_name='UserPromptSubmit').stdout),{})
+  env={**self.env,'CODEX_THREAD_ID':'enabled'}
+  for key in ('CODEX_SESSION_ID','DSH_SESSION_ID'):env.pop(key,None)
+  r=subprocess.run([sys.executable,str(ROOT/'hooks/conversation_scope.py'),'enable','--scope-file',str(self.scope),'--policy-file',str(self.policy),'--authorization-ref','synthetic user start'],env=env,capture_output=True,text=True)
+  self.assertEqual(r.returncode,0,r.stderr)
+  self.assertEqual(self.invoke().returncode,2)
+  for tool in ['mcp__recruiting_application_v2__runtime_info','mcp__recruiting-login-v2__runtime_info']:
+   result=self.invoke(turn_id=tool,tool_name=tool)
+   self.assertEqual(result.returncode,0,result.stderr)
+   context=json.loads(result.stdout)['hookSpecificOutput']
+   self.assertEqual(context['hookEventName'],'PreToolUse');self.assertIn('company_batch_create',context['additionalContext'])
+   self.assertEqual(self.invoke(turn_id=tool).returncode,0)
+   self.assertEqual(json.loads(self.invoke(turn_id=tool,tool_name=tool).stdout),{})
+  self.assertEqual(self.invoke(turn_id='other').returncode,2)
+
+ def test_readonly_bootstrap_does_not_enable_other_sessions_or_skip_hash_validation(self):
+  tool='mcp__recruiting_application_v2__runtime_info'
+  self.assertEqual(json.loads(self.invoke(session_id='other',tool_name=tool).stdout),{})
+  self.policy.write_text('changed policy',encoding='utf8')
+  result=self.invoke(tool_name=tool);self.assertEqual(result.returncode,2);self.assertIn('WORKFLOW_INSTRUCTION_HASH_CHANGED',result.stderr)
+
+ def test_expired_scope_cannot_be_bootstrapped_by_runtime_info(self):
+  self.scope.write_text(json.dumps({'session_ids':['enabled'],'sessions':{'enabled':{'registeredAt':1,'expiresAt':2}}}))
+  r=self.invoke(tool_name='mcp__recruiting_application_v2__runtime_info')
+  self.assertEqual(json.loads(r.stdout),{});self.assertFalse((self.root/'state').exists())
