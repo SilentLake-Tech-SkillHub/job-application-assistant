@@ -9,14 +9,14 @@ import {updateProfile} from '../shared/profile.mjs';
 import {acquireLease,leasePath,defaultLeaseRoot} from '../shared/leases.mjs';
 import {readCompanyFiles} from '../shared/company-directory.mjs';
 import {validateFormIdentities} from '../shared/form-identity.mjs';
-import {wasBuilt,sealedContractHash,unsealedTemplate} from '../shared/form-seal.mjs';
+import {wasBuilt,templateContractHash,draftTemplate} from '../shared/template-validation.mjs';
 import {acquisitionContractHash,captureContentHash} from '../shared/acquisition-chain.mjs';
 const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const bytesHash=value=>createHash('sha256').update(value).digest('hex');
 const identityFields=new Set(['companyId','companyCode','formId','templateId']);
 const referenceFields=new Set(['id','captureId','structureId','choicesId','draftId','runId','probeRunId','sourceRunId','baselineCaptureId','targetCaptureId','reboundFrom']);
 const preserve=new Set(['facts','sources','entities','rawEvidence','nativeStructure','scriptInventory','controls','actions','read','control','enumMap','policy','policies','applicationSelections','files']);
-const prefixes=['capture-','form-structure-','choices-','acquisition-','form-draft-','definition-','seal-','sealed-probe-','draft-probe-'];
+const prefixes=['capture-','form-structure-','choices-','acquisition-','form-draft-','definition-','sealed-probe-','draft-probe-'];
 const json=async file=>JSON.parse(await readFile(file,'utf8'));
 const optional=async file=>{try{return await json(file);}catch(e){if(e.code==='ENOENT')return null;throw e;}};
 
@@ -43,8 +43,8 @@ function collectHashes(before,after,hashes,key=''){
  hashes.set(digest(before),digest(after));
  if(before.pages&&before.evidence){
   hashes.set(acquisitionContractHash(before),acquisitionContractHash(after));
-  hashes.set(sealedContractHash(before),sealedContractHash(after));
-  hashes.set(digest(unsealedTemplate(before)),digest(unsealedTemplate(after)));
+  hashes.set(templateContractHash(before),templateContractHash(after));
+  hashes.set(digest(draftTemplate(before)),digest(draftTemplate(after)));
  }
  if(before.companyId&&before.pageUrl&&Array.isArray(before.controls))hashes.set(captureContentHash(before),captureContentHash(after));
  for(const [k,v]of Object.entries(before))if(Object.hasOwn(after,k))collectHashes(v,after[k],hashes,k);

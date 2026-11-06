@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {compatibleInventory,formScope} from './control-choice-store.mjs';
+import {controlDefinitionHash,formScope} from './control-choice-store.mjs';
 import {rankChoices,resolveObservedChoice,assertPopupChoiceContract} from './choice-resolution.mjs';
 
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -98,23 +98,24 @@ export async function assertStoredChoiceGoals(template,{store,companyId,profile,
  }
  assertChoiceGoalSources(template,profile);
  let capture=await store.get('runs',template.evidence.captureId);
- // A sealed form already proves its complete repeat inventory. Normal pages
- // may show only the first row until preparation restores the declared groups.
- // Use the certified capture only when every currently rendered definition
- // still matches; new or changed controls continue to block the plan.
- const formId=template.evidence.formId||template.id;
- if(/^C\d{5}$/.test(formId||'')){
-  let seal;try{seal=await store.get('runs','seal-'+formId);}catch(e){if(e.code!=='ENOENT')throw e;}
-  const baseline=seal?.certifiedCapture;
-  if(seal?.operation==='form_seal'&&seal.templateHash===hash(template)&&baseline?.companyId===companyId&&baseline.formId===formId&&formScope(baseline.pageUrl)===formScope(capture.pageUrl)&&compatibleInventory(baseline,capture))capture=baseline;
- }
  if(capture.companyId!==companyId||formScope(capture.pageUrl)!==formScope(template.evidence.sourceUrl))throw Error('CHOICE_GOAL_CAPTURE_SCOPE_MISMATCH');
  const fields=template.pages.flatMap(p=>p.fields),choices=[];
  for(const id of new Set(fields.map(f=>f.choiceGoal?.choicesId).filter(Boolean))){
   const asset=await store.get('runs',id);
   if(asset.companyId!==companyId||asset.formId&&asset.formId!==capture.formId||formScope(asset.pageUrl)!==formScope(capture.pageUrl))throw Error('CHOICE_GOAL_CAPTURE_SCOPE_MISMATCH');
+  for(const choice of asset.choices){
+   const live=capture.controls.find(control=>control.selector===choice.selector);
+   if(live&&choice.definition&&controlDefinitionHash(live)!==controlDefinitionHash(choice.definition))throw Error('CHOICE_GOAL_INCOMPLETE');
+  }
   choices.push(...asset.choices.map(c=>({...c,choicesId:id,captureId:capture.captureId})));
  }
+ // Option records already retain the definitions of extra repeat rows.
+ // Reuse those definitions only for rows absent from the rendered capture.
+ const retained=choices.map(choice=>choice.definition).filter(definition=>
+  definition?.group&&Number.isInteger(definition.repeatIndex)&&definition.repeatIndex>0&&
+  !capture.controls.some(control=>control.selector===definition.selector)
+ );
+ capture={...capture,controls:[...capture.controls,...retained]};
  const current=evaluateChoiceGoals({capture,profile,fields,choices});
  if(current.blockers.length)throw Error('CHOICE_GOAL_INCOMPLETE');
  for(const goal of current.goals)if(hash(fields.find(f=>f.id===goal.fieldId).choiceGoal)!==hash(goal))throw Error('CHOICE_GOAL_EVIDENCE_CHANGED');

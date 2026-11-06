@@ -1,5 +1,5 @@
 import {rolePageContract} from './role-identity.mjs';
-import {wasBuilt} from './form-seal.mjs';
+import {wasBuilt} from './template-validation.mjs';
 import {withProfileRecords} from './repeat-groups.mjs';
 import {materialAudit,effectiveRequired} from './business-materials.mjs';
 import {assertApplicationText} from './application-text.mjs';

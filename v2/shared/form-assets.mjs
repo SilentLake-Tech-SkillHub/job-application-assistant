@@ -1,4 +1,4 @@
-import {storedSeal} from './seal-state.mjs';
+import {templateState} from './template-state.mjs';
 import {contractRebuildRequired} from './rebuild-mark.mjs';
 // 公司表单资产：记录“已投递”前核对表单模板与核验记录、按批次汇报资产缺口（按站点编码）。
 // 投递链接不在这里写：第一次进入申请页的地址由 role-flow 记为观察（投递回传.json），用户确认后写主表。
@@ -34,7 +34,7 @@ export async function assertSubmissionPrepared({queues,store,catalog,outcome}){
   if(t.materials&&(!run.materialCoverage?.enabled||!run.materialCoverage.complete||run.materialCoverage.materialsHash!==hash(t.materials)))throw Error('ROLE_MATERIAL_VERIFICATION_REQUIRED');
   const templateId=boundTemplateId(catalog,t.companyId,t.roleId);if(!templateId)throw Error('SUBMISSION_COMPANY_TEMPLATE_MISSING');
   const template=await store.get('templates',templateId);
-  if((await storedSeal(store,template)).status!=='sealed')throw Error('SUBMISSION_COMPANY_TEMPLATE_NOT_SEALED');
+  if((await templateState(template)).status!=='sealed')throw Error('SUBMISSION_COMPANY_TEMPLATE_NOT_SEALED');
   if(hash(template)!==run.templateHash)throw Error('SUBMISSION_TEMPLATE_CHANGED_AFTER_VERIFY');
   return {taskId:t.taskId,verifyRunId:run.id,templateId};
  }
@@ -56,7 +56,7 @@ export async function formAssetStatus({handoffDir,catalog,store,companyIds,profi
   const sites=[];
   for(const e of entries){const required=roles.length?roles.filter(r=>r.siteId===e.siteId).map(r=>({roleId:r.roleId,templateId:e.templateId||null})):[{roleId:null,templateId:e.templateId||null}],assets=[];
    for(const requiredRole of required){let template=null;try{if(requiredRole.templateId)template=await store.get('templates',requiredRole.templateId);}catch{}
-    const seal=await storedSeal(store,template);assets.push({...requiredRole,...seal,status:template?(contractRebuildRequired(profile,hash(template))?'requires_rebuild':seal.status):'missing',reasonCode:seal.reason});}
+    const seal=await templateState(template);assets.push({...requiredRole,...seal,status:template?(contractRebuildRequired(profile,hash(template))?'requires_rebuild':seal.status):'missing',reasonCode:seal.reason});}
    const template=!assets.length?'not_applicable':assets.every(a=>a.status==='sealed')?'sealed':assets.some(a=>a.status==='requires_rebuild')?'requires_rebuild':assets.some(a=>a.status==='unsealed')?'unsealed':'missing';
    const noUrl=roles.filter(r=>r.siteId===e.siteId&&!r.applicationUrl).length,gaps=[];
    if(!(e.loginConfigured??e.loginFile))gaps.push('登录配置');

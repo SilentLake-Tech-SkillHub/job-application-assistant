@@ -23,11 +23,11 @@ import { compileExpected, attachInventory } from './observation.mjs';
 import {compileExecutionPlan,assertPreparedPlan,executionPlanId} from './execution-plan.mjs';
 import {validateControlContract} from './value-contract.mjs';
 import {acquireLease,leasePath,defaultLeaseRoot} from './leases.mjs';
-import {assertSealContract,wasBuilt} from './form-seal.mjs';
+import {assertTemplateContract,wasBuilt} from './template-validation.mjs';
 import {constructionTemplate} from './template-lifecycle.mjs';
 import {samePage} from './page-scope.mjs';
 import {withProfileRecords,sectionsWithoutAdd,groupFromDiscovery,groupSection,scopeOf,occurrenceBase} from './repeat-groups.mjs';
-import {recordRealFillFailure} from './seal-state.mjs';
+import {recordRealFillFailure} from './template-state.mjs';
 import {readdir} from 'node:fs/promises';
 import {probeConditions} from './condition-probe.mjs';
 import {enrichControlContext,liveControls} from './control-context.mjs';
@@ -135,7 +135,7 @@ export class Store {
   }
   async put(group, id, value, {sealPromotion}={}) {
     if (!idOK(id) || !['templates','runs','plans'].includes(group)) throw Error('INVALID_STORAGE_KEY');
-    if(sealPromotion){if(group!=='runs'||id!=='sealed-probe-'+sealPromotion.template.id||sealPromotion.template.coverage?.proof?.runId!==id)throw Error('INVALID_SEAL_PROMOTION');assertSealContract(sealPromotion.template,value,sealPromotion.companyId);}
+    if(sealPromotion){if(group!=='runs'||id!=='sealed-probe-'+sealPromotion.template.id||sealPromotion.template.coverage?.proof?.runId!==id)throw Error('INVALID_SEAL_PROMOTION');assertTemplateContract(sealPromotion.template,value,sealPromotion.companyId);}
     if(group==='runs'&&!sealPromotion){
       let files=[];try{files=await readdir(path.join(this.root,'templates'));}catch(e){if(e.code!=='ENOENT')throw e;}
       for(const f of files.filter(f=>f.endsWith('.json'))){const t=JSON.parse(await readFile(path.join(this.root,'templates',f),'utf8'));if(t.coverage?.proof?.runId!==id)continue;let old;try{old=await this.get('runs',id);}catch(e){if(e.code!=='ENOENT')throw e;}if(old&&hash(old)!==hash(value))throw Error('SEALED_EVIDENCE_PROTECTED');}

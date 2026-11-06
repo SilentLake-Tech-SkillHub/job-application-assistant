@@ -1,5 +1,5 @@
 import {COMPANY_CODE} from './form-identity.mjs';
-import {unsealedTemplate} from './form-seal.mjs';
+import {draftTemplate} from './template-validation.mjs';
 import {compareControlStructures} from './control-structure.mjs';
 const key=c=>JSON.stringify([c.group||null,c.repeatIndex??null,c.fieldKey||null,c.controlIndex??null,c.type,c.label]);
 // Offline only: same company, verified role and actual control correspondence.
@@ -23,5 +23,5 @@ export function rebindTemplate({template,baseline,current,roleId,confirmedTitle}
  result.evidence={...result.evidence,formId:current.formId,captureId:current.captureId,sourceUrl:current.pageUrl,observedAt:current.observedAt,reboundFrom:template.id,baselineCaptureId:baseline.captureId,targetCaptureId:current.captureId};
  delete result.evidence.pipeline;
  result.pages=result.pages.map(p=>({...p,pathPrefix:new URL(current.pageUrl).pathname,roleTitle:confirmedTitle,fields:p.fields.map(f=>({...f,prepareBeforeGroups:false}))}));result.validation={livePassed:false};
- return {template:unsealedTemplate(result),comparison,requiresLiveVerification:true};
+ return {template:draftTemplate(result),comparison,requiresLiveVerification:true};
 }

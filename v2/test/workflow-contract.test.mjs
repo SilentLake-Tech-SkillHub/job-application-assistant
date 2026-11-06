@@ -33,10 +33,10 @@ test('company form identity survives role changes and recapture',async()=>{
 });
 
 test('coverage flags and an old probe cannot seal changed content/component/operation contracts',async()=>{
- const {observedSeal}=await import('./fixtures/observed-seal.mjs'),{assertSealContract}=await import('../shared/form-seal.mjs');
- const t=template(),sealed=observedSeal(t,'synthetic');assert.equal(assertSealContract(sealed.template,sealed.probe,'synthetic'),true);
- sealed.template.pages[0].fields[0].actions[0].selector='#wrong-field';assert.throws(()=>assertSealContract(sealed.template,sealed.probe,'synthetic'),/SEALED_CONTRACT_CHANGED/);
- const f=template();f.coverage={allControlsMapped:true,allDriversSupported:true,allConditionalBranchesVerified:true};assert.throws(()=>assertSealContract(f),/SEAL_PROOF_REQUIRED/);
+ const {observedSeal}=await import('./fixtures/observed-seal.mjs'),{assertTemplateContract}=await import('../shared/template-validation.mjs');
+ const t=template(),sealed=observedSeal(t,'synthetic');assert.equal(assertTemplateContract(sealed.template,sealed.probe,'synthetic'),true);
+ sealed.template.pages[0].fields[0].actions[0].selector='#wrong-field';assert.throws(()=>assertTemplateContract(sealed.template,sealed.probe,'synthetic'),/SEALED_CONTRACT_CHANGED/);
+ const f=template();f.coverage={allControlsMapped:true,allDriversSupported:true,allConditionalBranchesVerified:true};assert.throws(()=>assertTemplateContract(f),/SEAL_PROOF_REQUIRED/);
 });
 
 test('ordinary semantic and input errors cannot be laundered into terminal supervisor handoffs',async()=>{

@@ -77,6 +77,12 @@ test('a template bound to a profile contract marked requires_rebuild is never re
  const route=await new FormRouter({store,companies,validateTemplate:()=>true,loadProfile:async()=>marked}).resolve({companyId:'C00001',pageUrl:apply});
  const plain=await new FormRouter({store,companies,validateTemplate:()=>true,loadProfile:async()=>null}).resolve({companyId:'C00001',pageUrl:apply});
  assert.equal(route.reasonCode,'real_fill_failure');assert.equal(route.route,'incremental');assert.ok(route.blockers.includes('PROFILE_EXECUTION_CONTRACT_REQUIRES_REBUILD'));
+ assert.deepEqual(route.nextTools,['capture_controls','form_mapping_candidates','form_build_template']);
+ assert.equal(route.fullAcquisitionRequired,false);
+ assert.deepEqual(plain.nextTools,['prepare_plan']);
+ const movedStore={get:async()=>({...t,validation:{realFillFailure:{fields:['name']}}})};
+ const moved=await new FormRouter({store:movedStore,companies}).resolve({companyId:'C00001',pageUrl:apply});
+ assert.deepEqual(moved.nextTools,['form_repair_fields']);
 });
 
 test('filling a form does not mark its contract for rebuild; a question the contract does not cover does',async()=>{

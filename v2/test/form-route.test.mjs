@@ -9,8 +9,8 @@ const template=()=>({id:'form',version:1,coverage:{allConditionalBranchesVerifie
 test('existing usable company form skips acquisition; no asset selects acquisition without browser I/O',async()=>{
  let reads=0;const observed=observedSeal(template(),'company'),companies=[{id:'company',origin:'https://example.com',templateId:'form'}],store={get:async (group,id)=>{reads++;return group==='runs'?(observed.assets.get(id)||observed.probe):observed.template;}},r=new FormRouter({store,companies,validateTemplate});
  const args={companyId:'company',pageUrl:'https://example.com/form'};
- assert.equal((await r.resolve(args)).route,'reuse');assert.ok(reads>=2);
- companies[0].templateId=null;assert.equal((await r.resolve(args)).reason,'NO_COMPANY_FORM_ASSET');assert.ok(reads>=2);
+ assert.equal((await r.resolve(args)).route,'reuse');assert.equal(reads,1);
+ companies[0].templateId=null;assert.equal((await r.resolve(args)).reason,'NO_COMPANY_FORM_ASSET');assert.equal(reads,1);
 });
 test('partial or incompatible asset requests only missing/different parts, never grants filling',async()=>{
  const company={id:'company',origin:'https://example.com',templateId:'form'};let t=template();const r=new FormRouter({store:{get:async()=>t},companies:[company],validateTemplate});

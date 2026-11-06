@@ -5,23 +5,23 @@ import {auditStoredContract} from './workflow-contract.mjs';
 const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 // Built once means complete coverage and a proof run were recorded when it was sealed.
 export const wasBuilt=t=>['allConditionalBranchesVerified','allControlsMapped','allDriversSupported'].every(k=>t?.coverage?.[k]===true)&&!!t.coverage.proof?.runId;
-export const sealedContractHash=t=>digest({id:t.id,version:t.version,evidence:t.evidence,pages:t.pages});
-export function assertSealContract(template,probe,companyId){
+export const templateContractHash=t=>digest({id:t.id,version:t.version,evidence:t.evidence,pages:t.pages});
+export function assertTemplateContract(template,probe,companyId){
  if(!auditStoredContract(template).ready)throw Error('COMPLETE_EXECUTION_CONTRACT_REQUIRED');
  const proof=template.coverage?.proof;
  if(!proof?.runId||!proof.sourceTemplateHash||!proof.contractHash)throw Error('SEAL_PROOF_REQUIRED');
- if(proof.contractHash!==sealedContractHash(template))throw Error('SEALED_CONTRACT_CHANGED');
+ if(proof.contractHash!==templateContractHash(template))throw Error('SEALED_CONTRACT_CHANGED');
  if(probe&&(probe.id!==proof.runId||probe.operation!=='internal_condition_probe'||probe.companyId!==companyId||probe.templateHash!==proof.sourceTemplateHash||probe.status!=='verified'||probe.restoration!=='verified'||!probe.branches?.length||probe.branches.some(b=>b.status!=='verified'||b.newQuestions!==0||b.selected!==true||b.roleMatched!==true||b.conditionFieldsMatched!==true)))throw Error('SEAL_PROBE_EVIDENCE_INVALID');
  return true;
 }
 // An imported model-authored asset cannot certify its own execution readiness.
-export function unsealedTemplate(template){
+export function draftTemplate(template){
  const t=structuredClone(template);
  t.coverage={...t.coverage,allConditionalBranchesVerified:false,allControlsMapped:false,allDriversSupported:false};
  delete t.coverage.proof;
  t.validation={livePassed:false};return t;
 }
-export function sealFormTemplate(template,probe,{companyId,profileMapped,channel}){
+export function completeFormTemplate(template,probe,{companyId,profileMapped,channel}){
  if(templateConstructionIssues(template).length)throw Error('FORM_CONSTRUCTION_GAPS_REQUIRE_REPAIR');
  if(!auditStoredContract(template).ready)throw Error('COMPLETE_EXECUTION_CONTRACT_REQUIRED');
  if(probe.operation!=='internal_condition_probe'||probe.companyId!==companyId||probe.templateHash!==digest(template)||probe.status!=='verified'||probe.restoration!=='verified'||!probe.branches?.length||probe.branches.some(b=>b.status!=='verified'||b.newQuestions!==0))throw Error('VERIFIED_CONDITION_PROOF_REQUIRED');
@@ -39,6 +39,6 @@ export function sealFormTemplate(template,probe,{companyId,profileMapped,channel
  for(const f of fields){validateControlContract(f);if(!f.userOnly&&!controls.some(c=>f.inventorySelectors?.includes(c.selector)))throw Error('SEAL_FIELD_NOT_OBSERVED');if((f.actions||[]).some(a=>a.method==='upload')&&channel==='iab')throw Error('IAB_UPLOAD_DRIVER_NOT_AVAILABLE');}
  const result=structuredClone(template);result.version++;
  result.coverage={...result.coverage,allConditionalBranchesVerified:true,allControlsMapped:true,allDriversSupported:true,proof:{runId:probe.id,sourceTemplateHash:probe.templateHash,probeScope:probe.scope||'declared_conditions',restoration:probe.restoration,completedAt:probe.finishedAt}};
- result.coverage.proof.contractHash=sealedContractHash(result);
+ result.coverage.proof.contractHash=templateContractHash(result);
  result.validation={livePassed:false};return result;
 }

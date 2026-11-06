@@ -3,7 +3,7 @@ import {recordPlanOf,withProfileRecords,groupFromDiscovery} from './repeat-group
 import {withTaskRecords,taskRecordScope,TaskRecords} from './task-records.mjs';
 import {evaluateBusinessAuthorization,businessAuthorizationSwitch} from './business-authorization.mjs';
 import {registerFormDraft,constructionTemplate,promoteSealedTemplate} from './template-lifecycle.mjs';
-import {storedSeal,assertReaRequired,certifySeal,recordRealFillFailure} from './seal-state.mjs';
+import {templateState,assertReaRequired,clearTemplateFailures,recordRealFillFailure} from './template-state.mjs';
 import {repairFields} from './form-local-repair.mjs';
 import {retainControlChoices,bindControlChoices,formScope} from './control-choice-store.mjs';
 import {assertCurrentStructure,originalStructureCapture} from './acquisition-chain.mjs';
@@ -57,7 +57,7 @@ import {compareControlStructures} from './control-structure.mjs';
 import {CompanyBatch} from './company-batch.mjs';
 import {MaterialImport} from './material-import.mjs';
 import {RoutedBrowserAdapter} from './routed-browser.mjs';
-import {sealFormTemplate,unsealedTemplate} from './form-seal.mjs';
+import {completeFormTemplate,draftTemplate} from './template-validation.mjs';
 import {rebindTemplate} from './template-rebind.mjs';
 import {closeApplication} from './application-closeout.mjs';
 import {assertSubmissionPrepared,formAssetStatus} from './form-assets.mjs';
@@ -517,7 +517,7 @@ registerTool('form_build_template',{description:'统一控件合集按真实采�
  if(native.length)await store.put('runs',canonicalChoicesId,{...(canonical||{}),id:canonicalChoicesId,companyId:a.companyId,pageUrl:capture.pageUrl,captureId,formId:capture.formId,captureHash:captureContentHash(capture),...bindControlChoices({capture,choices:[...(canonical?.choices||[]),...native],previous:canonical}),readAt:new Date().toISOString()});
  for(const id of choiceIds){let asset;try{asset=await store.get('runs',id);}catch(e){if(id===canonicalChoicesId&&e.code==='ENOENT')continue;throw e;}if(asset.companyId!==a.companyId||asset.formId!==capture.formId)throw Error('CHOICE_CAPTURE_SCOPE_MISMATCH');choices.push(...asset.choices.map(c=>({...c,choicesId:id,captureId})));}
  if(reaStructure.operation!=='rea_form_structure'||reaStructure.structure?.provider!=='rea'||reaStructure.reaEvidenceHash!==reaStructure.structure.evidenceHash)throw Error('REA_STRUCTURE_EVIDENCE_REQUIRED');
- await assertCurrentStructure(store,reaStructure,capture,a.companyId);
+ assertCurrentStructure(reaStructure,capture,a.companyId);
  const baseline=originalStructureCapture(reaStructure,capture),currentSelectors=new Set(capture.controls.map(c=>c.selector)),retained=baseline.controls.filter(c=>!currentSelectors.has(c.selector)&&c.repeatIndex>0&&c.group);
  const previous=[];for(const read of [()=>store.get('templates',capture.formId),async()=>(await store.get('runs',formAssetKeys(capture.formId).draft)).template])try{previous.push(await read());}catch(e){if(e.code!=='ENOENT')throw e;}
  let observedGroups=[];if(!a.page.groups?.length)try{const open=await browser.existingPage(capture.pageUrl,{readOnly:true});observedGroups=(await open.repeatDiscovery(a.page.sections.map(section=>section.title||section))).map(groupFromDiscovery);}catch{}
@@ -532,14 +532,21 @@ registerTool('form_build_template',{description:'统一控件合集按真实采�
 registerTool('form_repair_fields',{description:'局部修复：真实填写发现控件变了时，只读当前页面，只更新失败的那几个字段的定位；不调用REA、不重采其他控件、不改已有映射、选项和栏目条数。认不出的字段在 unresolved 里列出候选，用 mappings 指定后再调。不填写、不提交。',inputSchema:{...queueTask,mappings:z.array(z.object({fieldId:z.string(),selector:z.string()})).default([])}},wrap(async a=>{
  const {t,state,template}=await boundRole(a);
  return engine.withCompanyLease(t.companyId,async()=>{
-  const seal=await storedSeal(store,template),failedIds=[...new Set([...(seal.reason==='real_fill_failure'?seal.blockers:[]),...a.mappings.map(m=>m.fieldId)])];
+  const route=await engine.formRoute({companyId:t.companyId,roleId:t.roleId,pageUrl:state.returnUrl});
+  if(route.repairKind==='question_definition')return {
+   templateId:template.id,status:'needs_question_mapping',repaired:[],unresolved:[],nextTools:route.nextTools,
+   continuation:continuationFor({route}),submission:'not_performed'
+  };
+  const seal=await templateState(template),failedIds=[...new Set([...(seal.reason==='real_fill_failure'?seal.blockers:[]),...a.mappings.map(m=>m.fieldId)])];
   if(!failedIds.length)return {templateId:template.id,status:'nothing_to_repair',repaired:[],unresolved:[],submission:'not_performed'};
   const page=await browser.existingPage(state.returnUrl,{pageId:state.pageId,readOnly:true}),plan=template.pages.find(p=>new URL(state.returnUrl).pathname.startsWith(p.pathPrefix));
   const result=repairFields({template,failedIds,controls:await liveControls(page,plan),mappings:a.mappings});
-  validateTemplate(result.template);await store.put('templates',result.template.id,result.template);
+  validateTemplate(result.template);
+  if(result.unresolved.length)await recordRealFillFailure(store,result.template,t.companyId,result.unresolved.map(u=>u.id));
+  else await clearTemplateFailures(store,result.template);
+  await store.put('templates',result.template.id,result.template);
   const templateHash=hash(result.template);
   await updateProfile(profileFile,p=>{for(const form of Object.values(p.companyForms||{})){const contract=form.executionContract;if(contract?.templateId!==result.template.id)continue;contract.templateHash=templateHash;contract.fields=result.template.pages.find(x=>x.fields.some(f=>f.id===contract.fields?.[0]?.id))?.fields.map((f,index)=>({...structuredClone(f),index}))||contract.fields;for(const moved of result.repaired.filter(r=>r.moved))for(const mapping of Object.values(form.mappings||{}))if(mapping.selector===moved.from)mapping.selector=moved.selector;}return p;});
-  if(result.unresolved.length)await recordRealFillFailure(store,result.template,t.companyId,result.unresolved.map(u=>u.id));else await certifySeal(store,result.template,t.companyId);
   return {templateId:result.template.id,templateHash,status:result.unresolved.length?'needs_mapping':'repaired',repaired:result.repaired,unresolved:result.unresolved,nextTools:result.unresolved.length?['form_repair_fields']:['prepare_plan'],submission:'not_performed'};
  });
 }));
@@ -579,7 +586,7 @@ registerTool('template_register',{description:'持久化已采集并确定的操
   if(draftId)template=templateFromDraft(await store.get('runs',draftId),{companyId,draftHash},hash);
   template=canonicalControlSpec(template);validateTemplate(template);c=companyContext(c,{pageUrl:template.evidence.sourceUrl});if(new URL(template.evidence.sourceUrl).origin!==c.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
   await assertAcquisitionChain(template,{store,companyId,profile:await loadProfile(profileFile)});
-  const t=unsealedTemplate(template);
+  const t=draftTemplate(template);
   await assertStoredChoiceGoals(t,{store,companyId,profile:await loadProfile(profileFile),required:true});
   await assertStoredChoiceResolutions(t,{store,companyId,profile:await loadProfile(profileFile)});
   if(!profileFile)throw Error('PROFILE_REQUIRED_FOR_NEW_QUESTIONS');

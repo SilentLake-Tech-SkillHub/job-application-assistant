@@ -137,6 +137,24 @@ test('a template whose captured controls changed under the same id is refused',a
  s.assets.set(captured.captureId,{...captured,controls:[{...captured.controls[0],label:'Other'}]});
  await assert.rejects(assertAcquisitionChain(template,{store:s.store,companyId:s.companyId}),/ACQUISITION_CONTROL_CAPTURE_CHANGED|ACQUISITION_EVIDENCE_CHANGED/);
 });
+test('question additions reuse original acquisition evidence even when the seal stores an expanded capture from another tab',async()=>{
+ const s=await inspectionScenario(),at='2026-10-26T12:00:00.000Z';
+ const original=await s.capture('chrome:original',at);
+ const {id:structureId}=await s.inspect('chrome:original',at,original,1);
+ const repeated={selector:'#record-2',label:'Second record',type:'text'};
+ const expanded=await s.capture('chrome:seal',at,[...original.controls,repeated]);
+ await s.store.put('runs','seal-'+original.formId,{operation:'form_seal',baselineCapture:expanded,certifiedCapture:expanded});
+ const current=await s.capture('chrome:current',at,[...original.controls,{selector:'#new',label:'New question',type:'text'}]);
+ const paired=await assertCapturedAcquisition(s.store,{companyId:s.companyId,captureId:current.captureId});
+ assert.equal(paired.structure.pageId,original.pageId);
+ assert.deepEqual(paired.capture.controls,current.controls);
+ const draft=await s.build(structureId,current);
+ assert.equal(draft.evidence.pipeline.version,3);
+ const otherPath={...current,pageUrl:'https://example.test/other-form'};
+ await s.store.put('runs',current.captureId,otherPath);
+ await assert.rejects(assertCapturedAcquisition(s.store,{companyId:s.companyId,captureId:current.captureId}),/ACQUISITION_CAPTURE_SCOPE_CHANGED/);
+});
+
 test('a current form code resolves the latest paired assets without any old page pointer',async()=>{
  const f=fixture();assert.equal((await assertCapturedAcquisition(f.store,{companyId:'example',formId:f.capture.formId})).capture.captureId,f.capture.captureId);
  await assert.rejects(assertCapturedAcquisition(f.store,{companyId:'example',pageUrl:f.capture.pageUrl}),/FORM_CODE_OR_CAPTURE_REQUIRED/);

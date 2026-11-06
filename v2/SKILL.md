@@ -2,12 +2,12 @@
 name: job-application-assistant-v2
 description: Coordinate company-configured login and application MCP tools, stage checks and user review for confirmed recruiting roles. Use the single maintained V2 runtime for preparation and testing.
 metadata:
-  version: "2.0.0-alpha.13"
+  version: "2.0.0-alpha.14"
 ---
 
 # 岗位代投助手 V2
 
-Start from the workspace router, confirmed role scope, current materials and existing authorization. Reuse same-batch decisions; ask only genuinely missing facts. This package is the single maintained application runtime in the workspace. Project MCP and host Hook entrypoints resolve to this source tree. Private facts and new runtime state stay outside the package.
+Start from the workspace router, confirmed role scope, current materials and existing authorization. Reuse same-batch decisions; ask only genuinely missing facts. This package is the single maintained application runtime in the workspace. Project MCP and host Hook entrypoints resolve to this source tree. Private facts and new runtime state stay outside the package. Each company owns one filling template. Shared helpers use its original capture and actual verification results; they never create or read a separate seal certificate or duplicate capture stored inside one.
 
 ## Start and route
 

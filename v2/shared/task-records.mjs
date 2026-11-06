@@ -9,7 +9,7 @@ const context=new AsyncLocalStorage();
 export const withTaskRecords=(scope,fn)=>context.run(scope,fn);
 export const taskRecordScope=()=>context.getStore()||{};
 export function bindTaskRecordScope(taskId){const scope=context.getStore();if(!scope||!taskId)return;if(scope.taskId&&scope.taskId!==taskId)throw Error('TASK_RECORD_SCOPE_MISMATCH');scope.taskId=taskId;}
-const durableAsset=/^(?:seal-|sealed-probe-|draft-probe-|capture-|form-structure-|choices-|acquisition-|form-draft-|definition-|probe-|submission-proof-|submission-evidence-)/;
+const durableAsset=/^(?:sealed-probe-|draft-probe-|capture-|form-structure-|choices-|acquisition-|form-draft-|definition-|probe-|submission-proof-|submission-evidence-)/;
 const read=async(file,fallback)=>{try{return JSON.parse(await readFile(file,'utf8'));}catch(e){if(e.code==='ENOENT')return fallback;throw e;}};
 async function write(file,value){await mkdir(path.dirname(file),{recursive:true,mode:0o700});const tmp=file+'.'+randomUUID()+'.tmp';await writeFile(tmp,JSON.stringify(value,null,2),{mode:0o600});await rename(tmp,file);}
 
@@ -26,7 +26,7 @@ export class TaskRecords{
  }
  async put(group,id,value){
   const scope=context.getStore()||{},taskId=value.taskId||scope.taskId;
-  if(!taskId||!['runs','plans'].includes(group)||id.startsWith('batch-prepare-')||durableAsset.test(id)||['internal_condition_probe','form_seal'].includes(value.operation))return false;
+  if(!taskId||!['runs','plans'].includes(group)||id.startsWith('batch-prepare-')||durableAsset.test(id)||value.operation==='internal_condition_probe')return false;
   if(!keyOK(taskId))throw Error('INVALID_TASK_RECORD_KEY');
   const operation=group==='plans'&&Number.isInteger(value.compilerVersion)?'execution_plan':value.operation||scope.tool||group;
   const identity=value.fieldId||value.selector||value.projectId||value.binding?.fieldId||(operation==='live_observation'?value.observation?.pageUrl:'')||'';
