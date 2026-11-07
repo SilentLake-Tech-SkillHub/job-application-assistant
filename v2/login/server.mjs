@@ -57,7 +57,7 @@ registerTool('login_inspect',{description:'只读核对登录页、账号匹配�
 registerTool('login_compile',{description:'离线编译公司登录方案，绑定公司资产和私有账号事实的 Hash；不访问页面。',inputSchema:location},wrap(a=>engine.compile(a)));
 registerTool('login_prepare',{description:'运行冻结方案：复用有效登录态，或处理已知阅读弹窗、选区号、填手机号。登录同意框只看主档业务授权开关：为1直接勾选并读回，不打开声明全文；为0或未设定时组件不勾，交用户在同一标签完成登录后调用 role_resume。',inputSchema:{...plan,authorization}},wrap(a=>engine.prepare(a)));
 registerTool('login_request_sms',{description:'通过真实按钮请求短信，限制重发次数与冷却时间；返回用户验证码或图形验证交接。绝不存验证码。',inputSchema:{...plan,authorization,acceptanceId:z.string()}},wrap(a=>engine.send(a)));
-registerTool('login_verify_otp',{description:'仅使用用户本次提供的临时短信码，真实填写并点击登录，核对账号及登录页消失；不落盘验证码。',inputSchema:{...plan,authorization,challengeId:z.string().uuid(),code:z.string().regex(/^\d{4,8}$/)}},wrap(a=>engine.verify(a)));
+registerTool('login_verify_otp',{description:'仅使用用户本次提供的临时短信码，真实填写并点击登录，检查登录成功及登录页消失；不落盘验证码。',inputSchema:{...plan,authorization,challengeId:z.string().uuid(),code:z.string().regex(/^\d{4,8}$/)}},wrap(a=>engine.verify(a)));
 registerTool('login_resume_verification',{description:'用户手动完成图形验证码后只读核验；验证码仍在则继续交接，消失后核实短信倒计时。不拖动、不重发短信。',inputSchema:{...plan,challengeId:z.string().uuid()},annotations:{readOnlyHint:true}},wrap(a=>engine.resumeVerification(a)));
 registerTool('login_batch_prepare',{description:'一次调用准备多个公司的登录；同账号 origin 串行，集中返回需用户参与的步骤。不会批量请求短信。',inputSchema:{tasks:z.array(z.object(plan)).min(1).max(20),concurrency:z.number().int().min(1).max(5).default(3),authorization}},wrap(a=>engine.batch(a)));
 registerTool('login_run_status',{description:'读取私有登录结果，不返回手机号或验证码。',inputSchema:{runId:z.string().uuid()},annotations:{readOnlyHint:true}},wrap(a=>engine.store.get('runs',a.runId)));

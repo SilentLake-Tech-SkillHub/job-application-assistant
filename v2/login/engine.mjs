@@ -34,7 +34,7 @@ export class LoginEngine{
   }
   async compile({companyId,pageUrl,taskContext}){
     const c=await this.company(companyId,{pageUrl});assertScope(c,pageUrl);const a=c.loginMethod==='user_operated'?null:resolveAccount(await this.profile(),c);
-    const plan={id:taskContext?.taskId||taskRecordScope().taskId?randomUUID():'login-plan-'+companyId,companyId,pageUrl,assetHash:hash(c),accountFingerprint:a?.fingerprint??null,createdAt:now(),steps:c.loginMethod==='user_operated'?['check_current_session','user_login_handoff_if_required','verify_exact_account_at_session_page']:['check_current_session','inspect_and_dismiss_known_popups','select_actual_country_option','fill_phone_from_private_profile','require_privacy_acceptance','request_sms_once','handoff_verification_if_present','consume_ephemeral_user_otp','click_login_only','verify_account_and_absent_login_form'],applicationSubmission:'forbidden'};
+    const plan={id:taskContext?.taskId||taskRecordScope().taskId?randomUUID():'login-plan-'+companyId,companyId,pageUrl,assetHash:hash(c),accountFingerprint:a?.fingerprint??null,createdAt:now(),steps:c.loginMethod==='user_operated'?['check_current_session','user_login_handoff_if_required','verify_session_on_current_task_page']:['check_current_session','inspect_and_dismiss_known_popups','select_actual_country_option','fill_phone_from_private_profile','require_privacy_acceptance','request_sms_once','handoff_verification_if_present','consume_ephemeral_user_otp','click_login_only','verify_authenticated_session_and_absent_login_form'],applicationSubmission:'forbidden'};
     if(taskContext)plan.taskContext=taskContext;
     plan.planHash=hash(plan);await this.store.put('plans',plan.id,plan);return {planId:plan.id,planHash:plan.planHash,companyId,assetHash:plan.assetHash,stepCount:plan.steps.length,browserAccess:false};
   }
@@ -48,13 +48,13 @@ export class LoginEngine{
   async prepare(args){const {p,c}=await this.plan(args);return this.locked(c,async()=>{
     let o=await this.planState(c,p);beforeLoginStep({step:'prepare',state:o,authorization:args.authorization});
     if(o.authenticated&&!o.form)return this.record(c,'prepare',{...this.publicState(o),reusedSession:true,smsSent:false});
-    if(c.loginMethod==='user_operated')return this.record(c,'prepare',{status:'needs_user_login',method:'user_operated',pageUrl:o.url,automaticLogin:false,smsSent:false,handoff:{operator:'user',nextTool:'role_resume'}});
+    if(c.loginMethod==='user_operated')return this.record(c,'prepare',{status:'needs_user_login',method:'user_operated',pageUrl:o.url,automaticLogin:false,smsSent:false,handoff:{operator:'user',nextTool:'role_advance'}});
     if(!o.form)throw Error('LOGIN_FORM_NOT_PRESENT');
     // One business switch decides the login consent checkbox. 1: the component ticks it, no
     // policy text is opened or re-confirmed. 0 / undecided: the component never ticks it; the
     // user completes this login on the same tab and the workflow resumes with role_resume.
     const standing=evaluateBusinessAuthorization(await this.profile(),{operation:'recruiting_privacy',phase:'classify',stage:'login',companyId:c.companyId,officialOrigin:c.origin});
-    if(standing.decision!=='allow')return this.record(c,'prepare',{status:'needs_user_login',method:'user_operated_consent',pageUrl:o.url,automaticLogin:false,smsSent:false,businessAuthorization:{decision:standing.decision,reason:standing.reason,switchValue:standing.switchValue,authorizationRef:standing.authorizationRef},handoff:{operator:'user',nextTool:'role_resume'}});
+    if(standing.decision!=='allow')return this.record(c,'prepare',{status:'needs_user_login',method:'user_operated_consent',pageUrl:o.url,automaticLogin:false,smsSent:false,businessAuthorization:{decision:standing.decision,reason:standing.reason,switchValue:standing.switchValue,authorizationRef:standing.authorizationRef},handoff:{operator:'user',nextTool:'role_advance'}});
     o=await this.dismiss(c,o);const a=resolveAccount(await this.profile(),c),f=c.fields;
     if(o.country!==c.account.countryCode)await this.browser.act(c,o.url,{method:'dropdown',selector:f.country,options:[f.countryOptionLabel]},f.countryOptionLabel);
     await this.browser.act(c,o.url,{method:'fill',selector:f.phone},a.phone);
