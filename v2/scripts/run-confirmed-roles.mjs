@@ -27,9 +27,7 @@ async function fill(){
 }
 async function nextParallel(){
  while(index<queue.tasks.length){const company=queue.tasks[index].companyId,group=[];let end=index;while(end<queue.tasks.length&&queue.tasks[end].companyId===company)group.push(queue.tasks[end++]);
-  for(const task of group){currentArgs={queueId:queue.queueId,queueHash:queue.queueHash,taskId:task.taskId};const opened=await call('login','role_open',currentArgs);if(opened.status==='needs_login'){
-   const prepared=await call('login','login_prepare',{planId:opened.loginPlan.planId,planHash:opened.loginPlan.planHash,authorization:loginAuth});let result=prepared;if(prepared.status==='ready_to_request_sms')result=await call('login','login_request_sms',{planId:opened.loginPlan.planId,planHash:opened.loginPlan.planHash,acceptanceId:prepared.acceptanceId,authorization:loginAuth});await handoff(result);return;
-  }if(opened.status!=='ready_to_fill')throw Error('ROLE_OPEN_DID_NOT_RELEASE_FILL');}
+  for(const task of group){currentArgs={queueId:queue.queueId,queueHash:queue.queueHash,taskId:task.taskId};const entered=await call('login','role_advance',{...currentArgs,authorization:loginAuth});if(entered.continuation?.requiresUser){await handoff(entered);return;}if(entered.status!=='ready_to_fill')throw Error('ROLE_ENTRY_NOT_READY');}
   const prepared=await call('application','roles_prepare_batch',{queueId:queue.queueId,queueHash:queue.queueHash,taskIds:group.map(t=>t.taskId),concurrency:Math.min(group.length,5),authorization:fillAuth});
   if(prepared.status!=='ready_for_user_review'){timing.stage='needs_attention';await persist();console.log(JSON.stringify({event:'needs_attention',...prepared}));return;}
   for(const result of prepared.results){const task=group.find(t=>t.taskId===result.taskId),args={queueId:queue.queueId,queueHash:queue.queueHash,taskId:task.taskId};const screenshot=await call('login','role_screenshot',args);(timing.completedTasks??=[]).push({...task,...result,screenshot});}index=end;await persist();
@@ -38,14 +36,9 @@ async function nextParallel(){
 }
 async function next(){
  if(queue.executionMode==='parallel_roles')return nextParallel();
- while(index<queue.tasks.length){currentArgs={queueId:queue.queueId,queueHash:queue.queueHash,taskId:queue.tasks[index].taskId};const opened=await call('login','role_open',currentArgs);
-  if(opened.status==='needs_login'){
-   const prepared=await call('login','login_prepare',{planId:opened.loginPlan.planId,planHash:opened.loginPlan.planHash,authorization:loginAuth});
-   let result=prepared;
-   if(prepared.status==='ready_to_request_sms')result=await call('login','login_request_sms',{planId:opened.loginPlan.planId,planHash:opened.loginPlan.planHash,acceptanceId:prepared.acceptanceId,authorization:loginAuth});
-   const screenshot=await call('login','role_screenshot',currentArgs);await handoff({...result,screenshot});return;
-  }
-  if(opened.status!=='ready_to_fill')throw Error('ROLE_OPEN_DID_NOT_RELEASE_FILL');
+ while(index<queue.tasks.length){currentArgs={queueId:queue.queueId,queueHash:queue.queueHash,taskId:queue.tasks[index].taskId};const opened=await call('login','role_advance',{...currentArgs,authorization:loginAuth});
+  if(opened.continuation?.requiresUser){await handoff(opened);return;}
+  if(opened.status!=='ready_to_fill')throw Error('ROLE_ENTRY_NOT_READY');
   if(!await fill())return;
  }
  timing.stage='ready_for_user_review';timing.completedAt=new Date().toISOString();timing.elapsedMs=Math.round(Date.parse(timing.completedAt)-started);timing.humanWaitingMs=timing.waitingIntervals.reduce((n,x)=>n+Date.parse(x.finishedAt)-Date.parse(x.startedAt),0);timing.elapsedExcludingWaitingMs=timing.elapsedMs-timing.humanWaitingMs;await persist();console.log(JSON.stringify({event:'ready_for_user_review',elapsedMs:timing.elapsedMs,humanWaitingMs:timing.humanWaitingMs,elapsedExcludingWaitingMs:timing.elapsedExcludingWaitingMs,tasks:timing.completedTasks,submission:'not_performed'}));
@@ -57,7 +50,7 @@ for await(const line of createInterface({input:process.stdin,terminal:false})){
  if(line.trim()==='close')break;
  if(line.trim()==='resume'&&waiting)await safe(async()=>{
   const interval=timing.waitingIntervals.at(-1);interval.finishedAt=new Date().toISOString();waiting=false;
-  const restored=await call('login','role_resume',currentArgs);if(restored.status!=='ready_to_fill'){await handoff(restored);return;}
+  const restored=await call('login','role_advance',{...currentArgs,authorization:loginAuth});if(restored.status!=='ready_to_fill'){await handoff(restored);return;}
   console.log(JSON.stringify({event:'original_role_restored',...restored}));if(queue.executionMode==='parallel_roles')await next();else if(await fill())await next();
  });
 }

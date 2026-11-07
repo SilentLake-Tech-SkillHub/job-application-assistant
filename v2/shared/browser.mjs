@@ -1,3 +1,4 @@
+import {loginStateDOM} from './login-state.mjs';
 import {samePage} from './page-scope.mjs';
 import {pageFailureState,missingPageFailureState} from './page-failure-state.mjs';
 import {inspectEntryPage} from './entry-inspection.mjs';
@@ -218,10 +219,10 @@ export class BrowserAdapter {
       return {evidence,nativeStructure,binding:{pageId,targetId:targetInfo.targetId,beforeUrl,afterUrl:page.url()}};
     }finally{await cdp.detach();}
   }
-  async roleSnapshot({pageId,roleSelector,accountSelector,loginRoot,roleIdentity}){
+  async roleSnapshot({pageId,roleSelector,accountSelector,loginRoot,roleIdentity,sessionSelectors}){
     const page=await this.trackedPage(pageId);
     const read=async s=>{if(!s)return null;const l=page.locator(s);if(await l.count()!==1)return null;return ((await l.innerText())||'').trim()||null;};
-    return {pageUrl:page.url(),roleTitle:await read(roleSelector),...(roleIdentity?{roleIdentity:readRoleIdentity(roleIdentity,page.url())}:{}),account:await read(accountSelector),loginFormPresent:loginRoot?await page.locator(loginRoot).count()>0:false,readAt:new Date().toISOString()};
+    return {pageUrl:page.url(),roleTitle:await read(roleSelector),...(roleIdentity?{roleIdentity:readRoleIdentity(roleIdentity,page.url())}:{}),...await page.evaluate(loginStateDOM,{loginRoot,accountSelector,sessionSelectors}),readAt:new Date().toISOString()};
   }
   async screenshot(pageId,{selector}={}){const page=await this.trackedPage(pageId);const dir=this.screenshotDir||(this.profileDir?path.join(path.dirname(this.profileDir),'screenshots'):null);if(!dir)throw Error('SCREENSHOT_DIRECTORY_REQUIRED');await mkdir(dir,{recursive:true,mode:0o700});const file=path.join(dir,randomUUID()+'.png');const masks=await page.evaluate(screenshotMaskDOM),options={path:file,mask:masks.map(selector=>page.locator(selector))};if(selector){const actual=await new PageAdapter(page).resolveSelector(selector),target=page.locator(actual);if(await target.count()!==1)throw Error('SCREENSHOT_TARGET_NOT_UNIQUE');await target.screenshot(options);}else await page.screenshot({...options,fullPage:true});await chmod(file,0o600);return {path:file,scope:selector?'captured_field':'full_page',sensitiveFieldsMasked:masks.length};}
   async closePage(pageId){const page=await this.trackedPage(pageId);if(page.context().pages().filter(p=>!p.isClosed()).length<=1)throw Error('LAST_PAGE_NOT_CLOSABLE');await page.close();this.pageIds.delete(pageId);return {pageId,closed:true};}
@@ -239,19 +240,16 @@ export class BrowserAdapter {
     const id=await this.trackPage(page);
     return {pageId:id,pageUrl:page.url(),reused};
   }
-  async enterApplication({pageId,expectedTitle,accountSelector,expectedAccount,roleSelector,entry,expectedRoleId,sessionAccountPageUrl}){
+  async enterApplication({pageId,expectedTitle,accountSelector,roleSelector,entry,expectedRoleId}){
     const page=await this.trackedPage(pageId),before=new URL(page.url());
     if(entry?.kind==='declarative_transition'){
       const identify=p=>this.trackPage(p);
-      return executeTransition({entry,pageId,expectedTitle,expectedRoleId,expectedAccount,accountSelector,sessionAccountPageUrl},{
+      return executeTransition({entry,pageId,expectedTitle,expectedRoleId,accountSelector},{
         getPage:id=>this.trackedPage(id),listPages:async()=>{const b=await this.connect();return Promise.all(b.contexts().flatMap(c=>c.pages()).filter(p=>!p.isClosed()).map(async p=>({id:await identify(p),url:p.url()})));},pause:ms=>new Promise(r=>setTimeout(r,ms))
       });
     }
     if(entry?.kind==='resume_modal'){
-      if(!expectedRoleId||entry.entryLabel!=='立即投递'||entry.editLabel!=='编辑'||!sessionAccountPageUrl||new URL(sessionAccountPageUrl).origin!==before.origin)throw Error('RESUME_ENTRY_CONTRACT_REQUIRED');
-      const accountPage=await this.existingPage(sessionAccountPageUrl);
-      const readAccount=async()=>(await accountPage.page.locator(accountSelector).innerText()).trim();
-      if(await readAccount()!==expectedAccount)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');
+      if(!expectedRoleId||entry.entryLabel!=='立即投递'||entry.editLabel!=='编辑')throw Error('RESUME_ENTRY_CONTRACT_REQUIRED');
       let target=page,clicked=false;
       if(before.pathname===entry.detailPath){
         if(before.searchParams.get(entry.detailIdParameter)!==expectedRoleId||!(await page.getByText(expectedTitle,{exact:true}).count()))throw Error('APPLICATION_ENTRY_ROLE_CHANGED');
@@ -266,19 +264,14 @@ export class BrowserAdapter {
       }
       const after=new URL(target.url());
       if(after.origin!==before.origin||after.pathname!==entry.formPath||after.searchParams.get(entry.formIdParameter)!==expectedRoleId)throw Error('APPLICATION_ENTRY_RESULT_ROLE_CHANGED');
-      await target.locator(entry.formReadySelector).waitFor({state:'visible',timeout:15000});if(await readAccount()!==expectedAccount)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');
+      await target.locator(entry.formReadySelector).waitFor({state:'visible',timeout:15000});
       const id=await this.trackPage(target);
-      return {pageId:id,pageUrl:after.href,roleIdentity:{parameter:entry.formIdParameter,value:after.searchParams.get(entry.formIdParameter)},roleTitle:null,entryClicked:clicked,accountMatched:true,submission:'not_performed'};
+      return {pageId:id,pageUrl:after.href,roleIdentity:{parameter:entry.formIdParameter,value:after.searchParams.get(entry.formIdParameter)},roleTitle:null,entryClicked:clicked,submission:'not_performed'};
     }
     // 通用分支只执行 JSON 配方；没有已核实配方的站点直接阻断，绝不按按钮文字猜测点击。
     const {detail,form,expectedApplyPath}=matchEntryPath(entry,before.pathname);
     if(!detail&&!form)throw Error('APPLICATION_ENTRY_PATH_REQUIRED');
-    if(!expectedTitle||!expectedAccount||!accountSelector||!roleSelector)throw Error('APPLICATION_ENTRY_IDENTITY_REQUIRED');
-    if(sessionAccountPageUrl&&new URL(sessionAccountPageUrl).origin!==before.origin)throw Error('APPLICATION_ENTRY_ACCOUNT_SCOPE_CHANGED');
-    // Some user-operated sites expose the verified identity on a separate résumé page.
-    // Resolve it again before and after entry so a closed, replaced or duplicate page fails.
-    const readAccount=async()=>{const identityPage=sessionAccountPageUrl?(await this.existingPage(sessionAccountPageUrl)).page:page;const l=identityPage.locator(accountSelector);if(await l.count()!==1)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');return (await l.innerText()).trim();};
-    if(await readAccount()!==expectedAccount)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');
+    if(!expectedTitle||!roleSelector)throw Error('APPLICATION_ENTRY_IDENTITY_REQUIRED');
     if(detail){
       const title=await page.title();if(!title.startsWith(expectedTitle+entry.detailTitleSeparator))throw Error('APPLICATION_ENTRY_ROLE_CHANGED');
       const button=page.getByRole(entry.entryButton.role,{name:entry.entryButton.name,exact:true});await button.waitFor({state:'visible',timeout:READY_TIMEOUT_MS});if(await button.count()!==1)throw Error('APPLICATION_ENTRY_BUTTON_CHANGED');
@@ -288,8 +281,8 @@ export class BrowserAdapter {
     }else if(before.pathname!==expectedApplyPath)throw Error('APPLICATION_ENTRY_PATH_REQUIRED');
     try{await page.locator(roleSelector).waitFor({state:'visible',timeout:READY_TIMEOUT_MS});}catch{throw Error('PAGE_NOT_READY');}
     if((await page.locator(roleSelector).innerText()).trim()!==expectedTitle)throw Error('APPLICATION_ENTRY_RESULT_ROLE_CHANGED');
-    if(await readAccount()!==expectedAccount)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');
-    return {pageId,pageUrl:page.url(),roleTitle:expectedTitle,entryClicked:detail,accountMatched:true,submission:'not_performed'};
+
+    return {pageId,pageUrl:page.url(),roleTitle:expectedTitle,entryClicked:detail,submission:'not_performed'};
   }
   async existingPage(url,{pageId,readOnly=false,roleBinding}={}){
     if(pageId&&!readOnly&&(!roleBinding||!['navigation','verified_role'].includes(roleBinding.kind)||roleBinding.pageId!==pageId||!this.executor.verified))throw Error('VERIFIED_ROLE_PAGE_BINDING_REQUIRED');

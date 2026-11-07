@@ -2,7 +2,7 @@ import {taskRecordScope,bindTaskRecordScope} from '../shared/task-records.mjs';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {validateCompany,assertScope,resolveAccount,accountMatches,matchesAccount,hash,PrivateStore,safeCode} from './contracts.mjs';
+import {validateCompany,assertScope,resolveAccount,hash,PrivateStore,safeCode} from './contracts.mjs';
 import {keyOK} from '../shared/ids.mjs';
 import {acquireLease,leasePath,defaultLeaseRoot} from '../shared/leases.mjs';
 import {beforeLoginStep,canHandoff} from '../hooks/login-gate.mjs';
@@ -20,28 +20,25 @@ export class LoginEngine{
   async open({companyId}){const c=await this.company(companyId);return this.locked(c,async()=>{const result=await this.browser.open(c.origin+c.loginPath);await this.browser.ready(c,result.pageUrl);return {...result,companyId,ready:true,applicationSubmission:'not_performed'};});}
   async locked(c,fn,{waitMs=0}={}){const release=await acquireLease(leasePath(this.leaseRoot,'recruiting-origin:'+c.origin),{waitMs,busyCode:'COMPANY_ALREADY_RUNNING'});try{return await fn();}finally{await release();}}
   // 角色任务用：按绑定标签（pageId）上已读到的快照判断账号，不按网址另找页面。
-  async stateForPage(c,{pageId,snapshot}){if(c.loginMethod!=='user_operated')return this.state(c,snapshot.pageUrl);assertScope(c,snapshot.pageUrl);const identity=await this.identityPage(c);const o=await observeUserOperatedSession(this.browser.broker,c,snapshot.pageUrl,{currentSnapshot:snapshot,identityPageId:identity?.pageId});return {...o,pageId};}
-  // login_open_identity 打开的账号核对页按站点登记（每个站点一张），之后按编号复用。
-  async identityPage(c){try{const r=await this.store.get('runs','identity-page-'+c.companyId);return r.pageUrl===c.account?.pageUrl?r:null;}catch(e){if(e.code==='ENOENT'||e.message==='INVALID_LOGIN_STORAGE_KEY')return null;throw e;}}
-  async registerIdentityPage(c,opened){try{await this.store.put('runs','identity-page-'+c.companyId,{companyId:c.companyId,pageId:opened.pageId,pageUrl:c.account.pageUrl,at:now()});}catch(e){if(e.message!=='INVALID_LOGIN_STORAGE_KEY')throw e;}}
-  async state(c,preferred){const url=await this.browser.locate(c,preferred);assertScope(c,url);const o=await this.browser.observe(c,url),account=resolveAccount(await this.profile(),c);return {...o,accountMatched:matchesAccount(o.account,account),accountMismatch:!!o.account&&!matchesAccount(o.account,account),unknownPopup:o.dialogs>0&&o.popupTitle!==c.popups?.[0]?.title};}
-  publicState(o){return {pageUrl:o.url,readAt:o.readAt,status:o.accountMismatch?'account_mismatch':o.accountMatched&&!o.form?'authenticated':o.challenges?'needs_user_verification':o.unknownPopup?'unknown_popup':o.form?'logged_out':'unknown',accountMatched:o.accountMatched,loginFormAbsent:!o.form,popup:o.dialogs?{title:o.popupTitle,known:!o.unknownPopup}:null,applicationSubmission:'not_performed'};}
+  async stateForPage(c,{pageId,snapshot}){assertScope(c,snapshot.pageUrl);return {...await observeUserOperatedSession(this.browser.broker,c,snapshot.pageUrl,{currentSnapshot:snapshot,pageId}),pageId};}
+  async state(c,preferred){const url=await this.browser.locate(c,preferred);assertScope(c,url);const o=await this.browser.observe(c,url);return {...o,authenticated:o.authenticated===true||(!o.form&&typeof o.account==='string'&&!!o.account.trim()),unknownPopup:o.dialogs>0&&o.popupTitle!==c.popups?.[0]?.title};}
+  publicState(o){return {pageUrl:o.url,readAt:o.readAt,status:o.authenticated&&!o.form?'authenticated':o.challenges?'needs_user_verification':o.unknownPopup?'unknown_popup':o.form?'logged_out':'unknown',authenticated:o.authenticated===true,loginFormAbsent:!o.form,popup:o.dialogs?{title:o.popupTitle,known:!o.unknownPopup}:null,applicationSubmission:'not_performed'};}
   async inspect({companyId,pageUrl}){const c=await this.company(companyId,{pageUrl});assertScope(c,pageUrl);return this.locked(c,async()=>{const o=await this.state(c,pageUrl);return this.publicState(o);});}
   async capture({companyId,pageUrl,evidence}){
     const c=await this.company(companyId,{pageUrl});assertScope(c,pageUrl);if(!evidence)throw Error('CAPTURE_EVIDENCE_REQUIRED');
     return this.locked(c,async()=>{
       const o=await this.state(c,pageUrl),controls=await this.browser.inventory(c,o.url),id='login-capture-'+companyId;
-      await updateProfile(this.profileFile,p=>{p.loginForms??={};p.loginForms[companyId]={companyId,version:c.version,assetHash:hash(c),observedAt:now(),fields:Object.entries(c.fields).filter(([k])=>!k.endsWith('Label')).map(([key,selector])=>({key,selector,source:key==='phone'?c.account.source:null,storage:key==='otp'?'never_store_authentication_secret':'company_definition'})),observedControls:controls.map(({selector,type,placeholder,required,disabled})=>({selector,type,placeholder,required,disabled})),evidence};});
+      await updateProfile(this.profileFile,p=>{p.loginForms??={};p.loginForms[companyId]={companyId,version:c.version,assetHash:hash(c),observedAt:now(),fields:Object.entries(c.fields||{}).filter(([k])=>!k.endsWith('Label')).map(([key,selector])=>({key,selector,source:key==='phone'?c.account.source:null,storage:key==='otp'?'never_store_authentication_secret':'company_definition'})),observedControls:controls.map(({selector,type,placeholder,required,disabled})=>({selector,type,placeholder,required,disabled})),evidence};});
       const result={id,companyId,assetHash:hash(c),capturedAt:now(),controls,coverage:'current_login_document; declared_country_and_privacy_popup; captcha_not_yet_observed',submission:'not_performed'};await this.store.put('captures',id,result);return {id,companyId,controlCount:controls.length,assetHash:hash(c),profileRegistered:true,coverage:result.coverage};
     });
   }
   async compile({companyId,pageUrl,taskContext}){
-    const c=await this.company(companyId,{pageUrl});assertScope(c,pageUrl);const a=resolveAccount(await this.profile(),c);
-    const plan={id:taskContext?.taskId||taskRecordScope().taskId?randomUUID():'login-plan-'+companyId,companyId,pageUrl,assetHash:hash(c),accountFingerprint:a.fingerprint,createdAt:now(),steps:c.loginMethod==='user_operated'?['check_current_session','user_login_handoff_if_required','verify_exact_account_at_session_page']:['check_current_session','inspect_and_dismiss_known_popups','select_actual_country_option','fill_phone_from_private_profile','require_privacy_acceptance','request_sms_once','handoff_verification_if_present','consume_ephemeral_user_otp','click_login_only','verify_account_and_absent_login_form'],applicationSubmission:'forbidden'};
+    const c=await this.company(companyId,{pageUrl});assertScope(c,pageUrl);const a=c.loginMethod==='user_operated'?null:resolveAccount(await this.profile(),c);
+    const plan={id:taskContext?.taskId||taskRecordScope().taskId?randomUUID():'login-plan-'+companyId,companyId,pageUrl,assetHash:hash(c),accountFingerprint:a?.fingerprint??null,createdAt:now(),steps:c.loginMethod==='user_operated'?['check_current_session','user_login_handoff_if_required','verify_exact_account_at_session_page']:['check_current_session','inspect_and_dismiss_known_popups','select_actual_country_option','fill_phone_from_private_profile','require_privacy_acceptance','request_sms_once','handoff_verification_if_present','consume_ephemeral_user_otp','click_login_only','verify_account_and_absent_login_form'],applicationSubmission:'forbidden'};
     if(taskContext)plan.taskContext=taskContext;
     plan.planHash=hash(plan);await this.store.put('plans',plan.id,plan);return {planId:plan.id,planHash:plan.planHash,companyId,assetHash:plan.assetHash,stepCount:plan.steps.length,browserAccess:false};
   }
-  async plan(args){const p=await this.store.get('plans',args.planId),h=p.planHash;delete p.planHash;if(hash(p)!==h||args.planHash!==h)throw Error('LOGIN_PLAN_HASH_MISMATCH');p.planHash=h;if(p.taskContext){if(!this.roleQueues)throw Error('ROLE_QUEUE_REQUIRED');await this.roleQueues.task(p.taskContext);bindTaskRecordScope(p.taskContext.taskId);}const c=await this.company(p.companyId,{pageUrl:p.pageUrl}),a=resolveAccount(await this.profile(),c);if(hash(c)!==p.assetHash)throw Error('LOGIN_ASSET_CHANGED');if(a.fingerprint!==p.accountFingerprint)throw Error('LOGIN_ACCOUNT_CHANGED');return {p,c,a};}
+  async plan(args){const p=await this.store.get('plans',args.planId),h=p.planHash;delete p.planHash;if(hash(p)!==h||args.planHash!==h)throw Error('LOGIN_PLAN_HASH_MISMATCH');p.planHash=h;if(p.taskContext){if(!this.roleQueues)throw Error('ROLE_QUEUE_REQUIRED');await this.roleQueues.task(p.taskContext);bindTaskRecordScope(p.taskContext.taskId);}const c=await this.company(p.companyId,{pageUrl:p.pageUrl}),a=c.loginMethod==='user_operated'?null:resolveAccount(await this.profile(),c);if(hash(c)!==p.assetHash)throw Error('LOGIN_ASSET_CHANGED');if(a&&a.fingerprint!==p.accountFingerprint)throw Error('LOGIN_ACCOUNT_CHANGED');return {p,c,a};}
   async record(c,operation,result){const run={id:taskRecordScope().taskId?randomUUID():'login-'+c.companyId+'-'+operation,companyId:c.companyId,operation,finishedAt:now(),...result,applicationSubmission:'not_performed'};await this.store.put('runs',run.id,run);return run;}
   async dismiss(c,o){
     if(!o.dialogs)return o;if(o.unknownPopup||o.dialogs!==1)throw Error('UNKNOWN_LOGIN_POPUP');
@@ -50,7 +47,7 @@ export class LoginEngine{
   }
   async prepare(args){const {p,c}=await this.plan(args);return this.locked(c,async()=>{
     let o=await this.planState(c,p);beforeLoginStep({step:'prepare',state:o,authorization:args.authorization});
-    if(o.accountMatched&&!o.form)return this.record(c,'prepare',{...this.publicState(o),reusedSession:true,smsSent:false});
+    if(o.authenticated&&!o.form)return this.record(c,'prepare',{...this.publicState(o),reusedSession:true,smsSent:false});
     if(c.loginMethod==='user_operated')return this.record(c,'prepare',{status:'needs_user_login',method:'user_operated',pageUrl:o.url,automaticLogin:false,smsSent:false,handoff:{operator:'user',nextTool:'role_resume'}});
     if(!o.form)throw Error('LOGIN_FORM_NOT_PRESENT');
     // One business switch decides the login consent checkbox. 1: the component ticks it, no
@@ -64,16 +61,16 @@ export class LoginEngine{
     o=await this.state(c,o.url);if(o.phone!==a.phone||o.country!==c.account.countryCode)throw Error('LOGIN_PREPARATION_READBACK_FAILED');
     const decision=evaluateBusinessAuthorization(await this.profile(),{operation:'recruiting_privacy',stage:'login',officialOrigin:c.origin,pageUrl:o.url,confirmedRole:!!p.taskContext||args.authorization?.login===true,companyId:c.companyId});
     const businessAuthorization={decision:decision.decision,reason:decision.reason,switchValue:decision.switchValue,permanent:decision.permanent,authorizationRef:decision.authorizationRef};
-    if(decision.decision!=='allow')return this.record(c,'prepare',{status:'privacy_evidence_required',accountMatched:false,phoneReadback:'match',countryReadback:'match',businessAuthorization,smsSent:false,continuation:{state:'login',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['login_inspect','login_capture'],reason:decision.reason}});
+    if(decision.decision!=='allow')return this.record(c,'prepare',{status:'privacy_evidence_required',authenticated:false,phoneReadback:'match',countryReadback:'match',businessAuthorization,smsSent:false,continuation:{state:'login',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['login_inspect','login_capture'],reason:decision.reason}});
     await this.browser.act(c,o.url,{method:'check',selector:f.consent},true);o=await this.state(c,o.url);if(!o.consent)throw Error('PRIVACY_CHECK_READBACK_FAILED');
     // The acceptance record lives only in the login store as execution evidence; the profile keeps the single switch.
     const acceptedAt=now(),reused={id:'acceptance-'+c.companyId,companyId:c.companyId,planId:p.id,assetHash:p.assetHash,evidenceHash:hash({mode:'business_authorization_switch',origin:c.origin,authorizationRef:decision.authorizationRef}),acceptedAt,reusedAt:acceptedAt,scope:'global'};await this.store.put('acceptances',reused.id,reused);
-    return this.record(c,'prepare',{status:'ready_to_request_sms',privacyScope:'global',acceptanceId:reused.id,privacyReused:true,accountMatched:false,phoneReadback:'match',countryReadback:'match',popupHandling:'not_opened_business_switch_on',businessAuthorization,smsSent:false});
+    return this.record(c,'prepare',{status:'ready_to_request_sms',privacyScope:'global',acceptanceId:reused.id,privacyReused:true,authenticated:false,phoneReadback:'match',countryReadback:'match',popupHandling:'not_opened_business_switch_on',businessAuthorization,smsSent:false});
   });}
   async acceptance(id,p){if(!id)return null;const a=await this.store.get('acceptances',id);if(a.planId!==p.id||a.assetHash!==p.assetHash)throw Error('PRIVACY_ACCEPTANCE_SCOPE_MISMATCH');const c=await this.company(p.companyId,{pageUrl:p.pageUrl}),permission=evaluateBusinessAuthorization(await this.profile(),{operation:'recruiting_privacy',phase:'classify',stage:'login',companyId:c.companyId,officialOrigin:c.origin,field:{label:c.consent.title}});if(permission.decision==='revoked')throw Error(permission.reason);return a;}
   async send(args){const {p,c,a}=await this.plan(args);return this.locked(c,async()=>{
     const o=await this.planState(c,p);beforeLoginStep({step:'prepare',state:o,authorization:args.authorization});
-    if(o.accountMatched&&!o.form)return this.record(c,'request_sms',{...this.publicState(o),reusedSession:true,smsSent:false});
+    if(o.authenticated&&!o.form)return this.record(c,'request_sms',{...this.publicState(o),reusedSession:true,smsSent:false});
     const acceptance=await this.acceptance(args.acceptanceId,p);beforeLoginStep({step:'send',state:o,authorization:args.authorization,acceptance});
     if(!o.consent||o.phone!==a.phone||o.country!==c.account.countryCode||o.sendLabel!==c.fields.sendLabel)throw Error('SMS_PRECONDITION_CHANGED');
     let previous;try{previous=await this.store.get('challenges',c.companyId);}catch(e){if(e.code!=='ENOENT')throw e;}
@@ -93,8 +90,7 @@ export class LoginEngine{
     const ch=await this.store.get('challenges',c.companyId);
     if(ch.id!==args.challengeId||ch.planId!==p.id)throw Error('VERIFICATION_CHALLENGE_CHANGED');
     const o=await this.planState(c,p);
-    if(o.accountMismatch)throw Error('LOGIN_ACCOUNT_MISMATCH');
-    if(o.accountMatched&&!o.form)return this.record(c,'resume_verification',{...this.publicState(o),readyForApplication:true});
+    if(o.authenticated&&!o.form)return this.record(c,'resume_verification',{...this.publicState(o),readyForApplication:true});
     if(o.challenges)return this.record(c,'resume_verification',{status:'needs_user_verification',challengeId:ch.id,handoff,smsSent:false});
     if(o.unknownPopup)throw Error('UNKNOWN_LOGIN_POPUP');
     if(smsCountdown(o)){
@@ -108,7 +104,7 @@ export class LoginEngine{
   });}
   async verify(args){const {p,c}=await this.plan(args);return this.locked(c,async()=>{
     let o=await this.planState(c,p);beforeLoginStep({step:'prepare',state:o,authorization:args.authorization});
-    if(o.accountMatched&&!o.form)return this.record(c,'verify',{...this.publicState(o),reusedSession:true});
+    if(o.authenticated&&!o.form)return this.record(c,'verify',{...this.publicState(o),reusedSession:true});
     const ch=await this.store.get('challenges',c.companyId),acceptance=await this.acceptance(ch.acceptanceId,p);
     if(ch.id!==args.challengeId||ch.planId!==p.id||!ch.smsConfirmedAt||Date.now()-Date.parse(ch.smsConfirmedAt)>c.challenge.expirySeconds*1000)throw Error('OTP_CHALLENGE_EXPIRED_OR_CHANGED');
     if(ch.otpAttempts>=c.challenge.maxOtpAttempts)throw Error('OTP_ATTEMPT_LIMIT');
@@ -117,7 +113,7 @@ export class LoginEngine{
     ch.otpAttempts++;ch.status='login_attempted';await this.store.put('challenges',c.companyId,ch);
     await this.browser.act(c,o.url,{method:'fill',selector:c.fields.otp},args.code);args.code=undefined;
     await this.browser.act(c,o.url,{method:'click',selector:c.fields.submit,label:c.fields.submitLabel});
-    for(let i=0;i<30;i++){o=await this.planState(c,p);if(o.accountMatched&&!o.form||o.accountMismatch||o.challenges||o.errors)break;await new Promise(r=>setTimeout(r,200));}
+    for(let i=0;i<30;i++){o=await this.planState(c,p);if(o.authenticated&&!o.form||o.challenges||o.errors)break;await new Promise(r=>setTimeout(r,200));}
     const result=this.publicState(o);if(result.status==='logged_out')result.status=o.errors?'otp_rejected':'login_unverified';ch.status=result.status;await this.store.put('challenges',c.companyId,ch);
     return this.record(c,'verify',{...result,readyForApplication:canHandoff(result),otpStored:false});
   });}

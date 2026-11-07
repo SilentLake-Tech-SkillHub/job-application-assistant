@@ -234,7 +234,7 @@ def handle(event):
         handle_continuation({**event, 'hook_event_name': 'PostToolUse', 'tool_response': {'continuation': {'state': 'tool_pending', 'owner': 'agent', 'requiresUser': False, 'shouldContinue': True, 'nextTools': [tool.split('__')[-1]], 'reason': 'STAGE_RESULT_REQUIRED'}}})
     # Source repair, Skill reads and status reporting must remain possible even
     # when an enabled conversation has no same-turn application receipt.
-    bootstrap = name == 'PreToolUse' and recruiting_tool(tool) and tool.split('__')[-1] == 'runtime_info'
+    bootstrap = name == 'PreToolUse' and recruiting_tool(tool) and tool.split('__')[-1] in {'runtime_info', 'company_batch_create', 'company_batch_take', 'role_advance'}
     if name == 'PreToolUse' and tool.split('__')[-1] not in MUTATIONS and not bootstrap:
         return {}
     body = POLICY.read_bytes()

@@ -20,6 +20,13 @@ class WorkflowHookTest(unittest.TestCase):
    self.assertEqual(self.invoke(tool_name=tool).returncode,2)
    self.assertEqual(self.invoke(session_id='maintenance',tool_name=tool).returncode,0)
   self.assertEqual(self.invoke(tool_name='read_file',tool_input={'path':str(ROOT/'SKILL.md')}).returncode,0)
+ def test_first_business_entry_loads_without_runtime_preflight(self):
+  r=self.invoke(tool_name='mcp__recruiting_login_v2__role_advance')
+  self.assertEqual(r.returncode,0,r.stderr)
+  self.assertIn('additionalContext',json.loads(r.stdout)['hookSpecificOutput'])
+  self.assertEqual(self.invoke().returncode,0)
+  r=self.invoke(tool_name='mcp__recruiting_login_v2__role_advance')
+  self.assertNotIn('additionalContext',r.stdout)
  def test_other_conversation_unaffected_by_missing_policy(self):
   self.policy.unlink();self.assertEqual(json.loads(self.invoke(session_id='other').stdout),{})
  def test_receipt_from_another_turn_never_releases_mutation(self):

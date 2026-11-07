@@ -1,3 +1,4 @@
+import {loginStateDOM} from './login-state.mjs';
 import {samePage} from './page-scope.mjs';
 import {pageFailureState,missingPageFailureState} from './page-failure-state.mjs';
 import {inspectEntryPage} from './entry-inspection.mjs';
@@ -58,10 +59,7 @@ export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,
     listPages:tabs,pause:ms=>new Promise(r=>setTimeout(r,ms)),preserve:async id=>{await (await get(id)).markHandoff();}
    });
    if(entry?.kind==='resume_modal'){
-    if(!args.expectedRoleId||entry.entryLabel!=='立即投递'||entry.editLabel!=='编辑'||!args.sessionAccountPageUrl)throw Error('RESUME_ENTRY_CONTRACT_REQUIRED');
-    scope(args.sessionAccountPageUrl);
-    const readAccount=async()=>{const candidates=(await tabs()).filter(t=>t.url===args.sessionAccountPageUrl);if(candidates.length!==1)throw Error('SESSION_IDENTITY_PAGE_NOT_UNIQUE');return (await locator((await get(candidates[0].id)).playwright.locator(args.accountSelector)).innerText()).trim();};
-    if(await readAccount()!==args.expectedAccount)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');
+    if(!args.expectedRoleId||entry.entryLabel!=='立即投递'||entry.editLabel!=='编辑')throw Error('RESUME_ENTRY_CONTRACT_REQUIRED');
     let target=tab,clicked=false;
     if(before.pathname===entry.detailPath){
      if(before.searchParams.get(entry.detailIdParameter)!==args.expectedRoleId||(await locator(tab.playwright.locator(entry.detailRoleSelector)).innerText()).trim()!==args.expectedTitle)throw Error('APPLICATION_ENTRY_ROLE_CHANGED');
@@ -73,21 +71,11 @@ export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,
      if(!found)throw Error('ROLE_FORM_NOT_OPEN');target=await get(found.id);
     }
     const after=scope(await target.url());if(after.origin!==before.origin||after.pathname!==entry.formPath||after.searchParams.get(entry.formIdParameter)!==args.expectedRoleId)throw Error('APPLICATION_ENTRY_RESULT_ROLE_CHANGED');
-    await target.playwright.locator(entry.formReadySelector).waitFor({state:'visible',timeoutMs:15000});if(await readAccount()!==args.expectedAccount)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');
-    await target.markHandoff();await tab.markHandoff();return {pageId:target.id,pageUrl:after.href,roleIdentity:{parameter:entry.formIdParameter,value:args.expectedRoleId},roleTitle:null,entryClicked:clicked,accountMatched:true,submission:'not_performed'};
+    await target.playwright.locator(entry.formReadySelector).waitFor({state:'visible',timeoutMs:15000});
+    await target.markHandoff();await tab.markHandoff();return {pageId:target.id,pageUrl:after.href,roleIdentity:{parameter:entry.formIdParameter,value:args.expectedRoleId},roleTitle:null,entryClicked:clicked,submission:'not_performed'};
    }
    const {detail,form,expectedApplyPath:expectedPath}=matchEntryPath(entry,before.pathname);
-   if((!detail&&!form)||!args.expectedTitle||!args.expectedAccount||!args.accountSelector||!args.roleSelector)throw Error('APPLICATION_ENTRY_PATH_REQUIRED');
-   if(args.sessionAccountPageUrl&&scope(args.sessionAccountPageUrl).origin!==before.origin)throw Error('APPLICATION_ENTRY_ACCOUNT_SCOPE_CHANGED');
-   const readAccount=async()=>{
-    if(!args.sessionAccountPageUrl)return (await locator(tab.playwright.locator(args.accountSelector)).innerText()).trim();
-    const candidates=(await tabs()).filter(t=>t.url===args.sessionAccountPageUrl);
-    if(candidates.length!==1)throw Error('SESSION_IDENTITY_PAGE_NOT_UNIQUE');
-    const identityTab=await get(candidates[0].id),identity=locator(identityTab.playwright.locator(args.accountSelector));
-    if(await identity.count()!==1)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');
-    return (await identity.innerText()).trim();
-   };
-   if(await readAccount()!==args.expectedAccount)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');
+   if((!detail&&!form)||!args.expectedTitle||!args.roleSelector)throw Error('APPLICATION_ENTRY_PATH_REQUIRED');
    if(detail){
     const meta=(await tabs()).find(t=>t.id===args.pageId);if(!meta?.title.startsWith(args.expectedTitle+entry.detailTitleSeparator))throw Error('APPLICATION_ENTRY_ROLE_CHANGED');
     const button=tab.playwright.getByRole(entry.entryButton.role,{name:entry.entryButton.name,exact:true});if(await button.count()!==1)throw Error('APPLICATION_ENTRY_BUTTON_CHANGED');await button.click({timeoutMs:10000});
@@ -95,11 +83,11 @@ export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,
    try{await tab.playwright.locator(args.roleSelector).waitFor({state:'visible',timeoutMs:READY_TIMEOUT_MS});}catch{throw Error('PAGE_NOT_READY');}
    const after=scope(await tab.url());if(after.origin!==before.origin||after.pathname!==expectedPath)throw Error('APPLICATION_ENTRY_RESULT_ROLE_CHANGED');
    if((await locator(tab.playwright.locator(args.roleSelector)).innerText()).trim()!==args.expectedTitle)throw Error('APPLICATION_ENTRY_RESULT_ROLE_CHANGED');
-   if(await readAccount()!==args.expectedAccount)throw Error('APPLICATION_ENTRY_ACCOUNT_CHANGED');
-   return {pageId:args.pageId,pageUrl:after.href,roleTitle:args.expectedTitle,entryClicked:detail,accountMatched:true,submission:'not_performed'};
+
+   return {pageId:args.pageId,pageUrl:after.href,roleTitle:args.expectedTitle,entryClicked:detail,submission:'not_performed'};
   }
   if(method==='roleSnapshot'){
-   const tab=await get(args.pageId);const result=await tab.playwright.evaluate(({roleSelector,accountSelector,loginRoot})=>{const read=s=>{if(!s)return null;const ns=document.querySelectorAll(s);return ns.length===1?ns[0].innerText?.trim()||null:null;};return {pageUrl:location.href,roleTitle:read(roleSelector),account:read(accountSelector),loginFormPresent:!!document.querySelector(loginRoot),readAt:new Date().toISOString()};},args);if(args.roleIdentity)result.roleIdentity=readRoleIdentity(args.roleIdentity,result.pageUrl);return result;
+   const tab=await get(args.pageId);const result=await tab.playwright.evaluate(({roleSelector,accountSelector,loginRoot})=>{const read=s=>{if(!s)return null;const ns=document.querySelectorAll(s);return ns.length===1?ns[0].innerText?.trim()||null:null;};return {pageUrl:location.href,roleTitle:read(roleSelector),account:read(accountSelector),loginFormPresent:!!document.querySelector(loginRoot),readAt:new Date().toISOString()};},args);Object.assign(result,await tab.playwright.evaluate(loginStateDOM,args));delete result.account;if(args.roleIdentity)result.roleIdentity=readRoleIdentity(args.roleIdentity,result.pageUrl);return result;
   }
   if(!['existingPage','inventory','observe','act','ensureGroups','assertLocation','wait'].includes(method))throw Error('UNSUPPORTED_HOST_BROWSER_METHOD');
   if(args.pageId&&args.readOnly&&!['existingPage','inventory','observe','assertLocation','wait','repeatDiscovery'].includes(method))throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');

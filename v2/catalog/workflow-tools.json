@@ -43,13 +43,6 @@
         "form_build_template"
       ]
     ],
-    "login_open_identity": [
-      "login",
-      [
-        "login_inspect",
-        "role_resume"
-      ]
-    ],
     "role_confirm_material_no_destination": [
       "prepare",
       [
@@ -434,6 +427,12 @@
       [
         "form_route",
         "prepare_plan"
+      ]
+    ],
+    "role_advance": [
+      "route",
+      [
+        "role_prepare"
       ]
     ]
   }

@@ -1,3 +1,4 @@
+import {sessionFromSnapshot} from './login-state.mjs';
 import {rolePageContract} from './role-identity.mjs';
 import {recordPlanOf,withProfileRecords,groupFromDiscovery} from './repeat-groups.mjs';
 import {withTaskRecords,taskRecordScope,TaskRecords} from './task-records.mjs';
@@ -61,7 +62,6 @@ import {completeFormTemplate,draftTemplate} from './template-validation.mjs';
 import {rebindTemplate} from './template-rebind.mjs';
 import {closeApplication} from './application-closeout.mjs';
 import {assertSubmissionPrepared,formAssetStatus} from './form-assets.mjs';
-import {accountMatches,matchesAccount,resolveAccount} from '../login/contracts.mjs';
 import {retireLegacyQuestionMappings} from './profile-migration.mjs';
 import {restageAutocomplete,autocompleteRestagePlan} from './autocomplete-restage.mjs';
 import {selectApplicationProjects,assertSelectedProjects} from './project-selection.mjs';
@@ -113,13 +113,12 @@ async function boundRole(args,{construction=false,templateHash}={}){
   if(!plan||plan.roleTitle!==t.title)throw Error('CONFIRMED_ROLE_TITLE_TEMPLATE_MISMATCH');
   const login=await directory.loginConfig(t.companyId,t);
   // A tab lost to a browser restart is found again by role_resume, which reads the account before anything is written.
-  const snapshot=await browser.request('roleSnapshot',{pageId:state.pageId,roleSelector:plan.roleSelector,accountSelector:login.account.selector,loginRoot:login.fields?.root,roleIdentity:plan.roleIdentity}).catch(error=>{if(error.message==='ROLE_BROWSER_PAGE_LOST')error.details={nextTool:'role_resume',pageIds:[state.pageId]};throw error;});
+  const snapshot=await browser.request('roleSnapshot',{pageId:state.pageId,roleSelector:plan.roleSelector,accountSelector:login.account?.selector,loginRoot:login.fields?.root,sessionSelectors:login.session,roleIdentity:plan.roleIdentity}).catch(error=>{if(error.message==='ROLE_BROWSER_PAGE_LOST')error.details={nextTool:'role_resume',pageIds:[state.pageId]};throw error;});
   if(plan.rolePrefix!==undefined){
     if(!samePage(snapshot.pageUrl,state.returnUrl))throw Error('ROLE_OR_ACCOUNT_CHANGED_BEFORE_FILL');
     await bindRoleTitleProof(browser,plan,state.pageId,snapshot);
   }
-  if(login.loginMethod==='user_operated'){const identity=await observeUserOperatedSession(browser,login,snapshot.pageUrl,{currentSnapshot:snapshot});snapshot.account=identity.account;snapshot.loginFormPresent=identity.form;}
-  if(!samePage(snapshot.pageUrl,state.returnUrl)||!matchesRole(plan,snapshot)||snapshot.loginFormPresent||!matchesAccount(snapshot.account,resolveAccount(await loadProfile(profileFile),login)))throw Error('ROLE_OR_ACCOUNT_CHANGED_BEFORE_FILL');
+  if(!samePage(snapshot.pageUrl,state.returnUrl)||!matchesRole(plan,snapshot)||!sessionFromSnapshot(snapshot).authenticated)throw Error('ROLE_OR_LOGIN_STATE_CHANGED_BEFORE_FILL');
   const browserBinding=await browser.bindRolePage?.({taskId:t.taskId,companyId:t.companyId,pageId:state.pageId,pageUrl:state.returnUrl});
   if(browserBinding){state.browserBinding=browserBinding;await queues.put(t.taskId,state);}
   return {q,t,state,template};
@@ -187,7 +186,7 @@ registerTool('workflow_handoff',{description:'把组件已记录的真实技术�
 registerTool('application_closeout',{description:'固定事件收尾：校验官网证据后把本岗位最新结果覆盖写入 岗位交接/投递回传.json（每岗位一条，不留历史和备份）；同事件幂等。记录“已投递”前，本岗位必须在本批队列中由 MCP 按已封存的公司表单模板填写并核验通过，手工填写的岗位拒绝记录。不改主表状态：由搜索端反向评审、用户确认后才写入。不提交网站。',inputSchema:{outcome:outcomeSchema}},wrap(async args=>{await refreshBindings();return closeApplication({...args,catalog:catalog.companies,assertPrepared:outcome=>assertSubmissionPrepared({queues,store,catalog:catalog.companies,outcome})});},false));
 registerTool('form_assets_status',{description:'只读：按本轮批次（或指定公司编码 C00001）逐站点列出登录配置、表单模板是否封存、各岗位投递链接是否已有；缺口须先按建库路线补齐，不得手工填表代替。',inputSchema:{companyIds:z.array(z.string().regex(/^C\d{5}$/)).min(1).max(50).optional()},annotations:{readOnlyHint:true}},wrap(async({companyIds})=>{await refreshBindings();return formAssetStatus({handoffDir:directory.handoffDir,catalog:catalog.companies,store,companyIds,profile:await readProfileFile(profileFile)});}));
 const queueTask={queueId:z.string().uuid(),queueHash:z.string().length(64),taskId:z.string().uuid()};
-registerTool('role_confirm_material_no_destination',{description:'仅在用户明确确认本岗位不使用某项已有码材料后登记例外。核对原岗位/账号、已封存模板、本次捕获及当前实际完整控件均无对应入口；任一入口存在则拒绝。仅对该岗位、表单和材料摘要生效，不删除主表代码，不影响其他岗位；mode=revoke明确撤回例外；两种操作都使旧冻结计划失效，不提交。',inputSchema:{...queueTask,captureId:z.string().optional(),mode:z.enum(['confirm','revoke']).default('confirm'),key:z.enum(['referralCode']),authorization:z.object({confirm:z.literal(true),evidence:z.string().min(1)})}},wrap(async a=>{
+registerTool('role_confirm_material_no_destination',{description:'仅在用户明确确认本岗位不使用某项已有码材料后登记例外。核对原岗位/登录态、已封存模板、本次捕获及当前实际完整控件均无对应入口；任一入口存在则拒绝。仅对该岗位、表单和材料摘要生效，不删除主表代码，不影响其他岗位；mode=revoke明确撤回例外；两种操作都使旧冻结计划失效，不提交。',inputSchema:{...queueTask,captureId:z.string().optional(),mode:z.enum(['confirm','revoke']).default('confirm'),key:z.enum(['referralCode']),authorization:z.object({confirm:z.literal(true),evidence:z.string().min(1)})}},wrap(async a=>{
  const queued=await queues.task(a);return engine.withCompanyLease(queued.t.companyId,async()=>{
   const {t,state,template}=await boundRole(a);
   const context=await confirmedMaterialContext({handoffDir:directory.handoffDir,companyId:t.companyId,roleId:t.roleId,pageUrl:state.returnUrl,catalog:catalog.companies});
@@ -214,7 +213,7 @@ const constructionPage=z.object({
  sections:z.array(z.union([z.string().min(1),z.object({title:z.string().min(1)}).passthrough()])).min(1),
  sectionDiscovery:z.object({selector:z.string().min(1),titleSelector:z.string().min(1),selectors:z.array(z.string()).optional()}).passthrough()
 }).passthrough().superRefine((page,ctx)=>{if(page.rolePrefix!==undefined&&(typeof page.roleSelector!=='string'||!page.roleSelector.trim()))ctx.addIssue({code:z.ZodIssueCode.custom,path:['roleSelector'],message:'ROLE_PREFIX_CONTRACT_REQUIRED'});});
-registerTool('role_restage_autocomplete',{description:'有明确准备授权时，将已捕获、已映射、有来源且与主档一致的普通自动完成框重置为空，供上传解析后的重新建库。逐字段核对原岗位/账号/当前值，先记录尝试并双次读回空值及无旧实体；不碰附件、敏感字段或其它控件，不冒充选中/填写成功。必须重新采集、建库后按完整计划填写。',inputSchema:{...queueTask,captureId:z.string(),selector:z.string(),authorization:z.object({restage:z.literal(true),evidence:z.string().min(1)})}},wrap(async args=>{
+registerTool('role_restage_autocomplete',{description:'有明确准备授权时，将已捕获、已映射、有来源且与主档一致的普通自动完成框重置为空，供上传解析后的重新建库。逐字段核对原岗位/登录态/当前值，先记录尝试并双次读回空值及无旧实体；不碰附件、敏感字段或其它控件，不冒充选中/填写成功。必须重新采集、建库后按完整计划填写。',inputSchema:{...queueTask,captureId:z.string(),selector:z.string(),authorization:z.object({restage:z.literal(true),evidence:z.string().min(1)})}},wrap(async args=>{
  const {t}=await queues.task(args);
  return engine.withCompanyLease(t.companyId,async()=>{
   const {state}=await boundRole(args),capture=await store.get('runs',args.captureId);
@@ -239,8 +238,8 @@ registerTool('form_search_choices',{description:'通用控件目标闭环：只�
 registerTool('role_submit',{description:'仅凭用户对具体岗位及当前表单的最终提交授权执行一次官网提交。绑定模板和已通过核验的reviewRunId，离开填写页前独立重核全部字段、主档来源和附件；网站有“预览并提交”时直接点进摘要页，摘要页不做任何内容比对；摘要页尚未勾选的条款框按主档业务授权开关处理（1直接勾选，0返回needs_user_consent交用户勾选后再调用本工具）。先落提交尝试再点击真实按钮，官网回执才算成功。返回固定回传供application_closeout，不改主表；不确定禁止自动重试。',inputSchema:{...queueTask,authorization:z.object({submit:z.literal(true),templateHash:z.string().length(64),reviewRunId:z.string().uuid(),evidence:z.string().min(1)})}},wrap(async a=>{
  const {t}=await queues.task(a);return engine.withCompanyLease(t.companyId,()=>submitReviewedRole({evaluateAuthorization:async input=>evaluateBusinessAuthorization(await loadProfile(profileFile),input),args:a,boundRole,engine,browser,queues,store,resolveTask:async(task,state,template)=>({companyId:task.companyId,roleId:task.roleId,pageUrl:state.returnUrl,pageId:state.pageId,browserBinding:state.browserBinding,taskId:t.taskId,templateHash:hash(template),...await resolveInputs(await loadProfile(profileFile),template,{},task.companyId,{roleId:task.roleId,pageUrl:state.returnUrl}),roleQueueArgs:{queueId:a.queueId,queueHash:a.queueHash,taskId:a.taskId}})}));
 }));
-registerTool('role_prepare_materials',{description:'在完整已封存表单及原岗位账号下，仅冻结并填写已确认岗位材料（例如已有推荐码），独立读回并保存字段截图；不改其余履历、不把本回执算作全表完成，不提交。来源和值由MCP从确认批次读取，Agent不能传值或任意字段。',inputSchema:{...queueTask,authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1)})}},wrap(async a=>{const {t}=await queues.task(a);return engine.withCompanyLease(t.companyId,()=>prepareRoleMaterials({args:a,boundRole,resolveContext:(task,state)=>confirmedMaterialContext({handoffDir:directory.handoffDir,companyId:task.companyId,roleId:task.roleId,pageUrl:state.returnUrl,catalog:catalog.companies}),engine,queues,store,browser}));}));
-registerTool('role_prepare_profile_fields',{description:'按私有主档的global填写授权，在已确认原岗位、账号和已封存表单内补齐已授权主档字段。来源、字段和值由内核确定；冻结记录只存来源Hash，双次独立比对且不回传证件号。不上传、不提交，不以局部结果代替整表核验。',inputSchema:{...queueTask,authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1)})}},wrap(async a=>{
+registerTool('role_prepare_materials',{description:'在完整已封存表单及原岗位及登录态下，仅冻结并填写已确认岗位材料（例如已有推荐码），独立读回并保存字段截图；不改其余履历、不把本回执算作全表完成，不提交。来源和值由MCP从确认批次读取，Agent不能传值或任意字段。',inputSchema:{...queueTask,authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1)})}},wrap(async a=>{const {t}=await queues.task(a);return engine.withCompanyLease(t.companyId,()=>prepareRoleMaterials({args:a,boundRole,resolveContext:(task,state)=>confirmedMaterialContext({handoffDir:directory.handoffDir,companyId:task.companyId,roleId:task.roleId,pageUrl:state.returnUrl,catalog:catalog.companies}),engine,queues,store,browser}));}));
+registerTool('role_prepare_profile_fields',{description:'按私有主档的global填写授权，在已确认原岗位、登录态和已封存表单内补齐已授权主档字段。来源、字段和值由内核确定；冻结记录只存来源Hash，双次独立比对且不回传证件号。不上传、不提交，不以局部结果代替整表核验。',inputSchema:{...queueTask,authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1)})}},wrap(async a=>{
  const {t}=await queues.task(a);return engine.withCompanyLease(t.companyId,async()=>{
   const {state,template}=await boundRole(a),resolved=await resolveInputs(await loadProfile(profileFile),template,{},t.companyId,{roleId:t.roleId,pageUrl:state.returnUrl,confirmedOfficialId:state.siteRoleId||t.officialId});
   if(!resolved.profileFillContext)throw Error('GLOBAL_PROFILE_FILL_NOT_AUTHORIZED');
@@ -337,7 +336,7 @@ async function prepareRole(args){
   return {status:state.status,taskId:t.taskId,companyId:t.companyId,roleTitle:t.title,pageUrl:state.returnUrl,fillRunId:fill.results[0]?.preparationRunId||fill.id,verifyRunId:verification.id,counts:verification.counts,summary:verification.summary,deferredControls:fill.results[0]?.deferredControls||[],continuation:continuationFor({verification,template,profile:await loadProfile(profileFile)}),fillElapsedMs:fill.elapsedMs,initialReadbackStatus:fill.status,exceptions:verification.checks.filter(x=>!['match','confirmed_omission'].includes(x.status)).map(({id,label,status,reason})=>({id,label,status,reason})),save:verification.save,submission:'not_performed'};
 }
 registerTool('role_prepare',{description:'从冻结岗位队列取目标；核对登录后已返回原岗位，离线编译全部字段后填写并独立核验。仅返回异常与计数，不提交。',inputSchema:{...queueTask,authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1),sensitiveFields:z.boolean().default(false),uploads:z.boolean().default(false),allowPartialPreparation:z.boolean().default(false),uploadFieldIds:z.array(z.string().min(1)).min(1).max(10).optional()})}},wrap(prepareRole));
-registerTool('role_prepare_fields',{description:'从当前完整冻结计划补填指定普通文本、下拉或日期字段；只接受字段ID，取值和动作由主档及封存模板确定。核对原岗位账号及完整控件契约，不上传、不重新解析简历；同公司租约内独立核验整表，不把局部执行算成整表完成，不提交。',inputSchema:{...queueTask,fieldIds:z.array(z.string().min(1)).min(1).max(50),authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1),allowPartialPreparation:z.boolean().default(false)})}},wrap(async args=>{
+registerTool('role_prepare_fields',{description:'从当前完整冻结计划补填指定普通文本、下拉或日期字段；只接受字段ID，取值和动作由主档及封存模板确定。核对原岗位及登录态及完整控件契约，不上传、不重新解析简历；同公司租约内独立核验整表，不把局部执行算成整表完成，不提交。',inputSchema:{...queueTask,fieldIds:z.array(z.string().min(1)).min(1).max(50),authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1),allowPartialPreparation:z.boolean().default(false)})}},wrap(async args=>{
  const queued=await queues.task(args);
  return engine.withCompanyLease(queued.t.companyId,async()=>{
   const {t,state,template}=await boundRole(args),profile=await loadProfile(profileFile);
@@ -416,14 +415,14 @@ registerTool('coverage_check',{description:'检查现有公司与表单资产覆
 registerTool('browser_tabs',{description:'读取显式连接的本地浏览器页面，不打开、重载或关闭页面。',annotations:{readOnlyHint:true}},wrap(()=>browser.tabs()));
 registerTool('browser_status',{description:'读取当前连接生命周期和实际连接次数，不发起连接；失败或断开不自动重连。',annotations:{readOnlyHint:true}},wrap(()=>browser.status(),false));
 registerTool('browser_initialize_chrome',{description:'仅在用户明确要求初始化投递专用Chrome分身后调用。分身未运行时先以固定私有资料目录和本机调试端口启动（可见窗口、允许扩展），再连接并核对资料目录；拒绝日常Chrome。纯启动/只读检查不会自动开浏览器；已连接或分身已运行不重复启动，断连走原恢复入口，不关闭既有页面。作用域由宿主实际PreToolUse会话检查，维护宿主不能调用。',inputSchema:{authorization:z.object({initialize:z.literal(true),evidence:z.string().min(1)})}},wrap(args=>browser.request('initializeConfiguredChrome',args)));
-registerTool('browser_restore_chrome',{description:'只有用户明确批准恢复原投递专用Chrome分身时才调用。仅复用已配置且存在的私有资料目录及原本地CDP端口，端口不在时以恢复上次会话方式重新启动分身；不关闭其他浏览器，不换通道，不自动重试。恢复后必须重新核对原岗位、账号和页面内容。',inputSchema:{authorization:z.object({restore:z.literal(true),evidence:z.string().min(1)})}},wrap(args=>browser.request('restoreConfiguredChrome',args)));
+registerTool('browser_restore_chrome',{description:'只有用户明确批准恢复原投递专用Chrome分身时才调用。仅复用已配置且存在的私有资料目录及原本地CDP端口，端口不在时以恢复上次会话方式重新启动分身；不关闭其他浏览器，不换通道，不自动重试。恢复后必须重新核对原岗位、登录态和页面内容。',inputSchema:{authorization:z.object({restore:z.literal(true),evidence:z.string().min(1)})}},wrap(args=>browser.request('restoreConfiguredChrome',args)));
 registerTool('browser_open',{description:'在共用的 MCP Chrome 中打开已建库公司的表单页；必须匹配该公司的 origin 和模板路径。不会填写或提交。',inputSchema:{companyId:z.string(),pageUrl:z.string().url()}},wrap(async({companyId,pageUrl})=>{
   const c=companyContext(catalog.companies.find(c=>c.id===companyId),{pageUrl});if(!c?.templateId)throw Error('COMPANY_NOT_COVERED');
   const t=await store.get('templates',c.templateId),u=new URL(pageUrl);
   if(u.origin!==c.origin||!t.pages.some(p=>u.pathname.startsWith(p.pathPrefix)))throw Error('COMPANY_FORM_SCOPE_MISMATCH');
   return engine.withCompanyLease(companyId,()=>browser.request('openPage',{pageUrl}));
 }));
-registerTool('probe_conditions',{description:'内部条件探测。具体岗位须传queueId/queueHash/taskId，内核从原任务核对账号、岗位和页面并派生绑定，不接受Agent声明浏览器身份。按已捕获选项展开并恢复原表单，不写个人事实、不上传、不提交；仅已验证且恢复成功的探测可以封存。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),roleId:z.string().optional(),queueId:queueTask.queueId.optional(),queueHash:queueTask.queueHash.optional(),taskId:queueTask.taskId.optional(),templateHash:z.string(),authorization:z.object({probe:z.literal(true),evidence:z.string().min(1)})}},wrap(args=>runConditionProbe(args,{boundRole:a=>boundRole(a,{construction:true,templateHash:args.templateHash}),engine,store,assertAcquisition:assertAcquisitionChain,refreshBindings})));
+registerTool('probe_conditions',{description:'内部条件探测。具体岗位须传queueId/queueHash/taskId，内核从原任务检查登录态、岗位和页面并派生绑定，不接受Agent声明浏览器身份。按已捕获选项展开并恢复原表单，不写个人事实、不上传、不提交；仅已验证且恢复成功的探测可以封存。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),roleId:z.string().optional(),queueId:queueTask.queueId.optional(),queueHash:queueTask.queueHash.optional(),taskId:queueTask.taskId.optional(),templateHash:z.string(),authorization:z.object({probe:z.literal(true),evidence:z.string().min(1)})}},wrap(args=>runConditionProbe(args,{boundRole:a=>boundRole(a,{construction:true,templateHash:args.templateHash}),engine,store,assertAcquisition:assertAcquisitionChain,refreshBindings})));
 registerTool('capture_form_definition',{description:'内部建库：按公司已核实的官网模板读取接口获取全部栏目、隐藏条件问题和选项字典，强制登记个人JSON；不读取候选人答案，不填写、不提交。',inputSchema:{companyId:z.string(),pageUrl:z.string().url()}},wrap(args=>engine.withCompanyLease(args.companyId,async()=>{
  const company=companyContext(catalog.companies.find(c=>c.id===args.companyId),args);if(!company||new URL(args.pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
  const recipeFile=directory.definitionFile(args.companyId,args);if(!recipeFile)throw Error('FORM_DEFINITION_NOT_CONFIGURED');const recipe=JSON.parse(await readFile(recipeFile,'utf8'));
