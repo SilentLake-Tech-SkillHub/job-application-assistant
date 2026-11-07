@@ -172,7 +172,7 @@ export function compare(actual, expected) {
 }
 
 export class Engine {
-  constructor({store,companies,browser,onInventory,onTemplateUpdated,refreshCompanies,resolveTask,profileFields,loadProfile,attachmentCapture,visionReviewer,privacyFields,leaseRoot=defaultLeaseRoot()}) { Object.assign(this,{store,companies,browser,onInventory,onTemplateUpdated,refreshCompanies,resolveTask,profileFields,loadProfile,attachmentCapture,visionReviewer,privacyFields,leaseRoot}); this.locks = new Set(); }
+  constructor({store,companies,browser,onInventory,onTemplateUpdated,refreshCompanies,resolveTask,profileFields,loadProfile,attachmentCapture,visionReviewer,privacyFields,routeTemplate=async t=>t,leaseRoot=defaultLeaseRoot()}) { Object.assign(this,{store,companies,browser,onInventory,onTemplateUpdated,refreshCompanies,resolveTask,profileFields,loadProfile,attachmentCapture,visionReviewer,privacyFields,routeTemplate,leaseRoot}); this.locks = new Set(); }
   async taskPage(task){
     const pageId=task.pageId||task.browserBinding?.pageId,binding=task.browserBinding;
     if((task.roleId||task.roleQueueArgs)&&(!pageId||!binding))throw Error('VERIFIED_ROLE_PAGE_BINDING_REQUIRED');
@@ -183,7 +183,7 @@ export class Engine {
   async profileProofs(task,template,page,prepare=false){if(!task.profileFillContext)return {};if(!this.profileFields)throw Error('PROFILE_FILL_KERNEL_REQUIRED');return this.profileFields({task,template,page,prepare});}
   async privacyProofs(task,template,page,prepare=false){if(!task.privacyFillContext)return {};if(!this.privacyFields)throw Error('PRIVACY_FILL_KERNEL_REQUIRED');return this.privacyFields({task,template,page,prepare});}
   attachPrivacyProofs(observation,proofs){for(const[id,proof]of Object.entries(proofs))if(observation.fields?.[id])observation.fields[id].privacyFillProof=proof;return observation;}
-  formRoute(task){return new FormRouter({store:this.store,companies:this.companies,validateTemplate,...(this.loadProfile?{loadProfile:this.loadProfile}:{})}).resolve(task);}
+  formRoute(task){return new FormRouter({store:this.store,companies:this.companies,validateTemplate,routeTemplate:this.routeTemplate,...(this.loadProfile?{loadProfile:this.loadProfile}:{})}).resolve(task);}
   companyForTask(task){const c=this.companies.find(c=>c.id===task.companyId);return c?{...companyContext(c,task),templateId:c.templateId}:null;}
   async acquireCompanies(companies){
     const origins=[...new Set(companies.flatMap(c=>c.origins||[c.origin]).filter(Boolean).map(origin=>new URL(origin).origin))].sort(),releases=[];
@@ -205,7 +205,7 @@ export class Engine {
       if(new URL(task.pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
       const template=validateTemplate(await constructionTemplate(this.store,company.templateId,task.templateHash));
       if(hash(template)!==task.templateHash)throw Error('TEMPLATE_VERSION_CHANGED');
-      const matches=template.pages.filter(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix));
+      const matches=(await this.routeTemplate(template,task)).pages.filter(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix));
       if(matches.length!==1)throw Error('AMBIGUOUS_PROBE_PAGE');
       const run={id:'draft-probe-'+template.id,operation:'internal_condition_probe',companyId:company.id,templateHash:hash(template),startedAt:new Date().toISOString(),status:'running',submission:'not_performed',save:'not_verified',authorizationEvidence:authorization.evidence};
       const started=performance.now();
@@ -230,8 +230,9 @@ export class Engine {
     if(new URL(task.pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
     const template=validateTemplate(await this.store.get('templates',company.templateId));
     if(hash(template)!==task.templateHash)throw Error('TEMPLATE_VERSION_CHANGED');
-    if(!template.pages.some(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix)))throw Error('PLAN_PAGE_NOT_COVERED');
-    const plan=await compileExecutionPlan(template,task);
+    const routed=await this.routeTemplate(template,task);
+    if(!routed.pages.some(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix)))throw Error('PLAN_PAGE_NOT_COVERED');
+    const plan=await compileExecutionPlan(routed,task);
     if(!transient)await this.store.put('plans',plan.id,plan);
     return {...(transient?{compiled:plan}:{}),companyId:task.companyId,route:route.route,nextStage:route.nextStage,routeReason:route.reason,planId:plan.id,planHash:plan.planHash,templateHash:plan.templateHash,counts:plan.counts,allKnown:plan.allKnown,readyForExecution:plan.readyForExecution,constructionBlockers:plan.constructionBlockers,status:plan.constructionBlockers.length?'blocked_construction':plan.counts.needs_user?'needs_answers':plan.counts.user_only?'ready_with_user_steps':'ready',browserAccess:false,pending:plan.pages.flatMap(p=>p.fields).filter(f=>f.disposition==='needs_user').map(f=>({id:f.id,source:f.source,label:f.label,required:!!f.required,...(task.sources?.[f.source]?.datePrecisionGap?{datePrecisionGap:task.sources[f.source].datePrecisionGap}:{})}))};
   }
@@ -280,7 +281,7 @@ export class Engine {
         if(task.planId!==executionPlanId(task.companyId))throw Error('PREPARED_PLAN_NOT_FOUND');
         try{prepared=await this.store.get('plans',task.planId);}catch{throw Error('PREPARED_PLAN_NOT_FOUND');}
       }
-      await assertPreparedPlan(prepared,template,task,authorization);
+      await assertPreparedPlan(prepared,await this.routeTemplate(template,task),task,authorization);
       if(authorization.uploadFieldIds&&(new Set(authorization.uploadFieldIds).size!==authorization.uploadFieldIds.length||authorization.uploadFieldIds.some(id=>!prepared.pages.some(page=>page.fields.some(field=>field.id===id&&field.kind==='file'&&field.disposition==='fill')))))throw Error('UPLOAD_FIELD_SCOPE_INVALID');
       if((await this.formRoute(task)).route!=='reuse')throw Error('FORM_ASSET_NOT_SEALED');
       jobs.push({task,company,template,prepared,deferFinalVerification:independentVerificationFollows===true&&template.pages.length===1&&!template.pages[0].after?.length});
@@ -356,7 +357,7 @@ export class Engine {
     const template=validateTemplate(await this.store.get('templates',company.templateId));
     if(task.templateHash!==hash(template))throw Error('TEMPLATE_VERSION_CHANGED');
     if((await this.formRoute(task)).route!=='reuse')throw Error('FORM_ASSET_NOT_SEALED');
-    const matches=withProfileRecords(template,task.recordPlan).pages.filter(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix));
+    const matches=withProfileRecords(await this.routeTemplate(template,task),task.recordPlan).pages.filter(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix));
     if(matches.length!==1)throw Error('AMBIGUOUS_VERIFICATION_PAGE');
     const plan=rolePageContract(matches[0],task.confirmedRole),page=await this.taskPage(task);
     await page.assertLocation(company.origin,plan.pathPrefix);await page.wait(plan.readySelector);
@@ -384,7 +385,7 @@ export class Engine {
     if(!titles.length||typeof page.repeatDiscovery!=='function'||!template.id)return;
     const found=(await page.repeatDiscovery(titles)).filter(item=>titles.includes(item.title));
     if(!found.length)return;
-    const stored=await this.store.get('templates',template.id),target=stored.pages.find(p=>p.pathPrefix===plan.pathPrefix);
+    const stored=await this.store.get('templates',template.id),target=stored.pages.find(p=>p.pathPrefix===(plan.sourcePathPrefix||plan.pathPrefix));
     target.groups=[...(target.groups||[]).filter(group=>!found.some(item=>item.title===groupSection(group))),...found.map(groupFromDiscovery)];
     await this.store.put('templates',template.id,stored);
     await this.onTemplateUpdated?.(stored);
@@ -397,7 +398,7 @@ export class Engine {
     try {
       const page=await this.taskPage(task);
       activePage=page;
-      for (const [pageIndex,storedPage] of withProfileRecords(template,task.recordPlan).pages.entries()) {
+      for (const [pageIndex,storedPage] of withProfileRecords(await this.routeTemplate(template,task),task.recordPlan).pages.entries()) {
         const plan=rolePageContract(storedPage,task.confirmedRole);
         const compiled=prepared.pages[pageIndex],frozenFields=compiled.fields;
         activePlan=plan;

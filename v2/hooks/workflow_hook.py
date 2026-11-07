@@ -79,6 +79,8 @@ def executor_boundary(event):
         return
     if not isinstance(args, dict):
         args = {}
+    if kind == 'view_image' and isinstance(args.get('path'), str) and Path(args['path']).is_absolute():
+        return  # Read a saved MCP screenshot; this does not operate the browser.
     if kind in {'read', 'read_file', 'readfile'}:
         value = next((args.get(key) for key in ('filePath', 'file_path', 'path') if args.get(key)), None)
         if value and source_read_allowed(value):

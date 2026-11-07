@@ -217,3 +217,14 @@ test('a cloned completed project date uses the new project’s confirmed ongoing
  const native=form([{...end,actions:[{method:'native_date'}]}],[group('Project',1)]);
  assert.equal(withProfileRecords(native,recordPlan).pages[0].fields.find(f=>f.source==='projects.new.end').ongoingSource,undefined);
 });
+
+test('Feishu add action may be a visible text control outside the immediate row parent',()=>{
+ const visible=()=>[{}],selector='.resumeEditForm-item.resumeEditForm-project';
+ const add={id:'add-project',tagName:'SPAN',innerText:'+ 添加项目经历',children:[],getClientRects:visible};
+ const grand={parentElement:null,querySelectorAll:s=>s==='button[type="button"],[role="button"]'?[]:[add]};
+ const parent={parentElement:grand,querySelectorAll:()=>[]};
+ const rows=[{parentElement:parent,getClientRects:visible,contains:()=>false}];
+ const document={querySelectorAll:s=>s===selector?rows:s==='#add-project'?[add]:[]};
+ const run=spec=>vm.runInNewContext('('+controlDOM.toString()+')(spec)',{spec,document,getComputedStyle:()=>({visibility:'visible'}),CSS:{escape:s=>s}});
+ const [g]=run({operation:'repeatDiscovery',titles:['project']});assert.ok(g);assert.equal(g.addLabel,'+ 添加项目经历');assert.equal(run({operation:'resolvePhoenix',references:[g.addSelector]})[0],'#add-project');
+});

@@ -3,7 +3,7 @@ import {templateState} from './template-state.mjs';
 import {contractRebuildRequired} from './rebuild-mark.mjs';
 import {hash} from './engine.mjs';
 export class FormRouter {
- constructor({store,companies,validateTemplate,loadProfile=async()=>null}){Object.assign(this,{store,companies,validateTemplate,loadProfile});}
+ constructor({store,companies,validateTemplate,loadProfile=async()=>null,routeTemplate=async t=>t}){Object.assign(this,{store,companies,validateTemplate,loadProfile,routeTemplate});}
  async resolve({companyId,roleId,pageUrl}){
   const company=companyContext(this.companies.find(c=>c.id===companyId),{pageUrl});
   if(!company||new URL(pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
@@ -13,7 +13,8 @@ export class FormRouter {
   if(templateId)try{template=await this.store.get('templates',templateId);}catch(e){if(e.code!=='ENOENT')throw e;}
   let state=await templateState(template);
   if(!template)return out(state,templateId?'COMPANY_FORM_ASSET_MISSING':'NO_COMPANY_FORM_ASSET');
-  if(template.pages.filter(p=>new URL(pageUrl).pathname.startsWith(p.pathPrefix)).length!==1)return out({status:'unsealed',reason:'real_fill_failure',route:'incremental',blockers:['FORM_PATH_NOT_COVERED']},'FORM_PATH_NOT_COVERED');
+  const routed=await this.routeTemplate(template,{companyId,roleId,pageUrl});
+  if(routed.pages.filter(p=>new URL(pageUrl).pathname.startsWith(p.pathPrefix)).length!==1)return out({status:'unsealed',reason:'real_fill_failure',route:'incremental',blockers:['FORM_PATH_NOT_COVERED']},'FORM_PATH_NOT_COVERED');
   if(contractRebuildRequired(await this.loadProfile(),hash(template)))return out(
    {status:'unsealed',reason:'real_fill_failure',route:'incremental',blockers:['PROFILE_EXECUTION_CONTRACT_REQUIRES_REBUILD']},
    'COMPANY_FORM_ASSET_REAL_FILL_FAILURE',

@@ -30,3 +30,6 @@ test('logout control proves login even with no account text',()=>{assert.equal(d
 test('login URL takes priority over a stale session marker',()=>{assert.equal(domState({url:'/campus/login',selectors:{'.session':['']}}).sessionStatus,'logged_out');});
 test('public page login control yields waiting rather than URL failure',()=>{assert.equal(domState({buttons:['登录/注册']}).sessionStatus,'logged_out');});
 test('empty page is unknown and cannot authorize filling',()=>{assert.equal(domState({}).sessionStatus,'unknown');});
+
+import {continuationFor} from '../shared/workflow-continuation.mjs';
+test('ready compiled plan does not request an inactive optional branch answer',()=>{const result=continuationFor({plan:{readyForExecution:true,counts:{needs_user:0,inactive:1}},template:{pages:[{fields:[{id:'inactive',source:'missing.answer',when:{source:'choice',equals:'other'}}]}]},profile:{facts:{}}});assert.equal(result.requiresUser,false);assert.deepEqual(result.nextTools,['role_prepare']);});

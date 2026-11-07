@@ -27,6 +27,8 @@ class WorkflowHookTest(unittest.TestCase):
   self.assertEqual(self.invoke().returncode,0)
   r=self.invoke(tool_name='mcp__recruiting_login_v2__role_advance')
   self.assertNotIn('additionalContext',r.stdout)
+ def test_saved_screenshot_is_readable_during_execution(self):
+  self.assertEqual(self.invoke(tool_name='view_image', tool_input={'path':'/tmp/component-screenshot.png'}).returncode,0)
  def test_other_conversation_unaffected_by_missing_policy(self):
   self.policy.unlink();self.assertEqual(json.loads(self.invoke(session_id='other').stdout),{})
  def test_receipt_from_another_turn_never_releases_mutation(self):

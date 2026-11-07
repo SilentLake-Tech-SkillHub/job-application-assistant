@@ -1,3 +1,4 @@
+import {bindCompanyTemplateRoute} from './company-template-route.mjs';
 import {sessionFromSnapshot} from './login-state.mjs';
 import {rolePageContract} from './role-identity.mjs';
 import {recordPlanOf,withProfileRecords,groupFromDiscovery} from './repeat-groups.mjs';
@@ -109,7 +110,7 @@ async function boundRole(args,{construction=false,templateHash}={}){
   const {q,t}=await queues.task(args),state=await queues.read(t.taskId);
   assertBoundRoleState(q,t,state);
   const c=catalog.companies.find(c=>c.id===t.companyId),templateId=c?.templateId;if(!templateId)throw Error('COMPANY_NOT_COVERED');
-  const template=construction?await constructionTemplate(store,templateId,templateHash):await store.get('templates',templateId),storedPage=template.pages.find(p=>new URL(state.returnUrl).pathname.startsWith(p.pathPrefix)),plan=storedPage&&rolePageContract(storedPage,{title:t.title,officialId:state.siteRoleId||t.officialId});
+  const template=construction?await constructionTemplate(store,templateId,templateHash):await store.get('templates',templateId),storedPage=(await engine.routeTemplate(template,{companyId:t.companyId,pageUrl:state.returnUrl})).pages.find(p=>new URL(state.returnUrl).pathname.startsWith(p.pathPrefix)),plan=storedPage&&rolePageContract(storedPage,{title:t.title,officialId:state.siteRoleId||t.officialId});
   if(!plan||plan.roleTitle!==t.title)throw Error('CONFIRMED_ROLE_TITLE_TEMPLATE_MISMATCH');
   const login=await directory.loginConfig(t.companyId,t);
   // A tab lost to a browser restart is found again by role_resume, which reads the account before anything is written.
@@ -146,7 +147,7 @@ async function refreshBindings(){
 }
 
 const visionReviewer=process.env.RECRUITING_VISION_SOCKET?createSocketVisionReviewer(process.env.RECRUITING_VISION_SOCKET,{expectedSourceFingerprint:residentRuntime.sourceFingerprint}):Object.assign((...args)=>createSamplingVisionReviewer(server)(...args),{isAvailable:async()=>createSamplingVisionReviewer(server).isAvailable()});
-const engine=new Engine({store,companies:catalog.companies,browser,visionReviewer,onTemplateUpdated:async template=>{const templateHash=hash(template);await updateProfile(profileFile,p=>{for(const form of Object.values(p.companyForms||{})){const contract=form.executionContract;if(contract?.templateId!==template.id)continue;contract.templateHash=templateHash;const page=template.pages.find(x=>x.fields.some(f=>f.id===contract.fields?.[0]?.id));if(page?.groups)contract.groups=page.groups;}});},privacyFields:async({task,template,page,prepare})=>{
+const engine=new Engine({store,companies:catalog.companies,browser,visionReviewer,routeTemplate:async (template,task)=>bindCompanyTemplateRoute(template,task.pageUrl,await directory.loginConfig(task.companyId,{pageUrl:task.pageUrl})),onTemplateUpdated:async template=>{const templateHash=hash(template);await updateProfile(profileFile,p=>{for(const form of Object.values(p.companyForms||{})){const contract=form.executionContract;if(contract?.templateId!==template.id)continue;contract.templateHash=templateHash;const page=template.pages.find(x=>x.fields.some(f=>f.id===contract.fields?.[0]?.id));if(page?.groups)contract.groups=page.groups;}});},privacyFields:async({task,template,page,prepare})=>{
  if(prepare&&task.roleQueueArgs)await boundRole(task.roleQueueArgs);
  const profile=await loadProfile(profileFile),materialContext=await confirmedMaterialContext({handoffDir:directory.handoffDir,companyId:task.companyId,roleId:task.roleId,pageUrl:task.pageUrl,catalog:catalog.companies}),company=companyContext(catalog.companies.find(c=>c.id===task.companyId),task);
  return applyAuthorizedPrivacyFields({profile,template,page,scope:{materialContext,companyId:task.companyId,roleId:task.roleId,pageUrl:task.pageUrl,officialOrigin:company?.origin},expected:task.privacyFillContext,prepare});
@@ -199,7 +200,7 @@ registerTool('role_confirm_material_no_destination',{description:'仅在用户�
   if(!captureId)throw Error('MATERIAL_EXCEPTION_CAPTURE_REQUIRED');
   const route=await engine.formRoute({companyId:t.companyId,roleId:t.roleId,pageUrl:state.returnUrl});if(route.route!=='reuse')throw Error('SEALED_FORM_REQUIRED_FOR_MATERIAL_EXCEPTION');
   const capture=await store.get('runs',captureId),page=await browser.existingPage(state.returnUrl,{pageId:state.pageId,readOnly:true});
-  const plan=template.pages.find(p=>new URL(state.returnUrl).pathname.startsWith(p.pathPrefix)),controls=await page.inventory(plan);
+  const plan=(await engine.routeTemplate(template,{companyId:t.companyId,pageUrl:state.returnUrl})).pages.find(p=>new URL(state.returnUrl).pathname.startsWith(p.pathPrefix)),controls=await page.inventory(plan);
   const result=await updateProfile(profileFile,p=>recordMaterialDestinationException(p,{context,pageUrl:state.returnUrl,template,templateHash:hash(template),capture,controls,key:a.key,evidence:a.authorization.evidence}));
   const {planId,planHash,fillRunId,verifyRunId,...rest}=state;await queues.put(t.taskId,{...rest,status:'ready_to_fill'});
   return {...result,companyId:t.companyId,roleId:t.roleId,fullFormVerified:false,continuation:{state:'prepare',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['prepare_plan','role_prepare']}};
@@ -467,7 +468,7 @@ registerTool('form_remove_attachment',{description:'仅按用户针对本岗位�
   if(capture.companyId!==t.companyId||capture.pageUrl!==state.returnUrl||capture.pageId!==state.pageId)throw Error('ATTACHMENT_CAPTURE_SCOPE_MISMATCH');
   const control=capture.controls.find(c=>c.selector===a.selector&&c.type==='file'),item=control?.uploadedItems?.find(f=>f.filename===a.filename);
   if(!item?.removeSelector||!control.uploadContainerSelector||!control.filenameSelector)throw Error('ATTACHMENT_REMOVE_ACTION_NOT_CAPTURED');
-  const plan=template.pages.find(p=>new URL(state.returnUrl).pathname.startsWith(p.pathPrefix)),page=await browser.existingPage(state.returnUrl,{pageId:state.pageId,roleBinding:state.browserBinding});
+  const plan=(await engine.routeTemplate(template,{companyId:t.companyId,pageUrl:state.returnUrl})).pages.find(p=>new URL(state.returnUrl).pathname.startsWith(p.pathPrefix)),page=await browser.existingPage(state.returnUrl,{pageId:state.pageId,roleBinding:state.browserBinding});
   const live=(await liveControls(page,plan)).find(c=>c.selector===a.selector),current=live?.uploadedItems?.filter(f=>f.filename===a.filename);
   if(current?.length!==1||current[0].removeSelector!==item.removeSelector)throw Error('ATTACHMENT_PREVIOUS_FILE_CHANGED');
   const result=await page.act({method:'remove_uploaded_file',selector:a.selector,containerSelector:control.uploadContainerSelector,filenameSelector:control.filenameSelector,removeSelector:item.removeSelector,expectedFilename:a.filename,authorized:true},null,{});
@@ -539,7 +540,7 @@ registerTool('form_repair_fields',{description:'局部修复：真实填写发�
   };
   const seal=await templateState(template),failedIds=[...new Set([...(seal.reason==='real_fill_failure'?seal.blockers:[]),...a.mappings.map(m=>m.fieldId)])];
   if(!failedIds.length)return {templateId:template.id,status:'nothing_to_repair',repaired:[],unresolved:[],submission:'not_performed'};
-  const page=await browser.existingPage(state.returnUrl,{pageId:state.pageId,readOnly:true}),plan=template.pages.find(p=>new URL(state.returnUrl).pathname.startsWith(p.pathPrefix));
+  const page=await browser.existingPage(state.returnUrl,{pageId:state.pageId,readOnly:true}),plan=(await engine.routeTemplate(template,{companyId:t.companyId,pageUrl:state.returnUrl})).pages.find(p=>new URL(state.returnUrl).pathname.startsWith(p.pathPrefix));
   const result=repairFields({template,failedIds,controls:await liveControls(page,plan),mappings:a.mappings});
   validateTemplate(result.template);
   if(result.unresolved.length)await recordRealFillFailure(store,result.template,t.companyId,result.unresolved.map(u=>u.id));

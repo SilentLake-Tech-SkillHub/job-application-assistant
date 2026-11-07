@@ -6,6 +6,7 @@ const REPAIRABLE=new Set(['CONTROL_NOT_ON_PAGE','CONTROL_NOT_IN_TEMPLATE']);
 export function continuationFor({route,plan,verification,template,profile,error}={}){
  if(error)return {state:'technical_block',owner:'agent',requiresUser:false,shouldContinue:true,continueWithOtherCompanies:true,reason:error,routeCode:ROUTE_BY_ERROR.has(error)?error:null,nextTools:ROUTE_BY_ERROR.get(error)||['run_status','form_template_audit'],retry:'only_after_evidence_or_inputs_change'};
  if(route?.route&&route.route!=='reuse'||plan?.constructionBlockers?.length)return {state:'construct',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:route?.nextTools||['capture_controls','form_mapping_candidates','form_build_template','template_register','probe_conditions','template_finalize'],retry:'only_changed_missing_parts'};
+ if(plan?.readyForExecution&&plan.counts?.needs_user===0)return {state:'prepare',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['role_prepare']};
  const fields=(template&&profile?withProfileRecords(template,recordPlanOf(profile)):template)?.pages?.flatMap(p=>p.fields)||[],pending=fields.map(f=>({id:f.id,...classifyPending(f,profile)}));
  if(pending.some(x=>x.kind==='mapping'))return {state:'map',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:pending.some(x=>x.reason==='SOURCE_NOT_REGISTERED')?['capture_repeat_slots','capture_controls','form_mapping_candidates','profile_map_questions','form_build_template']:['form_mapping_candidates','profile_map_questions','form_build_template']};
  if(verification){

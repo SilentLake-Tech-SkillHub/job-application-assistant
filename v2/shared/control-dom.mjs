@@ -177,12 +177,26 @@ export function controlDOM(spec){
   }
   return {names,removeSelector:null};
  }
+ const scopedRepeatCandidates=(rows,recordSelector,label)=>{
+  for(let root=rows[0]?.parentElement,depth=0;root&&depth<4;root=root.parentElement,depth++){
+   const other=[...root.querySelectorAll('.resumeEditForm-item,.register-form-group-wrapper,[class^="apply-form-array-card__"]')].some(n=>typeof n.matches==='function'&&!n.matches(recordSelector)&&!rows.some(row=>row.contains(n)));
+   if(other)return [];
+   const nodes=[...root.querySelectorAll('button,[role="button"],a,span,div')].filter(n=>{
+    const text=n.innerText?.trim()||'';
+    return visible(n)&&!rows.some(row=>row.contains(n))&&text.length<80&&(label?text===label:/^[+＋]?\s*(?:添加|新增|Add)(?:$|\s|[\p{Script=Han}])/iu.test(text));
+   });
+   const candidates=nodes.filter(n=>!nodes.some(other=>other!==n&&typeof n.contains==='function'&&n.contains(other)));
+   if(candidates.length)return candidates;
+   if(root===document.body)break;
+  }
+  return [];
+ };
  const phoenixResolve=reference=>{
   let r;try{r=JSON.parse(reference.slice(9));}catch{throw Error('PHOENIX_REFERENCE_INVALID');}
   if(r.part==='scopedRepeatAdd'){
    const rows=[...document.querySelectorAll(r.recordSelector)].filter(visible);
    if(!rows.length||rows.some(row=>row.parentElement!==rows[0].parentElement))throw Error('REPEAT_SECTION_NOT_FOUND');
-   const candidates=[...rows[0].parentElement.querySelectorAll('button[type="button"],[role="button"]')].filter(node=>visible(node)&&!rows.some(row=>row.contains(node))&&node.innerText?.trim()===r.addLabel);
+   const candidates=scopedRepeatCandidates(rows,r.recordSelector,r.addLabel);
    if(candidates.length!==1)throw Error('REPEAT_ADD_CONTROL_CHANGED');
    return diagnosticSelector(candidates[0]);
   }
@@ -227,7 +241,7 @@ export function controlDOM(spec){
    for(const selector of selectors){
     const rows=[...document.querySelectorAll(selector)].filter(visible);
     if(!rows.length||!rows[0].parentElement||rows.some(row=>row.parentElement!==rows[0].parentElement))continue;
-    const candidates=[...rows[0].parentElement.querySelectorAll('button[type="button"],[role="button"]')].filter(node=>visible(node)&&!rows.some(row=>row.contains(node))&&/^(?:添加|新增|Add)(?:$|\s|[\p{Script=Han}])/iu.test(node.innerText?.trim()||''));
+    const candidates=scopedRepeatCandidates(rows,selector);
     if(candidates.length!==1)continue;
     const addLabel=candidates[0].innerText.trim();
     found.push({title,selector,addLabel,addSelector:'phoenixq:'+JSON.stringify({part:'scopedRepeatAdd',recordSelector:selector,addLabel})});
