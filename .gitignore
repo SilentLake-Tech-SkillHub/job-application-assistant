@@ -7,3 +7,4 @@ __pycache__/
 *.private.md
 .codex/
 test-results/
+README-preview.html
