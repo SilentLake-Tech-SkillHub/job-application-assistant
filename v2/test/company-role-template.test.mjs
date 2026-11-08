@@ -28,7 +28,7 @@ test('adding a role updates references without duplicating or changing controls'
 
 import {Engine,Store,hash} from '../shared/engine.mjs';
 import {observedSeal} from './fixtures/observed-seal.mjs';
-import {mkdtemp,rm} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';
+import {mkdtemp,rm,readdir} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';
 test('company-role lookup stays consistent through compile and both preparation checks',async()=>{
  const dir=await mkdtemp(path.join(os.tmpdir(),'company-role-execution-'));
  try{
@@ -37,7 +37,7 @@ test('company-role lookup stays consistent through compile and both preparation 
   const template=toCompanyRoleTemplate(observedSeal(old,'C00001').template,roles),store=new Store(dir);await store.put('templates',template.id,template);
   const engine=new Engine({store,companies:[{id:'C00001',origin:config.origin,templateId:template.id}],routeTemplate:async(t,task)=>resolveCompanyRoleTemplate(t,{...task,role:roles.find(r=>r.roleId===task.roleId)},config),resolveTask:async t=>({...t})});
   const visited=[];engine.runCompany=async({task,template:t})=>{const resolved=await engine.routeTemplate(t,task);visited.push(resolved.pages[0].roleTitle);return {companyId:task.companyId,status:'verified',fields:[],pageChecks:[],submission:'not_performed'};};
-  for(const role of [roles[1],roles[0]]){const task={companyId:'C00001',roleId:role.roleId,pageUrl:config.origin+`/campus/resume/${role.officialId}/apply`,templateHash:hash(template),values:{name:'Example'}};const plan=await engine.preparePlan(task);await engine.prepare({tasks:[{...task,planId:plan.planId,planHash:plan.planHash}],authorization:{prepare:true,evidence:'synthetic'}});}
-  assert.deepEqual(visited,['Role B','Role A']);assert.equal(hash(await store.get('templates',template.id)),hash(template));
+  for(const role of [roles[1],roles[0]]){const task={companyId:'C00001',roleId:role.roleId,pageUrl:config.origin+`/campus/resume/${role.officialId}/apply`,templateHash:hash(template),values:{name:'Example'}};const plan=await engine.preparePlan(task);let id;for(let i=0;i<20;i++){const result=await engine.prepare({tasks:[{...task,planId:plan.planId,planHash:plan.planHash}],authorization:{prepare:true,evidence:'synthetic'}});id??=result.id;assert.equal(result.id,id);}}
+  assert.deepEqual(visited,[...Array(20).fill('Role B'),...Array(20).fill('Role A')]);assert.equal((await readdir(path.join(dir,'runs'))).filter(x=>x.startsWith('batch-current-')).length,2);assert.equal(hash(await store.get('templates',template.id)),hash(template));
  }finally{await rm(dir,{recursive:true,force:true});}
 });

@@ -318,7 +318,7 @@ export class Engine {
     }
     const queueIds=[...new Set(jobs.map(j=>j.task.roleQueueArgs?.queueId).filter(Boolean))];
     const batchOwner=queueIds.length===0?jobs[0].task.taskId:null;
-    const batchRunId=queueIds.length===1?'batch-prepare-'+queueIds[0]:batchOwner?'batch-current-'+batchOwner:randomUUID();
+    const batchRunId=queueIds.length===1?'batch-prepare-'+queueIds[0]:batchOwner?'batch-current-'+batchOwner:'batch-current-'+hash(jobs.map(j=>[j.company.id,j.task.roleId||j.task.pageUrl]).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)))).slice(0,24);
     run={id:batchRunId,...(batchOwner?{taskId:batchOwner}:{}),operation:'batch_prepare',startedAt:new Date().toISOString(),status:'running',results:[],batchPrepareCalls:1,parallelRoles,requestedConcurrency:concurrency,modelRoundTrips:'not_measured'};
     keys.forEach(k=>this.locks.add(k));
       await this.store.put('runs',run.id,run);
