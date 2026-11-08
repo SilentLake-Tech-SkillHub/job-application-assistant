@@ -1,6 +1,6 @@
 {
   "name": "job-application-suite-v2",
-  "version": "2.0.0-alpha.28",
+  "version": "2.0.0-alpha.29",
   "private": true,
   "type": "module",
   "files": [
@@ -19,7 +19,8 @@
     "start:login": "node scripts/start.mjs login",
     "start:application": "node scripts/start.mjs application",
     "test": "node --test test/*.test.mjs",
-    "run:roles": "node scripts/run-confirmed-roles.mjs"
+    "run:roles": "node scripts/run-confirmed-roles.mjs",
+    "cli": "node scripts/cli.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",

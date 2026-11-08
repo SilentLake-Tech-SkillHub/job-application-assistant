@@ -85,23 +85,16 @@ export function stageResult(tool,data){
 // this registration boundary, so new stages cannot silently omit their Hook.
 // A maintainer host gets read-only inspections only; stage tools are refused
 // before the handler runs, so no browser, profile or queue state is touched.
-export function registerWorkflowTool(server,tool,definition,handler,env=process.env){
+export async function executeWorkflowOperation(tool,args,handler,{env=process.env,context}={}){
  if(!inspections.has(tool)&&!stages[tool])throw Error('WORKFLOW_STAGE_DECLARATION_REQUIRED:'+tool);
- const role=hostRole(env);
- const handle=async(args,extra)=>{
-  if(role==='maintainer'&&!inspections.has(tool))return {isError:true,content:[{type:'text',text:JSON.stringify(stageResult(tool,maintainerRefusal(tool)))}]};
-  if(inspections.has(tool))return handler(args,extra);
-  const phase=stages[tool][0];
-  const result=await handler(args,extra);
-  const block=result.content?.find(x=>x.type==='text');if(!block)throw Error('WORKFLOW_RESPONSE_ENVELOPE_REQUIRED');
-  const staged=await recordOutcome({tool,phase,args,result:stageResult(tool,JSON.parse(block.text)),env});
-  return {...result,content:[{type:'text',text:JSON.stringify(staged)}]};
- };
- return server.registerTool(tool,definition,async(args,extra)=>{
-  const startedAt=Date.now(),response=await handle(args,extra);
-  await recordCall({tool,args,startedAt,bytes:Buffer.byteLength(JSON.stringify(response?.content||[])),isError:response?.isError===true,env});
-  return response;
- });
+ const startedAt=Date.now();let result;
+ if(hostRole(env)==='maintainer'&&!inspections.has(tool))result={...stageResult(tool,maintainerRefusal(tool)),isError:true};
+ else {
+  result=await handler(args,context);
+  if(!inspections.has(tool))result=await recordOutcome({tool,phase:stages[tool][0],args,result:stageResult(tool,result),env});
+ }
+ await recordCall({tool,args,startedAt,bytes:Buffer.byteLength(JSON.stringify(result)),isError:result?.isError===true,env});
+ return result;
 }
 
 export function technicalHandoffReasons(source){

@@ -1,0 +1,21 @@
+import {Server} from '@modelcontextprotocol/sdk/server/index.js';
+import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
+import {CallToolRequestSchema,ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
+import {openSamplingBridge} from './sampling-bridge.mjs';
+import {CoreClient} from './core-client.mjs';
+export async function serveRemoteMcp(mode){
+ const core=new CoreClient(mode);await core.connect();const status=await core.control('status');
+ const server=new Server({name:'recruiting-'+mode+'-v2',version:status.version},{capabilities:{tools:{listChanged:true}}});
+ const sampling=await openSamplingBridge(server);server.onclose=()=>{void sampling.close();};
+ const management={name:'component_runtime',description:'管理本组件业务核心：读取状态、暂停、更新核心、恢复或停止空闲核心。浏览器保持运行。',inputSchema:{type:'object',properties:{action:{type:'string',enum:['status','pause','reload','resume','stop']}},required:['action'],additionalProperties:false}};
+ server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:[...await core.listOperations(),management]}));
+ server.setRequestHandler(CallToolRequestSchema,async request=>{
+  let value;
+  if(request.params.name==='component_runtime'){
+   const action=request.params.arguments?.action;if(!['status','pause','reload','resume','stop'].includes(action))throw Error('INVALID_CORE_CONTROL');
+   value={...await core.control(action),adapterPid:process.pid};if(action==='reload'&&!value.reloadRequested)await server.notification({method:'notifications/tools/list_changed'});
+  }else value=await core.execute(request.params.name,request.params.arguments||{},{visionSocket:sampling.socket});
+  const {isError,...data}=value;return {...(isError?{isError:true}:{}),content:[{type:'text',text:JSON.stringify(data)}]};
+ });
+ await server.connect(new StdioServerTransport());return server;
+}

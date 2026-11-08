@@ -60,6 +60,40 @@ def source_read_allowed(value):
             target.suffix in {'.md', '.py', '.mjs', '.json'} and package in target.parents)
 
 
+def component_cli_event(event):
+    """Normalize the installed fixed CLI into the same workflow Hook path."""
+    kind = event.get('tool_name', '').split('__')[-1].lower()
+    if kind not in {'bash', 'exec_command', 'execute', 'shell'}:
+        return event
+    args = event.get('tool_input') or event.get('arguments') or {}
+    if not isinstance(args, dict):
+        return event
+    command = args.get('command', args.get('cmd', ''))
+    if any(c in command for c in ('\n', '\r', ';', '|', '&', '`', '$', '>', '<')):
+        return event
+    try:
+        parts = shlex.split(command)
+        cli = Path(__file__).resolve().parents[1] / 'scripts/cli.mjs'
+        if len(parts) < 4 or Path(parts[0]).name != 'node' or Path(parts[1]).resolve() != cli:
+            return event
+        tail = parts[2:]
+        if '--workspace' in tail:
+            i = tail.index('--workspace')
+            if Path(tail[i+1]).resolve() != ROOT:
+                return event
+            del tail[i:i+2]
+        if len(tail) not in {2, 3} or tail[0] not in {'login', 'application'}:
+            return event
+        mode, operation = tail[:2]
+        operation = {'runtime': 'component_runtime', 'list': 'runtime_info'}.get(operation, operation)
+        if operation not in set(LIFECYCLE['inspections']) | set(LIFECYCLE['stages']):
+            return event
+        payload = json.loads(Path(tail[2]).read_text()) if len(tail) == 3 else {}
+        return {**event, 'tool_name': 'mcp__recruiting_'+mode+'_v2__'+operation, 'tool_input': payload}
+    except (ValueError, IndexError, OSError):
+        return event
+
+
 def executor_boundary(event):
     """Enabled execution sessions may operate websites only through this MCP.
 
@@ -99,7 +133,7 @@ def executor_boundary(event):
                 Path(parts[1]).resolve() == bootstrap and parts[2] in {'enable', 'disable'} and
                 simple):
             return
-    raise ValueError('EXECUTOR_MCP_ONLY: 网站采集、映射、建库、填写、读回只允许 recruiting-login-v2 / recruiting-application-v2；插件缺陷请 workflow_handoff，禁止浏览器工具、脚本或直接修改运行资产替代插件')
+    raise ValueError('EXECUTOR_MCP_ONLY: 网站采集、映射、建库、填写、读回只允许 recruiting-login-v2 / recruiting-application-v2 或组件固定 CLI；插件缺陷请 workflow_handoff，禁止浏览器工具、脚本或直接修改运行资产替代插件')
 
 
 def emit(value):
@@ -220,6 +254,7 @@ def handle(event):
     # cannot turn a configured maintainer into an active application conversation.
     if host_role() == 'maintainer':
         return {}
+    event = component_cli_event(event)
     name = event.get('hook_event_name')
     if name not in INJECT | {'PreToolUse', 'PostToolUse', 'Stop'}:
         return {}

@@ -4,4 +4,6 @@
 3. workflow_next/form_route复用有效公司档案。首次REA解析；真实缺口补采→form_review_completeness（Agent完整性检查）→映射/选项→form_build_template→template_register→form_test_interactions→失败用form_patch_controls回补并重查重测→template_finalize。form_cycle_status返回下一步；条件探测不能代替真实交互测试。
 4. prepare_plan → role_prepare/batch_prepare → role_verify/verify_current独立核验→用户审阅。公司模板更新直接重读编译，无需升级或重启组件。
 5. 具体提交授权→role_submit→官网回执→application_closeout；主表经反向评审确认后更新。
-执行只用登录/申请MCP；禁止内联模板、脚本改资产及组件外填写。控件回补走固定工具；确有通用代码缺陷才workflow_handoff引用真实证据交维护。验证码交用户，无提交授权停在审阅。有效公司不因内部证据格式重做REA；Hook从catalog/workflow-tools.json读取阶段。
+执行使用登录/申请MCP或固定CLI；禁止内联模板、脚本改资产及组件外填写。控件回补走固定工具；确有通用代码缺陷才workflow_handoff引用真实证据交维护。验证码交用户，无提交授权停在审阅。有效公司不因内部证据格式重做REA；
+
+固定CLI scripts/cli.mjs沿用本流程；component_runtime更新核心，保留MCP及浏览器。

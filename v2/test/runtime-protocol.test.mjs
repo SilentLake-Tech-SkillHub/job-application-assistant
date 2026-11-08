@@ -78,5 +78,5 @@ test('actual application MCP reports new runtime and missing company form routes
  await assert.rejects(privateStore.get('templates',materialFixture.capture.formId),{code:'ENOENT'});const stored=(await privateStore.get('runs',formAssetKeys(materialFixture.capture.formId).draft)).template,probeId=randomUUID();
  await privateStore.put('runs',probeId,{id:probeId,operation:'internal_condition_probe',companyId,templateHash:hash(stored),status:'verified',restoration:'verified',branches:[{source:'__baseline__',value:null,status:'verified',newQuestions:0,selected:true,roleMatched:true,conditionFieldsMatched:true,inventory:[{selector:'#code',label:'推荐码',type:'text',required:false}]}]});
  const premature=await c.callTool({name:'template_finalize',arguments:{companyId,templateHash:hash(stored),probeRunId:probeId}});assert.equal(premature.isError,true);assert.equal(JSON.parse(premature.content[0].text).error,'VERIFIED_CONTROL_INTERACTION_REQUIRED');await assert.rejects(privateStore.get('templates',companyId),{code:'ENOENT'});assert.equal(JSON.parse(await readFile(profile,'utf8')).facts['material:referralCode'],undefined);
- }finally{await c.close();await rm(d,{recursive:true,force:true});}
+ }finally{await c.callTool({name:"component_runtime",arguments:{action:"stop"}}).catch(()=>{});await c.close();await rm(d,{recursive:true,force:true});}
 });

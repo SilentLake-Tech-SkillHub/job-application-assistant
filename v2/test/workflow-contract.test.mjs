@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {auditStoredContract,stageResult,registerWorkflowTool} from '../shared/workflow-contract.mjs';
+import {auditStoredContract,stageResult} from '../shared/workflow-contract.mjs';import {registerWorkflowTool} from './fixtures/mcp-registration.mjs';
 import {registerTemplateContract} from '../shared/profile.mjs';
 const field=()=>({id:'school',label:'学校',inventoryLabel:'学校',inventoryType:'combobox',source:'school',kind:'choice',control:{type:'dropdown',valueType:'string',readbackType:'string',options:['One University']},actions:[{method:'dropdown',selector:'#school',options:['One University']}],read:{selector:'#committed-school',selectedSelector:'#committed-school',kind:'text'}});
 const template=()=>({id:'generic',version:1,evidence:{sourceUrl:'https://example.test/apply'},pages:[{pathPrefix:'/apply',fields:[field()]}]});

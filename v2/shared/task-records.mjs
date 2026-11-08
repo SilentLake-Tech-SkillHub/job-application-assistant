@@ -25,7 +25,8 @@ export class TaskRecords{
   return record.value;
  }
  async put(group,id,value){
-  const scope=context.getStore()||{},taskId=value.taskId||scope.taskId;
+  const scope=context.getStore()||{},companyId=value.companyId||scope.companyId;
+  const taskId=value.taskId||scope.taskId||(group==='runs'&&/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(id)&&companyId?'company-'+companyId+'-'+(value.roleId||scope.roleId||'shared'):null);
   if(!taskId||!['runs','plans'].includes(group)||id.startsWith('batch-prepare-')||durableAsset.test(id)||value.operation==='internal_condition_probe')return false;
   if(!keyOK(taskId))throw Error('INVALID_TASK_RECORD_KEY');
   const operation=group==='plans'&&Number.isInteger(value.compilerVersion)?'execution_plan':value.operation||scope.tool||group;

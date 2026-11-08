@@ -49,7 +49,7 @@
 
 ## 一条脚本运行
 
-在本包目录运行 `node scripts/run-confirmed-roles.mjs`。设置 `RECRUITING_HANDOFF_DIR`、`RECRUITING_PROFILE_JSON`、`RECRUITING_LOGIN_PRIVATE_DIR`、`RECRUITING_PRIVATE_DIR`（已有申请模板）、`RECRUITING_RUN_EVIDENCE_DIR` 和 `RECRUITING_RUN_AUTHORIZATION_FILE`（已有本轮用户授权文件）；可选 `RECRUITING_ROLE_QUEUE_DIR`、`RECRUITING_BROWSER_SOCKET`、`RECRUITING_BROWSER_PROFILE_DIR`。
+在本包目录运行 `node scripts/run-confirmed-roles.mjs`。设置 `RECRUITING_HANDOFF_DIR`、`RECRUITING_PROFILE_JSON`、`RECRUITING_LOGIN_PRIVATE_DIR`、`RECRUITING_PRIVATE_DIR`（已有申请模板） 和 `RECRUITING_RUN_AUTHORIZATION_FILE`（已有本轮用户授权文件）；可选 `RECRUITING_ROLE_QUEUE_DIR`、`RECRUITING_BROWSER_SOCKET`、`RECRUITING_BROWSER_PROFILE_DIR`。
 
 脚本通过正式 stdio MCP 协议读取已确认的公司文件、打开岗位、准备登录并按授权请求一次短信；到人工步骤暂停。用户在原页面完成后向该进程输入 `resume`，脚本只读确认并恢复原岗位，继续填写及独立核验，保存计时和截图，停在用户校验。`close`只关闭MCP客户端，浏览器/broker保留。人工未完成时不重复发码；错误明确返回，不自动重启浏览器。它不实现Excel处理或最终提交。
 
@@ -78,3 +78,5 @@
 ## 声明式通用入口
 
 已有飞书与简历弹窗配方保持兼容。其他已核实的详情页到申请页跳转可用 `entry.kind=declarative_transition`，合同与实际证据要求见 [声明式入口](declarative-entry.md)。Chrome 和内置浏览器共同执行一个共享驱动；仅观察真实返回页，不构造申请 URL。未采到真实按钮或结果页证据时仍阻断，不以手工填表替代建库。
+
+连续执行由 shared/confirmed-runner.mjs 编排，脚本只负责命令行输入输出；当前状态通过 Store 覆盖保存在私有 runs/confirmed-runner-current.json，业务结果沿用核心 TaskRecords。

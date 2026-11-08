@@ -49,7 +49,7 @@ test('prefix contracts require a literal single-line prefix and a real selector'
  assert.throws(()=>validateTemplate(template({...page,roleSelector:undefined})),/ROLE_PREFIX_CONTRACT_REQUIRED/);
 });
 test('bound role reads prefix proof from the exact original page without replacing account or ID',async()=>{
- const source=await readFile(new URL('../shared/server.mjs',import.meta.url),'utf8');
+ const source=await readFile(new URL('../shared/application-service.mjs',import.meta.url),'utf8');
  const body=source.slice(source.indexOf('async function boundRole(args,'),source.indexOf('async function reconcileSelectorMappings'));
  async function run({prefix=true,snapshotId='actual',account='User',proofUrl=url,proofSource='live_dom',userOperated=false}={}){
   const plan={...page};if(!prefix)delete plan.rolePrefix;const calls=[];

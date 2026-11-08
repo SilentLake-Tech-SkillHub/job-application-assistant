@@ -19,7 +19,8 @@
     "inspect_choice",
     "role_entry_inspect",
     "form_inspect_repeats",
-    "form_cycle_status"
+    "form_cycle_status",
+    "component_runtime"
   ],
   "stages": {
     "profile_select_projects": [

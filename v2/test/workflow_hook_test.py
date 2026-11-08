@@ -11,6 +11,13 @@ class WorkflowHookTest(unittest.TestCase):
  def invoke(self,**args):
   event={'session_id':'enabled','turn_id':'turn','cwd':str(self.root),'hook_event_name':'PreToolUse','tool_name':'mcp__recruiting_application_v2__batch_prepare',**args}
   return subprocess.run([sys.executable,str(ROOT/'hooks/workflow_hook.py')],input=json.dumps(event),text=True,encoding="utf-8",capture_output=True,env=self.env)
+ def test_fixed_cli_uses_same_turn_gate(self):
+  cli=shlex.quote(str(ROOT/'scripts/cli.mjs'))
+  command='node '+cli+' --workspace '+shlex.quote(str(self.root))+' application role_prepare'
+  self.assertEqual(self.invoke(tool_name='exec_command',tool_input={'cmd':command}).returncode,2)
+  self.assertEqual(self.invoke(hook_event_name='UserPromptSubmit').returncode,0)
+  self.assertEqual(self.invoke(tool_name='exec_command',tool_input={'cmd':command}).returncode,0)
+  self.assertEqual(self.invoke(tool_name='exec_command',tool_input={'cmd':command+'; echo bypass'}).returncode,2)
  def test_short_route_injection_and_same_turn_mutation_receipt(self):
   r=self.invoke(hook_event_name='UserPromptSubmit');self.assertEqual(r.returncode,0,r.stderr);ctx=json.loads(r.stdout)['hookSpecificOutput']['additionalContext'];self.assertIn('company_batch_create',ctx);self.assertNotIn(self.policy.read_text(),ctx);self.assertLess(len(ctx.encode('utf-8')),1800);self.assertEqual(self.invoke().returncode,0)
  def test_unloaded_mutation_denied_but_maintenance_and_reads_work(self):
