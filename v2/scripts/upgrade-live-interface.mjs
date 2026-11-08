@@ -1,3 +1,4 @@
+import {readFile} from 'node:fs/promises';import {createHash} from 'node:crypto';
 import {execFile} from 'node:child_process';import {promisify} from 'node:util';import {fileURLToPath,pathToFileURL} from 'node:url';import path from 'node:path';
 const root=fileURLToPath(new URL('..',import.meta.url));
 export async function upgradeLiveInterface({pid,mode,endpoint}={}){
@@ -20,14 +21,18 @@ export async function upgradeLiveInterface({pid,mode,endpoint}={}){
   const actual=await evaluate('process.pid');if(actual.value!==pid)throw Error('INSPECTOR_PROCESS_MISMATCH');
   const sdk=pathToFileURL(path.join(root,'node_modules/@modelcontextprotocol/sdk/dist/esm/server/mcp.js')).href;
   const load=url=>`process.getBuiltinModule('vm').runInThisContext(${JSON.stringify('import('+JSON.stringify(url)+')')},{importModuleDynamically:process.getBuiltinModule('vm').constants.USE_MAIN_CONTEXT_DEFAULT_LOADER})`;
+  const proxyHash=createHash('sha256').update(await readFile(new URL('../shared/mcp-proxy.mjs',import.meta.url))).digest('hex');
+  const bridgeUrl=pathToFileURL(path.join(root,'shared/live-transport-upgrade.mjs')).href+'?release='+createHash('sha256').update(await readFile(new URL('../shared/live-transport-upgrade.mjs',import.meta.url))).digest('hex');
   const active=await evaluate("!!globalThis[Symbol.for('recruiting.activeTransport')]");
   if(active.value){
+   const liveHash=await evaluate("globalThis[Symbol.for('recruiting.activeTransport')]._recruitingTransportFingerprint");
+   if(liveHash.value!==proxyHash){const result=await evaluate(`(async()=>{const bridge=await ${load(bridgeUrl)};return bridge.upgradeLiveTransport(globalThis[Symbol.for('recruiting.activeTransport')],${JSON.stringify(mode)});})()`);const value=await rpc('Runtime.callFunctionOn',{objectId:result.objectId,functionDeclaration:'function(){return this;}',returnByValue:true});return value.result.value;}
    const result=await evaluate(`(async()=>{const m=await ${load(pathToFileURL(path.join(root,'shared/interface-call.mjs')).href)};const result=await m.interfaceCall({mode:${JSON.stringify(mode)},kind:'control',operation:'update'});if(result.isError)throw Error(result.error);globalThis[Symbol.for('recruiting.activeTransport')]._serverInfo.version=result.version;return {status:'updated',pid:process.pid,...result};})()`);
    const value=await rpc('Runtime.callFunctionOn',{objectId:result.objectId,functionDeclaration:'function(){return this;}',returnByValue:true});return value.result.value;
   }
   const prototype=await evaluate(`(async()=> (await ${load(sdk)}).McpServer.prototype)()`);
   const objects=await rpc('Runtime.queryObjects',{prototypeObjectId:prototype.objectId});
-  const result=await rpc('Runtime.callFunctionOn',{objectId:objects.objects.objectId,functionDeclaration:`async function(){const live=this.filter(s=>s.server?._transport?._stdin===process.stdin);if(live.length!==1)throw Error('LIVE_SERVER_NOT_UNIQUE');const module=await ${load(pathToFileURL(path.join(root,'shared/live-transport-upgrade.mjs')).href)};return module.upgradeLiveTransport(live[0],${JSON.stringify(mode)});}`,awaitPromise:true,returnByValue:true});
+  const result=await rpc('Runtime.callFunctionOn',{objectId:objects.objects.objectId,functionDeclaration:`async function(){const live=this.filter(s=>s.server?._transport?._stdin===process.stdin);if(live.length!==1)throw Error('LIVE_SERVER_NOT_UNIQUE');const module=await ${load(bridgeUrl)};return module.upgradeLiveTransport(live[0],${JSON.stringify(mode)});}`,awaitPromise:true,returnByValue:true});
   if(result.exceptionDetails)throw Error(result.exceptionDetails.exception?.description||result.exceptionDetails.text);
   return result.result.value;
  }finally{

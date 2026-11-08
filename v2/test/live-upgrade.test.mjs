@@ -16,6 +16,10 @@ test('legacy MCP becomes current in original host pipe without restarting client
   const tools=await c.listTools();assert.ok(tools.tools.some(t=>t.name==='component_runtime'));
   const state=JSON.parse((await c.callTool({name:'component_runtime',arguments:{action:'update'}})).content[0].text);assert.equal(state.adapterPid,before.pid);assert.equal(state.verified,true);
   const repeated=await upgradeLiveInterface({pid:before.pid,mode:'application',endpoint});assert.equal(repeated.status,'updated');assert.equal(repeated.verified,true);
+  const debug=new WebSocket(endpoint);await new Promise((resolve,reject)=>{debug.onopen=resolve;debug.onerror=reject;});
+  await new Promise((resolve,reject)=>{debug.onmessage=event=>{const result=JSON.parse(event.data);if(result.id===1){result.error?reject(Error(result.error.message)):resolve();}};debug.send(JSON.stringify({id:1,method:'Runtime.evaluate',params:{expression:"globalThis[Symbol.for('recruiting.activeTransport')]._recruitingTransportFingerprint='outdated-fixture'"}}));});debug.close();
+  const refreshed=await upgradeLiveInterface({pid:before.pid,mode:'application',endpoint});assert.equal(refreshed.status,'upgraded');
+  assert.equal(JSON.parse((await c.callTool({name:'component_runtime',arguments:{action:'status'}})).content[0].text).adapterPid,before.pid);
   const refused=await c.callTool({name:'workflow_next',arguments:{companyId:'C00001',pageUrl:'https://example.test/role'}});assert.equal(JSON.parse(refused.content[0].text).error,'HOST_ROLE_MAINTAINER_READ_ONLY');
  }finally{await c.callTool({name:'component_runtime',arguments:{action:'stop'}}).catch(()=>{});await c.close();await rm(d,{recursive:true,force:true});}
 });
