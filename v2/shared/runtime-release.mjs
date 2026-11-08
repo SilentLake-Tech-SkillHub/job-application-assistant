@@ -1,7 +1,7 @@
 import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {genericSourceManifest} from './runtime-identity.mjs';
-export const CORE_PROTOCOL_VERSION=2;
+export const CORE_PROTOCOL_VERSION=3;
 export async function installedRelease(){
  const [manifest,pkg]=await Promise.all([genericSourceManifest(),readFile(new URL('../package.json',import.meta.url),'utf8')]);
  return {version:JSON.parse(pkg).version,sourceFingerprint:manifest.sourceFingerprint};

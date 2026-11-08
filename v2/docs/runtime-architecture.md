@@ -7,7 +7,7 @@
 - 独立调用：`node scripts/cli.mjs --workspace /absolute/workspace application|login <operation> [input.json]`。`list` 列出操作；JSON 参数文件由调用者提供，业务规则在核心校验。
 - 连续准备：`node scripts/run-confirmed-roles.mjs`，读取 `RECRUITING_RUN_AUTHORIZATION_FILE`；输出等待登录或待审阅。`resume` 接续原岗位，`close` 关闭命令行客户端，保留浏览器和核心。
 - MCP 接口：`node scripts/start.mjs application|login`。stdio 只承载协议；客户端退出时业务核心继续运行。
-- 核心管理：MCP `component_runtime`，或 CLI `runtime`，输入 `{"action":"status|pause|reload|resume|stop"}`。启动在首次连接时完成。`stop` 只停止空闲核心。
+- 核心管理：MCP `component_runtime`，或 CLI `runtime`，输入 `{"action":"status|pause|reload|update|resume|stop"}`。启动在首次连接时完成。`stop` 只停止空闲核心。
 
 ## 更新与恢复
 
@@ -40,3 +40,9 @@
 用户允许保留两种调用方式，要求两端保持当前部署版本一致。业务调用前比较已安装版本、通用代码指纹、核心实际加载指纹，以及接口进程加载的适配器代码。业务核心落后且空闲时自动更新并再次比对；正在执行、已暂停、更新失败或仍不一致时返回明确错误，当前业务请求不执行。
 
 接口代码本身改变时返回 INTERFACE_CODE_STALE，需重连受影响的 MCP 接口；核心管理诊断仍可用。旧接口的诊断结果由 Hook 记录，已启用执行会话中的旧版本业务调用被 MCP_RUNTIME_VERSION_MISMATCH 拦截。首次连接或连接变化时用 runtime_info 读取真实身份，后续按同一连接记录检查。版本检查使用本地当前安装版本，不自动升级到远端未部署代码；公司模板和个人数据不参与代码指纹。
+
+## 同一对话更新闭环
+
+固定MCP通信层经interface-call将每次请求交给新加载的interface-worker，连续运行CLI编排也使用同一入口。更新管理处于业务程序之外。component_runtime update等待操作结束、切换当前已安装程序并校验版本/指纹后返回verified；随后调用原任务继续。管理程序本身变化也按指纹检查并在空闲时替换。独立CLI与MCP共用同一个核心。
+
+验收覆盖：同一MCP客户端连接保持不变，连续更新业务、接口调度和管理程序，CLI读回一致；持久化taskId/pageId不变、步骤继续递增；新程序启动失败不推进任务，修复后更新并接续。

@@ -1,7 +1,9 @@
+import {createHash} from 'node:crypto';
 import http from 'node:http';import {fork} from 'node:child_process';
-import {mkdir,chmod,unlink} from 'node:fs/promises';import path from 'node:path';import {fileURLToPath} from 'node:url';
+import {mkdir,chmod,unlink,readFile} from 'node:fs/promises';import path from 'node:path';import {fileURLToPath} from 'node:url';
 const [socket,mode]=process.argv.slice(2);if(!socket||!path.isAbsolute(socket)||!['login','application'].includes(mode))throw Error('CORE_HOST_ARGUMENTS_REQUIRED');
 await mkdir(path.dirname(socket),{recursive:true,mode:0o700});
+const managerFingerprint=createHash('sha256').update(await readFile(new URL(import.meta.url))).digest('hex');
 let worker,metadata,active=0,paused=false,reloading=false,reloadRequested=false,lastError=null,sequence=0;const pending=new Map();
 async function startWorker(){
  const child=fork(fileURLToPath(new URL('./core-worker.mjs',import.meta.url)),[mode],{env:process.env,stdio:['ignore','ignore',process.stderr,'ipc']});
@@ -17,7 +19,7 @@ async function replaceWorker(){
  finally{reloading=false;}
 }
 await replaceWorker();if(!worker)throw Error(lastError);
-const status=()=>({protocolVersion:2,sourceFingerprint:metadata.info.sourceFingerprint,mode,hostPid:process.pid,workerPid:worker.pid,version:metadata.info.version,active,paused,reloading,reloadRequested,lastError});
+const status=()=>({protocolVersion:3,managerFingerprint,sourceFingerprint:metadata.info.sourceFingerprint,mode,hostPid:process.pid,workerPid:worker.pid,version:metadata.info.version,active,paused,reloading,reloadRequested,lastError});
 const server=http.createServer(async(req,res)=>{
  res.setHeader('content-type','application/json');
  try{

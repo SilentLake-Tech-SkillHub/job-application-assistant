@@ -1,11 +1,11 @@
 // Fixed orchestration shared by standalone execution and transport adapters.
-import {CoreClient} from './core-client.mjs';
+import {interfaceCall} from './interface-call.mjs';
 import {Store} from './engine.mjs';
 import {configurePaths} from './runtime-paths.mjs';
 export async function createConfirmedRunner({authorization,startedAt,emit=()=>{},clients,workspace}={}){
  if(!authorization?.trim())throw Error('RUN_AUTHORIZATION_REQUIRED');
  const paths=configurePaths({workspace}),store=new Store(paths.application);
- clients||={login:new CoreClient('login'),application:new CoreClient('application')};
+ clients||=Object.fromEntries(['login','application'].map(mode=>[mode,{execute:(operation,args)=>interfaceCall({mode,kind:'execute',operation,args})}]));
  const started=startedAt?Date.parse(startedAt):Date.now();if(!Number.isFinite(started)||started>Date.now())throw Error('INVALID_RUN_START_TIMESTAMP');
  const timing={startedAt:new Date(started).toISOString(),timingRule:'elapsed_includes_waiting',stage:'initializing',calls:{},waitingIntervals:[],submission:'not_performed'};
  const taskRef=task=>task?{companyId:task.companyId,roleId:task.roleId,taskId:task.taskId,status:task.status,fillRunId:task.fillRunId,verifyRunId:task.verifyRunId||task.independentVerification?.id}:undefined;
