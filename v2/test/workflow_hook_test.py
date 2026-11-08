@@ -194,3 +194,8 @@ class WorkflowHookTest(unittest.TestCase):
   denied=self.invoke();self.assertEqual(denied.returncode,2);self.assertIn('MCP_RUNTIME_VERSION_MISMATCH',denied.stderr)
   self.assertEqual(self.invoke(tool_name='mcp__recruiting_application_v2__runtime_info').returncode,0)
   self.assertEqual(self.invoke(tool_name='mcp__recruiting_application_v2__component_runtime').returncode,0)
+
+ def test_component_backend_update_is_allowed_but_inline_shell_is_not(self):
+  command=shlex.join(['node',str(ROOT/'scripts/update-runtime.mjs')])
+  self.assertEqual(self.invoke(tool_name='exec_command',tool_input={'cmd':command}).returncode,0)
+  self.assertEqual(self.invoke(tool_name='exec_command',tool_input={'cmd':command+'; echo bypass'}).returncode,2)

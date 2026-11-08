@@ -75,6 +75,9 @@ def component_cli_event(event):
     try:
         parts = shlex.split(command)
         cli = Path(__file__).resolve().parents[1] / 'scripts/cli.mjs'
+        updater = cli.with_name('update-runtime.mjs')
+        if len(parts) in {2, 3} and Path(parts[0]).name == 'node' and Path(parts[1]).resolve() == updater and (len(parts) == 2 or parts[2] == '--preview'):
+            return {**event, 'tool_name': 'mcp__recruiting_application_v2__component_runtime', 'tool_input': {'action': 'update'}, 'component_cli': True}
         if len(parts) < 4 or Path(parts[0]).name != 'node' or Path(parts[1]).resolve() != cli:
             return event
         tail = parts[2:]

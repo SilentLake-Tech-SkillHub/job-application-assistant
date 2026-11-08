@@ -3,7 +3,7 @@ import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import {CallToolRequestSchema,ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
 import {openSamplingBridge} from './sampling-bridge.mjs';
 import {interfaceCall} from './interface-call.mjs';
-export async function serveRemoteMcp(mode){
+export async function serveRemoteMcp(mode,{clientState,beforeConnect}={}){
  const core={control:action=>interfaceCall({mode,kind:'control',operation:action}),listOperations:()=>interfaceCall({mode,kind:'list'}),execute:(operation,args,capabilities)=>interfaceCall({mode,kind:'execute',operation,args,capabilities})};const status=await core.control('status');if(status.isError)throw Error(status.error);
  const serverInfo={name:'recruiting-'+mode+'-v2',version:status.version};
  const server=new Server(serverInfo,{capabilities:{tools:{listChanged:true}}});
@@ -21,5 +21,7 @@ export async function serveRemoteMcp(mode){
   serverInfo.version=(await core.control('status')).version;
   const {isError,...data}=value;return {...(isError?{isError:true}:{}),content:[{type:'text',text:JSON.stringify(data)}]};
  });
- await server.connect(new StdioServerTransport());return server;
+ if(clientState){server._clientCapabilities=clientState.capabilities;server._clientVersion=clientState.clientInfo;server._requestMessageId=clientState.requestId;}
+ const transport=new StdioServerTransport();
+ try{await beforeConnect?.();await server.connect(transport);}catch(e){await transport.close().catch(()=>{});await sampling.close();throw e;}process.stdin.resume();globalThis[Symbol.for('recruiting.activeTransport')]=server;return server;
 }
