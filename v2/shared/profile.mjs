@@ -152,7 +152,7 @@ export function registerTemplateContract(profile,{companyId,template,templateHas
   profile.companyForms??={};profile.fieldRegistry??={};
   const audit=auditStoredContract(template);if(stage!=='construction'&&!audit.ready)throw Error('COMPLETE_EXECUTION_CONTRACT_REQUIRED');
   for(const page of template.pages){
-    const sourceUrl=new URL(template.evidence.sourceUrl),pageUrl=sourceUrl.pathname.startsWith(page.pathPrefix)?sourceUrl.href:new URL(page.pathPrefix,sourceUrl).href;
+    const sourceUrl=new URL(template.evidence.sourceUrl),pageUrl=template.companyTemplateVersion===2?sourceUrl.href:sourceUrl.pathname.startsWith(page.pathPrefix)?sourceUrl.href:new URL(page.pathPrefix,sourceUrl).href;
     const {pageKey,form}=lookupCompanyForm(profile,companyId,pageUrl,{create:true});
     const prior=form||{companyId,pageUrl,mappings:{}};
     const fields=page.fields.map((f,index)=>({...structuredClone(f),index}));
@@ -173,7 +173,7 @@ export function registerTemplateContract(profile,{companyId,template,templateHas
   return {companyId,templateHash,registeredFields:template.pages.reduce((n,p)=>n+p.fields.length,0)};
 }
 export function assertStoredExecutionContract(profile,companyId,template){
- for(const page of template.pages){const source=new URL(template.evidence.sourceUrl),url=source.pathname.startsWith(page.pathPrefix)?source.href:new URL(page.pathPrefix,source).href,stored=lookupCompanyForm(profile,companyId,url).form?.executionContract;
+ for(const page of template.pages){const source=new URL(template.evidence.sourceUrl),url=template.companyTemplateVersion===2?source.href:source.pathname.startsWith(page.pathPrefix)?source.href:new URL(page.pathPrefix,source).href,stored=lookupCompanyForm(profile,companyId,url).form?.executionContract;
   const candidate=stored?.templateHash===hash(template)?stored:lookupCompanyForm(profile,companyId,url).form?.draftExecutionContract;
   if(!candidate||candidate.templateHash!==hash(template)||hash((candidate.fields||[]).map(({index,...f})=>f))!==hash(page.fields))throw Error('PROFILE_CONTRACT_STORAGE_READBACK_FAILED');
  }

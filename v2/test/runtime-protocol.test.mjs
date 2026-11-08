@@ -2,7 +2,7 @@ import {captureContentHash} from '../shared/acquisition-chain.mjs';
 import {bindControlChoices} from '../shared/control-choice-store.mjs';
 import {formAssetKeys} from '../shared/form-identity.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';import {fileURLToPath} from 'node:url';
-import {companyDoc,site,saveCompany} from './fixtures/handoff.mjs';
+import {companyDoc,site,role,saveCompany} from './fixtures/handoff.mjs';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {registerObservedQuestions,mapProfileQuestions} from '../shared/profile.mjs';
 import {Store,hash} from '../shared/engine.mjs';
@@ -15,7 +15,8 @@ test('actual application MCP reports new runtime and missing company form routes
  const d=await mkdtemp(path.join(os.tmpdir(),'application-protocol-'));const profile=path.join(d,'profile.json');await writeFile(profile,JSON.stringify({schemaVersion:1,facts:{},sources:{},entities:{}}));
  const companyId='C00001',origin='https://application.example',pageUrl=origin+'/campus/resume/123/apply';
  const handoff=path.join(d,'handoff');
- await saveCompany(handoff,companyDoc({code:'C00001',name:'测试公司',sites:[site('S0001',origin)],roles:[]}));
+ await saveCompany(handoff,companyDoc({code:'C00001',name:'测试公司',sites:[site('S0001',origin)],roles:[role('J000001','S0001','Product',pageUrl,{'投递链接':pageUrl,'官方岗位ID':'123'})]}));
+ await writeFile(path.join(handoff,'工作簿全量.json'),JSON.stringify({login_configs:{C00001:{S0001:{companyId,origin}}}}));
  const c=new Client({name:'application-repair-regression',version:'1'});
  try{await c.connect(new StdioClientTransport({command:process.execPath,args:[path.join(root,'scripts/start.mjs'),'application'],cwd:d,env:{PATH:process.env.PATH,RECRUITING_HANDOFF_DIR:handoff,RECRUITING_PROFILE_JSON:profile,RECRUITING_PRIVATE_DIR:path.join(d,'application'),RECRUITING_ROLE_QUEUE_DIR:path.join(d,'queue'),RECRUITING_BROWSER_SOCKET:path.join(d,'absent.sock'),RECRUITING_BROWSER_MODE:'host'},stderr:'pipe'}));
  const toolList=(await c.listTools()).tools,names=toolList.map(t=>t.name);for(const name of ['runtime_info','workflow_next','template_rebind_role','application_closeout','capture_form_definition','inspect_choice','form_remove_attachment','role_prepare_profile_fields','role_prepare_fields','role_submit','form_search_choices','profile_record_document_facts'])assert.ok(names.includes(name));
@@ -33,7 +34,7 @@ test('actual application MCP reports new runtime and missing company form routes
  const privateStore=new Store(path.join(d,'application'));
  await privateStore.put('runs','browser-channel-bindings',{[origin]:{channel:'chrome',batchId:'offline-fixture-assignment',companyId}});
  await privateStore.put('runs','test-draft',{companyId,template,readyToRegister:true,blockers:[]});
- const imported=await c.callTool({name:'template_register',arguments:{companyId,draftId:'test-draft',draftHash:hash(template)}});assert.equal(imported.isError,true);assert.equal(JSON.parse(imported.content[0].text).error,'MCP_ACQUISITION_CHAIN_REQUIRED');
+ const imported=await c.callTool({name:'template_register',arguments:{companyId,draftId:'test-draft',draftHash:hash(template)}});assert.equal(imported.isError,true);assert.equal(JSON.parse(imported.content[0].text).error,'MCP_BUILT_DRAFT_REQUIRED');
  for(const args of [{companyId,draftId:'test-draft',draftHash:'0'.repeat(64)},{companyId,template,draftId:'test-draft',draftHash:hash(template)},{companyId}]){
   const rejected=await c.callTool({name:'template_register',arguments:args},undefined,{timeout:3000});assert.equal(rejected.isError,true);
  }
@@ -60,15 +61,22 @@ test('actual application MCP reports new runtime and missing company form routes
  mapProfileQuestions(personal,{companyId,pageUrl,evidence:'synthetic name mapping',mappings:[{questionId:prefixQuestion,factKey:'prefixName'}]});await writeFile(profile,JSON.stringify(personal));
  const prefixFixture=acquisitionFixture({...template,id:'prefix-source',pages:[{...template.pages[0],fields:[{...template.pages[0].fields[0],source:'prefixName',inventorySelectors:['#prefix-name'],inventoryLabel:'Display name',inventoryType:'text',read:{kind:'value',selector:'#prefix-name'}}]}]},companyId);
  await prefixFixture.persist(privateStore);const prefixCaptureId=prefixFixture.capture.captureId,prefixStructureId=formAssetKeys(prefixFixture.capture.formId).structure;
+ await call('form_review_completeness',{companyId,captureId:prefixCaptureId,reviewedSelectors:['#prefix-name'],evidence:'Synthetic complete frontend review'});
  const prefixBuilt=await call('form_build_template',{companyId,captureId:prefixCaptureId,structureId:prefixStructureId,page:{roleTitle:'Product',roleSelector:'#role',rolePrefix:'Applying for: ',readySelector:'#form',sections:[{title:'Basics'}],sectionDiscovery:{selector:'section',titleSelector:'h2'}}});
  const prefixSaved=await privateStore.get('runs',prefixBuilt.draftId);assert.equal(prefixSaved.template.pages[0].rolePrefix,'Applying for: ');assert.equal(prefixSaved.template.pages[0].roleSelector,'#role');
+ // A previously built company can rebuild from its current capture without REA.
+ const reusable=structuredClone(prefixSaved.template);reusable.coverage={allControlsMapped:true,allDriversSupported:true,allConditionalBranchesVerified:true,proof:{runId:'synthetic-built'}};await privateStore.put('templates',companyId,reusable);
+ const observedCapture=await privateStore.get('runs',prefixCaptureId);observedCapture.contentHash=captureContentHash(observedCapture);await privateStore.put('runs',prefixCaptureId,observedCapture);await privateStore.remove('runs',prefixStructureId);
+ const updated=await call('form_build_template',{companyId,captureId:prefixCaptureId,page:{roleSelector:'#role',rolePrefix:'Applying for: ',readySelector:'#form',sections:[{title:'Basics'}],sectionDiscovery:{selector:'section',titleSelector:'h2'}}});assert.equal((await privateStore.get('runs',updated.draftId)).template.evidence.formId,companyId);
+ await privateStore.remove('templates',companyId);
  const materialProfile={schemaVersion:1,entities:{},facts:{},sources:{},fieldRegistry:{}};
  registerObservedQuestions(materialProfile,{companyId,pageUrl,observedAt:'synthetic',coverageRequired:true,fields:[{selector:'#code',label:'推荐码',type:'text',required:false}]});await writeFile(profile,JSON.stringify(materialProfile));
  const materialField={...template.pages[0].fields[0],id:'code',source:'material:referralCode',label:'推荐码',inventoryLabel:'推荐码',inventoryType:'text',inventorySelectors:['#code'],read:{kind:'value',selector:'#code'},actions:[{method:'fill',selector:'#code'}]};
  const materialTemplate={...template,id:'material-source',coverage:{},pages:[{...template.pages[0],fields:[materialField]}]};const materialFixture=acquisitionFixture(materialTemplate,companyId);await materialFixture.persist(privateStore);
+ await call('form_review_completeness',{companyId,captureId:materialFixture.capture.captureId,reviewedSelectors:['#code'],evidence:'Synthetic material field complete review'});
  const materialBuilt=await call('form_build_template',{companyId,structureId:formAssetKeys(materialFixture.capture.formId).structure,page:{...template.pages[0],fields:undefined,pathPrefix:undefined}});await call('template_register',{companyId,draftId:materialBuilt.draftId,draftHash:materialBuilt.draftHash});
  await assert.rejects(privateStore.get('templates',materialFixture.capture.formId),{code:'ENOENT'});const stored=(await privateStore.get('runs',formAssetKeys(materialFixture.capture.formId).draft)).template,probeId=randomUUID();
  await privateStore.put('runs',probeId,{id:probeId,operation:'internal_condition_probe',companyId,templateHash:hash(stored),status:'verified',restoration:'verified',branches:[{source:'__baseline__',value:null,status:'verified',newQuestions:0,selected:true,roleMatched:true,conditionFieldsMatched:true,inventory:[{selector:'#code',label:'推荐码',type:'text',required:false}]}]});
- const sealed=await call('template_finalize',{companyId,templateHash:hash(stored),probeRunId:probeId});assert.equal(sealed.status,'asset_sealed_require_profile_preflight');assert.equal(JSON.parse(await readFile(profile,'utf8')).facts['material:referralCode'],undefined);
+ const premature=await c.callTool({name:'template_finalize',arguments:{companyId,templateHash:hash(stored),probeRunId:probeId}});assert.equal(premature.isError,true);assert.equal(JSON.parse(premature.content[0].text).error,'VERIFIED_CONTROL_INTERACTION_REQUIRED');await assert.rejects(privateStore.get('templates',companyId),{code:'ENOENT'});assert.equal(JSON.parse(await readFile(profile,'utf8')).facts['material:referralCode'],undefined);
  }finally{await c.close();await rm(d,{recursive:true,force:true});}
 });

@@ -8,7 +8,8 @@ import {readHandoffBatch,readCompanyFiles,CompanyDirectory,companyContext} from 
 import {Store,hash} from '../shared/engine.mjs';
 import {FormRouter} from '../shared/form-route.mjs';
 import {unstableLocators} from '../shared/selector-stability.mjs';
-import {resolveEntry} from '../shared/entry-recipe.mjs';
+import {resolveEntry,matchEntryPath} from '../shared/entry-recipe.mjs';
+import {toCompanyRoleTemplate,resolveCompanyRoleTemplate} from '../shared/company-role-template.mjs';
 import {recordSourceBindingIssues,recordParentsFromProfile} from '../shared/record-source-binding.mjs';
 import {placementFindings,nonRecordMembers} from '../shared/record-placement.mjs';
 import {recordPlanOf,withProfileRecords} from '../shared/repeat-groups.mjs';
@@ -54,8 +55,12 @@ for(const c of handoff?.input.companies||[]){
    let template=null;try{template=await store.get('templates',templateId);}catch{}
    if(!template)rr.reasons.push('绑定的表单模板文件缺失');
    else{
-    const pageUrl=r.applyUrl||template.evidence?.sourceUrl;
-    const route=await new FormRouter({store,companies:[{id:entry.id,origin:entry.origin,templateId}],validateTemplate:()=>true,loadProfile:async()=>profile}).resolve({companyId:entry.id,roleId:r.roleId,pageUrl}).catch(err=>({route:'error',reason:err.message}));
+    const login=logins.get(entry.id)||{origin:entry.origin},recipe=resolveEntry(login);
+    const inferred=recipe?.kind==='detail_to_form'?matchEntryPath(recipe,new URL(r.url).pathname).expectedApplyPath:null;
+    const pageUrl=r.applyUrl||(inferred?new URL(inferred,entry.origin).href:template.evidence?.sourceUrl);
+    const shared=toCompanyRoleTemplate(template,await directory.roles(entry.id));
+    const routeTemplate=async()=>resolveCompanyRoleTemplate(shared,{companyId:entry.id,role:{...r,roleId:r.roleId||r.id},pageUrl},login);
+    const route=await new FormRouter({store,companies:[{id:entry.id,origin:entry.origin,templateId}],validateTemplate:()=>true,loadProfile:async()=>profile,routeTemplate}).resolve({companyId:entry.id,roleId:r.roleId,pageUrl}).catch(err=>({route:'error',reason:err.message}));
     if(route.route!=='reuse')rr.reasons.push(`表单模板不可执行：${route.reason}${route.blockers?.length?'（'+route.blockers.slice(0,3).join(',')+'）':''}`);
     const binding=recordSourceBindingIssues({...template,evidence:{...template.evidence,recordParents:{...parents,...(template.evidence?.recordParents||{})}}});if(binding.length)rr.reasons.push(`记录归属错位 ${binding.length} 处`);
     const placement=placementFindings(template,rules,{...parents,...(template.evidence?.recordParents||{})});if(placement.length)rr.reasons.push('栏目放置不符合你的规则：'+placement.map(p=>`${p.section}#${p.index} 放了 ${p.family}`).join('；'));
@@ -63,7 +68,7 @@ for(const c of handoff?.input.companies||[]){
     if(route.route==='reuse')try{
      const recordPlan=recordPlanOf(profile),materialContext=withMaterialDispositions(profile,{batchId:handoff.input.batchId,contentSha256:'readiness',companyId:entry.id,roleId:r.roleId,officialId:r.officialId,roleUrl:r.url,materials:r.materials});
      const resolved=resolveProfile(profile,withProfileRecords(template,recordPlan),{},entry.id,materialContext);
-     const plan=await compileExecutionPlan(template,{...resolved,recordPlan,companyId:entry.id,roleId:r.roleId,pageUrl,templateHash:hash(template)});
+     const plan=await compileExecutionPlan(await routeTemplate(),{...resolved,recordPlan,companyId:entry.id,roleId:r.roleId,pageUrl,templateHash:hash(template),confirmedRole:{title:r.title,officialId:r.officialId}});
      if(plan.constructionBlockers.length)rr.reasons.push('计划有阻塞项：'+plan.constructionBlockers.join('、'));
      if(plan.counts.needs_user)row.notes.push(`${r.title}：${plan.counts.needs_user} 个字段主档没有答案，开工时要问你`);
     }catch(err){rr.reasons.push(`计划编译失败：${err.message}`);}

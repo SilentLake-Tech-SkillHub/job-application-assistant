@@ -54,10 +54,10 @@ export function workflowEnvelope(data){
  else if(data.readyToRegister!==undefined)nextTools=data.readyToRegister?['template_register']:data.nextTools||['form_mapping_candidates','capture_choice_options','form_build_template'];
  else if(data.choicesId)nextTools=data.nextTools||['form_build_template'];
  else if(data.captureId)nextTools=data.nextTools||['form_mapping_candidates','capture_choice_options','form_build_template'];
- else if(data.status==='captured_not_live_verified')nextTools=['probe_conditions','template_finalize'];
- else if(data.status==='asset_sealed_require_profile_preflight'){nextTools=['prepare_plan'];state='prepare';}
+ else if(data.status==='captured_not_live_verified')nextTools=['form_test_interactions'];
+ else if(['company_template_ready','asset_sealed_require_profile_preflight'].includes(data.status)){nextTools=['prepare_plan'];state='prepare';}
  else if(data.mapped!==undefined)nextTools=['form_build_template'];
- else if(data.operation==='internal_condition_probe'){state=data.status==='verified'&&data.restoration==='verified'?'construct':'repair';nextTools=state==='construct'?['template_finalize']:['run_status','form_template_audit'];}
+ else if(data.operation==='internal_condition_probe'){state=data.status==='verified'&&data.restoration==='verified'?'construct':'repair';nextTools=state==='construct'?['form_test_interactions']:['run_status','form_template_audit'];}
  else if(data.status==='ready_for_material_staging')nextTools=['material_import_run'];
  else if(data.status==='input_uploaded_server_unverified')nextTools=['capture_controls','verify_current'];
  if(!nextTools)return data;

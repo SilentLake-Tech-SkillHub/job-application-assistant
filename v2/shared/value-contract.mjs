@@ -22,13 +22,18 @@ export function validateControlContract(f) {
   const t=CONTROL_TYPES[c?.type];
   if(!t||f.kind!==t.kind||c.valueType!==t.valueType||c.readbackType!==t.readbackType)throw Error('CONTROL_TYPE_CONTRACT_REQUIRED');
   if(f.readonly!==true&&!f.userOnly&&!(f.actions||[]).length)throw Error('CONTROL_ACTION_REQUIRED');
-  if((f.actions||[]).some(a=>!t.methods.includes(a.method)))throw Error('CONTROL_ACTION_TYPE_MISMATCH');
+  if((f.actions||[]).some(a=>!t.methods.includes(a.method)&&!['scroll','press'].includes(a.method)))throw Error('CONTROL_ACTION_TYPE_MISMATCH');
+  for(const a of f.actions||[]){
+    if(a.method==='scroll'&&!['start','center','end','nearest'].includes(a.block||'center'))throw Error('INVALID_CONTROL_SCROLL');
+    if(a.method==='press'&&!['Escape','Tab'].includes(a.key))throw Error('INVALID_CONTROL_KEY');
+  }
+  if(!f.readonly&&!f.userOnly&&!(f.actions||[]).some(a=>t.methods.includes(a.method)))throw Error('CONTROL_ACTION_REQUIRED');
   if(!t.reads.includes(f.read.kind))throw Error('CONTROL_READBACK_TYPE_MISMATCH');
   for(const a of f.actions||[])if(a.inputMode!==undefined&&(a.method!=='fill'||!t.inputModes?.includes(a.inputMode)))throw Error('INVALID_TEXT_INPUT_MODE');
   if(f.kind==='date'&&f.precision!==(c.type==='year_picker'?'year':c.type==='month_picker'?'month':'day'))throw Error('DATE_CONTROL_PRECISION_MISMATCH');
   if(f.kind==='choice'){
     if(!Array.isArray(c.options)||!c.options.length||c.options.some(v=>typeof v!=='string')||new Set(c.options).size!==c.options.length)throw Error('CONTROL_OPTIONS_REQUIRED');
-    for(const a of f.actions||[])if(JSON.stringify(a.options)!==JSON.stringify(c.options))throw Error('CONTROL_OPTIONS_ACTION_MISMATCH');
+    for(const a of (f.actions||[]).filter(a=>!['scroll','press'].includes(a.method)))if(JSON.stringify(a.options)!==JSON.stringify(c.options))throw Error('CONTROL_OPTIONS_ACTION_MISMATCH');
     for(const a of f.actions||[])if(a.optionTextMap){
       if(a.method!=='ant_dropdown'||!Array.isArray(a.observedOptionTexts)||Object.entries(a.optionTextMap).some(([value,text])=>!c.options.includes(value)||typeof text!=='string'||!a.observedOptionTexts.includes(text)))throw Error('CHOICE_ALIAS_REQUIRES_CAPTURED_OPTION_TEXT');
     }

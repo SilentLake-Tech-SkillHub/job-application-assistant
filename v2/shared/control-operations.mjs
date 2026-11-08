@@ -233,6 +233,11 @@ export async function performControl(adapter,action,value,files={}){
     if(action.method==='wait')return adapter.wait(action.selector);
     if(action.method==='ant_multiselect')return performAntMulti(adapter,action,value);
     const l=await locateControl(adapter.page,action);
+    if(action.method==='scroll'){
+      const block=action.block||'center';if(!['start','center','end','nearest'].includes(block))throw Error('INVALID_CONTROL_SCROLL');
+      await l.evaluate((n,block)=>n.scrollIntoView({block,inline:'nearest',behavior:'instant'}),block);return;
+    }
+    if(action.method==='press'){if(!['Escape','Tab'].includes(action.key))throw Error('INVALID_CONTROL_KEY');await l.press(action.key);return;}
     const meta=await l.evaluate(n=>({tag:n.tagName,type:n.type||n.getAttribute('type'),role:n.getAttribute('role'),label:n.getAttribute('aria-label')||n.querySelector(':scope > .ant-form-item-label')?.innerText?.replace(/[＊*\s:：]+$/gu,'').trim()||n.textContent?.trim(),readonly:n.readOnly}));
     if(['ant_dropdown','ant_dropdown_inspect','ant_dropdown_verify'].includes(action.method))return performChoice(adapter,action,value,'ant');
     if(['phoenix_dropdown','phoenix_dropdown_inspect','phoenix_dropdown_verify'].includes(action.method))return performChoice(adapter,action,value,'phoenix');

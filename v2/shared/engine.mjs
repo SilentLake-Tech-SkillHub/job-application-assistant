@@ -89,9 +89,14 @@ export function validateTemplate(t) {
   if (!Array.isArray(t.pages) || !t.pages.length) throw Error('EMPTY_TEMPLATE');
   if (!t.evidence?.sourceUrl || !t.evidence?.observedAt) throw Error('MISSING_CAPTURE_EVIDENCE');
   const fields = new Set();
+  if(t.companyTemplateVersion===2){
+    const keys=t.pages.map(p=>p.pageKey);
+    if(keys.some(k=>typeof k!=='string'||!k)||new Set(keys).size!==keys.length||!t.roleBindings)throw Error('COMPANY_ROLE_TEMPLATE_INVALID');
+    for(const [role,binding] of Object.entries(t.roleBindings))if(!/^J\d{6}$/.test(role)||Object.keys(binding).some(k=>k!=='pageKeys')||!binding.pageKeys?.length||binding.pageKeys.some(k=>!keys.includes(k)))throw Error('ROLE_BINDING_MUST_SHARE_CONTROLS');
+  }
   for (const p of t.pages) {
-    if (!p.pathPrefix?.startsWith('/') || !p.readySelector || !Array.isArray(p.fields) || !p.fields.length) throw Error('INVALID_PAGE');
-    if(!p.roleTitle || (!p.roleSelector&&!p.roleIdentity?.parameter))throw Error('ROLE_IDENTITY_REQUIRED');
+    if ((t.companyTemplateVersion!==2&&!p.pathPrefix?.startsWith('/')) || !p.readySelector || !Array.isArray(p.fields) || !p.fields.length) throw Error('INVALID_PAGE');
+    if((t.companyTemplateVersion!==2&&!p.roleTitle) || (!p.roleSelector&&!p.roleIdentity?.parameter))throw Error('ROLE_IDENTITY_REQUIRED');
     if(p.rolePrefix!==undefined&&(typeof p.rolePrefix!=='string'||!p.rolePrefix.trim()||/[\r\n\u2028\u2029]/u.test(p.rolePrefix)||typeof p.roleSelector!=='string'||!p.roleSelector.trim()))throw Error('ROLE_PREFIX_CONTRACT_REQUIRED');
     if(!p.sections?.length||!p.sectionDiscovery?.selector||!p.sectionDiscovery?.titleSelector)throw Error('SECTION_COVERAGE_PLAN_REQUIRED');
     if(p.sections.some(section=>typeof section?.title!=='string'||!section.title.trim()))throw Error('SECTION_TITLES_REQUIRED');
@@ -385,7 +390,7 @@ export class Engine {
     if(!titles.length||typeof page.repeatDiscovery!=='function'||!template.id)return;
     const found=(await page.repeatDiscovery(titles)).filter(item=>titles.includes(item.title));
     if(!found.length)return;
-    const stored=await this.store.get('templates',template.id),target=stored.pages.find(p=>p.pathPrefix===(plan.sourcePathPrefix||plan.pathPrefix));
+    const stored=await this.store.get('templates',template.id),target=stored.pages.find(p=>plan.pageKey?p.pageKey===plan.pageKey:p.pathPrefix===(plan.sourcePathPrefix||plan.pathPrefix));
     target.groups=[...(target.groups||[]).filter(group=>!found.some(item=>item.title===groupSection(group))),...found.map(groupFromDiscovery)];
     await this.store.put('templates',template.id,stored);
     await this.onTemplateUpdated?.(stored);
@@ -476,11 +481,11 @@ export class Engine {
           if(!samePage(latest.pageUrl,task.pageUrl)||!matchesRole(plan,latest))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
           const current=latest.fields[f.id];
           try{
-          if(f.control?.type==='searchable_text'&&current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'){
+          if(!task.testInteractions&&f.control?.type==='searchable_text'&&current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'){
             const proofs=await verifySearchableCommits({store:this.store,page,plan:{fields:[f]},task});
             if(proofs[f.id]?.status==='verified'){(result.skippedMatchingFields??=[]).push(f.id);continue;}
           }
-          if(f.control?.type!=='searchable_text'&&current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'&&(!['choice','date'].includes(f.kind)||current.selected===true)){
+          if(!task.testInteractions&&f.control?.type!=='searchable_text'&&current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'&&(!['choice','date'].includes(f.kind)||current.selected===true)){
             if(f.control?.type==='dropdown'&&!f.read.nativeSelect){const proofs=await verifyDropdownSelections(page,{fields:[f]},task);if(proofs[f.id]?.status!=='verified'){const proof=proofs[f.id],details=safeControlErrorDetails(proof?.errorDetails),error=Error(details?.phase==='restored_control_failure'?proof.reason:'EXISTING_CHOICE_NOT_VERIFIED');error.details=details;throw error;}}
             (result.skippedMatchingFields??=[]).push(f.id);continue;
           }

@@ -67,6 +67,11 @@ export class CompanyDirectory{
   try{return JSON.parse(await readFile(this.masterFile,'utf8')).login_configs;}
   catch(error){if(error.code==='ENOENT')return undefined;throw error;}
  }
+ async roles(companyId){
+  const {doc}=await readCompanyFile(this.handoffDir,companyId);
+  if(doc['公司编码']!==companyId)throw Error('COMPANY_FILE_CODE_MISMATCH');
+  return (doc['岗位']||[]).map((row,index)=>({companyId,...roleView(row,index)}));
+ }
  // 一家公司一个目录项；站点信息仅作来源值保留。
  async load(){
   const logins={},definitions={},companyFiles=await readCompanyFiles(this.handoffDir),mainLogins=await this.loginConfigs();

@@ -18,7 +18,8 @@
     "login_verification_inspect",
     "inspect_choice",
     "role_entry_inspect",
-    "form_inspect_repeats"
+    "form_inspect_repeats",
+    "form_cycle_status"
   ],
   "stages": {
     "profile_select_projects": [
@@ -211,7 +212,7 @@
     "probe_conditions": [
       "construct",
       [
-        "template_finalize"
+        "form_test_interactions"
       ]
     ],
     "capture_form_definition": [
@@ -223,13 +224,13 @@
     "capture_controls": [
       "construct",
       [
-        "form_mapping_candidates"
+        "form_review_completeness"
       ]
     ],
     "capture_rea_structure": [
       "construct",
       [
-        "form_mapping_candidates"
+        "form_review_completeness"
       ]
     ],
     "form_mapping_candidates": [
@@ -259,7 +260,7 @@
     "template_register": [
       "construct",
       [
-        "probe_conditions"
+        "form_test_interactions"
       ]
     ],
     "prepare_plan": [
@@ -434,6 +435,25 @@
       "route",
       [
         "role_prepare"
+      ]
+    ],
+    "form_review_completeness": [
+      "construct",
+      [
+        "form_cycle_status"
+      ]
+    ],
+    "form_patch_controls": [
+      "construct",
+      [
+        "form_review_completeness"
+      ]
+    ],
+    "form_test_interactions": [
+      "construct",
+      [
+        "form_patch_controls",
+        "template_finalize"
       ]
     ]
   }

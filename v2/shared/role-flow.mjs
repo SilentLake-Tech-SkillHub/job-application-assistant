@@ -34,7 +34,7 @@ export class RoleFlow{
  // onObservation：链接观察只记到 投递回传.json（见 application-outcome.mjs recordObservation），
  // 由搜索端预览、用户确认后写主表；这里不改交接区的任何链接。触发：链接打不开（role_report_link_failure，附证据）、
  // 投递链接为空时第一次进入申请页、岗位链接跳转后岗位编号变了（岗位名核对一致）。只是跳转、编号不变不算变化。
- constructor({queues,login,templates,browser,onObservation=null}){Object.assign(this,{queues,login,templates,browser,onObservation});}
+ constructor({queues,login,templates,browser,onObservation=null,resolveTemplate=async t=>t}){Object.assign(this,{queues,login,templates,browser,onObservation,resolveTemplate});}
  roleId(t,state){return state?.siteRoleId||t.officialId;}
  // 浏览器主控进程不随 MCP 重载：旧进程不认识刷新、关闭标签，会报错或悄悄忽略。调用前先确认它支持。
  async assertPageTool(pageId,tool){let s;try{s=await this.browser.request('status');}catch{s=null;}const ch=String(pageId).split(':')[0],info=s?.channels?.[ch]||s;
@@ -58,7 +58,8 @@ export class RoleFlow{
   let plan;
   if(recipe&&!stored)plan=this.entryOnlyPlan(c,entry,template);
   else{
-   const plans=template?.pages.filter(p=>new URL(target).pathname.startsWith(p.pathPrefix))||[];
+   const resolved=template?await this.resolveTemplate(template,{...t,pageUrl:target},c):null;
+   const plans=resolved?.pages.filter(p=>new URL(target).pathname.startsWith(p.pathPrefix))||[];
    if(plans.length>1)throw Error('ROLE_ENTRY_RECIPE_REQUIRED');
    plan=plans[0];
    // 已存申请页链接但还没有覆盖该页的表单模板：仍从岗位页进入，进入后先建库。

@@ -1,5 +1,7 @@
 # 交接消费接口
 
+公司/岗位定位由固定代码完成：公司编码读取唯一公司控件定义，岗位编码读取roleBindings中的引用；同公司岗位共享全部控件。岗位标题、链接和官方编号来自确认交接，页面身份来自原任务。采集sourceUrl仅用于证据，不作为其它岗位的执行路径。`template_rebind_role`仅补岗位引用，不生成新的控件资产。
+
 ## 职责边界
 
 唯一输入是工作区 `岗位交接/公司/<公司编码>.json`：每家公司一份宽表，由搜索端 `company_store.py refresh/forward` 从主表投影生成；「批次」部分在用户正向评审确认（`forward-confirm` 登记原话与该公司的内容指纹）后才可读取。目录 `RECRUITING_HANDOFF_DIR` 指定，默认 `<工作区>/岗位交接`。旧的公司方案 JSON 文件或对象输入一律拒绝（`HANDOFF_BATCH_REQUIRED`）。本组件不做选岗、不转换 Excel；投递结果与链接观察回传见 application-outcome.md。

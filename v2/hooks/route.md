@@ -1,7 +1,7 @@
-仅对已启用对话执行，加载当前V2 Skill及阶段引用，复用已确认批次和原页面。
-1. company_batch_create → company_batch_take：消费确认JSON，按冻结通道派发；formAssets缺模板先建库。
-2. role_advance：内部完成开页→登录态检查→目标页校验→进入填写页；未登录等待用户，确认后再调role_advance接续。正常路径无需runtime_info预检，环境异常才调用诊断/初始化。
-3. workflow_next/form_route：完整证据链有效才复用。缺失或失效：有官网定义先capture_form_definition，再capture_rea_structure（原页REA、DOM/AX和脚本）→ form_mapping_candidates/profile_map_questions → 选项与条件采集 → form_build_template → template_register(draftId,draftHash) → probe_conditions → template_finalize。
-4. prepare_plan校验冻结 → batch_prepare/roles_prepare_batch → verify_current/role_verify独立核验 → 用户审阅。
-5. 具体提交授权 → role_submit → 官网回执 → application_closeout；主表经反向评审确认后更新。
-执行宿主只用登录/申请MCP，维护宿主只修插件。禁止内联模板、脚本改资产和插件外逐元素操作；失败用workflow_handoff引用runId/failureEvidenceId交回修复，再由执行宿主实测。验证码交用户；未获提交授权停在审阅。有效资产复用不重复REA，证据缺失回建库。
+仅对已启用对话执行，读取V2 Skill及当前阶段引用，复用确认批次、原页面。
+1. company_batch_create → company_batch_take：消费确认JSON。代码按公司编号定位唯一控件定义、岗位编号定位绑定；同公司岗位共用控件，Agent不选择或替换岗位路径。
+2. role_advance：开页→登录态检查→目标页校验→填写页。未登录等待本人操作后接续；正常流程不做runtime_info预检。
+3. workflow_next/form_route复用有效公司档案。首次REA解析；真实缺口补采→form_review_completeness（Agent完整性检查）→映射/选项→form_build_template→template_register→form_test_interactions→失败用form_patch_controls回补并重查重测→template_finalize。form_cycle_status返回下一步；条件探测不能代替真实交互测试。
+4. prepare_plan → role_prepare/batch_prepare → role_verify/verify_current独立核验→用户审阅。公司模板更新直接重读编译，无需升级或重启组件。
+5. 具体提交授权→role_submit→官网回执→application_closeout；主表经反向评审确认后更新。
+执行只用登录/申请MCP；禁止内联模板、脚本改资产及组件外填写。控件回补走固定工具；确有通用代码缺陷才workflow_handoff引用真实证据交维护。验证码交用户，无提交授权停在审阅。有效公司不因内部证据格式重做REA；Hook从catalog/workflow-tools.json读取阶段。
