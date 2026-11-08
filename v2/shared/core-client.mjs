@@ -1,3 +1,5 @@
+import {CORE_PROTOCOL_VERSION,installedRelease,interfaceFingerprint,requireSameRelease} from './runtime-release.mjs';
+const loadedInterfaceFingerprint=await interfaceFingerprint();
 import http from 'node:http';import path from 'node:path';import {tmpdir} from 'node:os';import {createHash} from 'node:crypto';import {spawn} from 'node:child_process';import {fileURLToPath} from 'node:url';import {unlink,lstat,mkdir,open} from 'node:fs/promises';
 import {configurePaths} from './runtime-paths.mjs';import {acquireLease,leasePath,defaultLeaseRoot} from './leases.mjs';import {hostRole} from './host-role.mjs';
 export class CoreClient{
@@ -14,13 +16,23 @@ export class CoreClient{
  }
 
  async connect(){
-  const probe=()=>this.request('/control',{action:'status'},1000).catch(()=>null);if(await probe())return;
+  const probe=()=>this.request('/control',{action:'status'},1000).catch(()=>null);const initial=await probe();if(initial?.protocolVersion===CORE_PROTOCOL_VERSION)return;
   const release=await acquireLease(leasePath(defaultLeaseRoot(),'core-start:'+this.socket),{waitMs:5000,busyCode:'CORE_START_BUSY'});
-  try{if(await probe())return;const info=await lstat(this.socket).catch(()=>null);if(info){if(!info.isSocket())throw Error('CORE_SOCKET_PATH_OCCUPIED');await unlink(this.socket);}await mkdir(path.dirname(this.socket),{recursive:true,mode:0o700});
-   const log=await open(this.socket+'.log','w',0o600);let child;try{child=spawn(process.execPath,[fileURLToPath(new URL('./core-host.mjs',import.meta.url)),this.socket,this.mode],{env:this.env,detached:true,stdio:['ignore','ignore',log.fd]});}finally{await log.close();}child.unref();const end=Date.now()+35000;while(Date.now()<end){if(await probe())return;if(child.exitCode!==null||child.signalCode)throw Error('CORE_HOST_START_FAILED: '+this.socket+'.log');await new Promise(r=>setTimeout(r,100));}throw Error('CORE_HOST_START_TIMEOUT');
+  try{const existing=await probe();if(existing?.protocolVersion===CORE_PROTOCOL_VERSION)return;if(existing){const stop=await this.request('/control',{action:'stop'});if(stop.isError)throw Error('CORE_INTERFACE_UPGRADE_BUSY');for(let i=0;i<50&&await probe();i++)await new Promise(r=>setTimeout(r,20));if(await probe())throw Error('CORE_INTERFACE_UPGRADE_PENDING');}const info=await lstat(this.socket).catch(()=>null);if(info){if(!info.isSocket())throw Error('CORE_SOCKET_PATH_OCCUPIED');await unlink(this.socket);}await mkdir(path.dirname(this.socket),{recursive:true,mode:0o700});
+   const log=await open(this.socket+'.log','w',0o600);let child;try{child=spawn(process.execPath,[fileURLToPath(new URL('./core-host.mjs',import.meta.url)),this.socket,this.mode],{env:this.env,detached:true,stdio:['ignore','ignore',log.fd]});}finally{await log.close();}child.unref();const end=Date.now()+35000;while(Date.now()<end){if((await probe())?.protocolVersion===CORE_PROTOCOL_VERSION)return;if(child.exitCode!==null||child.signalCode)throw Error('CORE_HOST_START_FAILED: '+this.socket+'.log');await new Promise(r=>setTimeout(r,100));}throw Error('CORE_HOST_START_TIMEOUT');
   }finally{await release();}
  }
- async execute(operation,args={},capabilities={}){await this.connect();return this.request('/execute',{operation,args,capabilities});}
- async listOperations(){await this.connect();return this.request('/operations');}
+ async freshRelease(){
+  if(await interfaceFingerprint()!==loadedInterfaceFingerprint)throw Error('INTERFACE_CODE_STALE');
+  await this.connect();const expected=await installedRelease();let actual=await this.request('/control',{action:'status'});
+  if(actual.sourceFingerprint!==expected.sourceFingerprint||actual.version!==expected.version){
+   if(actual.active||actual.reloading||actual.reloadRequested)throw Error('CORE_UPDATE_PENDING');
+   if(actual.paused)throw Error('CORE_PAUSED');
+   actual=await this.request('/control',{action:'reload'});
+  }
+  requireSameRelease(actual,expected);return expected;
+ }
+ async execute(operation,args={},capabilities={}){const expected=await this.freshRelease();return this.request('/execute',{operation,args,capabilities,expected});}
+ async listOperations(){const expected=await this.freshRelease();return this.request('/operations',{expected});}
  async control(action){await this.connect();return this.request('/control',{action});}
 }

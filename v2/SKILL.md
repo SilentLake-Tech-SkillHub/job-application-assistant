@@ -38,3 +38,5 @@ This component never changes the master table status. `application_closeout` val
 
 ## Independent runtime
 Use the fixed CLI or MCP adapter for the same business core; see [runtime architecture](docs/runtime-architecture.md). Company data is re-read on each operation. Use `component_runtime` to pause/reload/resume a deployed core; keep the MCP adapter and browser running. The fixed CLI follows the same host role, workflow Hook, handoff confirmation and submission rules.
+
+CLI/MCP version agreement is required: business calls compare the installed release and actual core fingerprint, refresh an idle outdated core, and refuse mismatches before execution. An outdated adapter requires reconnecting that MCP interface; do not continue through a known stale connection. Read runtime_info once for a new or changed native connection so the Hook can validate its actual identity.

@@ -7,8 +7,18 @@ def scope_state(ids):
 class WorkflowHookTest(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name);self.policy=self.root/'policy.md';self.policy.write_text('Detailed policy is a reference, not per-turn context.',encoding='utf-8');self.scope=self.root/'scope.json';self.scope.write_text(json.dumps(scope_state(['enabled'])));self.lock=self.root/'lock.json';self.lock.write_text(json.dumps({'version':'synthetic','sha256':hashlib.sha256(self.policy.read_bytes()).hexdigest(),'route_sha256':hashlib.sha256((ROOT/'hooks/route.md').read_bytes()).hexdigest()}));self.env={**os.environ,'RECRUITING_HOST_ROLE':'executor','RECRUITING_WORKSPACE_ROOT':str(self.root),'RECRUITING_WORKFLOW_POLICY':str(self.policy),'RECRUITING_WORKFLOW_SCOPE':str(self.scope),'RECRUITING_WORKFLOW_LOCK':str(self.lock),'RECRUITING_WORKFLOW_STATE':str(self.root/'state')}
+  sys.path.insert(0,str(ROOT/'hooks'))
+  from runtime_guard import installed_release
+  release=installed_release(ROOT)
+  for module in ['login','application']:
+   self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_'+module+'_v2__runtime_info',tool_response={**release,'runtime':{'sourceFingerprint':release['sourceFingerprint'],'processId':os.getpid()}})
  def tearDown(self):self.tmp.cleanup()
  def invoke(self,**args):
+  if args.get('hook_event_name')=='UserPromptSubmit':
+   from runtime_guard import installed_release
+   release=installed_release(ROOT)
+   for module in ['login','application']:
+    self.invoke(session_id=args.get('session_id','enabled'),hook_event_name='PostToolUse',tool_name='mcp__recruiting_'+module+'_v2__runtime_info',tool_response={**release,'runtime':{'sourceFingerprint':release['sourceFingerprint'],'processId':os.getpid()}})
   event={'session_id':'enabled','turn_id':'turn','cwd':str(self.root),'hook_event_name':'PreToolUse','tool_name':'mcp__recruiting_application_v2__batch_prepare',**args}
   return subprocess.run([sys.executable,str(ROOT/'hooks/workflow_hook.py')],input=json.dumps(event),text=True,encoding="utf-8",capture_output=True,env=self.env)
  def test_fixed_cli_uses_same_turn_gate(self):
@@ -176,4 +186,11 @@ class WorkflowHookTest(unittest.TestCase):
  def test_expired_scope_cannot_be_bootstrapped_by_runtime_info(self):
   self.scope.write_text(json.dumps({'session_ids':['enabled'],'sessions':{'enabled':{'registeredAt':1,'expiresAt':2}}}))
   r=self.invoke(tool_name='mcp__recruiting_application_v2__runtime_info')
-  self.assertEqual(json.loads(r.stdout),{});self.assertFalse((self.root/'state').exists())
+  self.assertEqual(json.loads(r.stdout),{});self.assertEqual([p.name for p in (self.root/'state').iterdir()],['runtime-identities.json'])
+
+ def test_old_runtime_is_blocked_and_diagnostics_remain_available(self):
+  self.invoke(hook_event_name='UserPromptSubmit')
+  self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__runtime_info',tool_response={'version':'old','runtime':{'sourceFingerprint':'0'*64,'processId':os.getpid()}})
+  denied=self.invoke();self.assertEqual(denied.returncode,2);self.assertIn('MCP_RUNTIME_VERSION_MISMATCH',denied.stderr)
+  self.assertEqual(self.invoke(tool_name='mcp__recruiting_application_v2__runtime_info').returncode,0)
+  self.assertEqual(self.invoke(tool_name='mcp__recruiting_application_v2__component_runtime').returncode,0)

@@ -10,6 +10,7 @@ import uuid
 import shlex
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from conversation_scope import host_role, read_active_scope
+from runtime_guard import check_runtime
 
 ROOT = Path(os.environ['RECRUITING_WORKSPACE_ROOT']).resolve()
 POLICY = Path(os.environ['RECRUITING_WORKFLOW_POLICY'])
@@ -89,7 +90,7 @@ def component_cli_event(event):
         if operation not in set(LIFECYCLE['inspections']) | set(LIFECYCLE['stages']):
             return event
         payload = json.loads(Path(tail[2]).read_text()) if len(tail) == 3 else {}
-        return {**event, 'tool_name': 'mcp__recruiting_'+mode+'_v2__'+operation, 'tool_input': payload}
+        return {**event, 'tool_name': 'mcp__recruiting_'+mode+'_v2__'+operation, 'tool_input': payload, 'component_cli': True}
     except (ValueError, IndexError, OSError):
         return event
 
@@ -238,6 +239,8 @@ def handle_continuation(event):
 
 def handle(event):
     started = time.perf_counter()
+    if event.get('hook_event_name') == 'PostToolUse':
+        check_runtime(event, Path(__file__).resolve().parents[1], STATE, LIFECYCLE['stages'], write_atomic)
     # This workflow belongs to an explicitly enabled conversation, not every
     # conversation sharing the project. Return before policy/receipt checks for
     # unrelated sessions, including continuations started before installation.
@@ -255,6 +258,7 @@ def handle(event):
     if host_role() == 'maintainer':
         return {}
     event = component_cli_event(event)
+    check_runtime(event, Path(__file__).resolve().parents[1], STATE, LIFECYCLE['stages'], write_atomic)
     name = event.get('hook_event_name')
     if name not in INJECT | {'PreToolUse', 'PostToolUse', 'Stop'}:
         return {}

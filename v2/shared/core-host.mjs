@@ -17,7 +17,7 @@ async function replaceWorker(){
  finally{reloading=false;}
 }
 await replaceWorker();if(!worker)throw Error(lastError);
-const status=()=>({mode,hostPid:process.pid,workerPid:worker.pid,version:metadata.info.version,active,paused,reloading,reloadRequested,lastError});
+const status=()=>({protocolVersion:2,sourceFingerprint:metadata.info.sourceFingerprint,mode,hostPid:process.pid,workerPid:worker.pid,version:metadata.info.version,active,paused,reloading,reloadRequested,lastError});
 const server=http.createServer(async(req,res)=>{
  res.setHeader('content-type','application/json');
  try{
@@ -35,12 +35,14 @@ const server=http.createServer(async(req,res)=>{
    else if(body.action==='reload'){paused=true;reloadRequested=true;if(!active)await replaceWorker();}
    else if(body.action!=='status')throw Error('UNKNOWN_CORE_CONTROL');
    result=status();
-  }else if(req.url==='/operations')result=metadata.operations;
+  }else if(req.url==='/operations'){if(!body.expected?.sourceFingerprint||body.expected.sourceFingerprint!==metadata.info.sourceFingerprint||body.expected.version!==metadata.info.version)throw Error('RUNTIME_VERSION_MISMATCH');result=metadata.operations;}
   else if(req.url==='/execute'){
    if(!worker.connected&&!paused)await replaceWorker();
    if(paused||reloading||reloadRequested)throw Error('CORE_PAUSED');
+   if(!body.expected?.sourceFingerprint)throw Error('RUNTIME_FINGERPRINT_REQUIRED');
+   if(body.expected.sourceFingerprint!==metadata.info.sourceFingerprint||body.expected.version!==metadata.info.version)throw Error('RUNTIME_VERSION_MISMATCH');
    active++;const id=String(++sequence);
-   try{result=await new Promise((resolve,reject)=>{pending.set(id,{resolve,reject,child:worker});worker.send({id,operation:body.operation,args:body.args,capabilities:body.capabilities});});}
+   try{result=await new Promise((resolve,reject)=>{pending.set(id,{resolve,reject,child:worker});worker.send({id,operation:body.operation,args:body.args,capabilities:body.capabilities,expected:body.expected});});}
    finally{active--;if(!active&&reloadRequested)void replaceWorker();}
   }else throw Error('UNKNOWN_CORE_REQUEST');
   res.end(JSON.stringify(result));

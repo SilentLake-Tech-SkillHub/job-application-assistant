@@ -50,15 +50,15 @@ test('failed core update preserves prior worker and resumes without replaying re
  const {spawn}=await import('node:child_process'),http=await import('node:http');
  const d=await mkdtemp('/tmp/core-update-'),socket=path.join(d,'core.sock');let host;
  const request=(route,body)=>new Promise((resolve,reject)=>{const q=http.request({socketPath:socket,path:route,method:'POST'},r=>{let text='';r.on('data',x=>text+=x);r.on('end',()=>resolve(JSON.parse(text)));});q.on('error',reject);q.end(JSON.stringify(body));});
- const worker=version=>`process.on('disconnect',()=>process.exit(0));process.on('message',m=>process.send({id:m.id,result:{version:${version}}}));process.send({ready:true,info:{version:String(${version})},operations:[]});`;
+ const worker=version=>`process.on('disconnect',()=>process.exit(0));process.on('message',m=>process.send({id:m.id,result:{version:${version}}}));process.send({ready:true,info:{version:String(${version}),sourceFingerprint:'synthetic-'+${version}},operations:[]});`;
  try{
   await writeFile(path.join(d,'core-host.mjs'),await readFile(path.join(root,'shared/core-host.mjs')));await writeFile(path.join(d,'core-worker.mjs'),worker(1));
   host=spawn(process.execPath,[path.join(d,'core-host.mjs'),socket,'application'],{stdio:'ignore'});
   let before;for(let i=0;i<100&&!before;i++){before=await request('/control',{action:'status'}).catch(()=>null);if(!before)await new Promise(r=>setTimeout(r,20));}assert.ok(before);
   await writeFile(path.join(d,'core-worker.mjs'),'throw Error("synthetic startup failure");');
   const failed=await request('/control',{action:'reload'});assert.equal(failed.workerPid,before.workerPid);assert.equal(failed.paused,true);assert.equal(failed.lastError,'CORE_START_FAILED');
-  await request('/control',{action:'resume'});assert.deepEqual(await request('/execute',{operation:'read'}),{version:1});
+  await request('/control',{action:'resume'});assert.deepEqual(await request('/execute',{operation:'read',expected:{version:'1',sourceFingerprint:'synthetic-1'}}),{version:1});
   await writeFile(path.join(d,'core-worker.mjs'),worker(2));const after=await request('/control',{action:'reload'});assert.notEqual(after.workerPid,before.workerPid);assert.equal(after.version,'2');
-  assert.deepEqual(await request('/execute',{operation:'read'}),{version:2});
+  assert.deepEqual(await request('/execute',{operation:'read',expected:{version:'2',sourceFingerprint:'synthetic-2'}}),{version:2});
  }finally{await request('/control',{action:'stop'}).catch(()=>{});host?.kill();await rm(d,{recursive:true,force:true});}
 });
