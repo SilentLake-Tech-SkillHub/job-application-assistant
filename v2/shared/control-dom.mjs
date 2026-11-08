@@ -183,7 +183,11 @@ export function controlDOM(spec){
    if(other)return [];
    const nodes=[...root.querySelectorAll('button,[role="button"],a,span,div')].filter(n=>{
     const text=n.innerText?.trim()||'';
-    return visible(n)&&!rows.some(row=>row.contains(n))&&text.length<80&&(label?text===label:/^[+＋]?\s*(?:添加|新增|Add)(?:$|\s|[\p{Script=Han}])/iu.test(text));
+    const insideRecord=rows.some(row=>row.contains(n));
+    // Feishu renders its repeat action inside the final record. A field's own
+    // add action is distinct and stays excluded from repeat discovery.
+    const repeatAction=n.matches?.('.addMore-add')&&!n.closest?.('.atsx-form-item,.ud-formily-item,.ant-form-item,.form-item--phoenix');
+    return visible(n)&&(!insideRecord||repeatAction)&&text.length<80&&(label?text===label:/^[+＋]?\s*(?:添加|新增|Add)(?:$|\s|[\p{Script=Han}])/iu.test(text));
    });
    const candidates=nodes.filter(n=>!nodes.some(other=>other!==n&&typeof n.contains==='function'&&n.contains(other)));
    if(candidates.length)return candidates;
@@ -220,6 +224,19 @@ export function controlDOM(spec){
   if(part.length!==1)throw Error('PHOENIX_CONTROL_CHANGED');
   return diagnosticSelector(part[0].node);
  };
+ if(spec?.operation==='repeatInspection'){
+  // Only framework structure and add-control labels; never record answers.
+  return (spec.groups||[]).map(group=>{
+   const rows=[...document.querySelectorAll(group.selector)].filter(visible),ancestors=[];
+   for(let root=rows[0],depth=0;root&&depth<5;root=root.parentElement,depth++){
+    const adds=[...root.querySelectorAll('button,[role="button"],a,span,div')].filter(n=>visible(n)&&/^[+＋]?\s*(?:添加|新增|Add)(?:$|\s|[\p{Script=Han}])/iu.test(n.innerText?.trim()||'')&&(n.innerText?.trim()||'').length<80);
+    const leaves=adds.filter(n=>!adds.some(other=>other!==n&&n.contains(other)));
+    ancestors.push({depth,tag:root.tagName,classes:root.getAttribute('class')||'',selector:diagnosticSelector(root),records:rows.filter(row=>root===row||root.contains(row)).length,addControls:leaves.slice(0,12).map(n=>({tag:n.tagName,classes:n.getAttribute('class')||'',label:n.innerText.trim(),selector:diagnosticSelector(n),insideRecord:rows.some(row=>row.contains(n))}))});
+    if(root===document.body)break;
+   }
+   return {title:group.title,selector:group.selector,count:rows.length,sameParent:rows.every(row=>row.parentElement===rows[0]?.parentElement),ancestors};
+  });
+ }
  if(spec?.operation==='repeatDiscovery'){
   // Read only. A section heading and its add button are tied by the id the form framework gives them.
   const found=[];

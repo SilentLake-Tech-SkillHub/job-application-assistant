@@ -17,7 +17,8 @@
     "login_run_status",
     "login_verification_inspect",
     "inspect_choice",
-    "role_entry_inspect"
+    "role_entry_inspect",
+    "form_inspect_repeats"
   ],
   "stages": {
     "profile_select_projects": [

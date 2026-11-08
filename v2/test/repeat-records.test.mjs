@@ -228,3 +228,25 @@ test('Feishu add action may be a visible text control outside the immediate row 
  const run=spec=>vm.runInNewContext('('+controlDOM.toString()+')(spec)',{spec,document,getComputedStyle:()=>({visibility:'visible'}),CSS:{escape:s=>s}});
  const [g]=run({operation:'repeatDiscovery',titles:['project']});assert.ok(g);assert.equal(g.addLabel,'+ 添加项目经历');assert.equal(run({operation:'resolvePhoenix',references:[g.addSelector]})[0],'#add-project');
 });
+
+test('repeat inspection returns bounded add structure without personal field text',()=>{
+ const selector='.resumeEditForm-item.resumeEditForm-project',node=(id,tag,text)=>({id,tagName:tag,innerText:text,getClientRects:()=>[{}],getAttribute:k=>k==='class'?'public-class':null});
+ const add=node('add','SPAN','添加项目经历'),input=node('personal','INPUT','private-answer');add.contains=()=>false;
+ const row=node('row','DIV','private-answer'),parent=node('parent','DIV','private-answer 添加项目经历');row.parentElement=parent;parent.parentElement=null;row.contains=n=>n===input;parent.contains=()=>true;row.querySelectorAll=()=>[input];parent.querySelectorAll=()=>[input,add];
+ const document={querySelectorAll:s=>s===selector?[row]:s==='#add'?[add]:[],body:parent};
+ const result=vm.runInNewContext('('+controlDOM.toString()+')(spec)',{spec:{operation:'repeatInspection',groups:[{title:'project',selector}]},document,getComputedStyle:()=>({visibility:'visible'}),CSS:{escape:s=>s}});
+ assert.equal(result[0].count,1);assert.equal(result[0].ancestors[1].addControls[0].selector,'#add');assert.equal(JSON.stringify(result).includes('private-answer'),false);
+});
+
+test('Feishu final-record add control survives adding another row while field-local add is excluded',()=>{
+ const selector='.resumeEditForm-item.resumeEditForm-project',visible=()=>[{}];
+ const parent={parentElement:null,querySelectorAll:s=>s.includes('.resumeEditForm-item')?rows:[add,fieldAdd]};
+ const row=()=>({parentElement:parent,getClientRects:visible,contains:n=>n===add||n===fieldAdd,matches:s=>s===selector});
+ const rows=[row()],add={id:'add-record',tagName:'SPAN',innerText:'添加',children:[],getClientRects:visible,matches:s=>s==='.addMore-add',closest:()=>null};
+ const fieldAdd={...add,id:'add-inside-field',matches:()=>false,closest:()=>({})};
+ const document={querySelectorAll:s=>s===selector?rows:s==='#add-record'?[add]:[]};
+ const run=spec=>vm.runInNewContext('('+controlDOM.toString()+')(spec)',{spec,document,getComputedStyle:()=>({visibility:'visible'}),CSS:{escape:s=>s}});
+ const [g]=run({operation:'repeatDiscovery',titles:['project']});assert.ok(g);assert.equal(g.addLabel,'添加');
+ rows.push(row());assert.equal(run({operation:'resolvePhoenix',references:[g.addSelector]})[0],'#add-record');
+ add.closest=()=>({});assert.equal(run({operation:'repeatDiscovery',titles:['project']}).length,0);
+});
