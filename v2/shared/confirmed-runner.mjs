@@ -2,13 +2,14 @@
 import {CoreClient} from './core-client.mjs';
 import {Store} from './engine.mjs';
 import {configurePaths} from './runtime-paths.mjs';
-export async function createConfirmedRunner({authorization,startedAt,emit=()=>{},clients}={}){
+export async function createConfirmedRunner({authorization,startedAt,emit=()=>{},clients,workspace}={}){
  if(!authorization?.trim())throw Error('RUN_AUTHORIZATION_REQUIRED');
- const paths=configurePaths(),store=new Store(paths.application);
+ const paths=configurePaths({workspace}),store=new Store(paths.application);
  clients||={login:new CoreClient('login'),application:new CoreClient('application')};
  const started=startedAt?Date.parse(startedAt):Date.now();if(!Number.isFinite(started)||started>Date.now())throw Error('INVALID_RUN_START_TIMESTAMP');
  const timing={startedAt:new Date(started).toISOString(),timingRule:'elapsed_includes_waiting',stage:'initializing',calls:{},waitingIntervals:[],submission:'not_performed'};
- const persist=()=>store.put('runs','confirmed-runner-current',timing);
+ const taskRef=task=>task?{companyId:task.companyId,roleId:task.roleId,taskId:task.taskId,status:task.status,fillRunId:task.fillRunId,verifyRunId:task.verifyRunId||task.independentVerification?.id}:undefined;
+ const persist=()=>store.put('runs','confirmed-runner-current',{...timing,currentTask:taskRef(timing.currentTask),completedTasks:timing.completedTasks?.map(taskRef)});
 async function call(mode,name,args){const start=performance.now(),value=await clients[mode].execute(name,args);const r=value;const event={mode,tool:name,startedAt:new Date(performance.timeOrigin+start).toISOString(),elapsedMs:Math.round(performance.now()-start),isError:!!r.isError,result:value};timing.calls[JSON.stringify([mode,name,args.taskId||'queue'])]={mode,tool:name,taskId:args.taskId||null,startedAt:event.startedAt,elapsedMs:event.elapsedMs,isError:event.isError};await persist();if(r.isError)throw Error(value.error||'MCP_OPERATION_FAILED');return value;}
 const loginAuth={login:true,evidence:authorization};
 const fillAuth={prepare:true,evidence:authorization,sensitiveFields:true,uploads:true};
