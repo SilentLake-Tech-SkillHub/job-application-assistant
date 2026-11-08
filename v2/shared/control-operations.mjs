@@ -275,6 +275,10 @@ export async function performControl(adapter,action,value,files={}){
     }
     if(action.method==='feishu_month'){
       if(value!=='至今'&&!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(value)))throw Error('INVALID_MONTH_VALUE');
+      // The portal's fixed footer can cover the last month even when the input
+      // itself is visible. Reposition the trigger before opening its popup.
+      await l.press('Escape');
+      await l.evaluate(n=>n.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'}));
       await l.click({timeout:10000});
       const base='.atsx-date-picker-period-month-panel-list-item';
       if(value==='至今')await adapter.page.locator(`${base}[data-cy="-"]:visible`).click({timeout:10000});

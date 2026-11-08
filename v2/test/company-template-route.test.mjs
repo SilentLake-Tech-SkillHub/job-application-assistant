@@ -21,6 +21,12 @@ test('runtime path binding compiles and revalidates a frozen plan while stored c
   const p=await e.preparePlan(task);assert.equal(p.readyForExecution,true,JSON.stringify(p));
   const saved=await store.get('plans',p.planId);assert.equal(saved.pages[0].pathPrefix,'/campus/resume/222/apply');
   await assertPreparedPlan(saved,await routeTemplate(t,task),{...task,planId:p.planId,planHash:p.planHash},{prepare:true});
+  // prepare() re-resolves inputs under its company lease. That second check
+  // must use the same current-role route as compilation and the first check.
+  e.resolveTask=async current=>({...current});let entered=false;
+  e.runCompany=async()=>{entered=true;return {companyId:'C00001',status:'verified',fields:[],pageChecks:[],submission:'not_performed'};};
+  await e.prepare({tasks:[{...task,planId:p.planId,planHash:p.planHash}],authorization:{prepare:true,evidence:'synthetic current-role preparation'}});
+  assert.equal(entered,true);
   assert.equal(hash(await store.get('templates',t.id)),hash(t));
  }finally{await rm(dir,{recursive:true,force:true});}
 });

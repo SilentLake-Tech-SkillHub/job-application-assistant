@@ -303,7 +303,7 @@ export class Engine {
       }
       if(this.resolveTask){
         const fresh=await this.resolveTask(job.task,job.template);
-        await assertPreparedPlan(job.prepared,job.template,fresh,authorization);
+        await assertPreparedPlan(job.prepared,await this.routeTemplate(job.template,fresh),fresh,authorization);
         job.task=fresh;
       }
     }

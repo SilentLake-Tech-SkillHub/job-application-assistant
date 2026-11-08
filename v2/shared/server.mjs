@@ -247,7 +247,7 @@ registerTool('role_prepare_profile_fields',{description:'按私有主档的globa
   if(!resolved.profileFillContext)throw Error('GLOBAL_PROFILE_FILL_NOT_AUTHORIZED');
   const task={companyId:t.companyId,roleId:t.roleId,pageUrl:state.returnUrl,pageId:state.pageId,browserBinding:state.browserBinding,taskId:t.taskId,templateHash:hash(template),...resolved,roleQueueArgs:{queueId:a.queueId,queueHash:a.queueHash,taskId:a.taskId}};
   const plan=await engine.preparePlan(task,{leaseHeld:true});if(!plan.readyForExecution)throw Error('PROFILE_FILL_PREFLIGHT_REQUIRED');
-  await assertPreparedPlan(await store.get('plans',plan.planId),template,{...task,planId:plan.planId,planHash:plan.planHash},a.authorization,{scope:'authorized_profile_fields'});
+  await assertPreparedPlan(await store.get('plans',plan.planId),await engine.routeTemplate(template,task),{...task,planId:plan.planId,planHash:plan.planHash},a.authorization,{scope:'authorized_profile_fields'});
   const current=await boundRole(a);if(hash(current.template)!==hash(template)||current.state.pageId!==state.pageId)throw Error('PROFILE_FILL_ROLE_OR_TEMPLATE_CHANGED');
   const page=await browser.existingPage(state.returnUrl,{pageId:state.pageId,roleBinding:state.browserBinding});await engine.profileProofs(task,template,page,true);const proofs=await engine.profileProofs(task,template,page);
   const id='profile-fill-'+t.taskId,result={id,operation:'prepare_authorized_profile_fields',companyId:t.companyId,roleId:t.roleId,pageUrl:state.returnUrl,pageId:state.pageId,browserBinding:state.browserBinding,taskId:t.taskId,templateHash:hash(template),planId:plan.planId,planHash:plan.planHash,authorizationContextHash:resolved.profileFillContext.contextHash,proofs,status:Object.values(proofs).every(proof=>proof.status==='verified')?'verified':'needs_attention',fullFormVerified:false,save:'not_verified',submission:'not_performed',completion:{complete:false,status:'profile_fields_prepared'},continuation:{state:'prepare',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['role_verify']}};
@@ -347,10 +347,10 @@ registerTool('role_prepare_fields',{description:'从当前完整冻结计划补�
   const plan=await engine.preparePlan(task,{leaseHeld:true}),frozenTask={...task,planId:plan.planId,planHash:plan.planHash};
   if(!plan.planId)return {...plan,submission:'not_performed'};
   const prepared=await store.get('plans',plan.planId);
-  await assertPreparedPlan(prepared,template,frozenTask,args.authorization,{scope:'selected_fields',fieldIds:args.fieldIds});
+  await assertPreparedPlan(prepared,await engine.routeTemplate(template,frozenTask),frozenTask,args.authorization,{scope:'selected_fields',fieldIds:args.fieldIds});
   await boundRole(args);
   const page=await browser.existingPage(state.returnUrl,{pageId:state.pageId,roleBinding:state.browserBinding});
-  const selected=await prepareSelectedFields({store,page,task:frozenTask,template,prepared,fieldIds:args.fieldIds});
+  const selected=await prepareSelectedFields({store,page,task:frozenTask,template:await engine.routeTemplate(template,frozenTask),prepared,fieldIds:args.fieldIds});
   await boundRole(args);
   const verification=await engine.verifyCurrentLocked({...task,...await resolveInputs(await loadProfile(profileFile),template,{},t.companyId,{roleId:t.roleId,pageUrl:state.returnUrl,confirmedOfficialId:state.siteRoleId||t.officialId})});
   Object.assign(state,{status:verification.status==='verified'?'ready_for_user_review':'needs_attention',selectedFieldRunId:selected.id,verifyRunId:verification.id,verifiedAt:verification.readAt});
