@@ -7,7 +7,8 @@ import {uploadOriginKey,uploadOriginScope} from './upload-origin.mjs';
 import {saveSearchableCommit,searchableWitnessScope,verifySearchableCommits,attachSearchableCommits} from './searchable-commit.mjs';
 import {assertMaterialDestinationsRemainAbsent} from './business-materials.mjs';
 import {safeControlErrorDetails} from './control-error-details.mjs';
-import {verifyDropdownSelections,attachChoiceProofs} from './choice-verification.mjs';
+import {verifyDropdownSelections,attachChoiceProofs,choiceMenuUnrestored} from './choice-verification.mjs';
+import {choiceActionWithReadback} from './choice-actions.mjs';
 import {verifyDateRanges,attachDateRangeProofs} from './date-range-verification.mjs';
 import {attachProfileFillProofs} from './profile-fill-authorization.mjs';
 import {templateMethods} from './control-registry.mjs';
@@ -370,7 +371,7 @@ export class Engine {
     let mappingError=null;
     try{if(this.onInventory)await this.onInventory(company.id,task.pageUrl,inventory,plan);}catch(e){mappingError=/^[A-Z_]+$/.test(e.message)?e.message:'PROFILE_REGISTRATION_FAILED';}
     const choiceProofs=await verifyDropdownSelections(page,plan,task);
-    const dateProofs=await verifyDateRanges(page,plan,task);
+    const dateProofs=choiceMenuUnrestored(choiceProofs)?{}:await verifyDateRanges(page,plan,task);
     const profileProofs=await this.profileProofs(task,template,page),privacyProofs=await this.privacyProofs(task,template,page),searchableProofs=await verifySearchableCommits({store:this.store,page,plan,task});
     const observation=attachSearchableCommits(attachProfileFillProofs(attachDateRangeProofs(attachChoiceProofs(attachInventory(await page.observe(plan),plan,inventory),choiceProofs),dateProofs),profileProofs),searchableProofs),observationRunId=randomUUID();
     this.attachPrivacyProofs(observation,privacyProofs);
@@ -388,7 +389,7 @@ export class Engine {
   async learnRepeatContract(page,template,plan,live,recordPlan){
     const titles=sectionsWithoutAdd(plan,live,recordPlan);
     if(!titles.length||typeof page.repeatDiscovery!=='function'||!template.id)return;
-    const found=(await page.repeatDiscovery(titles)).filter(item=>titles.includes(item.title));
+    const found=(await page.repeatDiscovery(titles)).filter(item=>titles.includes(item.title)&&item.addSelector);
     if(!found.length)return;
     const stored=await this.store.get('templates',template.id),target=stored.pages.find(p=>plan.pageKey?p.pageKey===plan.pageKey:p.pathPrefix===(plan.sourcePathPrefix||plan.pathPrefix));
     target.groups=[...(target.groups||[]).filter(group=>!found.some(item=>item.title===groupSection(group))),...found.map(groupFromDiscovery)];
@@ -411,7 +412,6 @@ export class Engine {
         await page.wait(plan.readySelector);
         const inventory=()=>liveControls(page,plan);
         const live=await inventory();
-        await this.learnRepeatContract(page,template,plan,live,task.recordPlan);
         assertMaterialDestinationsRemainAbsent(prepared.materialCoverage,live);
         if(this.onInventory)await this.onInventory(company.id,task.pageUrl,live,plan);
         const mapped=new Set(plan.fields.flatMap(f=>f.inventorySelectors||[f.read.selector]));
@@ -423,8 +423,6 @@ export class Engine {
         // reads what is on the page: a strict reference to an absent record throws instead of
         // reporting it, and records are only added further down.
         const repeatFieldIds=plannedRepeatFieldIds(plan);
-        const uncontracted=sectionsWithoutAdd(plan,live).filter(section=>plan.groups?.some(group=>groupSection(group)===section&&!group.addSelector));
-        if(uncontracted.length)throw Object.assign(Error('REPEAT_ADD_CONTROL_NOT_OBSERVED'),{details:{sections:uncontracted}});
         const renderedFields=controls=>{const rendered=new Set(controls.map(control=>control.selector));return plan.fields.filter(field=>(field.inventorySelectors||[field.read.selector]).some(selector=>rendered.has(selector)||!repeatFieldIds.has(field.id)&&!selector?.startsWith('phoenixq:')));};
         let initial=await page.observe({...plan,fields:renderedFields(live)});
         if(!samePage(initial.pageUrl,task.pageUrl)||!matchesRole(plan,initial))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
@@ -444,20 +442,31 @@ export class Engine {
           for(const action of f.actions){const result=await page.act(action,f.value,prepared.files);if(result?.uploadOrigin)await this.store.put('runs',uploadOriginKey(task,f),{...result.uploadOrigin,operation:'field_upload_origin',fieldId:f.id,scopeHash:uploadOriginScope(task,f)});}
           materialWrites++;
         }
-        for(const f of frozenFields.filter(f=>f.prepareBeforeGroups&&f.disposition==='fill')){
-          for(const action of f.actions||[])await page.act(action,f.value,prepared.files);
+        const layoutInputs=frozenFields.filter(f=>f.prepareBeforeGroups&&f.disposition==='fill');
+        for(const f of layoutInputs){
+          for(const action of f.actions||[])await page.act(choiceActionWithReadback(action,f.read?.selectedSelector),f.value,prepared.files);
         }
+        // The portal can render an entire group only after a material or a
+        // prerequisite field has been applied. Discover against that state.
+        const layoutChanged=materialWrites>0||layoutInputs.length>0;
+        const beforeExpansion=layoutChanged?await inventory():live;
+        await this.learnRepeatContract(page,template,plan,beforeExpansion,task.recordPlan);
+        const uncontracted=sectionsWithoutAdd(plan,beforeExpansion).filter(section=>plan.groups?.some(group=>groupSection(group)===section&&!group.addSelector));
+        if(uncontracted.length)throw Object.assign(Error('REPEAT_ADD_CONTROL_NOT_OBSERVED'),{details:{sections:uncontracted}});
         if(plan.groups?.length)await page.ensureGroups(plan.groups);
-        const expanded=materialWrites||plan.groups?.length?await inventory():live;
+        const expanded=plan.groups?.length?await inventory():beforeExpansion;
         assertMaterialDestinationsRemainAbsent(prepared.materialCoverage,expanded);
-        if((materialWrites||plan.groups?.length)&&this.onInventory)await this.onInventory(company.id,task.pageUrl,expanded,plan);
+        if((layoutChanged||plan.groups?.length)&&this.onInventory)await this.onInventory(company.id,task.pageUrl,expanded,plan);
         if(expanded.some(f=>!mapped.has(f.selector)))throw Error('UNMAPPED_FORM_FIELDS_AFTER_EXPANSION');
         if(controlContractChanges(plan,expanded).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
-        if(materialWrites||plan.groups?.length){
+        if(layoutChanged||plan.groups?.length){
           const beforeMaterial=initial;initial=await page.observe({...plan,fields:renderedFields(expanded)});
           if(!samePage(initial.pageUrl,task.pageUrl)||!matchesRole(plan,initial))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
           result.pageChecks.at(-1).postMaterialReadAt=initial.readAt;
           result.pageChecks.at(-1).changedAfterMaterial=plan.fields.filter(f=>!f.userOnly&&JSON.stringify(beforeMaterial.fields[f.id]?.value)!==JSON.stringify(initial.fields[f.id]?.value)).map(f=>f.id);
+          if(plan.groups?.length)result.pageChecks.at(-1).repeatCounts=plan.groups.map(group=>({
+            id:group.id,expected:group.count,before:beforeMaterial.groups?.[group.id]??null,after:initial.groups?.[group.id]??null
+          }));
         }
         const fillOrder=compiled.executionOrder?.find(step=>step.stage==='fill')?.fieldIds;
         const fillFields=fillOrder?fillOrder.map(id=>frozenFields.find(f=>f.id===id)):frozenFields;
@@ -491,7 +500,7 @@ export class Engine {
           }
             for(const action of f.actions||[]){
               await page.assertLocation(company.origin,plan.pathPrefix);
-              const actionResult=await page.act(f.control?.type==='searchable_text'?{...action,witnessScope:searchableWitnessScope(task,f)}:action, f.value, prepared.files);
+              const actionResult=await page.act(f.control?.type==='searchable_text'?{...action,witnessScope:searchableWitnessScope(task,f)}:choiceActionWithReadback(action,f.read?.selectedSelector), f.value, prepared.files);
               if(f.control?.type==='searchable_text')await saveSearchableCommit(this.store,task,f,actionResult);
             }
             completedWrites.add(f.id);
@@ -523,7 +532,7 @@ export class Engine {
             const current=await page.observe({...plan,fields:[f]});
             if(!samePage(current.pageUrl,task.pageUrl)||!matchesRole(plan,current))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
             if(current.fields[f.id]?.value!==afterMaterial.fields[f.id].value)continue;
-            await page.act(f.actions[0],f.value,prepared.files);corrected.push(f.id);
+            await page.act(choiceActionWithReadback(f.actions[0],f.read?.selectedSelector),f.value,prepared.files);corrected.push(f.id);
           }
           if(corrected.length){result.lateMaterialCorrections=corrected;finalInventory=await inventory();if(this.onInventory)await this.onInventory(company.id,task.pageUrl,finalInventory,plan);if(controlContractChanges(plan,finalInventory).length||finalInventory.some(c=>!mapped.has(c.selector)))throw Error('FORM_CONTROL_CONTRACT_CHANGED');}
         }
@@ -531,7 +540,7 @@ export class Engine {
         // Verification reads every planned field and is the read-only verify_current's job here.
         if(notOnPage.length){result.fields.push(...notOnPage.map(f=>({id:f.id,label:f.label,status:'unverified',reason:'CONTROL_NOT_ON_PAGE'})));break;}
         const choiceProofs=await verifyDropdownSelections(page,plan,task);
-        const dateProofs=await verifyDateRanges(page,plan,task);
+        const dateProofs=choiceMenuUnrestored(choiceProofs)?{}:await verifyDateRanges(page,plan,task);
         const profileProofs=await this.profileProofs(task,template,page),privacyProofs=await this.privacyProofs(task,template,page),searchableProofs=await verifySearchableCommits({store:this.store,page,plan,task});
         const observation=attachSearchableCommits(attachProfileFillProofs(attachDateRangeProofs(attachChoiceProofs(attachInventory(await page.observe(plan),plan,finalInventory),choiceProofs),dateProofs),profileProofs),searchableProofs);
         result.selectionProofs={...(result.selectionProofs||{}),...choiceProofs};

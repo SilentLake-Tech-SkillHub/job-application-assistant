@@ -13,6 +13,7 @@ import {createHash} from 'node:crypto';
 import path from 'node:path';
 import {collectChoiceViews,choiceViewport} from './choice-inventory.mjs';
 import {UD_TREE_LEAF_LABEL,treeChoiceDOM} from './tree-choice.mjs';
+import {browserErrorDetails} from './browser-errors.mjs';
 const exact = value => new RegExp('^'+String(value).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$');
 export function choiceEmptyEvidenceDOM(menu){
  const pattern=/^(?:暂无(?:数据|选项|匹配(?:结果)?)|无(?:数据|结果|匹配(?:结果)?)|未找到(?:匹配项|匹配结果)?|没有(?:匹配项|匹配结果)|not found|no (?:data|options|results))$/i;
@@ -76,11 +77,34 @@ async function performChoice(adapter,action,value,family){
   const parent=l.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " ant-select ")][1]');
   if(await parent.count()===1){const display=parent.locator('.ant-select-selector, .ant-select-selection').filter({visible:true});trigger=await display.count()===1?display:parent;}
  }
- const readSelected=()=>family==='phoenix'?readPhoenixSelectedValue(trigger):trigger.innerText().then(text=>text.trim());
+ const readSelected=async()=>{
+  if(family==='phoenix')return readPhoenixSelectedValue(trigger);
+  if(family!=='aria'||!action.selectedSelector)return (await trigger.innerText()).trim();
+  const selected=page.locator(action.selectedSelector).filter({visible:true}),count=await selected.count();
+  if(count>1)throw Error('CHOICE_SELECTED_DISPLAY_NOT_UNIQUE');
+  return count===1?(await selected.innerText()).trim():'';
+ };
  const initial=await readSelected();let search=null,initialQuery,queryApplied=false;
  const expanded=await l.evaluate(n=>n.getAttribute('aria-expanded'));
- if(expanded!=='true')await trigger.click({timeout:10000});
+ let step='choice_open',locator=action.selector,menus,menuSelector,owned;
+ const closeMenu=async()=>{
+  step='choice_close';locator=action.labelSelector||action.selector;
+  try{
+   await dismiss();
+   locator=menuSelector;
+   await menus.waitFor({state:'hidden',timeout:3000});
+  }catch(error){
+   // Toggle only a still-expanded control whose own unique menu is visible.
+   if(!owned||await menus.count()!==1||await l.evaluate(n=>n.getAttribute('aria-expanded'))!=='true')throw error;
+   locator=action.selector;
+   await trigger.click({timeout:10000});
+   locator=menuSelector;
+   await menus.waitFor({state:'hidden',timeout:3000});
+  }
+ };
  try{
+  if(expanded!=='true')await trigger.click({timeout:10000});
+  step='choice_menu';
   if(family==='phoenix'){
    const popupKind=await phoenixPopupKind(page,action);
    if(popupKind!=='select'){
@@ -89,17 +113,20 @@ async function performChoice(adapter,action,value,family){
     return (popupKind==='area'?driver.performPhoenixArea:driver.performPhoenixListPopup)(adapter,action,value,{trigger,initial,dismiss});
    }
   }
-  let menus=page.locator(action.menuSelector||(family==='phoenix'?'.common-unmodeled-layer:has(.phoenix-selectList)':family==='ud'?'.ud__select__list':family==='ant'?'.ant-select-dropdown':'[role="listbox"]')).filter({visible:true});
-  const owned=await l.evaluate(n=>n.getAttribute('aria-controls')||n.getAttribute('aria-owns'));
+  menuSelector=action.menuSelector||(family==='phoenix'?'.common-unmodeled-layer:has(.phoenix-selectList)':family==='ud'?'.ud__select__list':family==='ant'?'.ant-select-dropdown':'[role="listbox"]');
+  owned=await l.evaluate(n=>n.getAttribute('aria-controls')||n.getAttribute('aria-owns'));
   if(owned){
    const id='[id='+JSON.stringify(owned)+']';
    // rc-select's aria list may be a hidden accessibility mirror. Scope to its
    // actual popup ancestor, whose rendered options carry the click targets.
-   menus=page.locator(family==='ant'?'.ant-select-dropdown'+id+', .ant-select-dropdown:has('+id+')':id).filter({visible:true});
+   menuSelector=family==='ant'?'.ant-select-dropdown'+id+', .ant-select-dropdown:has('+id+')':id;
   }
+  locator=menuSelector;menus=page.locator(menuSelector).filter({visible:true});
   if(await l.evaluate(n=>n.getAttribute('aria-expanded'))==='false')throw Error('CHOICE_TRIGGER_NOT_EXPANDED');
+  if(await menus.count()>1)throw Error('CHOICE_MENU_NOT_UNIQUE');
   await menus.waitFor({state:'visible',timeout:3000});
   if(await menus.count()!==1)throw Error('CHOICE_MENU_NOT_UNIQUE');
+  step='choice_option';
   const phoenixEditable=family==='phoenix'&&await l.evaluate(n=>n.classList.contains('phoenix-select--editable'));
   const candidates=family==='ant'?[page.locator('.ant-select-open input.ant-select-search__field, .ant-select-open input.ant-select-selection-search-input').filter({visible:true})]:family==='ud'?[menus.locator('input[type="search"], input[placeholder*="搜索"], input[placeholder*="Search"]').filter({visible:true}),l.filter({visible:true})]:[menus.locator('input[type="search"], input[role="combobox"], input[placeholder*="搜索"], input[placeholder*="Search"]').filter({visible:true}),...(phoenixEditable?[l.locator('input.phoenix-select__input').filter({visible:true})]:[]),l.filter({visible:true})];
   for(const candidate of candidates){if(await candidate.count()===1&&await candidate.evaluate(n=>n.tagName==='INPUT'&&!n.readOnly&&!n.disabled&&(n.type==='search'||n.getAttribute('role')==='combobox'||/搜索|search/i.test(n.getAttribute('placeholder')||n.className||'')||n.classList?.contains?.('phoenix-select__input')&&!!n.closest?.('.phoenix-select--editable')))){search=candidate;break;}}
@@ -118,7 +145,7 @@ async function performChoice(adapter,action,value,family){
   const options=menus.locator(optionSelector).filter({visible:true});
   if(tree&&action.method.endsWith('_inspect')&&await options.count()===0){
    const treeEvidence=await menus.evaluate(treeChoiceDOM);
-   if(queryApplied&&initialQuery!==undefined)await search.fill(initialQuery,{timeout:10000});await dismiss();await menus.waitFor({state:'hidden',timeout:3000});
+   if(queryApplied&&initialQuery!==undefined)await search.fill(initialQuery,{timeout:10000});await closeMenu();
    return {options:[],tree:treeEvidence,renderer:'ud_tree_select',restored:await readSelected()===initial&&await menus.count()===0,searchable,queryApplied,scope:'rendered_tree_branches',coverage:{complete:false,reason:'no_rendered_leaf_options'},status:'branches_only'};
   }
   const emptyEvidence=()=>menus.evaluate(choiceEmptyEvidenceDOM);
@@ -128,7 +155,7 @@ async function performChoice(adapter,action,value,family){
   }
   if(action.method.endsWith('_inspect')&&queryApplied&&await options.count()===0&&empty.length){
    if(initialQuery!==undefined)await search.fill(initialQuery,{timeout:10000});
-   await dismiss();await menus.waitFor({state:'hidden',timeout:3000});
+   await closeMenu();
    return {options:[],optionRecords:[],restored:await readSelected()===initial&&await menus.count()===0,searchable,queryApplied,scope:'exact_search_results',coverage:{complete:true,reason:'observed_no_results',emptyEvidence:empty},status:'captured_empty_search'};
   }
   const optionText=action.optionTextMap?.[value]||String(value);
@@ -137,8 +164,8 @@ async function performChoice(adapter,action,value,family){
   if(action.method.endsWith('_inspect')){
    const treeEvidence=tree?await menus.evaluate(treeChoiceDOM):null;
    if(queryApplied&&initialQuery!==undefined)await search.fill(initialQuery,{timeout:10000});
-   await dismiss();
-   await menus.waitFor({state:'hidden',timeout:3000});
+   await closeMenu();
+   step='choice_readback';locator=action.selectedSelector||action.selector;
    const restored=await readSelected()===initial&&await menus.count()===0;
    return {options:values,optionRecords:captured.optionRecords,restored,searchable,queryApplied,...(tree?{renderer:'ud_tree_select',tree:treeEvidence}:{}),scope:queryApplied&&action.query?'exact_search_results':tree?'rendered_tree_leaves':captured.complete?'all_menu_options':captured.steps?'partial_menu_options':'current_visible_menu',coverage:{complete:tree?false:captured.complete,reason:tree?'rendered_leaf_paths_only':captured.reason,keyboardSteps:captured.steps},status:'captured'};
   }
@@ -152,7 +179,8 @@ async function performChoice(adapter,action,value,family){
   if(action.expectedOptionValue!=null&&candidate.value!==action.expectedOptionValue)throw Error('CHOICE_OPTION_VALUE_CHANGED');
   if(!verifyOnly)await option.click({timeout:10000});
   if(queryApplied&&initialQuery!==undefined&&verifyOnly)await search.fill(initialQuery,{timeout:10000});
-  await dismiss();await menus.waitFor({state:'hidden',timeout:3000});
+  await closeMenu();
+  step='choice_readback';locator=action.selectedSelector||action.selector;
   const blurredLabel=await readSelected();
   if(blurredLabel!==optionText)throw Error('CHOICE_SELECTED_LABEL_MISMATCH');
   if(verifyOnly){const proof=family==='phoenix'&&candidate.selected!==true?confirmPhoenixSelectedDisplay(candidate,await readPhoenixSelectedDisplay(trigger),{expectedLabel:optionText,blurredLabel}):confirmChoiceEvidence(candidate,candidate,{expectedLabel:optionText,blurredLabel});return {performed:false,selectionProof:proof,verification:'requires_independent_readback'};}
@@ -165,7 +193,20 @@ async function performChoice(adapter,action,value,family){
   }
   const proof=confirmChoiceEvidence(candidate,{...checked.selectionProof,selected:checked.selectionProof.reopenedOptionSelected},{expectedLabel:optionText,blurredLabel});
   return {performed:true,selectionProof:proof,verification:'requires_independent_readback'};
- }catch(e){if(queryApplied&&search&&initialQuery!==undefined)await search.fill(initialQuery,{timeout:10000}).catch(()=>{});await dismiss().catch(()=>{});if(family!=='phoenix'||action.method.endsWith('_inspect'))throw e;throw await annotateRecoveredControl(e,{before:initial,expected:String(value),read:readSelected,isClosed:async()=>await page.locator('.common-unmodeled-layer').filter({visible:true}).count()===0,samePage:async()=>typeof originalPage==='string'&&page.url()===originalPage});}
+ }catch(error){
+  if(error.details?.phase==='browser_operation'&&error.details.step?.startsWith('choice_'))throw error;
+  if(queryApplied&&search&&initialQuery!==undefined)await search.fill(initialQuery,{timeout:10000}).catch(()=>{});
+  const samePage=async()=>typeof originalPage==='string'&&page.url()===originalPage;
+  if(await samePage()&&(!menus||await menus.count().catch(()=>1)>0))await dismiss().catch(()=>{});
+  if(family==='phoenix'&&!action.method.endsWith('_inspect')){
+   await annotateRecoveredControl(error,{before:initial,expected:String(value),read:readSelected,isClosed:async()=>await page.locator('.common-unmodeled-layer').filter({visible:true}).count()===0,samePage});
+  }
+  if(!error.details){
+   error.operationLocator=locator;
+   error.details={...browserErrorDetails(error,{method:'act',step}),popupClosed:Boolean(menus&&await samePage()&&await menus.count().catch(()=>1)===0)};
+  }
+  throw error;
+ }
 }
 async function performAntMulti(adapter,action,value){
  if(!Array.isArray(value)||new Set(value).size!==value.length||value.some(v=>!action.options?.includes(v)))throw Error('CAPTURED_MULTISELECT_VALUES_REQUIRED');

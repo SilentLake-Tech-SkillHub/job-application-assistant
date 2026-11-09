@@ -8,6 +8,7 @@ import {applyChoiceResolution} from './choice-resolution.mjs';
 import {evaluateChoiceGoals} from './choice-goal-contract.mjs';
 import {createHash} from 'node:crypto';
 import {CONTROL_TYPES} from './control-registry.mjs';
+import {capturedChoiceAction} from './choice-actions.mjs';
 import {humanActionReason,classifyPending,templateConstructionIssues} from './field-policy.mjs';
 import {suggestSemanticMappings,enrichRegistryCandidate,rankMappingSuggestions} from './mapping-candidates.mjs';
 const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
@@ -67,13 +68,13 @@ function fieldFromControl(c,m,choice){
   else if(c.tag==='select'||c.type==='select'){f.read.nativeSelect=true;f.actions=[{...action('select'),options:options||[]}];}
   else if(c.renderer==='phoenix_select'){
    f.read.kind='text';f.read.selector=c.selectedSelector;f.read.selectedSelector=c.selectedSelector;
-   if(!human)f.actions=[{...action('phoenix_dropdown'),labelSelector:c.labelSelector,options:options||[],...(choice?.renderer==='phoenix_list_popup'?{choiceRenderer:choice.renderer,choiceContract:choice.choiceContract}: {})}];
+   if(!human)f.actions=[{...capturedChoiceAction(c,'phoenix_dropdown'),options:options||[],...(choice?.renderer==='phoenix_list_popup'?{choiceRenderer:choice.renderer,choiceContract:choice.choiceContract}: {})}];
   }
   else if(framework==='.ant-form-item'||framework==='.ud-formily-item'){
    const method=framework==='.ant-form-item'?'ant_dropdown':'ud_dropdown';
    f.read.kind='text';f.read.selector=c.selectedSelector||c.questionSelector||c.selector;
-   if(!human)f.actions=[{...action(method),labelSelector:c.labelSelector,options:options||[]}];
-  }else if(c.role==='combobox'&&c.selectedSelector){f.read.kind='text';f.read.selector=c.selectedSelector;f.actions=[{...action('dropdown'),options:options||[]}];}
+   if(!human)f.actions=[{...capturedChoiceAction(c,method),options:options||[]}];
+  }else if(c.role==='combobox'&&c.selectedSelector){f.read.kind='text';f.read.selector=c.selectedSelector;f.actions=[{...capturedChoiceAction(c,'dropdown'),options:options||[]}];}
   else f.constructionBlockers.push('CONTROL_DRIVER_REQUIRED');
  }else if(f.kind==='date'){
   f.precision=type==='year_picker'?'year':type==='month_picker'?'month':'day';f.read.selectedSelector=c.selector;

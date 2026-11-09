@@ -1,5 +1,6 @@
 import {matchesRole} from './role-identity.mjs';
 import {liveControls} from './control-context.mjs';
+import {choiceActionWithReadback} from './choice-actions.mjs';
 // Internal maintenance only. Traverse captured branch choices through real UI
 // controls, persist every discovery, then restore and read back the initial form.
 const signature=f=>JSON.stringify({selector:f.selector,label:f.label,type:f.type,required:!!f.required});
@@ -41,7 +42,7 @@ export async function probeConditions({page,plan,pageUrl,origin,onInventory,chec
  try{
   for(const parent of parents)for(const value of parent.control.options){
    await page.assertLocation(origin,plan.pathPrefix);changed=true;
-   await page.act(parent.actions[0],value,{});
+   await page.act(choiceActionWithReadback(parent.actions[0],parent.read?.selectedSelector),value,{});
    const expected=conditional.filter(f=>f.when.source===parent.source&&f.when.equals===value);
    for(const f of expected)await page.wait(f.read.presenceSelector||f.read.selector);
    let controls,matched=false;const deadline=Date.now()+settleMs;
@@ -66,7 +67,7 @@ export async function probeConditions({page,plan,pageUrl,origin,onInventory,chec
  finally{
   if(changed){
    try{
-    for(const parent of parents){await page.assertLocation(origin,plan.pathPrefix);await page.act(parent.actions[0],baseline.fields[parent.id].value,{});}
+    for(const parent of parents){await page.assertLocation(origin,plan.pathPrefix);await page.act(choiceActionWithReadback(parent.actions[0],parent.read?.selectedSelector),baseline.fields[parent.id].value,{});}
     await inventory(); // Refresh logical row selectors before restoring.
     for(const f of originalFields){await page.wait(f.read.presenceSelector||f.read.selector);for(const action of f.actions)await page.act(action,baseline.fields[f.id].value??'',{});}
     const finalInventory=await inventory();await onInventory(finalInventory);restored=await page.observe(plan);

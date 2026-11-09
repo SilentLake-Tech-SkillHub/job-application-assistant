@@ -25,6 +25,8 @@ export class TaskRecords{
   return record.value;
  }
  async put(group,id,value){
+  // A company batch is shared across its tasks even when a company tool updates it.
+  if(group==='runs'&&value.id===id&&typeof value.batchHash==='string'&&typeof value.queueId==='string'&&Array.isArray(value.companies))return false;
   const scope=context.getStore()||{},companyId=value.companyId||scope.companyId;
   const taskId=value.taskId||scope.taskId||(group==='runs'&&/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(id)&&companyId?'company-'+companyId+'-'+(value.roleId||scope.roleId||'shared'):null);
   if(!taskId||!['runs','plans'].includes(group)||id.startsWith('batch-prepare-')||durableAsset.test(id)||value.operation==='internal_condition_probe')return false;

@@ -1,7 +1,17 @@
 import {withProfileRecords,recordPlanOf} from './repeat-groups.mjs';
 import {classifyPending} from './field-policy.mjs';
 // The component names the one route for a failure; the agent only carries it out.
-const ROUTE_BY_ERROR=new Map([['REPEAT_CONTRACT_LEARNED',['prepare_plan','batch_prepare']],['ROLE_BROWSER_PAGE_LOST',['role_resume']],['ROLE_OR_LOGIN_STATE_CHANGED_BEFORE_FILL',['role_resume']],['EXISTING_PAGE_NOT_FOUND',['role_resume']],['UNMAPPED_FORM_FIELDS',['form_repair_fields']],['FORM_CONTROL_CONTRACT_CHANGED',['form_repair_fields']],['REPEAT_ADD_CONTROL_CHANGED',['form_repair_fields']]]);
+const ROUTE_BY_ERROR=new Map([
+ ['REPEAT_CONTRACT_LEARNED',['prepare_plan','batch_prepare']],
+ ['REPEAT_ADD_CONTROL_NOT_OBSERVED',['capture_controls','form_patch_controls']],
+ ['REPEAT_ADD_CONTROL_CHANGED',['capture_controls','form_patch_controls']],
+ ['UNMAPPED_FORM_FIELDS_AFTER_EXPANSION',['capture_controls','form_mapping_candidates','form_build_template']],
+ ['ROLE_BROWSER_PAGE_LOST',['role_resume']],
+ ['ROLE_OR_LOGIN_STATE_CHANGED_BEFORE_FILL',['role_resume']],
+ ['EXISTING_PAGE_NOT_FOUND',['role_resume']],
+ ['UNMAPPED_FORM_FIELDS',['form_repair_fields']],
+ ['FORM_CONTROL_CONTRACT_CHANGED',['form_repair_fields']]
+]);
 const REPAIRABLE=new Set(['CONTROL_NOT_ON_PAGE','CONTROL_NOT_IN_TEMPLATE']);
 export function continuationFor({route,plan,verification,template,profile,error}={}){
  if(error)return {state:'technical_block',owner:'agent',requiresUser:false,shouldContinue:true,continueWithOtherCompanies:true,reason:error,routeCode:ROUTE_BY_ERROR.has(error)?error:null,nextTools:ROUTE_BY_ERROR.get(error)||['run_status','form_template_audit'],retry:'only_after_evidence_or_inputs_change'};

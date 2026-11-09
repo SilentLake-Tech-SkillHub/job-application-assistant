@@ -41,6 +41,10 @@ export function safeControlErrorDetails(value){
  if(value&&typeof value==='object'&&Object.getPrototypeOf(value)===Object.prototype&&Object.getOwnPropertyDescriptor(value,'phase')?.value==='browser_operation'){
   const keys=['phase','operation','step','locator','locatorHash','nextAction','requiresUserConfirmation'];
   const descriptors=Object.getOwnPropertyDescriptors(value);
+  if(Object.hasOwn(descriptors,'popupClosed')){
+   if(typeof descriptors.popupClosed.value!=='boolean'||!/^choice_(?:open|menu|option|close|readback)$/.test(descriptors.step?.value))return null;
+   keys.push('popupClosed');
+  }
   if(Reflect.ownKeys(value).length!==keys.length||keys.some(k=>!Object.hasOwn(descriptors,k)||!Object.hasOwn(descriptors[k],'value')))return null;
   value=Object.fromEntries(keys.map(k=>[k,descriptors[k].value]));
   if(!/^[A-Za-z_]{1,80}$/.test(value.operation)||!/^[A-Za-z_]{1,80}$/.test(value.step)||value.locator!==null&&(typeof value.locator!=='string'||value.locator.length>500)||value.locatorHash!==null&&!sha256(value.locatorHash)||!['reacquire_entry_and_preview','reacquire_control','inspect_failure'].includes(value.nextAction)||typeof value.requiresUserConfirmation!=='boolean')return null;

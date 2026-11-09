@@ -47,7 +47,11 @@ export function verifyForm(expected, observed, {now=Date.now(),maxAgeMs=60000}={
       if(field.profileFillBinding&&humanActionReason(field)==='sensitive_identity'){const proof=actual?.profileFillProof;check.status=actual?.present===true&&proof?.status==='verified'&&proof.readbackStable===true&&proof.contextHash===field.profileFillBinding.contextHash&&proof.sourceHash===field.profileFillBinding.sourceHash?'match':'mismatch';check.reason=check.status==='match'?null:proof?.reason||'AUTHORIZED_PROFILE_PROOF_REQUIRED';checks.push(check);continue;}
       check.status=humanActionReason(field)?'needs_user':'construction_required';check.reason=humanActionReason(field)?'USER_ACTION_REQUIRED':'ORDINARY_FIELD_MARKED_USER_ONLY';checks.push(check);continue;
     }
-    if(!actual||actual.present!==true){check.reason='FIELD_NOT_READ';checks.push(check);continue;}
+    if(!actual||actual.present!==true){
+      check.reason='FIELD_NOT_READ';
+      check.readbackStage=observed.inventoryIds.includes(field.id)?'bound_question_readback_missing':'question_not_observed';
+      checks.push(check);continue;
+    }
     if(field.lockedControl&&(actual.disabled!==true||actual.value!==field.lockedControl.value)){check.status='mismatch';check.reason='LOCKED_CONTROL_STATE_CHANGED';checks.push(check);continue;}
     if(isRedactedReadback(actual.value)){check.reason=REDACTED_READBACK_REASON;check.readbackVisibility='redacted';checks.push(check);continue;}
     if(field.value===undefined||field.value===null){
@@ -58,8 +62,10 @@ export function verifyForm(expected, observed, {now=Date.now(),maxAgeMs=60000}={
     }
     if(actual.errors?.length){check.status='invalid';check.reason='FIELD_VALIDATION_ERROR';checks.push(check);continue;}
     if(field.searchableCommitRequired&&(actual.searchableCommitProof?.status!=='verified'||actual.searchableCommitProof.label!==actual.value||actual.searchableCommitProof.blurConfirmed!==true||actual.searchableCommitProof.readbackStable!==true||!(actual.searchableCommitProof.optionClicked===true||actual.searchableCommitProof.mode==='explicit_custom_value'))){check.status='mismatch';check.reason=actual.searchableCommitProof?.reason||'SEARCHABLE_COMMIT_ACTION_PROOF_REQUIRED';const errorDetails=safeControlErrorDetails(actual.searchableCommitProof?.errorDetails);if(errorDetails)check.errorDetails=errorDetails;checks.push(check);continue;}
-    if(field.kind==='choice' && actual.selected!==true){check.status='mismatch';check.reason='DISPLAY_TEXT_WITHOUT_SELECTED_OPTION';checks.push(check);continue;}
     const proof=actual.selectionProof,selectedDisplay=field.selectionDisplayProofAllowed===true&&proof?.kind==='selected_display'&&proof.renderer==='phoenix_select'&&proof.selectedDisplayConfirmed===true&&proof.nonEditable===true&&proof.placeholderAbsent===true;
+    const selectionError=safeControlErrorDetails(proof?.errorDetails);
+    if(selectionError)check.errorDetails=selectionError;
+    if(field.kind==='choice' && actual.selected!==true){check.status='mismatch';check.reason='DISPLAY_TEXT_WITHOUT_SELECTED_OPTION';checks.push(check);continue;}
     if(field.selectionVerificationRequired&&(proof?.status!=='verified'||!(proof.reopenedOptionSelected===true||selectedDisplay)||proof.blurConfirmed!==true||proof.label!==actual.value||field.choiceValue!=null&&proof.value!==field.choiceValue)){check.status='mismatch';check.reason=proof?.reason||'CHOICE_SELECTION_PROOF_REQUIRED';checks.push(check);continue;}
     if(field.choiceRenderer==='phoenix_list_popup'&&(field.choiceContract!=='leaf_v2'||proof?.renderer!==field.choiceRenderer||proof.choiceContract!==field.choiceContract||proof.path!==(field.choicePath??null)||proof.label!==field.value||proof.value!==field.choiceValue||proof.valueAttribute!==(field.choiceValueAttribute??null))){check.status='mismatch';check.reason='LIST_POPUP_IDENTITY_PROOF_REQUIRED';checks.push(check);continue;}
     if(field.kind==='date'){
