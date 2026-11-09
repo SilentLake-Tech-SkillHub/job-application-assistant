@@ -43,3 +43,15 @@ test('entry diagnostics can inspect a unique existing confirmed form after its o
  assert.equal(evidence.pageId,'chrome:live');
  assert.equal(prior.pageId,'chrome:closed');
 });
+test('catalog entry recipes provide the form shape required by a resident browser broker',async()=>{
+ const origin='https://example.test',flow=Object.create(RoleFlow.prototype);
+ const prior={pageId:'chrome:form'},t={taskId:'task',officialId:'123',url:origin+'/campus/position/123/detail',title:'Role'};
+ const entry={kind:'detail_to_form',detailPathPattern:'^/campus/position/(?<id>\\d+)/detail$',formPathPattern:'^/campus/resume/(?<id>\\d+)/apply$',formPathTemplate:'/campus/resume/{id}/apply'};
+ flow.base=async()=>({prior,t,c:{origin},entry});
+ flow.browser={request:async(method,args)=>{
+  if(method==='pageIdentity')return {pageUrl:origin+'/campus/resume/123/apply'};
+  if(method==='entryInspection')return {prefix:args.entry.form.rolePrefix||''};
+  throw Error('UNEXPECTED_MUTATION');
+ }};
+ assert.deepEqual(await flow.inspectEntry({stage:'form'}),{prefix:''});
+});

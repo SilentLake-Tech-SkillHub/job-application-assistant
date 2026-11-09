@@ -4,7 +4,7 @@ const escaped=value=>value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 // Read only the already-bound page. These candidates are evidence for a data
 // preview, never automatic configuration writes or permission to click.
 export async function inspectEntryPage(page,{entry,expectedTitle,stage}){
- const prefix=stage==='form'?entry.form.rolePrefix||'':'';
+ const prefix=stage==='form'?entry?.form?.rolePrefix||'':'';
  const selectors=['h1:visible','h2:visible','h3:visible','[role="heading"]:visible'];
  if(prefix)selectors.push('span:visible:text-matches('+JSON.stringify('^'+escaped(prefix)+'\\s*\\S.+$')+')');
  else if(/\([A-Z]{1,3}\d+\)$/.test(expectedTitle))selectors.push('span:visible:text-matches("\\\\([A-Z]{1,3}[0-9]+\\\\)$")');

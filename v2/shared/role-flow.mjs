@@ -278,7 +278,10 @@ export class RoleFlow{
    stage=args.stage;pageId=pageIdOf(matches[0]);
   }
   if(!['detail','form'].includes(stage))throw Error('ROLE_BOUND_PAGE_NOT_AT_ROLE');
-  return this.browser.request('entryInspection',{pageId,entry:x.entry,expectedTitle:x.t.title,stage});
+  // Flat catalog recipes predate the declarative form object. Normalize the
+  // diagnostic payload at the caller so existing browser brokers can read it.
+  const entry={...x.entry,form:x.entry?.form||{}};
+  return this.browser.request('entryInspection',{pageId,entry,expectedTitle:x.t.title,stage});
  }
  async closeExtraPages(args){const x=await this.base(args);return this.login.locked(x.c,async()=>{
   const bound=typeof this.queues.boundPages==='function'?await this.queues.boundPages():new Map(),keep=new Set(bound.keys());
