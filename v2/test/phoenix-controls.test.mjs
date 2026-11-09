@@ -14,6 +14,22 @@ test('Phoenix never mistakes a custom select/date for an ordinary text input',()
 test('same-name questions in different sections keep independent semantic identity',()=>{const f=fixture();f.add('开始时间',{section:'教育经历'});f.add('开始时间',{section:'工作经历'});const rows=f.read();assert.notEqual(rows[0].selector,rows[1].selector);assert.equal(JSON.parse(rows[0].selector.slice(9)).section,'教育经历');const resolved=f.read({operation:'resolvePhoenix',references:rows.map(x=>x.selector)});assert.equal(resolved.length,2);assert.ok(resolved.every(s=>s.startsWith('body > ')));});
 test('a missing Phoenix question fails rather than resolving another field',()=>{const f=fixture();f.add('姓名');const ref=f.read()[0].selector;f.roots.length=0;assert.throws(()=>f.read({operation:'resolvePhoenix',references:[ref]}),/PHOENIX_QUESTION_NOT_FOUND/);});
 test('PageAdapter resolves Phoenix semantic references for actions and independent readback',async()=>{const ref='phoenixq:'+JSON.stringify({label:'Name'});const calls=[],p=new PageAdapter({evaluate:async(fn,arg)=>{calls.push(arg);return ['resolvePhoenix','resolvePhoenixReadback'].includes(arg.operation)?['#live-current-field']:{pageUrl:'https://fixture.test/form',fields:{name:{value:'actual'}}};}});assert.equal(await p.resolveSelector(ref),'#live-current-field');await p.observe({fields:[{id:'name',read:{kind:'value',selector:ref}}]});assert.equal(calls.at(-1).fields[0].read.selector,'#live-current-field');});
+test('an initial read does not resolve write-only selectors for an unrendered repeat group',async()=>{
+ const addSelector='phoenixq:'+JSON.stringify({part:'scopedRepeatAdd',recordSelector:'.experience-row',addLabel:'Add'});
+ const page=new PageAdapter({evaluate:async(_read,spec)=>{
+  if(spec.operation==='resolvePhoenixReadback')throw Error('REPEAT_SECTION_NOT_FOUND');
+  assert.equal(spec.groups[0].addSelector,undefined);
+  return {groups:{experience:0},fields:{resume:{present:true}}};
+ }});
+ const observation=await page.observe({groups:[{id:'experience',selector:'.experience-row',addSelector,count:2}],fields:[{id:'resume',kind:'file',read:{selector:'#resume',kind:'files'}}]});
+ assert.deepEqual(observation.groups,{experience:0});
+});
+test('a resident broker can read an empty repeat group without resolving its add target',()=>{
+ const f=fixture();
+ const add='phoenixq:'+JSON.stringify({part:'scopedRepeatAdd',recordSelector:'.experience-row',addLabel:'Add'});
+ assert.deepEqual(JSON.parse(JSON.stringify(f.read({operation:'resolvePhoenixReadback',references:[add]}))),[null]);
+ assert.throws(()=>f.read({operation:'resolvePhoenix',references:[add]}),/REPEAT_SECTION_NOT_FOUND/);
+});
 
 test('Phoenix Node normalization accepts raw and encoded transport while DOM needs no URI builtins',async()=>{const {normalizePhoenixReference}=await import('../shared/control-dom.mjs');const raw='phoenixq:'+JSON.stringify({section:'Education',label:'Rate 100%',occurrence:0,part:'native',controlIndex:0});assert.equal(normalizePhoenixReference(raw),raw);assert.equal(normalizePhoenixReference('phoenixq:'+encodeURIComponent(raw.slice(9))),raw);});
 test('section identity can come from the exact visible outer heading without framework class names',()=>{

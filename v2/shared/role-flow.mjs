@@ -263,14 +263,17 @@ export class RoleFlow{
  // 关闭本站点多余的标签：不属于任何任务、也不是登记的账号核对页。岗位页、首页、验证页、空白页直接关；
  // 申请页样式的标签可能有未保存的填写，先截图返回给用户，用户同意后带 closeFormPages 与用户原话再关。只关本站点的标签，不关浏览器。
  async inspectEntry(args){const x=await this.base(args);if(!x.prior?.pageId)throw bindingError('ROLE_PAGE_NOT_BOUND',{nextTool:'role_open'});
-  const identity=await this.browser.request('pageIdentity',{pageId:x.prior.pageId});
-  if(originOf(identity.pageUrl)!==x.c.origin)throw Error('ROLE_BOUND_PAGE_SCOPE_CHANGED');
-  let stage=rolePageKind(x.entry,identity.pageUrl,{roleUrl:x.t.url,roleId:this.roleId(x.t,x.prior)}),pageId=x.prior.pageId;
-  // Diagnostics may read the unique already-open detail of this same confirmed
+  let identity;
+  try{identity=await this.browser.request('pageIdentity',{pageId:x.prior.pageId});}
+  catch(error){if(error.message!=='ROLE_BROWSER_PAGE_LOST'||!args.stage)throw error;}
+  if(identity&&originOf(identity.pageUrl)!==x.c.origin)throw Error('ROLE_BOUND_PAGE_SCOPE_CHANGED');
+  const kind=url=>rolePageKind(x.entry,url,{roleUrl:x.t.url,roleId:this.roleId(x.t,x.prior)});
+  let stage=identity?kind(identity.pageUrl):null,pageId=x.prior.pageId;
+  // Diagnostics may read a unique already-open page of this same confirmed
   // role. Never navigate, open a page or replace the application task binding.
   if(args.stage&&args.stage!==stage){
    const others=await this.boundElsewhere(x.t.taskId),tabs=await this.browser.request('tabs',{pageUrl:x.t.url});
-   const matches=tabs.filter(p=>originOf(p.url)===x.c.origin&&!others.has(pageIdOf(p))&&rolePageKind(x.entry,p.url,{roleUrl:x.t.url,roleId:this.roleId(x.t,x.prior)})===args.stage);
+   const matches=tabs.filter(p=>pageIdOf(p)&&originOf(p.url)===x.c.origin&&!others.has(pageIdOf(p))&&kind(p.url)===args.stage);
    if(matches.length!==1)throw bindingError('ROLE_EXISTING_PAGE_NOT_UNIQUE',{nextTool:'role_close_extra_pages',pageIds:matches.map(pageIdOf).filter(Boolean)});
    stage=args.stage;pageId=pageIdOf(matches[0]);
   }

@@ -66,7 +66,20 @@ export class PageAdapter {
    }
    const raw=await this.page.evaluate(plan?.provider==='feishu'?inventoryFeishuDOM:await currentNative());return plan?.provider==='feishu'&&!plan.rawKeys?canonicalizeInventory(raw).fields:raw;
   }
-  async observe(plan){plan=await this.resolveSpec(plan,{readback:true,keepUploadReferences:true});const result=await this.page.evaluate(await currentNative(),plan.provider==='feishu'&&!plan.selectorsResolved?await this.page.evaluate(remapFeishuSpecDOM,plan):plan);if(plan.roleIdentity)result.roleIdentity=readRoleIdentity(plan.roleIdentity,result.pageUrl);return result;}
+  async observe(plan){
+   // Only observation selectors participate in readback. Write selectors can
+   // legitimately be absent until materials or a preceding action render them.
+   const {fields,groups,after,...scope}=plan;
+   const observation={
+    ...scope,
+    ...(fields?{fields:fields.map(({id,kind,read,userOnly})=>({id,kind,read,userOnly}))}:{}),
+    ...(groups?{groups:groups.map(({id,title,selector,containsSelector})=>({id,title,selector,containsSelector}))}:{})
+   };
+   const resolved=await this.resolveSpec(observation,{readback:true,keepUploadReferences:true});
+   const result=await this.page.evaluate(await currentNative(),resolved.provider==='feishu'&&!resolved.selectorsResolved?await this.page.evaluate(remapFeishuSpecDOM,resolved):resolved);
+   if(resolved.roleIdentity)result.roleIdentity=readRoleIdentity(resolved.roleIdentity,result.pageUrl);
+   return result;
+  }
   async repeatDiscovery(titles){
     const args={operation:'repeatDiscovery',titles};
     const native=await this.page.evaluate(await currentNative(),args);

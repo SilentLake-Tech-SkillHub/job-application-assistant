@@ -97,7 +97,9 @@ async function performChoice(adapter,action,value,family){
    // Toggle only a still-expanded control whose own unique menu is visible.
    if(!owned||await menus.count()!==1||await l.evaluate(n=>n.getAttribute('aria-expanded'))!=='true')throw error;
    locator=action.selector;
-   await trigger.click({timeout:10000});
+   const display=family==='aria'?l.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " atsx-select-selection ")][1]').filter({visible:true}):null;
+   const closeTrigger=display&&await display.count()===1?display:trigger;
+   await closeTrigger.click({timeout:10000});
    locator=menuSelector;
    await menus.waitFor({state:'hidden',timeout:3000});
   }
@@ -203,7 +205,8 @@ async function performChoice(adapter,action,value,family){
   }
   if(!error.details){
    error.operationLocator=locator;
-   error.details={...browserErrorDetails(error,{method:'act',step}),popupClosed:Boolean(menus&&await samePage()&&await menus.count().catch(()=>1)===0)};
+   const popupClosed=Boolean(menus&&await samePage()&&await menus.count().catch(()=>1)===0);
+   error.details=browserErrorDetails(error,{method:'act',step:popupClosed?step:step+'_unrestored'});
   }
   throw error;
  }

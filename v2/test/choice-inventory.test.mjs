@@ -27,10 +27,10 @@ test('a target can be located in a later virtual window without claiming a compl
  assert.equal(r.reason,'target_visible');assert.equal(r.complete,false);assert.equal(i,1);
 });
 
-function fixture({editable=true,tree=false,leaf=true,empty=false,owned=false,stuck=false,toggle=false}={}){
+function fixture({editable=true,tree=false,leaf=true,empty=false,owned=false,stuck=false,toggle=false,displayToggle=false}={}){
  let opened=false,query='',selection='Original',writes=[],menuSelectors=[];
  const node={tagName:'INPUT',type:editable?'search':'text',readOnly:!editable,disabled:false,get value(){return query;},getAttribute:k=>k==='role'?'combobox':k==='aria-controls'&&owned?'bound-menu':k==='aria-expanded'&&owned?String(opened):null,querySelector:()=>null};
- const input={count:async()=>1,waitFor:async()=>{},evaluate:async f=>f(node),innerText:async()=>'',filter(){return this;},fill:async v=>{query=v;writes.push(v);},press:async k=>{if(k==='Escape'&&!stuck)opened=false;},click:async()=>{opened=toggle?!opened:true;},locator:()=>none};
+ const input={count:async()=>1,waitFor:async()=>{},evaluate:async f=>f(node),innerText:async()=>'',filter(){return this;},fill:async v=>{query=v;writes.push(v);},press:async k=>{if(k==='Escape'&&!stuck)opened=false;},click:async()=>{opened=toggle?!opened:true;},locator:s=>displayToggle&&s.includes(' atsx-select-selection ')?{...input,click:async()=>{opened=!opened;}}:none};
  const none={count:async()=>0,filter(){return this;}};
  const display={...input,innerText:async()=>selection};
  const option={...input,evaluate:async f=>f({tagName:'DIV',textContent:'中国',hasAttribute:()=>false,getAttribute:k=>k==='aria-selected'?String(selection==='中国'):null}),click:async()=>{selection='中国';query='';opened=false;}};
@@ -48,11 +48,16 @@ test('a uniquely owned menu can be closed by its still-expanded trigger when key
  assert.equal(r.restored,true);
  assert.equal(f.state().opened,false);
 });
+test('an ATSX control closes via its visible selection wrapper when the combobox input does not toggle',async()=>{
+ const f=fixture({editable:false,owned:true,stuck:true,displayToggle:true});
+ const r=await performControl(f.adapter,{method:'dropdown_inspect',selector:'#control',selectedSelector:'#selected'},null);
+ assert.equal(r.restored,true);
+ assert.equal(f.state().opened,false);
+});
 test('an unclosed menu reports the close step and preserves the failure for dependent work',async()=>{
  const f=fixture({editable:false,owned:true,stuck:true});
  await assert.rejects(performControl(f.adapter,{method:'dropdown_inspect',selector:'#control',selectedSelector:'#selected'},null),error=>{
-  assert.equal(error.details?.step,'choice_close');
-  assert.equal(error.details?.popupClosed,false);
+  assert.equal(error.details?.step,'choice_close_unrestored');
   return true;
  });
 });

@@ -271,6 +271,12 @@ export function controlDOM(spec){
  // This never grants presence, equivalence or a successful field check.
  // Writes retain strict resolution; malformed or changed controls still fail.
  if(['resolvePhoenixAliases','resolvePhoenixReadback'].includes(spec?.operation))return (spec.references||[]).map(reference=>{
+  // Old brokers can still send write targets in a readback request. The
+  // add button is resolved strictly by the repeat writer after layout changes.
+  if(spec.operation==='resolvePhoenixReadback'){
+   let part;try{part=JSON.parse(reference.slice(9)).part;}catch{throw Error('PHOENIX_REFERENCE_INVALID');}
+   if(['repeatAdd','scopedRepeatAdd'].includes(part))return null;
+  }
   try{return phoenixResolve(reference);}catch(error){if(error.message==='PHOENIX_QUESTION_NOT_FOUND')return null;throw error;}
  });
  if(spec?.operation==='recruiting_disclosure'){

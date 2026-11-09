@@ -28,3 +28,18 @@ test('detail diagnostics read only the same role unique existing page and preser
  flow.boundElsewhere=async()=>new Map([['chrome:detail','other-task']]);await assert.rejects(flow.inspectEntry({stage:'detail'}),/ROLE_EXISTING_PAGE_NOT_UNIQUE/);
  assert.equal(calls.some(c=>['openPage','act','roleEnterApplication'].includes(c.method)),false);
 });
+test('entry diagnostics can inspect a unique existing confirmed form after its old binding is lost',async()=>{
+ const origin='https://example.test',flow=Object.create(RoleFlow.prototype),prior={pageId:'chrome:closed'};
+ const t={taskId:'task',officialId:'job',url:origin+'/detail?job=job',title:'Role'};
+ const entry={kind:'declarative_transition',detail:{location:{pathnamePattern:'^/detail$',query:{job:'$roleId'}}},form:{location:{pathnamePattern:'^/form$',query:{job:'$roleId'}}}};
+ flow.base=async()=>({prior,t,c:{origin},entry});flow.boundElsewhere=async()=>new Map();
+ flow.browser={request:async(method,args)=>{
+  if(method==='pageIdentity')throw Error('ROLE_BROWSER_PAGE_LOST');
+  if(method==='tabs')return [{id:'live',browserChannel:'chrome',url:origin+'/form?job=job'},{id:'wrong',browserChannel:'chrome',url:origin+'/form?job=other'}];
+  if(method==='entryInspection')return args;
+  throw Error('UNEXPECTED_MUTATION');
+ }};
+ const evidence=await flow.inspectEntry({stage:'form'});
+ assert.equal(evidence.pageId,'chrome:live');
+ assert.equal(prior.pageId,'chrome:closed');
+});
