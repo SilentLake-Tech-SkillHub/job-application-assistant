@@ -66,6 +66,11 @@ test('a binding carried over from a re-import keeps using that tab (no new tab) 
  const f=fixture({tabs:[['chrome:kept',home]],prior:{queueId:'queue-1',taskId:'task-1',pageId:'chrome:kept',status:'rebind_required'}}),r=await f.flow.open({});
  assert.equal(r.pageId,'chrome:kept');assert.equal(f.pages.size,1);const o=opens(f);assert.equal(o.length,1);assert.equal(o[0].pageId,'chrome:kept');assert.equal(o[0].pageUrl,roleLink);
 });
+test('role advance refuses a task for a different explicitly requested role before opening a tab',async()=>{
+ const f=fixture();
+ await assert.rejects(f.flow.advance({roleId:'J000157',authorization:{login:true,evidence:'resume requested role'}}),/ROLE_TASK_SELECTION_MISMATCH/);
+ assert.equal(f.calls.length,0);
+});
 test('role advance verifies an inherited application tab after re-import before resuming it',async()=>{
  const pageId='chrome:kept';
  const f=fixture({officialId:siteId,url:detail(siteId),tabs:[[pageId,form(siteId)]],

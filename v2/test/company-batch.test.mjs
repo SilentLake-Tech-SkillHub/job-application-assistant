@@ -12,8 +12,23 @@ async function fixture(fn,n=24){const root=await mkdtemp(path.join(os.tmpdir(),'
  const addRole=async i=>{const d=docs[i],S=d['站点'][0]['站点编码'],J='J'+pad(100+i,6);d['岗位'].push(role(J,S,'Role',d['站点'][0]['站点']+'/role/2',{'志愿顺序':2}));d['批次']['选中岗位'].push(J);await saveCompany(dir,confirm(d));return J;};
  const catalog=await new CompanyDirectory({handoffDir:dir}).load();
  const store=new Store(path.join(root,'store')),queues=new RoleQueue({root:path.join(root,'queues'),catalog,inputAdapter:handoffInput(dir)});let now=1000000;const batch=new CompanyBatch({store,queues,catalog,browser:{executionCapabilities:async()=>({channels:{chrome:{available:true,provider:'local_cdp_chrome'},iab:{available:true,provider:'official_host_browser_sdk'}},capability:{status:'detected',channels:['chrome','iab'],mode:'dual'}})},clock:()=>now,leaseRoot:root});
- try{await fn({catalog,addRole,store,queues,batch,setChannels:async(i,channels)=>{docs[i]['批次']['执行']={browserChannels:channels};await saveCompany(dir,confirm(docs[i]));},tick:()=>now+=31*60*1000});}finally{await rm(root,{recursive:true,force:true});await rm(dir,{recursive:true,force:true});}}
+ const submitRole=async (i,id)=>{const doc=docs[i];doc['岗位'].find(r=>r['岗位编码']===id)['投递状态']='岗位已投递';await saveCompany(dir,confirm(doc));};
+ try{await fn({catalog,addRole,submitRole,store,queues,batch,setChannels:async(i,channels)=>{docs[i]['批次']['执行']={browserChannels:channels};await saveCompany(dir,confirm(docs[i]));},tick:()=>now+=31*60*1000});}finally{await rm(root,{recursive:true,force:true});await rm(dir,{recursive:true,force:true});}}
 test('default takes ten companies per channel, not ten roles; repeat take cannot duplicate',()=>fixture(async({batch,addRole})=>{await addRole(0);const b=await batch.create({authorizationRef:'synthetic approved batch'}),r=await batch.take(b);assert.deepEqual(r.activeCompanies,{chrome:10,iab:10});assert.equal(r.assignments.length,20);assert.equal(r.assignments[0].tasks.length,2);assert.equal(r.pendingCompanies,4);assert.equal(r.browserExecuted,false);assert.equal((await batch.take(b)).assignments.length,0);}));
+test('an existing batch drops submitted roles from dispatch and keeps other roles and their task IDs',()=>fixture(async({batch,queues,addRole,submitRole})=>{
+ const next=await addRole(0);
+ const original=await batch.create({authorizationRef:'confirmed batch'});
+ const nextTask=original.queue.tasks.find(t=>t.roleId===next);
+ await queues.put(nextTask.taskId,{queueId:original.queue.queueId,taskId:nextTask.taskId,pageId:'chrome:retained'});
+ await submitRole(0,'J000001');
+ await submitRole(1,'J000002');
+ const readback=await batch.status(original);
+ assert.deepEqual(readback.companies.map(c=>c.roleCount),[1,0]);
+ assert.deepEqual(readback.companies[0].protectedRoles,[{roleId:'J000001',reason:'already_submitted'}]);
+ const taken=await batch.take(original);
+ assert.deepEqual(taken.assignments.map(a=>[a.queueId,a.tasks.map(t=>t.taskId)]),[[original.queue.queueId,[nextTask.taskId]]]);
+ assert.equal((await queues.read(nextTask.taskId)).pageId,'chrome:retained');
+},2));
 test('company-scoped resume and batch-scoped queue refresh share one current batch record',()=>fixture(async({batch,store})=>{
  const b=await batch.create({authorizationRef:'prepare'});
  const [assignment]=(await batch.take(b)).assignments;

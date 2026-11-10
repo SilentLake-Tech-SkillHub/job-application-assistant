@@ -23,7 +23,7 @@
 ## 执行顺序
 
 1. 以相同私有档案、队列目录、浏览器socket、申请资产目录启动两个MCP；`role_queue_import`先离线接收方案。
-2. `role_advance({queueId,queueHash,taskId,authorization:{login:true,evidence}})` 连续推进本岗位到可填写状态；本次任务已有标签直接复用。
+2. 从派发结果按本轮明确的岗位编码选择任务。定向续跑用 `role_advance({queueId,queueHash,taskId,roleId,authorization:{login:true,evidence}})` 连续推进本岗位到可填写状态；本次任务已有标签直接复用。
 3. 返回 needs_user_login 时交给用户在原分身登录；用户完成后再次调用 role_advance，组件实际复查登录态。
 4. 已登录后组件内部校验目标 URL 与岗位，并进入对应填写页；ready_to_fill 后继续原准备流程。
 5. `role_prepare` 核对同一任务→全部字段离线编译→填写→独立只读核验；新增问题强制登记私有JSON。`role_verify`可额外核验；`role_screenshot`保存原标签截图并遮盖密码/短信码。

@@ -2,11 +2,19 @@ import {readFile,writeFile,mkdir,rename,unlink,readdir} from 'node:fs/promises';
 import {createHash,randomUUID} from 'node:crypto';
 import path from 'node:path';
 import {acquireLease,leasePath,defaultLeaseRoot} from './leases.mjs';
-import {assertHandoffUnchanged,readHandoffCompanies,roleView,combinedSha} from './company-directory.mjs';
+import {assertHandoffUnchanged,readHandoffCompanies,readRoleOutcomes,roleView,combinedSha} from './company-directory.mjs';
 export const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 // 任务编号固定：同一批次的同一岗位永远是同一个 taskId，重新导入时页面绑定按它延续。
 export const stableTaskId=(batchId,roleId)=>{const h=createHash('sha256').update(String(batchId)+'|'+String(roleId)).digest('hex');return [h.slice(0,8),h.slice(8,12),'5'+h.slice(13,16),'8'+h.slice(17,20),h.slice(20,32)].join('-');};
 const isQueue=v=>v&&Array.isArray(v.tasks)&&typeof v.batchId==='string';
+function protectedReason(role){
+ if(role.applicationStatus==='岗位已投递')return 'already_submitted';
+ if(role.applicationStatus==='岗位失效/关闭')return 'role_closed';
+ if(['submission_uncertain','application_blocked','user_skipped'].includes(role.applicationOutcome?.event))return 'outcome_requires_resolution';
+ if(role.applicationStatus&&role.applicationStatus!=='岗位待投递')return 'not_pending';
+ return null;
+}
+
 // 队列只接受用户正向评审确认后的各公司宽表（inputAdapter = queue-config.mjs handoffInput）；旧的“公司方案”文件或对象输入已删除。
 export class RoleQueue{
  constructor({root,catalog,inputAdapter}){if(typeof inputAdapter!=='function')throw Error('HANDOFF_INPUT_ADAPTER_REQUIRED');Object.assign(this,{root,catalog,inputAdapter});}
@@ -37,11 +45,9 @@ export class RoleQueue{
     if(!r.roleId||!r.title||!site||u.protocol!=='https:'||u.origin!==site.origin||u.username||u.password||/\/(?:login|sign[-_]?in)\/?$/.test(u.pathname))throw Error('INVALID_CONFIRMED_ROLE_URL');
     if(r.applyUrl){const a=new URL(r.applyUrl);if(a.protocol!=='https:'||a.origin!==site.origin||a.username||a.password)throw Error('INVALID_ROLE_APPLICATION_URL');}
     if(identities.has(r.roleId))throw Error('DUPLICATE_CONFIRMED_ROLE');identities.add(r.roleId);
-    const companyId=company.id,roleId=r.roleId,status=r.applicationStatus;
-    if(status==='岗位已投递'){protectedRoles.push({companyId,roleId,reason:'already_submitted'});continue;}
-    if(status==='岗位失效/关闭'){protectedRoles.push({companyId,roleId,reason:'role_closed'});continue;}
-    if(status!=='岗位待投递')throw Error('ROLE_APPLICATION_STATE_UNRESOLVED');
-    if(['submission_uncertain','application_blocked','user_skipped'].includes(r.applicationOutcome?.event)){protectedRoles.push({companyId,roleId,reason:'outcome_requires_resolution'});continue;}
+    const companyId=company.id,roleId=r.roleId,reason=protectedReason(r);
+    if(reason){protectedRoles.push({companyId,roleId,reason});continue;}
+    if(r.applicationStatus!=='岗位待投递')throw Error('ROLE_APPLICATION_STATE_UNRESOLVED');
     // 任务只存编码与顺序；链接、标题、材料执行时现读该公司宽表（见 hydrate）。
     tasks.push({taskId:stableTaskId(input.batchId,roleId),companyId,siteId:r.siteId,companyCode:c.companyId,roleId,order:tasks.length+1,companyOrder:sequence?sequence.indexOf(c.companyId)+1:c.order,roleOrder:r.order});
    }
@@ -92,17 +98,34 @@ export class RoleQueue{
  // 所有任务记录里已绑定的标签（pageId → taskId），用于“这张标签是不是别的任务的”。
  async boundPages(){const out=new Map();for(const s of await this.entries())if(!isQueue(s)&&typeof s.pageId==='string'&&s.taskId)out.set(s.pageId,s.taskId);return out;}
  // 交接任务的链接、标题、材料：核对该公司宽表仍是导入时确认的那一版后现读；别家变了不影响这一家。
- async hydrate(q,task){
-  await assertHandoffUnchanged(q.source,task.companyCode);
-  const doc=JSON.parse(await readFile(q.source.files[task.companyCode].file,'utf8'));
+ async hydrate(q,task,{showProtected=false,outcomes}={}){
+  const doc=await assertHandoffUnchanged(q.source,task.companyCode,{allowCompleted:true});
   const r=(doc['岗位']||[]).find(x=>x['岗位编码']===task.roleId);
   if(!r||r['站点编码']!==task.siteId)throw Error('ROLE_INPUT_CHANGED');
-  const v=roleView(r,0);
-  return {...task,title:v.title,url:v.url,applyUrl:v.applyUrl||null,officialId:v.officialId,materials:v.materials};
+  const handoffDir=path.dirname(path.dirname(q.source.files[task.companyCode].file));
+  const v=roleView(r,0,outcomes??await readRoleOutcomes(handoffDir));
+  const reason=protectedReason(v);
+  const current={...task,title:v.title,url:v.url,applyUrl:v.applyUrl||null,officialId:v.officialId,materials:v.materials};
+  if(reason&&showProtected)return {...current,protectedReason:reason};
+  if(reason||v.applicationStatus!=='岗位待投递'||doc['批次']['状态']==='已回写')throw Error('ROLE_INPUT_CHANGED');
+  return current;
  }
- async hydrateAll(q){const out=[];for(const t of q.tasks){try{out.push(await this.hydrate(q,t));}catch(e){if(e.message!=='ROLE_INPUT_CHANGED')throw e;out.push({...t,inputChanged:true});}}return out;}
+ async hydrateAll(q){
+  const source=Object.values(q.source.files)[0];
+  const outcomes=source?await readRoleOutcomes(path.dirname(path.dirname(source.file))):{};
+  const out=[];
+  for(const t of q.tasks){
+   try{out.push(await this.hydrate(q,t,{showProtected:true,outcomes}));}
+   catch(error){if(error.message!=='ROLE_INPUT_CHANGED')throw error;out.push({...t,inputChanged:true});}
+  }
+  return out;
+ }
  async hydratedTasks(queueId){const q=await this.read(queueId);return new Map((await this.hydrateAll(q)).map(t=>[t.taskId,t]));}
- async public(q){return {queueId:q.id,queueHash:q.queueHash,inputKind:q.inputKind,executionMode:q.executionMode,parallelRoles:q.parallelRoles,tasks:await this.hydrateAll(q),protectedRoles:q.protectedRoles,browserAccess:false,submission:'forbidden'};}
+ async public(q){
+  const live=await this.hydrateAll(q);
+  const protectedRoles=[...(q.protectedRoles||[]),...live.filter(t=>t.protectedReason).map(t=>({companyId:t.companyId,roleId:t.roleId,reason:t.protectedReason}))];
+  return {queueId:q.id,queueHash:q.queueHash,inputKind:q.inputKind,executionMode:q.executionMode,parallelRoles:q.parallelRoles,tasks:live.filter(t=>!t.protectedReason),protectedRoles,browserAccess:false,submission:'forbidden'};
+ }
  // 某家公司在导入后经用户确认补了材料或改了链接（确认作用域 materials_only / links_only，且由导入时那一版直接改来、选岗不变）：
  // 只换这一家的确认版本并重置这一家任务的核验状态；链接变了的任务回到重新打开岗位。其它公司不受影响。
  async refreshMaterials({queueId,queueHash,authorizationRef}){
@@ -140,5 +163,5 @@ export class RoleQueue{
   delete q.queueHash;q.queueHash=digest(q);await this.put(q.id,q);return {...await this.public(q),refreshedCompanies:refreshed};
  }
  async get({queueId,queueHash}){const q=await this.read(queueId),{queueHash:h,...payload}=q;if(h!==queueHash||digest(payload)!==h)throw Error('ROLE_QUEUE_HASH_MISMATCH');return q;}
- async task(args){const q=await this.get(args),index=q.tasks.findIndex(t=>t.taskId===args.taskId);if(index<0)throw Error('ROLE_NOT_IN_CONFIRMED_QUEUE');const target=q.tasks[index];const predecessors=q.tasks.slice(0,index).filter(t=>q.executionMode==='parallel_companies'?t.companyId===target.companyId&&!q.parallelRoles:q.executionMode!=='parallel_roles'||t.companyId!==target.companyId);for(const t of predecessors){let state;try{state=await this.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}if(state?.status!=='ready_for_user_review')throw Error('CONFIRMED_ROLE_ORDER_BLOCKED');}return {q,t:await this.hydrate(q,target)};}
+ async task(args){const q=await this.get(args),index=q.tasks.findIndex(t=>t.taskId===args.taskId);if(index<0)throw Error('ROLE_NOT_IN_CONFIRMED_QUEUE');const target=await this.hydrate(q,q.tasks[index]);const predecessors=q.tasks.slice(0,index).filter(t=>q.executionMode==='parallel_companies'?t.companyId===target.companyId&&!q.parallelRoles:q.executionMode!=='parallel_roles'||t.companyId!==target.companyId);for(const t of predecessors){let state;try{state=await this.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}if(state?.status==='ready_for_user_review')continue;const prior=await this.hydrate(q,t,{showProtected:true}).catch(error=>{if(error.message!=='ROLE_INPUT_CHANGED')throw error;return null;});if(!prior?.protectedReason||prior.protectedReason==='outcome_requires_resolution')throw Error('CONFIRMED_ROLE_ORDER_BLOCKED');}return {q,t:target};}
 }

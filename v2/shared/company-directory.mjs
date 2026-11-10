@@ -148,10 +148,15 @@ export async function readHandoffCompanies({handoffDir=handoffDirFromEnv(),state
  return {batchId:[...ids][0],files};
 }
 
+export async function readRoleOutcomes(handoffDir){
+ try{return JSON.parse(await readFile(path.join(path.resolve(handoffDir),'投递回传.json'),'utf8')).roles||{};}
+ catch(error){if(error.code==='ENOENT')return {};throw error;}
+}
+
 // 投递输入只来自用户正向评审确认后的公司宽表；角色身份是岗位编码，链接、标题、材料都是现读的值。
 export async function readHandoffBatch({handoffDir=handoffDirFromEnv()}={}){
  const {batchId,files}=await readHandoffCompanies({handoffDir});
- let outcomes={};try{outcomes=JSON.parse(await readFile(path.join(path.resolve(handoffDir),'投递回传.json'),'utf8')).roles||{};}catch(e){if(e.code!=='ENOENT')throw e;}
+ const outcomes=await readRoleOutcomes(handoffDir);
  files.sort((a,b)=>(a.doc['批次']['公司顺序']||0)-(b.doc['批次']['公司顺序']||0)||(a.code<b.code?-1:1));
  const companies=files.map(({code,doc},i)=>{
   const roles=new Map((doc['岗位']||[]).map(r=>[r['岗位编码'],r]));
@@ -168,19 +173,23 @@ export async function readHandoffBatch({handoffDir=handoffDirFromEnv()}={}){
 }
 // outcomes：投递回传.json 的 roles（按岗位编码）；已投递/已关闭的岗位和待用户处理的结果在组队列时受保护。
 export function roleView(r,j,outcomes={}){
- const o=outcomes[r['岗位编码']];
+ const o=outcomes[r['岗位编码']],status=r['投递状态'];
+ const submitted=status==='岗位已投递'||o?.event==='submission_confirmed';
+ const applicationStatus=submitted?'岗位已投递':o?.event==='role_closed'?'岗位失效/关闭':status;
  return {id:r['岗位编码'],roleId:r['岗位编码'],siteId:r['站点编码'],officialId:r['官方岗位ID']??null,title:r['岗位名称'],url:r['岗位链接'],
   ...(r['投递链接']?{applyUrl:r['投递链接']}:{}),materials:r['材料'],order:j+1,
   preference:{group:r['志愿分组']||'公司',rank:r['志愿顺序']||1,bu:r.BU||null},selected:true,
-  applicationStatus:o?.event==='submission_confirmed'?'岗位已投递':o?.event==='role_closed'?'岗位失效/关闭':'岗位待投递',...(o?{applicationOutcome:{event:o.event}}:{})};
+  applicationStatus,...(o?{applicationOutcome:{event:o.event}}:{})};
 }
 
 // 核对某家（或全部）公司文件仍是导入时确认的那一版。
-export async function assertHandoffUnchanged(source,code=null){
+export async function assertHandoffUnchanged(source,code=null,{allowCompleted=false}={}){
  for(const c of code?[code]:Object.keys(source.files||{})){
   const recorded=source.files?.[c];if(!recorded)throw Error('ROLE_INPUT_CHANGED');
   let doc;try{doc=JSON.parse(await readFile(recorded.file,'utf8'));}catch(e){if(e.code==='ENOENT')throw Error('ROLE_INPUT_CHANGED');throw e;}
   const b=doc['批次']||{};
-  if(!HANDED.includes(b['状态'])&&b['状态']!=='等待反向评审'||b['批次编号']!==source.batchId||b['确认']?.contentSha256!==recorded.contentSha256||contentSha(doc)!==recorded.contentSha256)throw Error('ROLE_INPUT_CHANGED');
+  const validState=HANDED.includes(b['状态'])||b['状态']==='等待反向评审'||allowCompleted&&b['状态']==='已回写';
+  if(!validState||b['批次编号']!==source.batchId||b['确认']?.contentSha256!==recorded.contentSha256||contentSha(doc)!==recorded.contentSha256)throw Error('ROLE_INPUT_CHANGED');
+  if(code)return doc;
  }
 }

@@ -89,7 +89,9 @@ export class RoleFlow{
  }
  async advance(args){
   if(!args.authorization?.login||!args.authorization.evidence?.trim())throw Error('LOGIN_AUTHORIZATION_REQUIRED');
-  const {t}=await this.queues.task(args);let prior;try{prior=await this.queues.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
+  const {t}=await this.queues.task(args);
+  if(args.roleId&&args.roleId!==t.roleId)throw Error('ROLE_TASK_SELECTION_MISMATCH');
+  let prior;try{prior=await this.queues.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
   if(prior?.status==='ready_for_user_review')return {status:prior.status,taskId:t.taskId,pageId:prior.pageId,verifyRunId:prior.verifyRunId,submission:'not_performed'};
   const canResume=prior?.pageId&&prior.status!=='rebind_required';
   let result=canResume?await this.resume(args):await this.open(args);
