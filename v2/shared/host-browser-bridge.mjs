@@ -11,14 +11,15 @@ import http from 'node:http';import {mkdir,chmod,lstat} from 'node:fs/promises';
 import {READY_TIMEOUT_MS,matchEntryPath} from './entry-recipe.mjs';
 import {PageAdapter} from './ui-page.mjs';
 import {screenshotHostTab} from './host-screenshot.mjs';
+import {runtimeAgent} from './agent-registry.mjs';
 // Runs INSIDE the trusted host SDK session, with an explicitly provided browser
 // object. It never launches a browser, attaches CDP, or discovers credentials.
 export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,mode='iab',inventory,hostEnvironment=process.env,onError=()=>{},deferBrowserCalls=false,fileUpload,reaInspect,pageAdapter=PageAdapter}){
  if(!['iab','chrome'].includes(mode)||typeof inventory!=='function'||!socketPath?.startsWith('/')||Buffer.byteLength(socketPath)>100||!allowedOrigins?.length)throw Error('INVALID_HOST_BRIDGE_CONFIGURATION');
  const browsers=await inventory(),entry=browsers.find(item=>item.id===browser?.browserId),expected=mode==='iab'?'iab':null;
  if(!entry||mode==='iab'&&entry.type!==expected||mode==='chrome'&&!['extension','cdp'].includes(entry.type))throw Error('HOST_BROWSER_PROVIDER_NOT_VERIFIED');
- const owner=entry.metadata?.codexSessionId||hostEnvironment.CODEX_THREAD_ID||hostEnvironment.DSH_SESSION_ID;
- if(!owner)throw Error('HOST_BROWSER_SESSION_ID_REQUIRED');
+ const agent=await runtimeAgent(hostEnvironment);
+ const owner=agent?.executionKey||null;
  const sessionId=createHash('sha256').update(JSON.stringify({owner,browserId:entry.id,type:entry.type,extensionInstanceId:entry.metadata?.extensionInstanceId||null})).digest('hex');
  const executor={provider:'official_host_browser_sdk',verified:true,sessionId,browserId:entry.id,browserType:entry.type,profileName:entry.profileName||null,reason:null};
  await mkdir(path.dirname(socketPath),{recursive:true,mode:0o700});

@@ -1,52 +1,30 @@
-# 对话级 Hook 作用域
+# 投递 Hook 与执行身份
 
-Hook 可以由宿主在用户或项目配置中发现，但工作流的启用范围必须是对话，不能是 cwd、工作区或公司。未注册的对话在读取流程、核对 Hash 或回执前立即返回，不注入申请规则、不拦截读取 Skill、状态登记或其他工具。
+任意对话可以直接调用登录、申请 MCP 或固定 CLI。第一个阶段调用校验指令和短路由的 Hash，按需注入流程，然后进入组件。对话 ID 和回合 ID 仅用于记录本轮提示和接续结果。宿主事件缺少这些字段时，仍可执行经组件校验的阶段调用。
 
-启用由当前 SKILL 的宿主执行器调用 `hooks/conversation_scope.py enable`。脚本仅读取宿主提供的 `CODEX_THREAD_ID` / `CODEX_SESSION_ID` / `DSH_SESSION_ID`，不接受模型指定另一个对话 ID；缺失或冲突时拒绝注册。`DSH_SESSION_ID` 与 DSH Hook payload 的 `session_id` 同源，因此加载回执可按同一对话匹配。参数为私有 scope 文件、用户已确认指令文件及授权依据。私有目录路径由安装端传入，产品代码不写死用户路径或对话 ID。
+Agent 编码与组标识来自宿主部署和已有注册簿。分支保存独立对话历史，同一 Agent 或 Agent 组沿用稳定执行身份。组成员各自保留编码。内置浏览器桥使用真实浏览器标识及稳定执行主体；实际目标页仍由岗位、原标签及文档代际验证。
+
+`hooks/workflow_hook.py` 通过 `RECRUITING_WORKSPACE_ROOT`、`RECRUITING_WORKFLOW_POLICY`、`RECRUITING_WORKFLOW_LOCK`、`RECRUITING_WORKFLOW_SCOPE` 和 `RECRUITING_WORKFLOW_STATE` 接收部署路径。启用预加载的对话受组件固定入口约束。所有投递操作都使用组件入口。维护宿主由其部署角色限制为只读检查。CLI 和 MCP 的共同执行入口逐请求校验实际接口和核心版本，`runtime_info` 用于诊断与发布读回。
+
+## 对话提示设置
+
+可选启用预加载，使选定对话在回合开始时收到投递路由。登记有效期固定 12 小时，重复启用不续期。新对话可直接调用组件；需要预加载时，可单独设置。
 
 ```sh
 python3 hooks/conversation_scope.py enable --scope-file <private-scope.json> --policy-file <accepted-policy.md> --authorization-ref <user-request-reference>
 python3 hooks/conversation_scope.py disable --scope-file <private-scope.json>
 ```
 
-角色取值与部署配置来源见[宿主职责](host-integration.md#宿主职责由部署配置决定)。Hook 与 MCP 必须读取同一部署角色；不按 Agent 品牌或会话 ID 前缀决定权限。配置为 `maintainer` 的宿主调用 `enable` 一律拒绝（`HOST_ROLE_MAINTAINER_CANNOT_ENABLE_EXECUTION`），`disable` 仍可用于清理自己的旧登记；两个 MCP 在维护宿主下只回答只读检查，所有阶段工具在执行前返回 `HOST_ROLE_MAINTAINER_READ_ONLY` 并停止续跑，启动器不启动或附着浏览器。
-
-已启用的执行会话统一受 组件固定入口边界（MCP 或 scripts/cli.mjs）约束；维护角色即使留有旧 scope 登记，也不加载执行路由，MCP 仍独立拒绝阶段工具。当前会话可以用作用域脚本 `disable` 退出执行后处理经授权的维护，只放行组件固定 CLI，不放行其他 shell 替代执行。重复启用同一对话幂等；其他对话的记录保留。停用仅移除当前对话，不删除其他对话、表单或业务状态。新会话与 fork 默认未启用；确需继承时由用户明确启动，不能仅因目录相同自动继承。已获准的子 Agent 是否共享作用域，按宿主事件的真实父对话身份核验，不启动额外 Agent 作为默认要求。
-
-加载回执至少绑定对话 ID、回合 ID、指令 Hash。对话间不得复用回执。Hook 负责注入和回执检查，填写前的建库／映射／冻结等事实由 MCP 内部阶段门禁验证；加载成功不代表业务准备完成。
-
-验收覆盖：A 启用而 B 不受影响；A/B 可独立启停；fork 不默认继承；当前对话身份缺失或冲突不写状态。宿主实际触发及工具阻断另行验证，不能只凭脚本单元测试宣称全链路生效。速度目标不变，不引入逐动作串行模型审批。
-
-## 修复后的职责
-
-`hooks/route.md` 仅列具体 Skill/MCP 调用顺序及 IF 复用分支；详细规则按需读取。`hooks/workflow_hook.py` 是可部署的宿主入口，通过 `RECRUITING_WORKSPACE_ROOT`、`RECRUITING_WORKFLOW_POLICY`、`RECRUITING_WORKFLOW_LOCK`、`RECRUITING_WORKFLOW_SCOPE` 和 `RECRUITING_WORKFLOW_STATE` 接收私有路径，公开代码不写入用户或对话标识。锁同时绑定详细依据与短路由的 Hash。
-
-前置 Hook 对已启用执行会话约束组件外操作，并对申请写入检查同轮回执；允许组件 Skill/源码读取与 MCP 检查。未启用的维护会话不进入此执行门禁，组件修改仍受项目维护授权约束。当前已启用的 V2 对话不得误调旧 recruiting-form 写入；其他对话仍不受影响。真正的顺序依据由 MCP 的 `workflow_next`、资产覆盖声明、问题映射、冻结方案和读回证据决定，Hook 不把提示词加载当成业务完成，也不直接调度模型回合。
-
-启动时读取两模块的 `runtime_info`，核对实际代码版本；IAB 仍通过活跃宿主执行上下文中的 `withHostBrowserBridge` 运行，缺少桥接时明确返回阻塞，禁止退回 Chrome。MCP 配置写入不代表当前进程已重载。
+提示设置只使用宿主提供的当前对话 ID。停用只移除本对话的预加载设置；下一次阶段调用仍按实际组件流程执行。组件软锁、执行宿主角色及岗位授权由各自来源决定。
 
 ## DSH 驻留宿主验收
 
 配置文件里写有插件名不等于运行成功。先用宿主的 `pluginInventory.list` 核对目标 Hook 插件 `enabled=true` 且 `fiberPhase=active`；仅 enabled 而 phase 为空时检查正式插件管理接口的实际加载错误。插件包必须能从该 profile 解析；开发安装可用已存在、已核实本机入口的 file URL，不能用另一个宿主或新浏览器代替修复。通过宿主插件管理接口重载目标插件后，读回状态。
 
-随后由执行 Agent 在自己的宿主上下文调用作用域 enable，并在同一真实会话验证 UserPromptSubmit、PreToolUse、PostToolUse 和 continuation 文件。错误响应可能由宿主包装为 `Error: {JSON}`，仍必须保留技术待办。每个阶段的 pending 在 SDK 校验之前登记；参数失败不能使 Stop 静默放行。只有组件已核实的用户等待、完整审阅或技术交接允许结束。代码维护/纯查询无需伪造投递回执。
+随后在原对话和新对话调用实际业务入口，验证 PreToolUse、PostToolUse 和 continuation 文件。错误响应可能由宿主包装为 `Error: {JSON}`，仍必须保留技术待办。每个阶段的 pending 在 SDK 校验之前登记；参数失败不能使 Stop 静默放行。只有组件已核实的用户等待、完整审阅或技术交接允许结束。代码维护/纯查询无需伪造投递回执。
 
 真实日志没有 Hook 事件时，应先确认插件实际加载；不能仅根据会话恢复时间推断是 resumed-agent 接线故障。宿主重载和 MCP 子进程重载分别核实，保持原浏览器、原页面及未保存内容。
 
 ## 纯文字工具与文件参数
 
 哪些宿主工具只传文字（待办、提问、发消息）、哪些参数名表示文件，只在 `hooks/tool-arguments.json` 定义一次。本包 `hooks/workflow_hook.py` 与工作区搜索组件的数据保护、组件软锁 Hook 都读这一份：纯文字工具只有在参数任意层级都没有文件参数时才按纯文字放行，带任何文件参数就按文件操作检查。文件缺失或无法解析时不放行任何纯文字工具。新增宿主工具名或文件参数名只改这个文件。
-
-## 执行登记有效期
-
-登记保存 registeredAt 和 expiresAt，固定十二小时。Hook 每次读取都在同一文件锁下移除过期登记；重复读取或有效期内重新 enable 不滑动续期。没有时间戳的旧登记不会永久有效。
-
-上线时先与执行端核实当前会话并停靠，再由维护对话运行 `conversation_scope.py migrate --scope-file <scope> --retain-session <已核实且已登记的会话> --authorization-ref <依据>`：仅保留该旧登记并从上线时刻计时，已有时间戳不会重置。尚未登记的执行端须自己 enable，维护端不能代为新建执行资格。
-
-维护对话可按明确依据用 `disable --target-session <旧会话> --authorization-ref <依据>` 注销指定旧登记，参数可重复；启用操作不能指定他人身份，正在执行的对话不能管理其它会话。
-
-## 同回合首次启用
-
-作用域在 UserPromptSubmit 之后启用时，执行器先调用任一模块的 runtime_info。该真实 PreToolUse 事件校验指令及路由 Hash、向当前回合注入调用入口并登记加载回执；再进行写操作。重复调用不重复注入，不借用其他会话或回合的回执。未登记、过期及维护角色仍不启用；直接写调用仍不能代替加载。此回执仅表示流程加载，不授予提交或其他业务权限。
-
-业务入口首次加载：当前会话已启用时，真实 company_batch_create、company_batch_take 或 role_advance 的 PreToolUse 可以加载当前回合指令。runtime_info 作为独立诊断入口保留。其他写操作仍要求本轮指令回执。

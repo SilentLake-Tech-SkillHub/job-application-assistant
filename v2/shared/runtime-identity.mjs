@@ -1,5 +1,6 @@
 import {readFile,readdir} from 'node:fs/promises';import {createHash} from 'node:crypto';
 import {hostRole} from './host-role.mjs';
+import {runtimeAgent} from './agent-registry.mjs';
 // Read only generic package code. Freeze at process startup so editing files
 // cannot make an old resident worker advertise the new code as already loaded.
 export async function genericSourceManifest(){
@@ -10,7 +11,7 @@ export async function genericSourceManifest(){
  return {sourceFingerprint:digest.digest('hex'),fingerprintFileCount:files.length,fingerprintScope:'generic_code_dependencies_and_catalog'};
 }
 export async function runtimeIdentity(module){
- const manifest=await genericSourceManifest(),expected=process.env.RECRUITING_WORKER_SOURCE_SHA256;
+ const [manifest,agent]=await Promise.all([genericSourceManifest(),runtimeAgent()]),expected=process.env.RECRUITING_WORKER_SOURCE_SHA256;
  if(expected&&manifest.sourceFingerprint!==expected)throw Error('RUNTIME_SOURCE_CHANGED_DURING_STARTUP');
- return {module,hostId:process.env.RECRUITING_HOST_ID||null,hostRole:hostRole(),processId:process.pid,nodeVersion:process.version,startedAt:new Date(Date.now()-process.uptime()*1000).toISOString(),...manifest,startupConsistency:expected?'launcher_checked':'direct_entry_snapshot'};
+ return {module,hostId:process.env.RECRUITING_HOST_ID||null,hostRole:hostRole(),agent,processId:process.pid,nodeVersion:process.version,startedAt:new Date(Date.now()-process.uptime()*1000).toISOString(),...manifest,startupConsistency:expected?'launcher_checked':'direct_entry_snapshot'};
 }

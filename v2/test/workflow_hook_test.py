@@ -7,32 +7,22 @@ def scope_state(ids):
 class WorkflowHookTest(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name);self.policy=self.root/'policy.md';self.policy.write_text('Detailed policy is a reference, not per-turn context.',encoding='utf-8');self.scope=self.root/'scope.json';self.scope.write_text(json.dumps(scope_state(['enabled'])));self.lock=self.root/'lock.json';self.lock.write_text(json.dumps({'version':'synthetic','sha256':hashlib.sha256(self.policy.read_bytes()).hexdigest(),'route_sha256':hashlib.sha256((ROOT/'hooks/route.md').read_bytes()).hexdigest()}));self.env={**os.environ,'RECRUITING_HOST_ROLE':'executor','RECRUITING_WORKSPACE_ROOT':str(self.root),'RECRUITING_WORKFLOW_POLICY':str(self.policy),'RECRUITING_WORKFLOW_SCOPE':str(self.scope),'RECRUITING_WORKFLOW_LOCK':str(self.lock),'RECRUITING_WORKFLOW_STATE':str(self.root/'state')}
-  sys.path.insert(0,str(ROOT/'hooks'))
-  from runtime_guard import installed_release
-  release=installed_release(ROOT)
-  for module in ['login','application']:
-   self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_'+module+'_v2__runtime_info',tool_response={**release,'runtime':{'sourceFingerprint':release['sourceFingerprint'],'processId':os.getpid()}})
  def tearDown(self):self.tmp.cleanup()
  def invoke(self,**args):
-  if args.get('hook_event_name')=='UserPromptSubmit':
-   from runtime_guard import installed_release
-   release=installed_release(ROOT)
-   for module in ['login','application']:
-    self.invoke(session_id=args.get('session_id','enabled'),hook_event_name='PostToolUse',tool_name='mcp__recruiting_'+module+'_v2__runtime_info',tool_response={**release,'runtime':{'sourceFingerprint':release['sourceFingerprint'],'processId':os.getpid()}})
   event={'session_id':'enabled','turn_id':'turn','cwd':str(self.root),'hook_event_name':'PreToolUse','tool_name':'mcp__recruiting_application_v2__batch_prepare',**args}
   return subprocess.run([sys.executable,str(ROOT/'hooks/workflow_hook.py')],input=json.dumps(event),text=True,encoding="utf-8",capture_output=True,env=self.env)
- def test_fixed_cli_uses_same_turn_gate(self):
+ def test_fixed_cli_bootstraps_first_business_call(self):
   cli=shlex.quote(str(ROOT/'scripts/cli.mjs'))
   command='node '+cli+' --workspace '+shlex.quote(str(self.root))+' application role_prepare'
-  self.assertEqual(self.invoke(tool_name='exec_command',tool_input={'cmd':command}).returncode,2)
+  self.assertIn('additionalContext',self.invoke(tool_name='exec_command',tool_input={'cmd':command}).stdout)
   self.assertEqual(self.invoke(hook_event_name='UserPromptSubmit').returncode,0)
   self.assertEqual(self.invoke(tool_name='exec_command',tool_input={'cmd':command}).returncode,0)
   self.assertEqual(self.invoke(tool_name='exec_command',tool_input={'cmd':command+'; echo bypass'}).returncode,2)
  def test_short_route_injection_and_same_turn_mutation_receipt(self):
   r=self.invoke(hook_event_name='UserPromptSubmit');self.assertEqual(r.returncode,0,r.stderr);ctx=json.loads(r.stdout)['hookSpecificOutput']['additionalContext'];self.assertIn('company_batch_create',ctx);self.assertNotIn(self.policy.read_text(),ctx);self.assertLess(len(ctx.encode('utf-8')),1800);self.assertEqual(self.invoke().returncode,0)
- def test_unloaded_mutation_denied_but_maintenance_and_reads_work(self):
-  self.assertEqual(self.invoke().returncode,2)
-  self.assertEqual(self.invoke(tool_name='mcp__recruiting_application_v2__role_prepare_materials').returncode,2)
+ def test_execution_boundary_and_maintenance_reads(self):
+  self.assertEqual(self.invoke().returncode,0)
+  self.assertEqual(self.invoke(tool_name='mcp__recruiting_application_v2__role_prepare_materials').returncode,0)
   for tool in ['Bash','apply_patch','mcp__recruiting_form__profile_status','mcp__recruiting_form__workflow_next']:
    self.assertEqual(self.invoke(tool_name=tool).returncode,2)
    self.assertEqual(self.invoke(session_id='maintenance',tool_name=tool).returncode,0)
@@ -46,10 +36,11 @@ class WorkflowHookTest(unittest.TestCase):
   self.assertNotIn('additionalContext',r.stdout)
  def test_saved_screenshot_is_readable_during_execution(self):
   self.assertEqual(self.invoke(tool_name='view_image', tool_input={'path':'/tmp/component-screenshot.png'}).returncode,0)
- def test_other_conversation_unaffected_by_missing_policy(self):
-  self.policy.unlink();self.assertEqual(json.loads(self.invoke(session_id='other').stdout),{})
- def test_receipt_from_another_turn_never_releases_mutation(self):
-  self.invoke(hook_event_name='UserPromptSubmit');self.assertEqual(self.invoke(turn_id='other').returncode,2)
+ def test_unrelated_tool_unaffected_by_missing_policy(self):
+  self.policy.unlink();self.assertEqual(json.loads(self.invoke(session_id='other',tool_name='apply_patch').stdout),{})
+ def test_new_turn_loads_its_own_context(self):
+  self.invoke(hook_event_name='UserPromptSubmit')
+  self.assertIn('additionalContext',self.invoke(turn_id='other').stdout)
 
  def test_repeated_stops_without_new_tools_escalate_to_supervisor(self):
   response={'continuation':{'state':'map','owner':'agent','requiresUser':False,'shouldContinue':True}}
@@ -160,22 +151,25 @@ class WorkflowHookTest(unittest.TestCase):
   # Arguments that are not an object never crash the hook.
   r=self.invoke(session_id='session-executor',tool_name='read',tool_input=[workbook]);self.assertIn(r.returncode,(0,2));self.assertNotIn('Traceback',r.stderr)
 
- def test_midturn_enable_loads_on_first_readonly_runtime_call(self):
-  self.scope.write_text(json.dumps(scope_state([])))
-  self.assertEqual(json.loads(self.invoke(hook_event_name='UserPromptSubmit').stdout),{})
-  env={**self.env,'CODEX_THREAD_ID':'enabled'}
-  for key in ('CODEX_SESSION_ID','DSH_SESSION_ID'):env.pop(key,None)
-  r=subprocess.run([sys.executable,str(ROOT/'hooks/conversation_scope.py'),'enable','--scope-file',str(self.scope),'--policy-file',str(self.policy),'--authorization-ref','synthetic user start'],env=env,capture_output=True,text=True)
-  self.assertEqual(r.returncode,0,r.stderr)
-  self.assertEqual(self.invoke().returncode,2)
-  for tool in ['mcp__recruiting_application_v2__runtime_info','mcp__recruiting-login-v2__runtime_info']:
-   result=self.invoke(turn_id=tool,tool_name=tool)
-   self.assertEqual(result.returncode,0,result.stderr)
-   context=json.loads(result.stdout)['hookSpecificOutput']
-   self.assertEqual(context['hookEventName'],'PreToolUse');self.assertIn('company_batch_create',context['additionalContext'])
-   self.assertEqual(self.invoke(turn_id=tool).returncode,0)
-   self.assertEqual(json.loads(self.invoke(turn_id=tool,tool_name=tool).stdout),{})
-  self.assertEqual(self.invoke(turn_id='other').returncode,2)
+ def test_first_stage_in_new_and_forked_chats_with_no_scope_or_runtime_receipt(self):
+  self.scope.unlink()
+  for session,tool in [('original','mcp__recruiting_application_v2__company_batch_create'),
+                       ('fork','mcp__recruiting-login-v2__role_advance'),
+                       ('fresh','mcp__recruiting_login_v2__login_prepare')]:
+   with self.subTest(session=session):
+    r=self.invoke(session_id=session,tool_name=tool)
+    self.assertEqual(r.returncode,0,r.stderr)
+    self.assertIn('additionalContext',r.stdout)
+    self.assertEqual(json.loads(self.invoke(session_id=session,tool_name=tool).stdout),{})
+    unrelated=self.invoke(session_id=session,tool_name='apply_patch')
+    self.assertEqual(json.loads(unrelated.stdout),{})
+  self.assertFalse(self.scope.exists())
+  self.assertFalse((self.root/'state'/'runtime-identities.json').exists())
+
+ def test_login_call_does_not_require_host_conversation_fields(self):
+  result=self.invoke(session_id=None,turn_id=None,tool_name='mcp__recruiting_login_v2__role_advance')
+  self.assertEqual(result.returncode,0,result.stderr)
+  self.assertIn('additionalContext',result.stdout)
 
  def test_readonly_bootstrap_does_not_enable_other_sessions_or_skip_hash_validation(self):
   tool='mcp__recruiting_application_v2__runtime_info'
@@ -186,14 +180,17 @@ class WorkflowHookTest(unittest.TestCase):
  def test_expired_scope_cannot_be_bootstrapped_by_runtime_info(self):
   self.scope.write_text(json.dumps({'session_ids':['enabled'],'sessions':{'enabled':{'registeredAt':1,'expiresAt':2}}}))
   r=self.invoke(tool_name='mcp__recruiting_application_v2__runtime_info')
-  self.assertEqual(json.loads(r.stdout),{});self.assertEqual([p.name for p in (self.root/'state').iterdir()],['runtime-identities.json'])
+  self.assertEqual(json.loads(r.stdout),{});self.assertFalse((self.root/'state').exists())
+  self.assertIn('additionalContext',self.invoke(tool_name='mcp__recruiting_login_v2__role_advance').stdout)
 
- def test_old_runtime_is_blocked_and_diagnostics_remain_available(self):
-  self.invoke(hook_event_name='UserPromptSubmit')
-  self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__runtime_info',tool_response={'version':'old','runtime':{'sourceFingerprint':'0'*64,'processId':os.getpid()}})
-  denied=self.invoke();self.assertEqual(denied.returncode,2);self.assertIn('MCP_RUNTIME_VERSION_MISMATCH',denied.stderr)
-  self.assertEqual(self.invoke(tool_name='mcp__recruiting_application_v2__runtime_info').returncode,0)
-  self.assertEqual(self.invoke(tool_name='mcp__recruiting_application_v2__component_runtime').returncode,0)
+ def test_diagnostic_result_does_not_authorize_or_deny_later_calls(self):
+  response={'version':'old','runtime':{'sourceFingerprint':'0'*64,'processId':1}}
+  self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__runtime_info',tool_response=response)
+  result=self.invoke()
+  self.assertEqual(result.returncode,0,result.stderr)
+  self.assertFalse((self.root/'state'/'runtime-identities.json').exists())
+  self.policy.write_text('changed policy',encoding='utf-8')
+  self.assertIn('WORKFLOW_INSTRUCTION_HASH_CHANGED',self.invoke().stderr)
 
  def test_component_backend_update_is_allowed_but_inline_shell_is_not(self):
   command=shlex.join(['node',str(ROOT/'scripts/update-runtime.mjs')])

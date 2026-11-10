@@ -6,12 +6,12 @@ const source=fileURLToPath(new URL('..',import.meta.url));
 test('same MCP conversation updates dispatcher, core and manager, verifies CLI parity and resumes durable task',{timeout:30000},async()=>{
  const d=await mkdtemp('/tmp/same-connection-'),pkg=path.join(d,'component'),workspace=path.join(d,'workspace');
  const c=new Client({name:'same-conversation-regression',version:'1'});
- const env={PATH:process.env.PATH,RECRUITING_WORKSPACE_ROOT:workspace,RECRUITING_HOST_ROLE:'executor'};
+ const env={PATH:process.env.PATH,RECRUITING_WORKSPACE_ROOT:workspace,RECRUITING_HOST_ROLE:'executor',RECRUITING_HOST_ID:'codex',RECRUITING_AGENT_ID:'A0001',CODEX_THREAD_ID:'original'};
  const call=async(name,args={})=>{const r=await c.callTool({name,arguments:args});return {...JSON.parse(r.content[0].text),isError:!!r.isError};};
  const release=async revision=>{await writeFile(path.join(pkg,'package.json'),JSON.stringify({type:'module',version:'fixture.'+revision}));await writeFile(path.join(pkg,'shared/fixture-business.mjs'),'export const revision='+revision+';');};
  try{
   for(const dir of ['shared','login','application','catalog','host','scripts'])await mkdir(path.join(pkg,dir),{recursive:true});await mkdir(workspace);
-  const files=['core-client','core-host','runtime-release','runtime-identity','runtime-paths','leases','host-role','mcp-proxy','interface-call','interface-worker','sampling-bridge','attachment-visual-review','attachment-source-renderer'];
+  const files=['core-client','core-host','runtime-release','runtime-identity','agent-registry','runtime-paths','leases','host-role','mcp-proxy','interface-call','interface-worker','sampling-bridge','attachment-visual-review','attachment-source-renderer'];
   for(const name of files)await copyFile(path.join(source,'shared',name+'.mjs'),path.join(pkg,'shared',name+'.mjs'));
   for(const name of ['start','cli'])await copyFile(path.join(source,'scripts',name+'.mjs'),path.join(pkg,'scripts',name+'.mjs'));
   await symlink(path.join(source,'node_modules'),path.join(pkg,'node_modules'));await writeFile(path.join(pkg,'package-lock.json'),'{}');await release(1);
@@ -29,5 +29,17 @@ test('same MCP conversation updates dispatcher, core and manager, verifies CLI p
   await writeFile(path.join(pkg,'shared/fixture-business.mjs'),'throw Error("synthetic startup failure");');const failed=await call('component_runtime',{action:'update'});assert.equal(failed.isError,true);assert.equal(JSON.parse(await readFile(path.join(workspace,'task.json'))).step,3);
   await release(4);assert.equal((await call('component_runtime',{action:'update'})).verified,true);assert.equal((await call('task_continue')).step,4);
   assert.equal((await call('component_runtime',{action:'status'})).adapterPid,before.adapterPid);
+  const fork=new Client({name:'forked-conversation-regression',version:'1'});
+  try{
+   await fork.connect(new StdioClientTransport({command:process.execPath,args:[path.join(pkg,'scripts/start.mjs'),'application'],env:{...env,CODEX_THREAD_ID:'fork'},stderr:'pipe'}));
+   const response=await fork.callTool({name:'task_continue',arguments:{}});
+   assert.equal(!!response.isError,false);
+   const resumed=JSON.parse(response.content[0].text);
+   assert.equal(resumed.step,5);
+   assert.equal(resumed.taskId,'original-task');
+   assert.equal(resumed.pageId,'original-page');
+   assert.equal(resumed.pid,(await call('component_runtime',{action:'status'})).workerPid);
+  }finally{await fork.close();}
+
  }finally{await c.callTool({name:'component_runtime',arguments:{action:'stop'}}).catch(()=>{});await c.close();await rm(d,{recursive:true,force:true});}
 });

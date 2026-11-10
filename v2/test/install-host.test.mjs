@@ -114,7 +114,7 @@ test('a server defined through dotted keys or an inline table in a parent table 
 });
 
 test('agent registration serializes allocation and keeps member identity across sessions',async()=>{
- const {registerAgent}=await import('../shared/agent-registry.mjs');
+ const {registerAgent,runtimeAgent}=await import('../shared/agent-registry.mjs');
  const workspace=await mkdtemp(path.join(os.tmpdir(),'recruiting-agents-'));
  try{
   const first={workspace,host:'other-agent',instance:'member-one',mode:'multi_agent',group:'project-team'};
@@ -123,6 +123,15 @@ test('agent registration serializes allocation and keeps member identity across 
   assert.deepEqual(agents[0],agents[2]);
   assert.deepEqual(agents.slice(0,2).map(a=>a.id).sort(),['A0001','A0002']);
   assert.equal(agents[1].mode,'multi_agent');
+  const env={RECRUITING_WORKSPACE_ROOT:workspace,RECRUITING_HOST_ID:first.host};
+  const original=await runtimeAgent({...env,RECRUITING_AGENT_ID:agents[0].id,CODEX_THREAD_ID:'original'});
+  assert.deepEqual(await runtimeAgent({...env,RECRUITING_AGENT_ID:agents[0].id,CODEX_THREAD_ID:'fork'}),original);
+  const peer=await runtimeAgent({...env,RECRUITING_AGENT_ID:agents[1].id});
+  assert.notEqual(peer.id,original.id);
+  assert.equal(peer.executionKey,original.executionKey);
+  const defaultAgent=await runtimeAgent({...env,CODEX_THREAD_ID:'new-chat'});
+  assert.deepEqual(await runtimeAgent({...env,DSH_SESSION_ID:'other-chat'}),defaultAgent);
+  assert.notEqual(defaultAgent.executionKey,original.executionKey);
   const configFile=path.join(workspace,'agent-mcp.json');
   const installed=await installHost({...first,agent:agents[0],configFile,write:true});
   assert.equal(installed.written,true);

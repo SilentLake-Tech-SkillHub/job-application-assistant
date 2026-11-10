@@ -3,7 +3,17 @@ const loadedInterfaceFingerprint=await interfaceFingerprint();
 import http from 'node:http';import path from 'node:path';import {tmpdir} from 'node:os';import {createHash} from 'node:crypto';import {spawn} from 'node:child_process';import {fileURLToPath} from 'node:url';import {unlink,lstat,mkdir,open,readFile} from 'node:fs/promises';
 import {configurePaths} from './runtime-paths.mjs';import {acquireLease,leasePath,defaultLeaseRoot} from './leases.mjs';import {hostRole} from './host-role.mjs';
 export class CoreClient{
- constructor(mode,{env=process.env,workspace}={}){if(!['login','application'].includes(mode))throw Error('INVALID_CORE_MODE');const paths=configurePaths({workspace,env});this.mode=mode;this.env=env;this.socket=path.join('/tmp','recruiting-core-'+process.getuid(),createHash('sha256').update(paths.workspace).digest('hex').slice(0,12),mode+'-'+hostRole(env)+'-'+createHash('sha256').update(env.RECRUITING_HOST_ID||'standalone').digest('hex').slice(0,6)+'.sock');}
+ constructor(mode,{env=process.env,workspace}={}){
+  if(!['login','application'].includes(mode))throw Error('INVALID_CORE_MODE');
+  const paths=configurePaths({workspace,env});
+  this.mode=mode;
+  this.env=env;
+  const host=env.RECRUITING_HOST_ID||'standalone';
+  const executor=env.RECRUITING_AGENT_ID?host+'\0'+env.RECRUITING_AGENT_ID:host;
+  const workspaceKey=createHash('sha256').update(paths.workspace).digest('hex').slice(0,12);
+  const executorKey=createHash('sha256').update(executor).digest('hex').slice(0,6);
+  this.socket=path.join('/tmp','recruiting-core-'+process.getuid(),workspaceKey,mode+'-'+hostRole(env)+'-'+executorKey+'.sock');
+ }
  request(route,body={},timeout=120000){
   return new Promise((resolve,reject)=>{
    const data=JSON.stringify(body);

@@ -250,3 +250,20 @@ test('Feishu final-record add control survives adding another row while field-lo
  rows.push(row());assert.equal(run({operation:'resolvePhoenix',references:[g.addSelector]})[0],'#add-record');
  add.closest=()=>({});assert.equal(run({operation:'repeatDiscovery',titles:['project']}).length,0);
 });
+
+test('Formily discovers a group-owned add button even when the record wrappers have different parents',()=>{
+ const ownerSelector='#formily-item-project_list',selector=ownerSelector+' .register-form-group-wrapper';
+ const visible=()=>[{}],group={},nested={},rows=[{},{}].map(()=>({
+  parentElement:{},getClientRects:visible,closest:()=>group,contains:()=>false
+ }));
+ const add={id:'add-project',tagName:'BUTTON',innerText:'添加',getClientRects:visible,closest:()=>group};
+ const foreign={...add,id:'foreign-add',closest:()=>nested};
+ group.getClientRects=visible;
+ group.querySelectorAll=s=>s==='button'?[add,foreign]:[];
+ const document={querySelectorAll:s=>s===ownerSelector?[group]:s===selector?rows:s==='#add-project'?[add]:[]};
+ const run=spec=>vm.runInNewContext('('+controlDOM.toString()+')(spec)',{spec,document,getComputedStyle:()=>({visibility:'visible'}),CSS:{escape:s=>s}});
+ const [result]=run({operation:'repeatDiscovery',titles:['project']});
+ assert.equal(result.selector,selector);
+ assert.equal(result.addLabel,'添加');
+ assert.equal(run({operation:'resolvePhoenix',references:[result.addSelector]})[0],'#add-project');
+});

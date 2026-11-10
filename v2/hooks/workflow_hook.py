@@ -10,7 +10,6 @@ import uuid
 import shlex
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from conversation_scope import host_role, read_active_scope
-from runtime_guard import check_runtime
 
 ROOT = Path(os.environ['RECRUITING_WORKSPACE_ROOT']).resolve()
 POLICY = Path(os.environ['RECRUITING_WORKFLOW_POLICY'])
@@ -19,7 +18,6 @@ STATE = Path(os.environ['RECRUITING_WORKFLOW_STATE'])
 SCOPE = Path(os.environ['RECRUITING_WORKFLOW_SCOPE'])
 INJECT = {'UserPromptSubmit', 'SessionStart', 'SubagentStart'}
 ROUTE = Path(__file__).with_name('route.md')
-MUTATIONS = {'role_submit','batch_prepare','role_prepare','role_prepare_materials','role_prepare_profile_fields','form_remove_attachment','roles_prepare_batch','workflow_advance','roles_patch_text','material_import_run','login_prepare','login_request_sms','login_verify_otp','application_closeout'}
 LEGACY_CONTINUATION_TOOLS = {'workflow_next', 'form_route', 'workflow_advance', 'role_prepare', 'prepare_plan', 'batch_prepare', 'role_verify', 'verify_current', 'capture_rea_structure', 'capture_controls', 'form_mapping_candidates', 'capture_choice_options', 'form_build_template', 'template_register', 'probe_conditions', 'template_finalize', 'profile_map_questions', 'material_import_prepare', 'material_import_run', 'roles_prepare_batch', 'roles_patch_text', 'workflow_handoff'}
 
 LIFECYCLE = json.loads((Path(__file__).resolve().parents[1] / 'catalog/workflow-tools.json').read_text(encoding='utf-8'))
@@ -201,7 +199,6 @@ def handle_continuation(event):
     session, turn = event.get('session_id'), event.get('turn_id')
     if not session or not turn:
         return {}
-    STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
     file = STATE / ('continuation-' + key(session, turn) + '.json')
     try:
         old = json.loads(file.read_text(encoding='utf-8'))
@@ -219,6 +216,7 @@ def handle_continuation(event):
         # Store only fixed routing metadata, never form values or website text.
         route = {k: result.get(k) for k in ['state', 'owner', 'requiresUser', 'shouldContinue', 'nextTools', 'reason', 'handoffVerified']}
         fingerprint = hashlib.sha256(json.dumps(route, sort_keys=True).encode()).hexdigest()
+        STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
         write_atomic(file, {**route, 'fingerprint': fingerprint,
                             'reminded': False, 'stopAttempts': 0,
                             'receiptRevision': old.get('receiptRevision', 0) + 1,
@@ -242,83 +240,77 @@ def handle_continuation(event):
 
 def handle(event):
     started = time.perf_counter()
-    if event.get('hook_event_name') == 'PostToolUse':
-        check_runtime(event, Path(__file__).resolve().parents[1], STATE, LIFECYCLE['stages'], write_atomic)
-    # This workflow belongs to an explicitly enabled conversation, not every
-    # conversation sharing the project. Return before policy/receipt checks for
-    # unrelated sessions, including continuations started before installation.
-    try:
-        sessions = read_active_scope(SCOPE).get('session_ids', [])
-    except (FileNotFoundError, ValueError):
-        return {}
-    if event.get('session_id') not in sessions:
-        return {}
     cwd = Path(event.get('cwd') or ROOT).resolve()
-    if cwd != ROOT and ROOT not in cwd.parents:
-        return {}
-    # Deployment role, never host brand or session spelling. A stale registration
-    # cannot turn a configured maintainer into an active application conversation.
-    if host_role() == 'maintainer':
+    if (cwd != ROOT and ROOT not in cwd.parents) or host_role() == 'maintainer':
         return {}
     event = component_cli_event(event)
-    check_runtime(event, Path(__file__).resolve().parents[1], STATE, LIFECYCLE['stages'], write_atomic)
     name = event.get('hook_event_name')
-    if name not in INJECT | {'PreToolUse', 'PostToolUse', 'Stop'}:
-        return {}
-    if name == 'PreToolUse' and event.get('tool_name', '').startswith('mcp__recruiting_form__'):
-        raise ValueError('V2_RUNTIME_REQUIRED_USE_RECRUITING_APPLICATION_V2')
-    if name == 'PreToolUse':
-        executor_boundary(event)
-    if name in {'PostToolUse', 'Stop'}:
-        return handle_continuation(event)
     tool = event.get('tool_name', '')
-    if name == 'PreToolUse' and recruiting_tool(tool) and tool.split('__')[-1] in LIFECYCLE['stages']:
-        # Establish pending work before SDK validation. Invalid arguments may
-        # bypass MCP handlers, but cannot erase an actual attempted stage.
-        handle_continuation({**event, 'hook_event_name': 'PostToolUse', 'tool_response': {'continuation': {'state': 'tool_pending', 'owner': 'agent', 'requiresUser': False, 'shouldContinue': True, 'nextTools': [tool.split('__')[-1]], 'reason': 'STAGE_RESULT_REQUIRED'}}})
-    # Source repair, Skill reads and status reporting must remain possible even
-    # when an enabled conversation has no same-turn application receipt.
-    bootstrap = name == 'PreToolUse' and recruiting_tool(tool) and tool.split('__')[-1] in {'runtime_info', 'company_batch_create', 'company_batch_take', 'role_advance'}
-    if name == 'PreToolUse' and tool.split('__')[-1] not in MUTATIONS and not bootstrap:
+    operation = tool.split('__')[-1]
+    session, turn = event.get('session_id'), event.get('turn_id')
+    receipt = STATE / (key(session, turn) + '.json') if session and turn else None
+
+    if name == 'Stop':
+        return handle_continuation(event)
+    if name == 'PostToolUse':
+        return handle_continuation(event) if recruiting_tool(tool) else {}
+    if name not in INJECT | {'PreToolUse'}:
         return {}
-    body = POLICY.read_bytes()
-    sha = hashlib.sha256(body).hexdigest()
+
+    stage = name == 'PreToolUse' and recruiting_tool(tool) and operation in LIFECYCLE['stages']
+    # A business call is itself the entry point. No conversation registration
+    # or previous diagnostic result is needed to reach the checked core.
+    if not stage:
+        try:
+            active = session in read_active_scope(SCOPE).get('session_ids', [])
+        except (OSError, ValueError):
+            active = False
+        if not active:
+            return {}
+        if name == 'PreToolUse':
+            if tool.startswith('mcp__recruiting_form__'):
+                raise ValueError('V2_RUNTIME_REQUIRED_USE_RECRUITING_APPLICATION_V2')
+            executor_boundary(event)
+            if not recruiting_tool(tool) or operation != 'runtime_info':
+                return {}
+
+    sha = hashlib.sha256(POLICY.read_bytes()).hexdigest()
     lock = json.loads(LOCK.read_text(encoding='utf-8'))
     route_sha = hashlib.sha256(ROUTE.read_bytes()).hexdigest()
     if lock.get('route_sha256') and route_sha != lock['route_sha256']:
         raise ValueError('WORKFLOW_ROUTE_HASH_CHANGED')
     if sha != lock['sha256']:
         raise ValueError('WORKFLOW_INSTRUCTION_HASH_CHANGED')
-    session, turn = event.get('session_id'), event.get('turn_id')
-    if not session or (name in {'UserPromptSubmit', 'PreToolUse'} and not turn):
-        raise ValueError('WORKFLOW_EVENT_ID_MISSING')
-    STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
-    receipt = STATE / (key(session, turn) + '.json') if turn else None
-    # A real read-only preflight can load a scope enabled after UserPromptSubmit.
-    # The next mutation sees this same-turn receipt; never synthesize a user event.
-    if name in INJECT or bootstrap and not receipt.exists():
-        text = ROUTE.read_text(encoding='utf-8')
-        context = ('本轮求职调用入口；后续用户明确修改及上级指令优先。\n'
-                   '版本：' + lock['version'] + '；SHA256：' + sha + '\n'
-                   '速度要求不放宽；Hook与监督开销均计入用户视角总耗时。\n\n' + text)
-        if receipt:
-            write_atomic(receipt, {'session_id': session, 'turn_id': turn,
-                                  'sha256': sha, 'route_sha256': route_sha, 'event': name, 'at': time.time()})
-        # Store only event metadata, never the user's prompt, tool input or personal facts.
-        record = {'event': name, 'session_id': session, 'turn_id': turn,
-                  'sha256': sha, 'instruction_bytes': len(text.encode('utf-8')),
+
+    if stage:
+        # Invalid SDK arguments may bypass the component. Track this attempt
+        # for Stop without using the continuation record to authorize calls.
+        pending = {'state': 'tool_pending', 'owner': 'agent', 'requiresUser': False,
+                   'shouldContinue': True, 'nextTools': [operation], 'reason': 'STAGE_RESULT_REQUIRED'}
+        handle_continuation({**event, 'hook_event_name': 'PostToolUse',
+                             'tool_response': {'continuation': pending}})
+    current = {'session_id': session, 'turn_id': turn, 'sha256': sha, 'route_sha256': route_sha}
+    if receipt and name not in INJECT:
+        try:
+            loaded = json.loads(receipt.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            loaded = {}
+        if all(loaded.get(k) == v for k, v in current.items()):
+            return {}
+
+    route = ROUTE.read_text(encoding='utf-8')
+    context = ('本轮求职调用入口；后续用户明确修改及上级指令优先。\n'
+               '版本：' + lock['version'] + '；SHA256：' + sha + '\n'
+               '速度要求不放宽；Hook与监督开销均计入用户视角总耗时。\n\n' + route)
+    if receipt:
+        STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
+        write_atomic(receipt, {**current, 'event': name, 'at': time.time()})
+        record = {**current, 'event': name, 'instruction_bytes': len(route.encode('utf-8')),
                   'elapsed_ms': round((time.perf_counter() - started) * 1000, 3), 'at': time.time()}
         fd = os.open(STATE / 'injections.jsonl', os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+        with os.fdopen(fd, 'a', encoding='utf-8') as stream:
             stream.write(json.dumps(record, ensure_ascii=False) + '\n')
-        return {'hookSpecificOutput': {'hookEventName': name, 'additionalContext': context}}
-    try:
-        loaded = json.loads(receipt.read_text(encoding='utf-8'))
-    except FileNotFoundError:
-        raise ValueError('WORKFLOW_NOT_LOADED_FOR_THIS_TURN')
-    if loaded.get('route_sha256') != route_sha or loaded.get('sha256') != sha or loaded.get('session_id') != session or loaded.get('turn_id') != turn:
-        raise ValueError('WORKFLOW_TURN_RECEIPT_MISMATCH')
-    return {}
+    return {'hookSpecificOutput': {'hookEventName': name, 'additionalContext': context}}
 
 
 if __name__ == '__main__':

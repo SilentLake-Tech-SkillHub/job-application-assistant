@@ -62,3 +62,15 @@ test('failed core update preserves prior worker and resumes without replaying re
   assert.deepEqual(await request('/execute',{operation:'read',expected:{version:'2',sourceFingerprint:'synthetic-2'}}),{version:2});
  }finally{await request('/control',{action:'stop'}).catch(()=>{});host?.kill();await rm(d,{recursive:true,force:true});}
 });
+
+test('core selection isolates configured Agents on the same host and ignores conversation IDs',async()=>{
+ const workspace=await mkdtemp(path.join(os.tmpdir(),'r-agent-core-'));
+ try{
+  const env={RECRUITING_HOST_ID:'codex',RECRUITING_HOST_ROLE:'executor',RECRUITING_AGENT_ID:'A0001'};
+  const original=new CoreClient('login',{workspace,env:{...env,CODEX_THREAD_ID:'original'}});
+  const fork=new CoreClient('login',{workspace,env:{...env,CODEX_THREAD_ID:'fork'}});
+  const peer=new CoreClient('login',{workspace,env:{...env,RECRUITING_AGENT_ID:'A0002',CODEX_THREAD_ID:'fork'}});
+  assert.equal(fork.socket,original.socket);
+  assert.notEqual(peer.socket,original.socket);
+ }finally{await rm(workspace,{recursive:true,force:true});}
+});

@@ -177,6 +177,23 @@ export function controlDOM(spec){
   }
   return {names,removeSelector:null};
  }
+ // Formily cards can each wrap their own record. Bind their action to the
+ // owning list, including when the add button is inside the last card.
+ const formilyRepeatGroup=(title,label)=>{
+  if(!/^[A-Za-z][A-Za-z0-9_]*$/.test(title))return null;
+  const ownerSelector='#formily-item-'+title+'_list',selector=ownerSelector+' .register-form-group-wrapper';
+  const owners=[...document.querySelectorAll(ownerSelector)].filter(visible);
+  if(owners.length!==1)return null;
+  const [owner]=owners,list='[id^="formily-item-"][id$="_list"]';
+  const rows=[...document.querySelectorAll(selector)].filter(visible);
+  if(!rows.length||rows.some(row=>row.closest(list)!==owner))return null;
+  const buttons=[...owner.querySelectorAll('button')].filter(button=>{
+   const text=button.innerText?.trim()||'';
+   return visible(button)&&button.closest(list)===owner&&!rows.some(row=>row.contains(button))&&
+    (label?text===label:text.length<80&&/^[+＋]?\s*(?:添加|新增|Add)(?:$|\s|[\p{Script=Han}])/iu.test(text));
+  });
+  return {selector,buttons};
+ };
  const scopedRepeatCandidates=(rows,recordSelector,label)=>{
   for(let root=rows[0]?.parentElement,depth=0;root&&depth<4;root=root.parentElement,depth++){
    const other=[...root.querySelectorAll('.resumeEditForm-item,.register-form-group-wrapper,[class^="apply-form-array-card__"]')].some(n=>typeof n.matches==='function'&&!n.matches(recordSelector)&&!rows.some(row=>row.contains(n)));
@@ -197,6 +214,13 @@ export function controlDOM(spec){
  };
  const phoenixResolve=reference=>{
   let r;try{r=JSON.parse(reference.slice(9));}catch{throw Error('PHOENIX_REFERENCE_INVALID');}
+  if(r.part==='formilyRepeatAdd'){
+   if(!r.addLabel)throw Error('REPEAT_CAPTURED_SCOPE_REQUIRED');
+   const group=formilyRepeatGroup(r.section,r.addLabel);
+   if(!group)throw Error('REPEAT_SECTION_NOT_FOUND');
+   if(group.buttons.length!==1)throw Error('REPEAT_ADD_CONTROL_CHANGED');
+   return diagnosticSelector(group.buttons[0]);
+  }
   if(r.part==='scopedRepeatAdd'){
    const rows=[...document.querySelectorAll(r.recordSelector)].filter(visible);
    if(!rows.length||rows.some(row=>row.parentElement!==rows[0].parentElement))throw Error('REPEAT_SECTION_NOT_FOUND');
@@ -254,6 +278,12 @@ export function controlDOM(spec){
   }
   for(const title of spec.titles||[]){
    if(!/^[A-Za-z][A-Za-z0-9_]*$/.test(title))continue;
+   const formily=formilyRepeatGroup(title);
+   if(formily?.buttons.length===1){
+    const addLabel=formily.buttons[0].innerText.trim();
+    found.push({title,selector:formily.selector,addLabel,addSelector:'phoenixq:'+JSON.stringify({part:'formilyRepeatAdd',section:title,addLabel})});
+    continue;
+   }
    const selectors=[`.resumeEditForm-item.resumeEditForm-${title}`,`#formily-item-${title}_list [class^="apply-form-array-card__"]`];
    for(const selector of selectors){
     const rows=[...document.querySelectorAll(selector)].filter(visible);
@@ -275,7 +305,7 @@ export function controlDOM(spec){
   // add button is resolved strictly by the repeat writer after layout changes.
   if(spec.operation==='resolvePhoenixReadback'){
    let part;try{part=JSON.parse(reference.slice(9)).part;}catch{throw Error('PHOENIX_REFERENCE_INVALID');}
-   if(['repeatAdd','scopedRepeatAdd'].includes(part))return null;
+   if(['repeatAdd','scopedRepeatAdd','formilyRepeatAdd'].includes(part))return null;
   }
   try{return phoenixResolve(reference);}catch(error){if(error.message==='PHOENIX_QUESTION_NOT_FOUND')return null;throw error;}
  });
