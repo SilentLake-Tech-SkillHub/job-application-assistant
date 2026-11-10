@@ -91,7 +91,8 @@ export class RoleFlow{
   if(!args.authorization?.login||!args.authorization.evidence?.trim())throw Error('LOGIN_AUTHORIZATION_REQUIRED');
   const {t}=await this.queues.task(args);let prior;try{prior=await this.queues.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
   if(prior?.status==='ready_for_user_review')return {status:prior.status,taskId:t.taskId,pageId:prior.pageId,verifyRunId:prior.verifyRunId,submission:'not_performed'};
-  let result=prior?.pageId?await this.resume(args):await this.open(args);
+  const canResume=prior?.pageId&&prior.status!=='rebind_required';
+  let result=canResume?await this.resume(args):await this.open(args);
   if(result.status==='needs_login'){
    if(prior?.loginWait)return {status:'needs_user_login',taskId:t.taskId,pageId:result.pageId,continuation:{state:'user_input',owner:'user',requiresUser:true,shouldContinue:false,nextTools:['role_advance']}};
    let prepared=await this.login.prepare({...result.loginPlan,authorization:args.authorization});

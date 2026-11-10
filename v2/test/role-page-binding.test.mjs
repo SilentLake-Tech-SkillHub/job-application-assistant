@@ -66,6 +66,17 @@ test('a binding carried over from a re-import keeps using that tab (no new tab) 
  const f=fixture({tabs:[['chrome:kept',home]],prior:{queueId:'queue-1',taskId:'task-1',pageId:'chrome:kept',status:'rebind_required'}}),r=await f.flow.open({});
  assert.equal(r.pageId,'chrome:kept');assert.equal(f.pages.size,1);const o=opens(f);assert.equal(o.length,1);assert.equal(o[0].pageId,'chrome:kept');assert.equal(o[0].pageUrl,roleLink);
 });
+test('role advance verifies an inherited application tab after re-import before resuming it',async()=>{
+ const pageId='chrome:kept';
+ const f=fixture({officialId:siteId,url:detail(siteId),tabs:[[pageId,form(siteId)]],
+  prior:{queueId:'queue-1',taskId:'task-1',pageId,status:'rebind_required',carriedFrom:{hadFill:true}}});
+ const result=await f.flow.advance({authorization:{login:true,evidence:'resume confirmed role'}});
+ assert.equal(result.status,'ready_to_fill');
+ assert.equal(result.pageId,pageId);
+ assert.equal(f.state().reusedPage,'carried_binding');
+ assert.equal(opens(f).length,0);
+ assert.equal(f.calls.filter(c=>c.method==='cta').length,0);
+});
 test('after login the site lands on its home page: the same tab goes back to the role link',async()=>{
  const f=fixture({loggedIn:false});const first=await f.flow.open({});assert.equal(first.status,'needs_login');
  f.setLoggedIn(true);f.pages.get(first.pageId).url=home;
