@@ -163,5 +163,20 @@ export class CompanyBatch{
   }
   if(args.status==='blocked'&&!args.reason?.trim())throw Error('BLOCK_REASON_REQUIRED');Object.assign(c,{status:args.status,reason:args.reason||null,runIds:args.runIds||[],updatedAt:new Date(this.clock()).toISOString(),leaseExpiresAt:new Date(this.clock()+30*60*1000).toISOString()});b.revision++;await this.store.put('runs',b.id,b);if(c.status==='ready_for_user_review'&&!b.companies.some(x=>x.loginScope===c.loginScope&&active.has(x.status))){const owners=await this.owners();delete owners[c.loginScope];await this.store.put('runs','company-channel-owners',owners);}const remainingAgentWork=b.companies.filter(company=>['pending','dispatched','running'].includes(company.status)).length;return {companyId:c.companyId,channel:c.channel,status:c.status,remainingAgentWork,batchPreparationComplete:b.companies.every(company=>company.status==='ready_for_user_review'),continuation:remainingAgentWork?{state:'prepare',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['company_batch_take','workflow_advance']}:c.status==='blocked'?{state:'technical_block',owner:'supervisor',requiresUser:false,shouldContinue:false,handoffVerified:true,nextTools:[]}:{state:c.status==='waiting_for_user'?'user_input':'review',owner:'user',requiresUser:true,shouldContinue:false,nextTools:[]},submission:'not_performed'};
  });}
- async status(args){const b=await this.get(args),live=await this.queues.hydratedTasks(b.queueId);return {batchId:b.id,revision:b.revision,companiesPerChannel:b.companiesPerChannel,channels:b.channels,channelSelection:b.channelSelection,companies:b.companies.map(({leaseToken,tasks,...c})=>({...c,roleCount:remainingTasks({tasks},live).length,protectedRoles:tasks.filter(t=>live.get(t.taskId)?.protectedReason).map(t=>({roleId:t.roleId,reason:live.get(t.taskId).protectedReason}))})),submission:'not_performed'};}
+ async status(args){
+  const b=await this.get(args),live=await this.queues.hydratedTasks(b.queueId);
+  const companies=b.companies.map(({leaseToken,tasks,...company})=>{
+   const protectedRoles=tasks.flatMap(task=>{
+    const reason=live.get(task.taskId)?.protectedReason;
+    return reason?[{roleId:task.roleId,reason}]:[];
+   });
+   const roleCount=remainingTasks({tasks},live).length;
+   if(tasks.length&&protectedRoles.length===tasks.length&&company.status!=='closed_preparation'){
+    company.status='protected';
+    company.reason='all_roles_protected';
+   }
+   return {...company,roleCount,protectedRoles};
+  });
+  return {batchId:b.id,revision:b.revision,companiesPerChannel:b.companiesPerChannel,channels:b.channels,channelSelection:b.channelSelection,companies,submission:'not_performed'};
+ }
 }

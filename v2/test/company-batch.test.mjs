@@ -23,7 +23,7 @@ test('an existing batch drops submitted roles from dispatch and keeps other role
  await submitRole(0,'J000001');
  await submitRole(1,'J000002');
  const readback=await batch.status(original);
- assert.deepEqual(readback.companies.map(c=>c.roleCount),[1,0]);
+ assert.deepEqual(readback.companies.map(c=>[c.status,c.roleCount]),[['pending',1],['protected',0]]);
  assert.deepEqual(readback.companies[0].protectedRoles,[{roleId:'J000001',reason:'already_submitted'}]);
  const taken=await batch.take(original);
  assert.deepEqual(taken.assignments.map(a=>[a.queueId,a.tasks.map(t=>t.taskId)]),[[original.queue.queueId,[nextTask.taskId]]]);
