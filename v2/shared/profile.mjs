@@ -95,7 +95,8 @@ export function registerObservedQuestions(profile,{companyId,companyCode=null,pa
       const definition=profile.fieldRegistry[prior.factKey];
       if(definition?.companyId===companyId&&definition.selector===field.selector){delete definition.neverStoreValue;definition.status='needs_semantic_mapping';prior.status='needs_semantic_mapping';}
     }
-    const material=materialKey(field),external=material?{factKey:MATERIAL_SOURCES[material],status:'mapped',mappingEvidence:'Observed exact role-material question semantic'}:{};
+    const mappedSemantic=prior?.status==='mapped'&&prior.mappingEvidence&&!prior.factKey.startsWith('unmapped.')&&!Object.values(MATERIAL_SOURCES).includes(prior.factKey)&&profile.facts[prior.factKey];
+    const material=mappedSemantic?null:materialKey(field),external=material?{factKey:MATERIAL_SOURCES[material],status:'mapped',mappingEvidence:'Observed exact role-material question semantic'}:{};
     const definitionHash=hash({type:field.type||null,required:!!field.required,options:field.options||null,userOnly:!!field.userOnly,renderer:field.renderer||null,readonly:!!field.readonly,disabled:!!field.disabled,multiple:!!field.multiple,selectedSelector:field.selectedSelector||null});
     const observedControl=Object.fromEntries(['documentTypePrefix','type','renderer','contextProvider','readonly','disabled','role','multiple','controlIndex','repeatIndex','section','options','actionSelector','readSelector','selectedSelector','uploadContainerSelector','filenameSelector','uploadedSelector'].filter(k=>field[k]!==undefined).map(k=>[k,field[k]]));
     if(prior?.definitionHash===definitionHash){mappings[observedKey]={...prior,...external,observedAt,observedControl,operationContractStatus:'requires_current_contract_audit',active:field.active!==false,coverageRequired:!!prior.coverageRequired||coverageRequired};if(field.userOnly)mappings[observedKey].status=sensitiveMappingStatus(profile,{...field,id:observedKey},questions);continue;}

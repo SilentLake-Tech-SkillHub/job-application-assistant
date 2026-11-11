@@ -21,7 +21,7 @@ import {formAssetKeys} from './form-identity.mjs';
 export const captureContentId=formId=>formAssetKeys(formId).capture;
 
 export function isChoiceControl(field) {
- return field.type === 'radio' || field.tag === 'select' || field.type === 'select' || field.renderer === 'ant_select' || field.renderer === 'phoenix_select' || field.renderer === 'phoenix_autocomplete' ||
+ return ['radio','radio_group'].includes(field.type) || field.tag === 'select' || field.type === 'select' || field.renderer === 'ant_select' || field.renderer === 'phoenix_select' || field.renderer === 'phoenix_autocomplete' ||
   field.type === 'search' && field.contextProvider === '.ud-formily-item' ||
   field.type === 'combobox' && field.contextProvider === '.ant-form-item' ||
   ['choice','school_text'].includes(field.type) && field.contextProvider === '.atsx-form-item';
@@ -31,7 +31,7 @@ export const isDateControl=field=>['ant_date','phoenix_date_picker'].includes(fi
 // These options came from rendered controls in the bound capture, not a model
 // supplied list. Reading them needs no clicks and cannot alter the selection.
 export function capturedChoiceOptions(field) {
- if(field.type !== 'radio' && field.tag !== 'select' && field.type !== 'select')return null;
+ if(!['radio','radio_group'].includes(field.type) && field.tag !== 'select' && field.type !== 'select')return null;
  const options = (field.options || []).filter(x => typeof x === 'string' && x.trim());
  return {options,...(Array.isArray(field.optionRecords)?{optionRecords:structuredClone(field.optionRecords)}:{}),status: options.length ? 'captured' : 'options_not_observed', restored: true, source: 'rendered_control_capture'};
 }

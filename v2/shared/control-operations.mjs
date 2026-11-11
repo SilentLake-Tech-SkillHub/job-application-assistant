@@ -14,6 +14,7 @@ import path from 'node:path';
 import {collectChoiceViews,choiceViewport} from './choice-inventory.mjs';
 import {UD_TREE_LEAF_LABEL,treeChoiceDOM} from './tree-choice.mjs';
 import {browserErrorDetails} from './browser-errors.mjs';
+import {controlDOM} from './control-dom.mjs';
 const exact = value => new RegExp('^'+String(value).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$');
 export function choiceEmptyEvidenceDOM(menu){
  const pattern=/^(?:暂无(?:数据|选项|匹配(?:结果)?)|无(?:数据|结果|匹配(?:结果)?)|未找到(?:匹配项|匹配结果)?|没有(?:匹配项|匹配结果)|not found|no (?:data|options|results))$/i;
@@ -65,6 +66,8 @@ async function performChoice(adapter,action,value,family){
  if(family==='phoenix'){if(!await l.evaluate(n=>n.classList.contains('phoenix-select')))throw Error('PHOENIX_SELECT_CAPTURE_REQUIRED');}
  else if(await l.evaluate(n=>n.getAttribute('role'))!=='combobox')throw Error('CHOICE_COMBOBOX_REQUIRED');
  const root=action.labelSelector?.replace(/ > \.ud-formily-item-label$/,'');
+ const inputTriggered=family==='aria'&&action.searchTrigger==='input';
+ const searchInput=inputTriggered?(await l.evaluate(n=>n.tagName==='INPUT')?l:l.locator('input:not([type="hidden"])').filter({visible:true})):null;
  let trigger=l;
  if(family==='ud'){
   if(!root||root===action.labelSelector)throw Error('UD_QUESTION_ANCHOR_REQUIRED');
@@ -72,12 +75,18 @@ async function performChoice(adapter,action,value,family){
   const display=page.locator(root+' .ud__select__selector');
   if(await display.count()===1)trigger=display;
  }
- const dismiss=async()=>{if(action.labelSelector){const label=await locateControl(page,{selector:action.labelSelector});await label.click({timeout:10000});}else{await l.press('Escape');await l.press('Tab');}};
+ const dismiss=async()=>{
+  if(action.labelSelector){
+   const label=await locateControl(page,{selector:action.labelSelector});
+   await label.click({timeout:10000});
+  }else{await l.press('Escape');await l.press('Tab');}
+ };
  if(family==='ant'){
   const parent=l.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " ant-select ")][1]');
   if(await parent.count()===1){const display=parent.locator('.ant-select-selector, .ant-select-selection').filter({visible:true});trigger=await display.count()===1?display:parent;}
  }
  const readSelected=async()=>{
+  if(inputTriggered&&await searchInput.count()===1)return searchInput.evaluate(node=>node.value);
   if(family==='phoenix')return readPhoenixSelectedValue(trigger);
   if(family!=='aria'||!action.selectedSelector)return (await trigger.innerText()).trim();
   const selected=page.locator(action.selectedSelector).filter({visible:true}),count=await selected.count();
@@ -89,6 +98,7 @@ async function performChoice(adapter,action,value,family){
  let step='choice_open',locator=action.selector,menus,menuSelector,owned;
  const closeMenu=async()=>{
   step='choice_close';locator=action.labelSelector||action.selector;
+  if(await menus.count()===0)return;
   try{
    await dismiss();
    locator=menuSelector;
@@ -105,7 +115,20 @@ async function performChoice(adapter,action,value,family){
   }
  };
  try{
-  if(expanded!=='true')await trigger.click({timeout:10000});
+  if(inputTriggered){
+   const query=action.query||(action.method.endsWith('_inspect')?null:String(value));
+   if(!query?.trim())throw Error('CHOICE_SEARCH_QUERY_REQUIRED');
+   if(await searchInput.count()!==1||!await searchInput.evaluate(n=>n.tagName==='INPUT'&&!n.readOnly&&!n.disabled))throw Error('CHOICE_SEARCH_INPUT_REQUIRED');
+   search=searchInput;initialQuery=await search.evaluate(n=>n.value);
+   if(verifyOnly||action.method.endsWith('_inspect')&&initialQuery){
+    if(verifyOnly&&initialQuery!==(action.optionTextMap?.[value]||String(value)))throw Error('CHOICE_SELECTED_LABEL_MISMATCH');
+    await search.click({timeout:10000});
+   }else{
+    queryApplied=true;
+    await search.fill(query,{timeout:10000});
+    await assertValue(search,query);
+   }
+  }else if(expanded!=='true')await trigger.click({timeout:10000});
   step='choice_menu';
   if(family==='phoenix'){
    const popupKind=await phoenixPopupKind(page,action);
@@ -124,14 +147,14 @@ async function performChoice(adapter,action,value,family){
    menuSelector=family==='ant'?'.ant-select-dropdown'+id+', .ant-select-dropdown:has('+id+')':id;
   }
   locator=menuSelector;menus=page.locator(menuSelector).filter({visible:true});
-  if(await l.evaluate(n=>n.getAttribute('aria-expanded'))==='false')throw Error('CHOICE_TRIGGER_NOT_EXPANDED');
+  if(!inputTriggered&&await l.evaluate(n=>n.getAttribute('aria-expanded'))==='false')throw Error('CHOICE_TRIGGER_NOT_EXPANDED');
   if(await menus.count()>1)throw Error('CHOICE_MENU_NOT_UNIQUE');
   await menus.waitFor({state:'visible',timeout:3000});
   if(await menus.count()!==1)throw Error('CHOICE_MENU_NOT_UNIQUE');
   step='choice_option';
   const phoenixEditable=family==='phoenix'&&await l.evaluate(n=>n.classList.contains('phoenix-select--editable'));
   const candidates=family==='ant'?[page.locator('.ant-select-open input.ant-select-search__field, .ant-select-open input.ant-select-selection-search-input').filter({visible:true})]:family==='ud'?[menus.locator('input[type="search"], input[placeholder*="搜索"], input[placeholder*="Search"]').filter({visible:true}),l.filter({visible:true})]:[menus.locator('input[type="search"], input[role="combobox"], input[placeholder*="搜索"], input[placeholder*="Search"]').filter({visible:true}),...(phoenixEditable?[l.locator('input.phoenix-select__input').filter({visible:true})]:[]),l.filter({visible:true})];
-  for(const candidate of candidates){if(await candidate.count()===1&&await candidate.evaluate(n=>n.tagName==='INPUT'&&!n.readOnly&&!n.disabled&&(n.type==='search'||n.getAttribute('role')==='combobox'||/搜索|search/i.test(n.getAttribute('placeholder')||n.className||'')||n.classList?.contains?.('phoenix-select__input')&&!!n.closest?.('.phoenix-select--editable')))){search=candidate;break;}}
+  if(!inputTriggered)for(const candidate of candidates){if(await candidate.count()===1&&await candidate.evaluate(n=>n.tagName==='INPUT'&&!n.readOnly&&!n.disabled&&(n.type==='search'||n.getAttribute('role')==='combobox'||/搜索|search/i.test(n.getAttribute('placeholder')||n.className||'')||n.classList?.contains?.('phoenix-select__input')&&!!n.closest?.('.phoenix-select--editable')))){search=candidate;break;}}
   const searchable=!!search;
   // The exact option may already be rendered in an ordinary dropdown. Its
   // auxiliary input is not necessarily a persistent search box; typing there
@@ -139,7 +162,7 @@ async function performChoice(adapter,action,value,family){
   const targetText=action.optionTextMap?.[value]||String(value);
   const renderedTarget=family==='phoenix'&&!action.method.endsWith('_inspect')&&
    await menus.locator('.phoenix-selectList__listItem').filter({visible:true}).filter({hasText:exact(targetText)}).count()===1;
-  if(searchable){initialQuery=await search.evaluate(n=>n.value);if((action.query||!action.method.endsWith('_inspect'))&&!renderedTarget){queryApplied=true;await search.fill(action.query||String(value),{timeout:10000});await assertValue(search,action.query||String(value));}}
+  if(searchable&&!inputTriggered){initialQuery=await search.evaluate(n=>n.value);if((action.query||!action.method.endsWith('_inspect'))&&!renderedTarget){queryApplied=true;await search.fill(action.query||String(value),{timeout:10000});await assertValue(search,action.query||String(value));}}
   const tree=family==='ud'&&await menus.evaluate(n=>!!n.classList?.contains('ud__treeSelect__overlay')||!!n.querySelector?.('.ud__tree'));
   let optionSelector=tree?UD_TREE_LEAF_LABEL:family==='phoenix'?'.phoenix-selectList__listItem':family==='ud'?'.ud__select__list__item':family==='ant'?'.ant-select-item-option, .ant-select-dropdown-menu-item':'[role="option"]';
   // Prefer actual renderer rows; the hidden rc-select ARIA mirror is not a click target.
@@ -230,9 +253,10 @@ export async function performControl(adapter,action,value,files={}){
     if(action.method==='remove_project_record'){const url=new URL('./project-record-removal.mjs',import.meta.url);url.searchParams.set('revision',String((await stat(url)).mtimeMs));return (await import(url.href)).performProjectRecordRemoval(adapter,action);}
     if(action.method==='inspect_project_record'){const url=new URL('./project-record-removal.mjs',import.meta.url);url.searchParams.set('revision',String((await stat(url)).mtimeMs));return (await import(url.href)).inspectProjectRecordRemoval(adapter,action);}
     if(action.method==='capture_wecruit_schema')return captureWecruitSchema(adapter.page,action);
-    if(action.method==='phoenix_autocomplete_restage'){
+    if(['phoenix_autocomplete_restage','aria_autocomplete_restage'].includes(action.method)){
       await adapter.assertSingleEditor();action=await adapter.resolveSpec(action);
-      const {performAutocompleteRestage}=await import('./autocomplete-restage.mjs');return performAutocompleteRestage(adapter,action);
+      const url=new URL('./autocomplete-restage.mjs',import.meta.url);url.searchParams.set('revision',String((await stat(url)).mtimeMs));
+      const {performAutocompleteRestage}=await import(url.href);return performAutocompleteRestage(adapter,action);
     }
     if(['phoenix_autocomplete','phoenix_autocomplete_inspect','phoenix_autocomplete_verify'].includes(action.method)){
       if(action.method==='phoenix_autocomplete')await adapter.assertSingleEditor();
@@ -273,6 +297,12 @@ export async function performControl(adapter,action,value,files={}){
     if(action.method==='wait'&&action.operation==='compare_control_aliases'){
       if(!Array.isArray(action.alternatives)||!Array.isArray(action.references)||action.alternatives.length>600||action.references.length>600)throw Error('BOUNDED_SELECTOR_REFERENCES_REQUIRED');
       return adapter.page.evaluate(selectorAliasDOM,{alternatives:action.alternatives,references:action.references});
+    }
+    if(action.method==='wait'&&action.operation==='recent_network_errors'){
+      if(typeof adapter.page.consoleMessages!=='function')return {status:'unavailable',errors:[]};
+      const messages=await adapter.page.consoleMessages(),errors=[];
+      for(const message of messages){const text=message.text(),code=text.match(/net::ERR_[A-Z0-9_]+/)?.[0]||(/blocked by CORS policy/i.test(text)?'CORS_BLOCKED':null);if(!code)continue;let resource=null;try{const url=new URL(message.location().url);resource=url.origin+url.pathname.replace(/\d{6,}/gu,'[id]');}catch{}errors.push({code,resource});}
+      return {status:'observed',errors:errors.slice(-12),scope:'browser_console_network_codes_without_message_values'};
     }
     if(action.method==='wait')return adapter.wait(action.selector);
     if(action.method==='ant_multiselect')return performAntMulti(adapter,action,value);
@@ -320,6 +350,16 @@ export async function performControl(adapter,action,value,files={}){
     if(['dropdown','dropdown_inspect','dropdown_verify'].includes(action.method))return performChoice(adapter,action,value,'aria');
     if(action.method==='radio'){
       if(!action.options?.includes(String(value)))throw Error('UNSUPPORTED_CHOICE_NO_FALLBACK');
+      const read=()=>adapter.page.evaluate(controlDOM,{operation:'radioOptions',selector:action.selector});
+      const matches=(await read()).filter(option=>option.label===String(value));
+      if(matches.length===1&&matches[0].targetSelector){
+       const option=matches[0];
+       if(option.disabled)throw Error('CHOICE_OPTION_DISABLED');
+       const target=await locateControl(adapter.page,{selector:option.targetSelector});
+       await target.click({timeout:10000});
+       await waitCommit(async()=>{const selected=(await read()).filter(item=>item.selected);return selected.length===1&&selected[0].label===String(value);},true);
+       return;
+      }
       const choice=l.getByRole('radio',{name:String(value),exact:true});if(await choice.count()!==1)throw Error('CHOICE_NOT_UNIQUE_OR_NOT_PRESENT');await choice.check();await waitCommit(()=>choice.evaluate(n=>n.checked===true||n.getAttribute('aria-checked')==='true'||n.querySelector('input')?.checked===true),true);return;
     }
     if(action.method==='feishu_month'){
@@ -352,7 +392,7 @@ export async function performControl(adapter,action,value,files={}){
         if(!path.isAbsolute(file)||!(await stat(file)).isFile())throw Error('INVALID_FILE_REFERENCE');
       }
       const originUrl=new URL('./upload-origin.mjs',import.meta.url);originUrl.searchParams.set('revision',String((await stat(originUrl)).mtimeMs));
-      const uploadOrigin=await (await import(originUrl.href)).uploadWithOrigin(adapter.page,l,asset,await Promise.all(asset.paths.map(file=>readFile(file))));
+      const uploadOrigin=await (await import(originUrl.href)).uploadWithOrigin(adapter.page,l,asset,await Promise.all(asset.paths.map(file=>readFile(file))),{http1Resource:action.http1Resource});
       if(action.successSelector)await adapter.page.locator(action.successSelector).waitFor({state:'visible',timeout:30000});
       return {uploadOrigin};
     }

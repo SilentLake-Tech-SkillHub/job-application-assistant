@@ -58,8 +58,11 @@ export async function probeConditions({page,plan,pageUrl,origin,onInventory,chec
    }while(true);
    const observation=await page.observe({...plan,fields:[parent]});
    const unknown=controls.filter(f=>!mapped(f,plan));
+   let selectorEquivalences=[];
+   const references=controls.map(control=>control.selector),alternatives=expected.flatMap(field=>field.inventorySelectors||[field.read.selector]).filter(selector=>!references.includes(selector));
+   if(alternatives.length)try{const proof=await page.act({method:'wait',operation:'compare_control_aliases',selector:plan.readySelector,alternatives,references},null,{});selectorEquivalences=(proof?.pairs||[]).map(pair=>({selector:alternatives[pair.alternativeIndex],reference:references[pair.referenceIndex]})).filter(pair=>pair.selector&&pair.reference);}catch{}
    const branch={source:parent.source,value,inventory:controls,selected:observation.fields?.[parent.id]?.selected===true&&observation.fields?.[parent.id]?.value===value,
-    expectedFieldIds:expected.map(f=>f.id),newQuestions:unknown.length,conditionFieldsMatched:matched,roleMatched:observation.pageUrl===pageUrl&&matchesRole(plan,observation)};
+    expectedFieldIds:expected.map(f=>f.id),selectorEquivalences,newQuestions:unknown.length,conditionFieldsMatched:matched,roleMatched:observation.pageUrl===pageUrl&&matchesRole(plan,observation)};
    branch.status=branch.selected&&branch.roleMatched&&matched&&!unknown.length?'verified':'needs_attention';
    branches.push(branch);await checkpoint({branches,restoration:'pending'});
   }

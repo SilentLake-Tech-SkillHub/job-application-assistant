@@ -142,9 +142,10 @@
     "material_import_run": [
       "construct",
       [
-        "capture_controls"
+        "material_import_inspect"
       ]
     ],
+    "material_import_inspect": ["construct", ["capture_controls"]],
     "company_batch_create": [
       "route",
       [
@@ -220,6 +221,19 @@
       "construct",
       [
         "capture_rea_structure"
+      ]
+    ],
+    "form_capture_visual": [
+      "construct",
+      [
+        "form_capture_visual",
+        "capture_rea_structure"
+      ]
+    ],
+    "form_expand_sections": [
+      "construct",
+      [
+        "form_review_completeness"
       ]
     ],
     "capture_controls": [

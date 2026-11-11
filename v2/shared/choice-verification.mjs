@@ -19,4 +19,11 @@ export async function verifyDropdownSelections(page,plan,task){
  return proofs;
 }
 export const choiceMenuUnrestored=proofs=>Object.values(proofs).some(proof=>unrestored(proof.errorDetails));
-export function attachChoiceProofs(observation,proofs){for(const [id,proof]of Object.entries(proofs))if(observation.fields?.[id])observation.fields[id].selectionProof=proof;return observation;}
+export function attachChoiceProofs(observation,proofs){
+ for(const [id,proof]of Object.entries(proofs)){
+  const field=observation.fields?.[id];if(!field)continue;
+  field.selectionProof=proof;
+  if(proof.status==='verified'&&proof.reopenedOptionSelected===true&&proof.blurConfirmed===true&&proof.label===field.value)field.selected=true;
+ }
+ return observation;
+}

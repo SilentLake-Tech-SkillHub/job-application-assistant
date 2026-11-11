@@ -2,6 +2,7 @@ import {createHash} from 'node:crypto';
 import {validateControlContract} from './value-contract.mjs';
 import {templateConstructionIssues} from './field-policy.mjs';
 import {auditStoredContract} from './workflow-contract.mjs';
+import {observedRepeatPrototype} from './repeat-groups.mjs';
 const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 // Built once means complete coverage and a proof run were recorded when it was sealed.
 export const wasBuilt=t=>['allConditionalBranchesVerified','allControlsMapped','allDriversSupported'].every(k=>t?.coverage?.[k]===true)&&!!t.coverage.proof?.runId;
@@ -36,9 +37,18 @@ export function completeFormTemplate(template,probe,{companyId,profileMapped,cha
  if(!profileMapped)throw Error('FORM_PROFILE_MAPPING_INCOMPLETE');
  const fields=template.pages.flatMap(p=>p.fields),controls=probe.branches.flatMap(b=>b.inventory||[]);
  for(const c of controls)if(!fields.some(f=>f.inventorySelectors?.includes(c.selector)&&f.inventoryLabel===c.label&&f.inventoryType===c.type&&!!f.required===!!c.required))throw Error('SEAL_HAS_UNMAPPED_CONTROL');
- for(const f of fields){validateControlContract(f);if(!f.userOnly&&!controls.some(c=>f.inventorySelectors?.includes(c.selector)))throw Error('SEAL_FIELD_NOT_OBSERVED');if((f.actions||[]).some(a=>a.method==='upload')&&channel==='iab')throw Error('IAB_UPLOAD_DRIVER_NOT_AVAILABLE');}
+ const repeatPrototypeFieldIds=[];
+ for(const page of template.pages)for(const f of page.fields){
+  validateControlContract(f);
+  if(!f.userOnly&&!controls.some(c=>f.inventorySelectors?.includes(c.selector))){
+   if(!observedRepeatPrototype(f,page,controls))throw Error('SEAL_FIELD_NOT_OBSERVED');
+   repeatPrototypeFieldIds.push(f.id);
+  }
+  if((f.actions||[]).some(a=>a.method==='upload')&&channel==='iab')throw Error('IAB_UPLOAD_DRIVER_NOT_AVAILABLE');
+ }
  const result=structuredClone(template);result.version++;
  result.coverage={...result.coverage,allConditionalBranchesVerified:true,allControlsMapped:true,allDriversSupported:true,proof:{runId:probe.id,sourceTemplateHash:probe.templateHash,probeScope:probe.scope||'declared_conditions',restoration:probe.restoration,completedAt:probe.finishedAt}};
+ if(repeatPrototypeFieldIds.length)result.coverage.proof.repeatPrototypeFieldIds=repeatPrototypeFieldIds;
  result.coverage.proof.contractHash=templateContractHash(result);
  result.validation={livePassed:false};return result;
 }

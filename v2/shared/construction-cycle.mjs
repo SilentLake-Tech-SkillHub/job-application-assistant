@@ -1,8 +1,9 @@
 import {createHash} from 'node:crypto';
 import {captureContentHash} from './acquisition-chain.mjs';
 import {validateControlContract} from './value-contract.mjs';
+import {excludedRepeatField} from './repeat-groups.mjs';
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
-export const constructionCaptureHash=capture=>hash({capture:captureContentHash(capture),repeatGroups:capture.repeatGroups||[]});
+export const constructionCaptureHash=capture=>hash({capture:captureContentHash(capture),repeatGroups:capture.repeatGroups||[],...(capture.primaryReviewHash?{primaryReviewHash:capture.primaryReviewHash}:{})});
 export function reviewCompleteness(capture,{reviewedSelectors,findings=[],evidence}){
  const actual=[...new Set(capture.controls.map(c=>c.selector))],reviewed=new Set(reviewedSelectors);
  if(!evidence?.trim()||reviewed.size!==reviewedSelectors.length||actual.some(s=>!reviewed.has(s))||[...reviewed].some(s=>!actual.includes(s)))throw Error('COMPLETE_AGENT_CONTROL_REVIEW_REQUIRED');
@@ -18,6 +19,7 @@ export function assertInteractionEvidence(template,run){
  if(!run||run.operation!=='form_interaction_test'||run.templateHash!==hash(template)||run.companyId!==template.id||run.status!=='verified'||run.browserExecuted!==true)throw Error('VERIFIED_CONTROL_INTERACTION_REQUIRED');
  const fields=interactionFields(template),passed=new Set([...(run.testedFieldIds||[]),...(run.omittedFieldIds||[])]);
  for(const id of run.inactiveFieldIds||[])if(template.pages.some(p=>p.fields.some(f=>f.id===id&&f.when)))passed.add(id);
+ for(const id of run.inactiveRecordFieldIds||[])if(run.recordPlan&&run.recordPlanHash===hash(run.recordPlan)&&template.pages.some(page=>page.fields.some(field=>field.id===id&&excludedRepeatField(field,page,run.recordPlan))))passed.add(id);
  if(fields.some(id=>!passed.has(id))||run.failures?.length)throw Error('CONTROL_INTERACTION_INCOMPLETE');
  return run;
 }

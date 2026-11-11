@@ -1,6 +1,21 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {inspectEntryPage} from '../shared/entry-inspection.mjs';
 import {RoleFlow} from '../shared/role-flow.mjs';
+import {controlDOM} from '../shared/control-dom.mjs';
+import vm from 'node:vm';
+test('a missing rendered title returns bound-page loading diagnostics without navigation',async()=>{
+ const origin='https://example.test',pageUrl=origin+'/campus/resume/123/apply',flow=Object.create(RoleFlow.prototype);
+ const prior={pageId:'chrome:form'},entry={kind:'detail_to_form',detailPathPattern:'^/campus/position/(?<id>\\d+)/detail$',formPathPattern:'^/campus/resume/(?<id>\\d+)/apply$',formPathTemplate:'/campus/resume/{id}/apply'};
+ flow.base=async()=>({prior,t:{taskId:'task',officialId:'123',url:origin+'/campus/position/123/detail',title:'Role'},c:{origin},entry});
+ flow.browser={request:async method=>{if(method==='pageIdentity')return {pageUrl};if(method==='entryInspection')return {candidates:[]};throw Error('Unexpected mutation');},existingPage:async(url,options)=>{assert.equal(url,pageUrl);assert.deepEqual(options,{pageId:prior.pageId,readOnly:true});return {observe:async spec=>{assert.equal(spec.entryHealth,true);return {readyState:'complete',visibleControls:0};}};}};
+ assert.equal((await flow.inspectEntry({stage:'form'})).pageHealth.visibleControls,0);
+});
+test('loading diagnostics expose response status and omit resource queries and numeric identities',()=>{
+ const result=vm.runInNewContext('('+controlDOM.toString()+')({entryHealth:true})',{URL,Date,location:{href:'https://example.test/form'},document:{readyState:'complete',querySelectorAll:()=>[]},performance:{now:()=>6000,getEntriesByType:()=>[{name:'https://api.example.test/resumes/123456789?token=private',initiatorType:'fetch',duration:4000,responseStatus:503}]}});
+ assert.equal(result.visibleControls,0);assert.equal(result.failedResources[0].status,503);
+ assert.equal(result.failedResources[0].resource,'https://api.example.test/resumes/[id]');
+ assert.equal(JSON.stringify(result).includes('private'),false);
+});
 test('entry inspection accepts only unique rendered title matches and never clicks',async()=>{
  let reads=0;const page={url:()=> 'https://example.test/form',locator:selector=>({count:async()=>selector.startsWith('span:')?1:0,innerText:async()=>{reads++;return '你正在投递职位: Test Role(J12345)';}})};
  const result=await inspectEntryPage(page,{stage:'form',expectedTitle:'Test Role(J12345)',entry:{form:{rolePrefix:'你正在投递职位:'}}});

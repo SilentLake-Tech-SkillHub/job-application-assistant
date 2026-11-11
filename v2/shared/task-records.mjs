@@ -9,7 +9,7 @@ const context=new AsyncLocalStorage();
 export const withTaskRecords=(scope,fn)=>context.run(scope,fn);
 export const taskRecordScope=()=>context.getStore()||{};
 export function bindTaskRecordScope(taskId){const scope=context.getStore();if(!scope||!taskId)return;if(scope.taskId&&scope.taskId!==taskId)throw Error('TASK_RECORD_SCOPE_MISMATCH');scope.taskId=taskId;}
-const durableAsset=/^(?:sealed-probe-|draft-probe-|capture-|form-structure-|choices-|acquisition-|form-draft-|definition-|probe-|submission-proof-|submission-evidence-)/;
+const durableAsset=/^(?:sealed-probe-|draft-probe-|capture-|form-structure-|form-visual-|form-coverage-|choices-|acquisition-|form-draft-|definition-|probe-|submission-proof-|submission-evidence-)/;
 const read=async(file,fallback)=>{try{return JSON.parse(await readFile(file,'utf8'));}catch(e){if(e.code==='ENOENT')return fallback;throw e;}};
 async function write(file,value){await mkdir(path.dirname(file),{recursive:true,mode:0o700});const tmp=file+'.'+randomUUID()+'.tmp';await writeFile(tmp,JSON.stringify(value,null,2),{mode:0o600});await rename(tmp,file);}
 

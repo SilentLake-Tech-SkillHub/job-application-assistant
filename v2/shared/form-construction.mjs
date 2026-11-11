@@ -22,6 +22,7 @@ export function mappingCandidates(controls,profile){
  });
 }
 export function inferControl(c){
+ if(c.contextProvider==='.ud-formily-item'&&c.semanticType)return c.semanticType==='month_picker'?'month_picker':null;
  if(c.multiple&&(c.renderer==='ant_select'||c.tag==='select'))return 'multiselect';
  if(c.contextProvider==='.atsx-form-item'){
   const type={month:'month_picker',year:'year_picker',choice:'dropdown',radio_group:'radio',readonly:'readonly_text',school_text:'dropdown'}[c.type];if(type)return type;
@@ -45,6 +46,7 @@ export function inferControl(c){
 function fieldFromControl(c,m,choice){
  const phoenixDate=c.renderer==='phoenix_date_picker'&&choice?.status==='captured_date_options'&&choice.restored===true&&['day','month','year'].includes(choice.dateOptions?.precision),type=phoenixDate?({day:'day_picker',month:'month_picker',year:'year_picker'})[choice.dateOptions.precision]:inferControl(c),contract=CONTROL_TYPES[type],human=humanActionReason({inventoryLabel:c.label,inventoryType:c.type,inventoryRenderer:c.renderer,role:c.role});
  const f={id:'field-'+digest([c.selector,c.label]).slice(0,20),source:m?.factKey||'unmapped.pending',label:c.label||'未识别题目',required:!!c.required,inventorySelectors:c.inventorySelectors||[c.selector],inventoryLabel:c.label,inventoryType:c.type,inventoryReadonly:c.readonly===true||c.type==='readonly',inventoryDisabled:!!c.disabled,inventoryRenderer:c.renderer||null,read:{selector:c.selector,kind:'value'},actions:[],constructionBlockers:[]};
+ if(c.semanticType)f.inventorySemanticType=c.semanticType;
  if(!c.label)f.constructionBlockers.push('QUESTION_LABEL_NOT_CAPTURED');
  if(!m?.factKey||m.factKey.startsWith('unmapped.'))f.constructionBlockers.push('SEMANTIC_MAPPING_REQUIRED');
  if(!type){f.constructionBlockers.push(c.renderer==='phoenix_date_picker'?'DATE_OPTIONS_NOT_CAPTURED':'CONTROL_DRIVER_REQUIRED');return f;}
@@ -54,7 +56,7 @@ function fieldFromControl(c,m,choice){
  const framework=c.contextProvider;
  if(c.readSelector)f.read.selector=c.readSelector;
  if(c.documentTypePrefix)f.documentTypePrefix=c.documentTypePrefix;
- if(type==='readonly_text'){f.readonly=true;f.read.kind=framework==='.atsx-form-item'?'text':'value';}
+ if(type==='readonly_text'){f.readonly=true;f.read.kind=['input','textarea','select'].includes(c.tag)?'value':'text';}
  else if(type==='searchable_text'){if(c.renderer==='phoenix_autocomplete'&&choice?.restored===true&&(choice.options?.length||choice.customValueEvidence)){f.control.options=choice.options||[];f.actions=[{...action('phoenix_autocomplete'),labelSelector:c.labelSelector,options:choice.options||[],customValueEvidence:choice.customValueEvidence||null}];}else f.constructionBlockers.push('SEARCHABLE_TEXT_COMMIT_CONTRACT_REQUIRED');}
  else if(type==='text'){if(!human)f.actions=[action('fill')];}
  else if(type==='checkbox'){f.read.kind='checked';if(!human)f.actions=[action('check')];}
@@ -74,7 +76,7 @@ function fieldFromControl(c,m,choice){
    const method=framework==='.ant-form-item'?'ant_dropdown':'ud_dropdown';
    f.read.kind='text';f.read.selector=c.selectedSelector||c.questionSelector||c.selector;
    if(!human)f.actions=[{...capturedChoiceAction(c,method),options:options||[]}];
-  }else if(c.role==='combobox'&&c.selectedSelector){f.read.kind='text';f.read.selector=c.selectedSelector;f.actions=[{...capturedChoiceAction(c,'dropdown'),options:options||[]}];}
+  }else if(c.role==='combobox'&&c.selectedSelector){f.read.kind=c.searchSelector?'value':'text';f.read.selector=c.searchSelector||c.selectedSelector;f.selectionVerificationRequired=true;f.actions=[{...capturedChoiceAction(c,'dropdown'),options:options||[]}];}
   else f.constructionBlockers.push('CONTROL_DRIVER_REQUIRED');
  }else if(f.kind==='date'){
   f.precision=type==='year_picker'?'year':type==='month_picker'?'month':'day';f.read.selectedSelector=c.selector;
@@ -116,7 +118,7 @@ export function buildFormTemplate({capture,profile,mappings=[],choices=[],page,t
  const groups=new Map();
  for(const c of capture.controls){const identity=c.type==='radio'&&c.questionSelector?c.questionSelector:c.selector;const prior=groups.get(identity);if(prior&&c.type!=='radio')throw Error('DUPLICATE_CAPTURED_SELECTOR');if(prior)prior.inventorySelectors.push(c.selector);else groups.set(identity,{...c,inventorySelectors:[c.selector]});}
  let fields=[...groups.values()].map(c=>{
-  const f=fieldFromControl(c,mappings.find(m=>m.active!==false&&c.inventorySelectors.includes(m.selector)),choices.find(x=>x.selector===c.selector));
+  const f=fieldFromControl(c,mappings.find(m=>(m.active!==false||c.when)&&c.inventorySelectors.includes(m.selector)),choices.find(x=>x.selector===c.selector));
   const priorWhen=previous.flatMap(t=>t?.pages||[]).flatMap(p=>p.fields||[]).find(x=>x.when&&x.read?.selector===f.read?.selector)?.when;
   if(priorWhen&&!f.when)f.when=structuredClone(priorWhen);
   const ongoing=f.source.replace(/\.(?:end|endDate|dateEnd|endMonth)$/u,'.ongoing');
@@ -131,7 +133,8 @@ export function buildFormTemplate({capture,profile,mappings=[],choices=[],page,t
   }
   return f;
  });
- fields=inheritFields(fields,previous,page.pathPrefix||'/');
+ fields=inheritFields(fields,previous,page.pathPrefix||'/',{preserveObservedBlockers:!!capture.visualPage,mappings});
+ for(const field of fields)if(field.kind==='date'){const ongoing=field.source.replace(/\.(?:end|endDate|dateEnd|endMonth)$/u,'.ongoing');if(ongoing!==field.source&&profile.facts?.[ongoing]?.status==='known'&&typeof profile.facts[ongoing].value==='boolean')field.ongoingSource=ongoing;}
  const choiceGoals=evaluateChoiceGoals({capture,profile,fields,choices});
  fields=fields.map(f=>{
   const goal=choiceGoals.goals.find(g=>g.fieldId===f.id);

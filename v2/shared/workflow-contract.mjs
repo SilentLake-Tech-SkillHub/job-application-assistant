@@ -28,6 +28,8 @@ export function contractAuditSummary(audit){const {fields,ready,...summary}=audi
 // also consumed by the host Hook; nextTools alone is not a lifecycle contract.
 export function workflowEnvelope(data){
  if(!data||typeof data!=='object')return data;
+ const acquisitionNext={CURRENT_VISUAL_INVENTORY_REQUIRED:['form_capture_visual'],VISUAL_FORM_PAGE_CHANGED:['form_capture_visual'],CURRENT_VISUAL_REA_PAIR_REQUIRED:['capture_rea_structure','form_review_completeness'],PRIMARY_CONTROL_REVIEW_REQUIRED:['form_cycle_status'],FORM_SECTION_EXPANSION_REQUIRED:['form_expand_sections'],SECTION_EXPANSION_REOBSERVATION_REQUIRED:['form_capture_visual','capture_rea_structure'],CURRENT_CONSTRUCTION_DRAFT_REQUIRED:['form_build_template','template_register']}[data.error];
+ if(acquisitionNext)return {...data,continuation:{state:'construct',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:acquisitionNext,reason:data.error}};
  if(['PREPARED_PLAN_NOT_FOUND','PREPARED_PLAN_HASH_MISMATCH'].includes(data.error)){
   return {...data,completion:{complete:false,status:'company_plan_refresh_required',scope:'preparation'},continuation:{state:'prepare',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['prepare_plan'],reason:data.error}};
  }
@@ -53,13 +55,13 @@ export function workflowEnvelope(data){
  }
  else if(data.readyToRegister!==undefined)nextTools=data.readyToRegister?['template_register']:data.nextTools||['form_mapping_candidates','capture_choice_options','form_build_template'];
  else if(data.choicesId)nextTools=data.nextTools||['form_build_template'];
- else if(data.captureId)nextTools=data.nextTools||['form_mapping_candidates','capture_choice_options','form_build_template'];
+ else if(data.captureId||Array.isArray(data.nextTools))nextTools=data.nextTools||['form_mapping_candidates','capture_choice_options','form_build_template'];
  else if(data.status==='captured_not_live_verified')nextTools=['form_test_interactions'];
  else if(['company_template_ready','asset_sealed_require_profile_preflight'].includes(data.status)){nextTools=['prepare_plan'];state='prepare';}
  else if(data.mapped!==undefined)nextTools=['form_build_template'];
  else if(data.operation==='internal_condition_probe'){state=data.status==='verified'&&data.restoration==='verified'?'construct':'repair';nextTools=state==='construct'?['form_test_interactions']:['run_status','form_template_audit'];}
  else if(data.status==='ready_for_material_staging')nextTools=['material_import_run'];
- else if(data.status==='input_uploaded_server_unverified')nextTools=['capture_controls','verify_current'];
+ else if(data.status==='input_uploaded_server_unverified')nextTools=['material_import_inspect'];
  if(!nextTools)return data;
  if(data.error)state='technical_block';
  return {...data,completion:{status:data.error?'blocked_on_agent':'in_progress',complete:false},continuation:{state,owner:'agent',requiresUser:false,shouldContinue:true,nextTools,...(data.error?{reason:data.error,retry:'only_after_evidence_or_inputs_change'}:{})}};

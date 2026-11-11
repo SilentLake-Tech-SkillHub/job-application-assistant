@@ -10,6 +10,17 @@ function fixture(value='示例科技大学',type='dropdown'){
 function observed(args,options=['示例科技大学']){
  args.choices=[{selector,captureId:args.capture.captureId,choicesId:'choices-sample',status:'captured',restored:true,options,optionRecords:options.map((label,i)=>({label,value:'id-'+i,valueAttribute:'data-id',disabled:false}))}];return args;
 }
+test('one native radio question may carry equal evidence from its separate inputs, while conflicting or unrelated questions remain ambiguous',()=>{
+ const args=observed(fixture('内推','radio'),['无','内推','大使推荐']);
+ const original=args.choices[0];
+ args.capture.controls=['#r1','#r2','#r3'].map(selector=>({selector,type:'radio',questionSelector:'#recommendation'}));
+ args.fields[0].inventorySelectors=args.capture.controls.map(control=>control.selector);
+ args.choices=args.capture.controls.map(control=>({...structuredClone(original),selector:control.selector}));
+ assert.equal(evaluateChoiceGoals(args).goals[0].status,'resolved');
+ args.choices[1].options=['无','其他'];assert.equal(evaluateChoiceGoals(args).blockers[0].reason,'CHOICE_GOAL_EVIDENCE_AMBIGUOUS');
+ args.choices[1]=structuredClone(args.choices[0]);args.choices[1].selector='#r2';args.capture.controls[1].questionSelector='#another-question';
+ assert.equal(evaluateChoiceGoals(args).blockers[0].reason,'CHOICE_GOAL_EVIDENCE_AMBIGUOUS');
+});
 test('a real exact Chinese school candidate resolves without a search',()=>{
  const args=observed(fixture()),r=evaluateChoiceGoals(args);assert.equal(r.blockers.length,0);assert.equal(r.goals[0].decision,'resolved_known_alias');assert.equal(r.goals[0].resolution.optionValue,'id-0');assert.equal(r.goals[0].executionVerified,false);assert.equal(r.nextGoals.length,0);
 });

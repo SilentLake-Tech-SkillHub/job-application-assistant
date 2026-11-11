@@ -284,7 +284,14 @@ export class RoleFlow{
   // Flat catalog recipes predate the declarative form object. Normalize the
   // diagnostic payload at the caller so existing browser brokers can read it.
   const entry={...x.entry,form:x.entry?.form||{}};
-  return this.browser.request('entryInspection',{pageId,entry,expectedTitle:x.t.title,stage});
+  const inspection=await this.browser.request('entryInspection',{pageId,entry,expectedTitle:x.t.title,stage});
+  if(inspection.candidates?.length===0){
+   const current=await this.browser.request('pageIdentity',{pageId});
+   if(originOf(current.pageUrl)!==x.c.origin)throw Error('ROLE_BOUND_PAGE_SCOPE_CHANGED');
+   const page=await this.browser.existingPage(current.pageUrl,{pageId,readOnly:true});
+   inspection.pageHealth=await page.observe({entryHealth:true});
+  }
+  return inspection;
  }
  async closeExtraPages(args){const x=await this.base(args);return this.login.locked(x.c,async()=>{
   const bound=typeof this.queues.boundPages==='function'?await this.queues.boundPages():new Map(),keep=new Set(bound.keys());

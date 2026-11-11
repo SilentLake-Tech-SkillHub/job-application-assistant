@@ -29,12 +29,19 @@ export function uploadOriginMatches(origin,url){
 // Observe the acknowledgement of this native file-selection action. This is
 // artifact metadata only, never proof of source bytes; visual review decides
 // content matching. No file read, digest or POST-body comparison occurs here.
-export async function uploadWithOrigin(page,input,asset,_legacyBuffers,{timeoutMs=2500}={}){
+export async function uploadWithOrigin(page,input,asset,_legacyBuffers,{timeoutMs=2500,http1Resource}={}){
  if(!asset?.paths?.length){throw Error('FILE_REFERENCE_MISSING');}
+ let matcher,handler,transportRecovery;
+ if(http1Resource){
+  const resource=new URL(http1Resource);if(resource.protocol!=='https:'||resource.origin!==new URL(page.url()).origin||resource.search||resource.hash||typeof page.route!=='function'||typeof page.on!=='function')throw Error('UPLOAD_TRANSPORT_SCOPE_MISMATCH');
+  transportRecovery={mode:'http1',attempted:false};matcher=url=>url.origin+url.pathname===http1Resource;
+  handler=async route=>{if(!['POST','PUT'].includes(route.request().method()))return route.continue();transportRecovery.attempted=true;try{const response=await route.fetch({timeout:40000,maxRetries:0,maxRedirects:0});transportRecovery.responseStatus=response.status();await route.fulfill({response});}catch{transportRecovery.error='HTTP1_UPLOAD_FAILED';await route.abort('failed');}};
+  await page.route(matcher,handler,{times:1});
+ }
  if(typeof page.on!=='function'){await input.setInputFiles(asset.paths);return {status:'unverified',reason:'UPLOAD_ACK_HOST_UNAVAILABLE'};}
  let receipt=null,finish;const ready=new Promise(resolve=>finish=resolve);
  const response=async event=>{try{if(!event.ok()||event.request().method()!=='POST')return;const data=await event.json(),bindings=uploadArtifactBindings(data);if(!bindings.resourcePaths.length&&!bindings.fileIds.length)return;receipt={status:'ack_observed',kind:'upload_artifact_metadata',responseStatus:event.status(),...bindings,sourceBytesVerified:false};finish();}catch{}};
  page.on('response',response);let timer;
- try{await input.setInputFiles(asset.paths);await Promise.race([ready,new Promise(resolve=>timer=setTimeout(resolve,timeoutMs))]);return receipt||{status:'unverified',reason:'UPLOAD_ACK_NOT_OBSERVED',sourceBytesVerified:false};}
- finally{clearTimeout(timer);page.off('response',response);}
+ try{await input.setInputFiles(asset.paths);await Promise.race([ready,new Promise(resolve=>timer=setTimeout(resolve,http1Resource?45000:timeoutMs))]);return {...(receipt||{status:'unverified',reason:'UPLOAD_ACK_NOT_OBSERVED',sourceBytesVerified:false}),...(transportRecovery?{transportRecovery}:{})};}
+ finally{clearTimeout(timer);page.off('response',response);if(matcher)await page.unroute(matcher,handler);}
 }

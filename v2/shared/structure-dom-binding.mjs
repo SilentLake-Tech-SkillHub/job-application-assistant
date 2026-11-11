@@ -16,7 +16,7 @@ export function bindNativeDom(structure,native,{maxAgeMs=120000}={}){
   const paths=new Map();
   const pathOf=n=>{if(paths.has(n.index))return paths.get(n.index);if(n.nodeType!==1)return null;const tag=String(n.nodeName).toLowerCase();const parent=byIndex.get(n.parentIndex);let path;if(tag==='html')path='html';else if(tag==='body'&&String(parent?.nodeName).toLowerCase()==='html')path='body';else{const siblings=(children.get(n.parentIndex)||[]).filter(x=>x.nodeType===1&&String(x.nodeName).toLowerCase()===tag);const head=parent&&pathOf(parent);path=head?head+' > '+tag+':nth-of-type('+(siblings.findIndex(x=>x.index===n.index)+1)+')':tag;}paths.set(n.index,path);return path;};
   for(const n of d.nodes){if(n.nodeType!==1||!n.backendNodeId)continue;const ancestors=[];let p=byIndex.get(n.parentIndex),seen=new Set();while(p&&!seen.has(p.index)){seen.add(p.index);if(p.nodeType===1)ancestors.push({index:p.index,backendNodeId:p.backendNodeId,tag:String(p.nodeName).toLowerCase(),id:attr(p,'id'),class:attr(p,'class'),role:attr(p,'role')});p=byIndex.get(p.parentIndex);}
-   const entry={documentIndex,frameId:d.frameId,index:n.index,parentIndex:n.parentIndex,backendNodeId:n.backendNodeId,tag:String(n.nodeName).toLowerCase(),id:attr(n,'id'),class:attr(n,'class'),role:attr(n,'role'),path:cleanPath(pathOf(n)),ancestors};
+   const entry={documentIndex,frameId:d.frameId,index:n.index,parentIndex:n.parentIndex,backendNodeId:n.backendNodeId,tag:String(n.nodeName).toLowerCase(),id:attr(n,'id'),class:attr(n,'class'),role:attr(n,'role'),path:cleanPath(pathOf(n)),ancestors,...(n.layout?.bounds?{bounds:n.layout.bounds}:{})};
    const k=String(n.backendNodeId);domByBackend.set(k,domByBackend.has(k)?null:entry);
   }
  }

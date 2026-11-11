@@ -18,6 +18,13 @@ test('restaging freezes sourced references and hashes only; it is not a reusable
  assert.equal(CONTROL_METHODS.phoenix_autocomplete_restage.inspection,false);
  assert.equal(Object.values(CONTROL_TYPES).some(t=>t.methods.includes('phoenix_autocomplete_restage')),false);
 });
+test('a captured ARIA search container freezes its input separately without granting a template mutation',()=>{
+ const f=fixture();Object.assign(f.field,{renderer:undefined,contextProvider:'.atsx-form-item',type:'school_text',searchSelector:'#school input',actionSelector:'#school [role="combobox"]'});
+ const plan=autocompleteRestagePlan(f);
+ assert.equal(plan.restageMethod,'aria_autocomplete_restage');assert.equal(plan.inputSelector,f.field.searchSelector);
+ assert.equal(plan.comboSelector,f.field.actionSelector);assert.equal(CONTROL_METHODS.aria_autocomplete_restage.templateAllowed,false);
+ delete f.field.searchSelector;assert.throws(()=>autocompleteRestagePlan(f),/ORDINARY_CAPTURED_AUTOCOMPLETE_REQUIRED/);
+});
 for(const scenario of ['no_authority','wrong_page','unknown_source','sensitive_label','sensitive_source','unmapped','disabled','readonly','duplicate'])test('restaging refuses '+scenario,()=>{
  const f=fixture();
  if(scenario==='no_authority')f.authorization={restage:false,evidence:'text'};

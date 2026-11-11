@@ -10,6 +10,12 @@ const work=(...keys)=>keys.flatMap((key,i)=>[field('Work',i,`employment.${key}`,
 const form=(fields,groups,evidence={})=>({id:'F1',evidence,pages:[{pathPrefix:'/form',fields,...(groups?{groups}:{})}]});
 const plan=(entities,projects=null)=>({entities,projects});
 const selectors=page=>page.fields.map(f=>JSON.parse(f.inventorySelectors[0].slice(9)).occurrence);
+test('a file input owned by a named repeat id follows its own portfolio record when the profile expands',()=>{
+ const selector='.resumeEditForm-item.resumeEditForm-works:has([id="works[0].link"]) input[type="file"]',attachment={id:'attachment',source:'portfolio.one.attachment.reference',label:'File',kind:'file',inventorySelectors:[selector],read:{selector:selector.replace(' input[type="file"]',''),kind:'files'},actions:[{method:'upload',selector}],control:{type:'file_upload'}};
+ const t=form([attachment],[{id:'works',sectionKey:'works',selector:'.records',addSelector:'#add'}]),page=withProfileRecords(t,plan({portfolio:['one','two','three']})).pages[0];
+ assert.deepEqual(page.fields.map(f=>f.source),['portfolio.one.attachment.reference','portfolio.two.attachment.reference','portfolio.three.attachment.reference']);
+ assert.match(page.fields[2].actions[0].selector,/works\[2\]/);assert.match(page.fields[2].read.selector,/works\[2\]/);assert.equal(page.groups[0].count,3);
+});
 test('T13: the count comes from the profile, not from the number stored on the group',()=>{
  const t=form(work('a','b'),[group('Work',9)]);
  assert.equal(withProfileRecords(t,plan({employment:['a','b']})).pages[0].groups[0].count,2);

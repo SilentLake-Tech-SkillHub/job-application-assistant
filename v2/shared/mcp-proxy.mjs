@@ -2,7 +2,7 @@ import {Server} from '@modelcontextprotocol/sdk/server/index.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import {CallToolRequestSchema,ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
 import {openSamplingBridge} from './sampling-bridge.mjs';
-import {readFile} from 'node:fs/promises';import {createHash} from 'node:crypto';
+import {readFile,stat} from 'node:fs/promises';import {createHash} from 'node:crypto';
 const loadedTransportFingerprint=createHash('sha256').update(await readFile(new URL(import.meta.url))).digest('hex');
 const dispatcherUrl=new URL('./interface-call.mjs',import.meta.url);
 const dispatcherHash=createHash('sha256').update(await readFile(dispatcherUrl)).digest('hex');
@@ -24,7 +24,20 @@ export async function serveRemoteMcp(mode,{clientState,beforeConnect}={}){
   }else value=await core.execute(request.params.name,request.params.arguments||{},{visionSocket:sampling.socket});
   }catch(error){value={isError:true,error:error.message};}
   serverInfo.version=(await core.control('status')).version;
-  const {isError,...data}=value;return {...(isError?{isError:true}:{}),content:[{type:'text',text:JSON.stringify(data)}]};
+  const {isError,...data}=value;
+  const content=[{type:'text',text:JSON.stringify(data)}];
+  if(request.params.name==='form_capture_visual'&&data.status==='visual_screenshot_ready'){
+   // Paths come from the bound broker. Embed all captures or leave the set
+   // available by path, so a partial preview cannot imply full coverage.
+   const files=(data.screenshots||[]).map(screenshot=>screenshot.path);
+   const info=await Promise.all(files.map(file=>stat(file).catch(()=>null)));
+   if(info.every(item=>item?.isFile())&&info.reduce((size,item)=>size+item.size,0)<=16*1024*1024){
+    const images=await Promise.all(files.map(file=>readFile(file).catch(()=>null)));
+    const png=Buffer.from([137,80,78,71,13,10,26,10]);
+    if(images.every(bytes=>bytes?.subarray(0,8).equals(png)))for(const bytes of images)content.push({type:'image',mimeType:'image/png',data:bytes.toString('base64')});
+   }
+  }
+  return {...(isError?{isError:true}:{}),content};
  });
  if(clientState){server._clientCapabilities=clientState.capabilities;server._clientVersion=clientState.clientInfo;server._requestMessageId=clientState.requestId;}
  const transport=new StdioServerTransport();

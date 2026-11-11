@@ -213,7 +213,7 @@ export class Engine {
       if(hash(template)!==task.templateHash)throw Error('TEMPLATE_VERSION_CHANGED');
       const matches=(await this.routeTemplate(template,task)).pages.filter(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix));
       if(matches.length!==1)throw Error('AMBIGUOUS_PROBE_PAGE');
-      const run={id:'draft-probe-'+template.id,operation:'internal_condition_probe',companyId:company.id,templateHash:hash(template),startedAt:new Date().toISOString(),status:'running',submission:'not_performed',save:'not_verified',authorizationEvidence:authorization.evidence};
+      const run={id:'draft-probe-'+template.id,operation:'internal_condition_probe',companyId:company.id,pageUrl:task.pageUrl,pageId:task.pageId,browserBinding:task.browserBinding,templateHash:hash(template),startedAt:new Date().toISOString(),status:'running',submission:'not_performed',save:'not_verified',authorizationEvidence:authorization.evidence};
       const started=performance.now();
       try{
         await this.store.put('runs',run.id,run);
@@ -473,7 +473,8 @@ export class Engine {
         const unverifiedSources=new Set(),completedWrites=new Set();
         // Records are in place now. A control still absent means the company changed it:
         // mark only those fields for repair and fill everything else on the page.
-        const notOnPage=frozenFields.filter(f=>!['inactive','omitted','user_only'].includes(f.disposition)&&!initial.fields[f.id]?.present&&!canActivate(f));
+        const renderedControl=field=>expanded.some(control=>(field.inventorySelectors||[field.read.selector]).includes(control.selector));
+        const notOnPage=frozenFields.filter(f=>!['inactive','omitted','user_only'].includes(f.disposition)&&!initial.fields[f.id]?.present&&!renderedControl(f)&&!canActivate(f));
         if(notOnPage.length)await recordRealFillFailure(this.store,template,company.id,notOnPage.map(f=>f.id));
         for(const f of notOnPage){unverifiedSources.add(f.source);(result.deferredControls??=[]).push({id:f.id,source:f.source,kind:f.kind,label:f.label,status:'not_on_page',reason:'CONTROL_NOT_ON_PAGE'});}
         for(const f of fillFields){

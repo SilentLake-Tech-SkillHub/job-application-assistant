@@ -2,6 +2,16 @@ import test from 'node:test';import assert from 'node:assert/strict';import {cre
 import {reviewCompleteness,assertCompleteness,patchCapturedControls,assertInteractionEvidence,constructionNext} from '../shared/construction-cycle.mjs';
 const digest=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const fixture=()=>({capture:{companyId:'C00001',pageUrl:'https://sample.test/form',controls:[{selector:'#name',label:'Name',type:'text'}]},template:{id:'C00001',version:1,pages:[{fields:[{id:'name',source:'name',kind:'text',control:{type:'text',valueType:'string',readbackType:'string'},read:{selector:'#name',kind:'value'},actions:[{method:'fill',selector:'#name'}]}]}]}});
+test('record exclusions count only for explicitly unselected repeat records, never for an active or ordinary field',()=>{
+ const {template}=fixture(),base=template.pages[0].fields[0];
+ const field=(index,key)=>({...base,id:key,source:'projects.'+key+'.name',inventorySelectors:['.atsx-form-item[data-cy="project['+index+'].name"]']});
+ template.pages[0]={fields:[field(0,'one'),field(1,'two')],groups:[{id:'project',sectionKey:'project',selector:'.records',addSelector:'#add'}]};
+ const recordPlan={entities:{projects:['one','two']},projects:['one']};
+ const run={operation:'form_interaction_test',companyId:template.id,templateHash:digest(template),status:'verified',browserExecuted:true,testedFieldIds:['one'],inactiveRecordFieldIds:['two'],recordPlan,recordPlanHash:digest(recordPlan),failures:[]};
+ assertInteractionEvidence(template,run);
+ run.recordPlan.projects.push('two');run.recordPlanHash=digest(run.recordPlan);assert.throws(()=>assertInteractionEvidence(template,run),/CONTROL_INTERACTION_INCOMPLETE/);
+ run.recordPlan.projects=['one'];run.recordPlanHash=digest(run.recordPlan);delete template.pages[0].groups;run.templateHash=digest(template);assert.throws(()=>assertInteractionEvidence(template,run),/CONTROL_INTERACTION_INCOMPLETE/);
+});
 test('agent completeness must cover every actual field and becomes stale on a new field',()=>{const {capture}=fixture();assert.throws(()=>reviewCompleteness(capture,{reviewedSelectors:[],evidence:'reviewed'}),/COMPLETE_AGENT/);capture.completenessReview=reviewCompleteness(capture,{reviewedSelectors:['#name'],evidence:'Compared the complete form with captured controls'});assertCompleteness(capture);capture.controls.push({selector:'#other',label:'Other'});assert.throws(()=>assertCompleteness(capture),/AGENT_COMPLETENESS/);});
 test('declarative support and condition probes cannot replace actual interaction results',()=>{const {template}=fixture();for(const run of [{operation:'internal_condition_probe',status:'verified'},{operation:'form_interaction_test',companyId:template.id,templateHash:digest(template),status:'verified',browserExecuted:false,testedFieldIds:['name']}])assert.throws(()=>assertInteractionEvidence(template,run),/VERIFIED_CONTROL/);});
 test('failed interaction goes back to data patch; patch invalidates old proof; retest permits confirmation',()=>{

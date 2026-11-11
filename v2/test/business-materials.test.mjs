@@ -7,7 +7,7 @@ import {readHandoffBatch,contentSha} from '../shared/company-directory.mjs';
 import {companyDoc,site,role as roleRow,confirm as confirmDoc,saveCompany,handoffWorkspace} from './fixtures/handoff.mjs';
 import {confirmedMaterialContext} from '../shared/role-material-context.mjs';
 import {RoleQueue} from '../shared/role-queue.mjs';
-import {registerObservedQuestions,registerTemplateContract,resolveProfile,assertQuestionsMapped} from '../shared/profile.mjs';
+import {registerObservedQuestions,registerTemplateContract,resolveProfile,assertQuestionsMapped,mapProfileQuestions} from '../shared/profile.mjs';
 import {compileExecutionPlan,assertPreparedPlan,orderedFillIds} from '../shared/execution-plan.mjs';
 import {compileExpected} from '../shared/observation.mjs';import {verifyForm} from '../shared/verifier.mjs';import {hash} from '../shared/engine.mjs';
 const roleUrl='https://alpha.example/job/12345',pageUrl='https://alpha.example/apply/12345';
@@ -20,6 +20,14 @@ const task=()=>({...resolveMaterialValues(context()),companyId:'alpha',roleId:'J
 const observation=(value='SampleCode17')=>({source:'live_dom',readAt:new Date().toISOString(),pageUrl,roleTitle:'Product',sections:[{title:'Basics'}],inventoryIds:['referral'],fields:{referral:{present:true,value}},pageErrors:[]});
 const alpha=(m=materials())=>companyDoc({code:'C00001',name:'Sample',batchId:'sample-batch',sites:[site('S0001','https://alpha.example')],roles:[roleRow('J000001','S0001','Product',roleUrl,{'官方岗位ID':'12345','材料':m})]});
 const catalog=[{id:'S0001',siteId:'S0001',companyId:'C00001',origin:'https://alpha.example'}];
+test('recapture retains an explicitly mapped alternate question instead of replacing it with label-based material inference',()=>{
+ const p=profile(),args={companyId:'alpha',pageUrl,observedAt:'synthetic',fields:[{selector:'#alternate',label:'推荐码',type:'text',required:true}]};
+ const reg=registerObservedQuestions(p,args),questionId=Object.keys(p.companyForms[reg.pageKey].mappings)[0];
+ p.facts['companyAnswers.alpha.ambassadorCode']={status:'missing',value:null,sourceIds:[]};
+ mapProfileQuestions(p,{companyId:'alpha',pageUrl,mappings:[{questionId,factKey:'companyAnswers.alpha.ambassadorCode'}],evidence:'actual conditional branch asks for an ambassador code'});
+ registerObservedQuestions(p,args);assert.equal(p.companyForms[reg.pageKey].mappings[questionId].factKey,'companyAnswers.alpha.ambassadorCode');
+ args.fields[0].required=false;registerObservedQuestions(p,args);assert.equal(p.companyForms[reg.pageKey].mappings[questionId].factKey,'companyAnswers.alpha.ambassadorCode');
+});
 test('known required role materials run first after prerequisites, using the frozen order',()=>{
  const fields=[{id:'name',source:'name',kind:'text',disposition:'fill'},{id:'channel',source:'channel',kind:'choice',disposition:'fill'},{id:'code',source:'material:referralCode',kind:'text',disposition:'fill',when:{source:'channel',equals:'Referral'}}];
  assert.deepEqual(orderedFillIds(fields,[{fieldId:'code'}]),['channel','code','name']);
