@@ -3,6 +3,17 @@ import assert from 'node:assert/strict';
 import {bindNativeDom,correlateNativeControls} from '../shared/structure-dom-binding.mjs';
 import {bindStructureControls} from '../shared/rea-structure.mjs';
 const time='2026-10-23T18:01:00.000Z';
+test('a zero-area date-range backing input is owned by its two observed endpoints, while other unknown inputs remain unresolved',()=>{
+ const root='body > div:nth-of-type(1)',node={nodeId:'aux',role:'textbox',label:'',backendNodeId:8,nativeDOM:{documentIndex:0,path:root+' > input:nth-of-type(1)',class:'atsx-date-picker-period-hidden-input',bounds:[0,0,0,0],ancestors:[{class:'atsx-date-picker atsx-date-picker-period-month'}]}};
+ const capture={companyId:'sample',pageUrl:'https://forms.example/apply',controls:['Begin','End'].map((part,index)=>({selector:'#'+part,diagnosticSelector:root+' > div:nth-of-type('+(index+1)+')',type:'month',part}))};
+ const structure={pageUrl:capture.pageUrl,accessibility:[node,{nodeId:'unknown',role:'textbox',label:'New question'}]};
+ let result=bindStructureControls(structure,capture);
+ assert.deepEqual(result.auxiliaryControls[0].ownerSelectors,['#Begin','#End']);assert.deepEqual(result.uncorrelatedControls.map(n=>n.nodeId),['unknown']);
+ node.nativeDOM.bounds=[0,0,100,20];result=bindStructureControls(structure,capture);
+ assert.deepEqual(result.uncorrelatedControls.map(n=>n.nodeId),['aux','unknown']);
+ node.nativeDOM.bounds=[0,0,0,0];capture.controls.pop();result=bindStructureControls(structure,capture);
+ assert.deepEqual(result.uncorrelatedControls.map(n=>n.nodeId),['aux','unknown']);
+});
 function fixture(){
  const structure={targetId:'target',pageUrl:'https://forms.example/apply',pageId:'chrome:p',observedAt:time,accessibility:[{nodeId:'ax-first',role:'textbox',label:'请输入'},{nodeId:'ax-second',role:'textbox',label:'请输入'},{nodeId:'ax-radio',role:'radio',label:'女'},{nodeId:'ax-unknown',role:'checkbox',label:''}]};
  const nodes=[

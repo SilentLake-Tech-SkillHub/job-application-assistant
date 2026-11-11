@@ -10,6 +10,12 @@ const work=(...keys)=>keys.flatMap((key,i)=>[field('Work',i,`employment.${key}`,
 const form=(fields,groups,evidence={})=>({id:'F1',evidence,pages:[{pathPrefix:'/form',fields,...(groups?{groups}:{})}]});
 const plan=(entities,projects=null)=>({entities,projects});
 const selectors=page=>page.fields.map(f=>JSON.parse(f.inventorySelectors[0].slice(9)).occurrence);
+test('a file input owned by a named repeat id follows its own portfolio record when the profile expands',()=>{
+ const selector='.resumeEditForm-item.resumeEditForm-works:has([id="works[0].link"]) input[type="file"]',attachment={id:'attachment',source:'portfolio.one.attachment.reference',label:'File',kind:'file',inventorySelectors:[selector],read:{selector:selector.replace(' input[type="file"]',''),kind:'files'},actions:[{method:'upload',selector}],control:{type:'file_upload'}};
+ const t=form([attachment],[{id:'works',sectionKey:'works',selector:'.records',addSelector:'#add'}]),page=withProfileRecords(t,plan({portfolio:['one','two','three']})).pages[0];
+ assert.deepEqual(page.fields.map(f=>f.source),['portfolio.one.attachment.reference','portfolio.two.attachment.reference','portfolio.three.attachment.reference']);
+ assert.match(page.fields[2].actions[0].selector,/works\[2\]/);assert.match(page.fields[2].read.selector,/works\[2\]/);assert.equal(page.groups[0].count,3);
+});
 test('T13: the count comes from the profile, not from the number stored on the group',()=>{
  const t=form(work('a','b'),[group('Work',9)]);
  assert.equal(withProfileRecords(t,plan({employment:['a','b']})).pages[0].groups[0].count,2);
@@ -216,4 +222,54 @@ test('a cloned completed project date uses the new project’s confirmed ongoing
  assert.equal(fields.find(f=>f.source==='projects.unknown.end').ongoingSource,undefined);
  const native=form([{...end,actions:[{method:'native_date'}]}],[group('Project',1)]);
  assert.equal(withProfileRecords(native,recordPlan).pages[0].fields.find(f=>f.source==='projects.new.end').ongoingSource,undefined);
+});
+
+test('Feishu add action may be a visible text control outside the immediate row parent',()=>{
+ const visible=()=>[{}],selector='.resumeEditForm-item.resumeEditForm-project';
+ const add={id:'add-project',tagName:'SPAN',innerText:'+ 添加项目经历',children:[],getClientRects:visible};
+ const grand={parentElement:null,querySelectorAll:s=>s==='button[type="button"],[role="button"]'?[]:[add]};
+ const parent={parentElement:grand,querySelectorAll:()=>[]};
+ const rows=[{parentElement:parent,getClientRects:visible,contains:()=>false}];
+ const document={querySelectorAll:s=>s===selector?rows:s==='#add-project'?[add]:[]};
+ const run=spec=>vm.runInNewContext('('+controlDOM.toString()+')(spec)',{spec,document,getComputedStyle:()=>({visibility:'visible'}),CSS:{escape:s=>s}});
+ const [g]=run({operation:'repeatDiscovery',titles:['project']});assert.ok(g);assert.equal(g.addLabel,'+ 添加项目经历');assert.equal(run({operation:'resolvePhoenix',references:[g.addSelector]})[0],'#add-project');
+});
+
+test('repeat inspection returns bounded add structure without personal field text',()=>{
+ const selector='.resumeEditForm-item.resumeEditForm-project',node=(id,tag,text)=>({id,tagName:tag,innerText:text,getClientRects:()=>[{}],getAttribute:k=>k==='class'?'public-class':null});
+ const add=node('add','SPAN','添加项目经历'),input=node('personal','INPUT','private-answer');add.contains=()=>false;
+ const row=node('row','DIV','private-answer'),parent=node('parent','DIV','private-answer 添加项目经历');row.parentElement=parent;parent.parentElement=null;row.contains=n=>n===input;parent.contains=()=>true;row.querySelectorAll=()=>[input];parent.querySelectorAll=()=>[input,add];
+ const document={querySelectorAll:s=>s===selector?[row]:s==='#add'?[add]:[],body:parent};
+ const result=vm.runInNewContext('('+controlDOM.toString()+')(spec)',{spec:{operation:'repeatInspection',groups:[{title:'project',selector}]},document,getComputedStyle:()=>({visibility:'visible'}),CSS:{escape:s=>s}});
+ assert.equal(result[0].count,1);assert.equal(result[0].ancestors[1].addControls[0].selector,'#add');assert.equal(JSON.stringify(result).includes('private-answer'),false);
+});
+
+test('Feishu final-record add control survives adding another row while field-local add is excluded',()=>{
+ const selector='.resumeEditForm-item.resumeEditForm-project',visible=()=>[{}];
+ const parent={parentElement:null,querySelectorAll:s=>s.includes('.resumeEditForm-item')?rows:[add,fieldAdd]};
+ const row=()=>({parentElement:parent,getClientRects:visible,contains:n=>n===add||n===fieldAdd,matches:s=>s===selector});
+ const rows=[row()],add={id:'add-record',tagName:'SPAN',innerText:'添加',children:[],getClientRects:visible,matches:s=>s==='.addMore-add',closest:()=>null};
+ const fieldAdd={...add,id:'add-inside-field',matches:()=>false,closest:()=>({})};
+ const document={querySelectorAll:s=>s===selector?rows:s==='#add-record'?[add]:[]};
+ const run=spec=>vm.runInNewContext('('+controlDOM.toString()+')(spec)',{spec,document,getComputedStyle:()=>({visibility:'visible'}),CSS:{escape:s=>s}});
+ const [g]=run({operation:'repeatDiscovery',titles:['project']});assert.ok(g);assert.equal(g.addLabel,'添加');
+ rows.push(row());assert.equal(run({operation:'resolvePhoenix',references:[g.addSelector]})[0],'#add-record');
+ add.closest=()=>({});assert.equal(run({operation:'repeatDiscovery',titles:['project']}).length,0);
+});
+
+test('Formily discovers a group-owned add button even when the record wrappers have different parents',()=>{
+ const ownerSelector='#formily-item-project_list',selector=ownerSelector+' .register-form-group-wrapper';
+ const visible=()=>[{}],group={},nested={},rows=[{},{}].map(()=>({
+  parentElement:{},getClientRects:visible,closest:()=>group,contains:()=>false
+ }));
+ const add={id:'add-project',tagName:'BUTTON',innerText:'添加',getClientRects:visible,closest:()=>group};
+ const foreign={...add,id:'foreign-add',closest:()=>nested};
+ group.getClientRects=visible;
+ group.querySelectorAll=s=>s==='button'?[add,foreign]:[];
+ const document={querySelectorAll:s=>s===ownerSelector?[group]:s===selector?rows:s==='#add-project'?[add]:[]};
+ const run=spec=>vm.runInNewContext('('+controlDOM.toString()+')(spec)',{spec,document,getComputedStyle:()=>({visibility:'visible'}),CSS:{escape:s=>s}});
+ const [result]=run({operation:'repeatDiscovery',titles:['project']});
+ assert.equal(result.selector,selector);
+ assert.equal(result.addLabel,'添加');
+ assert.equal(run({operation:'resolvePhoenix',references:[result.addSelector]})[0],'#add-project');
 });

@@ -95,7 +95,8 @@ export function registerObservedQuestions(profile,{companyId,companyCode=null,pa
       const definition=profile.fieldRegistry[prior.factKey];
       if(definition?.companyId===companyId&&definition.selector===field.selector){delete definition.neverStoreValue;definition.status='needs_semantic_mapping';prior.status='needs_semantic_mapping';}
     }
-    const material=materialKey(field),external=material?{factKey:MATERIAL_SOURCES[material],status:'mapped',mappingEvidence:'Observed exact role-material question semantic'}:{};
+    const mappedSemantic=prior?.status==='mapped'&&prior.mappingEvidence&&!prior.factKey.startsWith('unmapped.')&&!Object.values(MATERIAL_SOURCES).includes(prior.factKey)&&profile.facts[prior.factKey];
+    const material=mappedSemantic?null:materialKey(field),external=material?{factKey:MATERIAL_SOURCES[material],status:'mapped',mappingEvidence:'Observed exact role-material question semantic'}:{};
     const definitionHash=hash({type:field.type||null,required:!!field.required,options:field.options||null,userOnly:!!field.userOnly,renderer:field.renderer||null,readonly:!!field.readonly,disabled:!!field.disabled,multiple:!!field.multiple,selectedSelector:field.selectedSelector||null});
     const observedControl=Object.fromEntries(['documentTypePrefix','type','renderer','contextProvider','readonly','disabled','role','multiple','controlIndex','repeatIndex','section','options','actionSelector','readSelector','selectedSelector','uploadContainerSelector','filenameSelector','uploadedSelector'].filter(k=>field[k]!==undefined).map(k=>[k,field[k]]));
     if(prior?.definitionHash===definitionHash){mappings[observedKey]={...prior,...external,observedAt,observedControl,operationContractStatus:'requires_current_contract_audit',active:field.active!==false,coverageRequired:!!prior.coverageRequired||coverageRequired};if(field.userOnly)mappings[observedKey].status=sensitiveMappingStatus(profile,{...field,id:observedKey},questions);continue;}
@@ -152,7 +153,7 @@ export function registerTemplateContract(profile,{companyId,template,templateHas
   profile.companyForms??={};profile.fieldRegistry??={};
   const audit=auditStoredContract(template);if(stage!=='construction'&&!audit.ready)throw Error('COMPLETE_EXECUTION_CONTRACT_REQUIRED');
   for(const page of template.pages){
-    const sourceUrl=new URL(template.evidence.sourceUrl),pageUrl=sourceUrl.pathname.startsWith(page.pathPrefix)?sourceUrl.href:new URL(page.pathPrefix,sourceUrl).href;
+    const sourceUrl=new URL(template.evidence.sourceUrl),pageUrl=template.companyTemplateVersion===2?sourceUrl.href:sourceUrl.pathname.startsWith(page.pathPrefix)?sourceUrl.href:new URL(page.pathPrefix,sourceUrl).href;
     const {pageKey,form}=lookupCompanyForm(profile,companyId,pageUrl,{create:true});
     const prior=form||{companyId,pageUrl,mappings:{}};
     const fields=page.fields.map((f,index)=>({...structuredClone(f),index}));
@@ -173,7 +174,7 @@ export function registerTemplateContract(profile,{companyId,template,templateHas
   return {companyId,templateHash,registeredFields:template.pages.reduce((n,p)=>n+p.fields.length,0)};
 }
 export function assertStoredExecutionContract(profile,companyId,template){
- for(const page of template.pages){const source=new URL(template.evidence.sourceUrl),url=source.pathname.startsWith(page.pathPrefix)?source.href:new URL(page.pathPrefix,source).href,stored=lookupCompanyForm(profile,companyId,url).form?.executionContract;
+ for(const page of template.pages){const source=new URL(template.evidence.sourceUrl),url=template.companyTemplateVersion===2?source.href:source.pathname.startsWith(page.pathPrefix)?source.href:new URL(page.pathPrefix,source).href,stored=lookupCompanyForm(profile,companyId,url).form?.executionContract;
   const candidate=stored?.templateHash===hash(template)?stored:lookupCompanyForm(profile,companyId,url).form?.draftExecutionContract;
   if(!candidate||candidate.templateHash!==hash(template)||hash((candidate.fields||[]).map(({index,...f})=>f))!==hash(page.fields))throw Error('PROFILE_CONTRACT_STORAGE_READBACK_FAILED');
  }

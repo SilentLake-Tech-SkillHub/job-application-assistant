@@ -48,7 +48,7 @@ test('draft reference registration checks company, exact template hash and compl
 });
 
 test('radio and native select options are collected without a dropdown action or invented fallback',()=>{
- for(const field of [{type:'radio',options:['男','女']},{tag:'select',type:'select-one',options:['本科','硕士']}]){
+ for(const field of [{type:'radio',options:['男','女']},{type:'radio_group',options:['无','内推','大使推荐']},{tag:'select',type:'select-one',options:['本科','硕士']}]){
   assert.equal(isChoiceControl(field),true);
   assert.deepEqual(capturedChoiceOptions(field),{options:field.options,status:'captured',restored:true,source:'rendered_control_capture'});
  }

@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {controlDefinitionHash,formScope} from './control-choice-store.mjs';
-import {rankChoices,resolveObservedChoice,assertPopupChoiceContract} from './choice-resolution.mjs';
+import {rankChoices,resolveObservedChoice,assertPopupChoiceContract,optionHash} from './choice-resolution.mjs';
 
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
@@ -46,7 +46,14 @@ export function evaluateChoiceGoals({capture,profile,fields=[],choices=[]}){
   const factKey=field.source,fact=profile?.facts?.[factKey];
   if(field.userOnly||field.readonly||!types.has(field.control?.type)||fact?.status!=='known')continue;
   const sourceHash=hash(fact),selectors=field.inventorySelectors||[],captured=selectors.filter(s=>capture?.controls?.some(c=>c.selector===s));
-  const matches=output.filter(c=>captured.includes(c.selector));
+  let matches=output.filter(c=>captured.includes(c.selector));
+  if(matches.length>1&&field.control.type==='radio'){
+   const controls=matches.map(choice=>capture.controls.find(control=>control.selector===choice.selector));
+   const question=controls[0]?.questionSelector,first=matches[0];
+   const sameQuestion=question&&controls.every(control=>control?.type==='radio'&&control.questionSelector===question);
+   const sameEvidence=matches.every(choice=>choice.status==='captured'&&choice.restored===true&&choice.captureId===first.captureId&&choice.choicesId===first.choicesId&&optionHash(choice)===optionHash(first));
+   if(sameQuestion&&sameEvidence)matches=[first];
+  }
   const base={fieldId:field.id,factKey,sourceHash,captureId:capture?.captureId||null,inventorySelectors:[...selectors],selector:captured[0]||null,executionVerified:false};
   const block=(reason,nextTool='form_search_choices',extra={})=>{
    goals.push({...base,status:'blocked',decision:'unresolved',reason,...extra});

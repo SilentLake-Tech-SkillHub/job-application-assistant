@@ -6,6 +6,88 @@ export function controlDOM(spec){
   const parts=[];for(let p=n;p&&p!==document.body;p=p.parentElement){let i=1;for(let s=p.previousElementSibling;s;s=s.previousElementSibling)if(s.tagName===p.tagName)i++;parts.unshift(p.tagName.toLowerCase()+':nth-of-type('+i+')');}
   return 'body > '+parts.join(' > ');
  };
+ if(spec?.entryHealth){
+  const resources=performance.getEntriesByType('resource').filter(entry=>['fetch','xmlhttprequest','script'].includes(entry.initiatorType)).map(entry=>{
+   let resource;
+   try{const url=new URL(entry.name);resource=url.origin+url.pathname.replace(/\d{6,}/gu,'[id]');}catch{resource='unavailable';}
+   return {resource,type:entry.initiatorType,durationMs:Math.round(entry.duration),status:Number.isFinite(entry.responseStatus)?entry.responseStatus:null};
+  });
+  const failed=resources.filter(entry=>entry.status>=400),slow=resources.filter(entry=>entry.durationMs>=3000);
+  return {pageUrl:location.href,readyState:document.readyState,observedAt:new Date().toISOString(),elapsedMs:Math.round(performance.now()),visibleControls:[...document.querySelectorAll('input,textarea,select,[role="combobox"],[role="radio"]')].filter(visible).length,progressIndicators:[...document.querySelectorAll('[role="progressbar"],[aria-busy="true"],.ant-spin-spinning')].filter(visible).length,failedResources:failed.slice(-12),slowResources:slow.slice(-12),recentRequests:resources.filter(entry=>['fetch','xmlhttprequest'].includes(entry.type)).slice(-12),scope:'rendered_state_and_resource_timing_without_query_or_response_body'};
+ }
+ if(spec?.acquisitionScroll){
+  const request=spec.acquisitionScroll;
+  const surface=node=>({selector:diagnosticSelector(node),top:node.scrollTop,height:node.clientHeight,extent:node.scrollHeight});
+  if(request.selector){
+   const nodes=[...document.querySelectorAll(request.selector)];
+   if(nodes.length!==1||!visible(nodes[0]))throw Error('VISUAL_SCROLL_SURFACE_CHANGED');
+   const node=nodes[0];
+   if(Number.isFinite(request.top))node.scrollTo({top:request.top,behavior:'instant'});
+   return {pageUrl:location.href,surface:surface(node)};
+  }
+  const ranked=[...document.querySelectorAll('body *')].filter(node=>{
+   if(!visible(node)||!/(?:auto|scroll|overlay)/u.test(getComputedStyle(node).overflowY))return false;
+   const rect=node.getBoundingClientRect();
+   return node.scrollHeight>node.clientHeight+40&&node.clientHeight>=innerHeight*0.35&&rect.width>=innerWidth*0.35&&!!node.querySelector('input,textarea,select,[role="combobox"],form');
+  }).sort((a,b)=>b.clientWidth*b.clientHeight-a.clientWidth*a.clientHeight);
+  return {pageUrl:location.href,surface:ranked[0]?surface(ranked[0]):null};
+ }
+ const radioRecords=root=>[...root.querySelectorAll('input[type="radio"],[role="radio"]')].filter(node=>{
+  if(node.matches('[role="radio"]:not(input)')&&node.querySelector('input[type="radio"]'))return false;
+  return visible(node)||visible(node.closest('label,.ud__radio,.ud__radio__wrapper,[role="radio"]'));
+ }).map(node=>{
+  const own=node.closest('label,.ud__radio,.ud__radio__wrapper,[role="radio"]');
+  const wrapper=own&&own!==node&&own.querySelectorAll('input[type="radio"]').length===1?own:null;
+  const labelled=(node.getAttribute('aria-labelledby')||'').split(/\s+/u).filter(Boolean).map(id=>document.getElementById(id)?.textContent.trim()).filter(Boolean).join(' ');
+  const native=[...(node.labels||[])].filter(visible);
+  const label=(node.getAttribute('aria-label')||labelled||native.map(n=>n.textContent.trim()).join(' ')||wrapper?.innerText||(node.getAttribute('role')==='radio'?node.innerText:'')||'').trim();
+  const target=native[0]||wrapper||(visible(node)?node:null);
+  const rendered=node.closest('.atsx-radio-wrapper');
+  const renderedChecked=rendered?rendered.classList.contains('atsx-radio-wrapper-checked')||!!rendered.querySelector('.atsx-radio-checked'):null;
+  return {label,selector:diagnosticSelector(node),targetSelector:target?diagnosticSelector(target):null,selected:(node.checked===true||node.getAttribute('aria-checked')==='true')&&renderedChecked!==false,nativeChecked:node.checked===true,ariaChecked:node.getAttribute('aria-checked'),renderedChecked,disabled:!!node.disabled||node.getAttribute('aria-disabled')==='true'};
+ });
+ if(spec?.operation==='radioOptions'){
+  const roots=[...document.querySelectorAll(spec.selector)].filter(visible);
+  return roots.length===1?radioRecords(roots[0]):[];
+ }
+ if(spec?.acquisitionEntrances){
+  const fieldNodes=(spec.acquisitionEntrances.controls||[]).map(control=>{
+   let nodes=[];
+   try{nodes=[...document.querySelectorAll(control.diagnosticSelector||control.selector)];}catch{}
+   return {...control,node:nodes.length===1?nodes[0]:null};
+  });
+  const targets=[...document.querySelectorAll('button,[role="button"],a,span,div')].filter(n=>{
+   if(!visible(n)||n.closest('nav,footer,[role="navigation"],dialog,[role="dialog"]')||n.matches('button[type="submit"],a[href]:not([href^="#"])'))return false;
+   const label=(n.innerText||'').trim();
+   if(!/^(?:[+＋]\s*)?(?:添加|新增|展开|Add|Expand)(?:\s*[^\n]{1,20})?$/iu.test(label))return false;
+   return ![...n.children].some(child=>visible(child)&&(child.innerText||'').trim()===label);
+  });
+  const knownHeaders='.createFormSection-title,.applyFormModuleWrapper-title,h2,h3,h4,legend,[role="heading"]';
+  const entries=new Map();
+  for(const textNode of targets){
+   const button=textNode.closest('button,[role="button"],a,.createFormSection-addBtn,.formOperate-addBtn')||textNode;
+   const label=(button.innerText||'').trim();
+   if(!/^(?:[+＋]\s*)?(?:添加|新增|展开|Add|Expand)(?:\s*[^\n]{1,20})?$/iu.test(label))continue;
+   let root=button.parentElement,heading;
+   for(let i=0;root&&i<12&&!root.matches('body,form,main');i++,root=root.parentElement){
+    const headings=[...root.querySelectorAll(knownHeaders)].filter(n=>visible(n)&&!n.contains(button)&&!button.contains(n));
+    if(headings.length===1){heading=headings[0];break;}
+    if(headings.length>1)break;
+   }
+   if(!heading||!root)continue;
+   const title=heading.innerText.trim();
+   const suffix=label.replace(/^(?:[+＋]\s*)?(?:添加|新增|展开|Add|Expand)\s*/iu,'');
+   if(!title||suffix&&suffix!==title)continue;
+   // A header and its button often share a small wrapper. Observe the full
+   // section when the next wrapper still owns just this one heading.
+   const parent=root.parentElement;
+   if(parent&&!parent.matches('body,form,main')&&[...parent.querySelectorAll(knownHeaders)].filter(visible).length===1)root=parent;
+   const selector=diagnosticSelector(button),scopeSelector=diagnosticSelector(root);
+   const children=fieldNodes.filter(field=>field.node&&root.contains(field.node));
+   entries.set(selector,{title,selector,scopeSelector,headingSelector:diagnosticSelector(heading),triggerLabel:label,expansionType:/^(?:[+＋]\s*)?(?:展开|expand)/iu.test(label)?'disclosure':'add',childSelectors:children.map(field=>field.selector),childControlIds:children.map(field=>field.id)});
+  }
+  return {pageUrl:location.href,entrances:[...entries.values()],controlPaths:fieldNodes.filter(field=>field.node).map(field=>({id:field.id,selector:diagnosticSelector(field.node)}))};
+ }
  const imagePreview=root=>{
   const images=[...root.querySelectorAll('img')].filter(img=>visible(img)&&img.complete&&img.naturalWidth>=100&&img.naturalHeight>=100&&!/\.svg(?:[?#]|$)/i.test(img.currentSrc||img.src||''));
   if(images.length!==1)return {status:'unavailable',reason:images.length?'AMBIGUOUS_IMAGE_PREVIEW':'LOADED_IMAGE_PREVIEW_NOT_VISIBLE'};
@@ -177,12 +259,54 @@ export function controlDOM(spec){
   }
   return {names,removeSelector:null};
  }
+ // Formily cards can each wrap their own record. Bind their action to the
+ // owning list, including when the add button is inside the last card.
+ const formilyRepeatGroup=(title,label)=>{
+  if(!/^[A-Za-z][A-Za-z0-9_]*$/.test(title))return null;
+  const ownerSelector='#formily-item-'+title+'_list',selector=ownerSelector+' .register-form-group-wrapper';
+  const owners=[...document.querySelectorAll(ownerSelector)].filter(visible);
+  if(owners.length!==1)return null;
+  const [owner]=owners,list='[id^="formily-item-"][id$="_list"]';
+  const rows=[...document.querySelectorAll(selector)].filter(visible);
+  if(!rows.length||rows.some(row=>row.closest(list)!==owner))return null;
+  const buttons=[...owner.querySelectorAll('button')].filter(button=>{
+   const text=button.innerText?.trim()||'';
+   return visible(button)&&button.closest(list)===owner&&!rows.some(row=>row.contains(button))&&
+    (label?text===label:text.length<80&&/^[+＋]?\s*(?:添加|新增|Add)(?:$|\s|[\p{Script=Han}])/iu.test(text));
+  });
+  return {selector,buttons};
+ };
+ const scopedRepeatCandidates=(rows,recordSelector,label)=>{
+  for(let root=rows[0]?.parentElement,depth=0;root&&depth<4;root=root.parentElement,depth++){
+   const other=[...root.querySelectorAll('.resumeEditForm-item,.register-form-group-wrapper,[class^="apply-form-array-card__"]')].some(n=>typeof n.matches==='function'&&!n.matches(recordSelector)&&!rows.some(row=>row.contains(n)));
+   if(other)return [];
+   const nodes=[...root.querySelectorAll('button,[role="button"],a,span,div')].filter(n=>{
+    const text=n.innerText?.trim()||'';
+    const insideRecord=rows.some(row=>row.contains(n));
+    // Feishu renders its repeat action inside the final record. A field's own
+    // add action is distinct and stays excluded from repeat discovery.
+    const repeatAction=n.matches?.('.addMore-add')&&!n.closest?.('.atsx-form-item,.ud-formily-item,.ant-form-item,.form-item--phoenix');
+    return visible(n)&&(!insideRecord||repeatAction)&&text.length<80&&(label?text===label:/^[+＋]?\s*(?:添加|新增|Add)(?:$|\s|[\p{Script=Han}])/iu.test(text));
+   });
+   const candidates=nodes.filter(n=>!nodes.some(other=>other!==n&&typeof n.contains==='function'&&n.contains(other)));
+   if(candidates.length)return candidates;
+   if(root===document.body)break;
+  }
+  return [];
+ };
  const phoenixResolve=reference=>{
   let r;try{r=JSON.parse(reference.slice(9));}catch{throw Error('PHOENIX_REFERENCE_INVALID');}
+  if(r.part==='formilyRepeatAdd'){
+   if(!r.addLabel)throw Error('REPEAT_CAPTURED_SCOPE_REQUIRED');
+   const group=formilyRepeatGroup(r.section,r.addLabel);
+   if(!group)throw Error('REPEAT_SECTION_NOT_FOUND');
+   if(group.buttons.length!==1)throw Error('REPEAT_ADD_CONTROL_CHANGED');
+   return diagnosticSelector(group.buttons[0]);
+  }
   if(r.part==='scopedRepeatAdd'){
    const rows=[...document.querySelectorAll(r.recordSelector)].filter(visible);
    if(!rows.length||rows.some(row=>row.parentElement!==rows[0].parentElement))throw Error('REPEAT_SECTION_NOT_FOUND');
-   const candidates=[...rows[0].parentElement.querySelectorAll('button[type="button"],[role="button"]')].filter(node=>visible(node)&&!rows.some(row=>row.contains(node))&&node.innerText?.trim()===r.addLabel);
+   const candidates=scopedRepeatCandidates(rows,r.recordSelector,r.addLabel);
    if(candidates.length!==1)throw Error('REPEAT_ADD_CONTROL_CHANGED');
    return diagnosticSelector(candidates[0]);
   }
@@ -206,6 +330,19 @@ export function controlDOM(spec){
   if(part.length!==1)throw Error('PHOENIX_CONTROL_CHANGED');
   return diagnosticSelector(part[0].node);
  };
+ if(spec?.operation==='repeatInspection'){
+  // Only framework structure and add-control labels; never record answers.
+  return (spec.groups||[]).map(group=>{
+   const rows=[...document.querySelectorAll(group.selector)].filter(visible),ancestors=[];
+   for(let root=rows[0],depth=0;root&&depth<5;root=root.parentElement,depth++){
+    const adds=[...root.querySelectorAll('button,[role="button"],a,span,div')].filter(n=>visible(n)&&/^[+＋]?\s*(?:添加|新增|Add)(?:$|\s|[\p{Script=Han}])/iu.test(n.innerText?.trim()||'')&&(n.innerText?.trim()||'').length<80);
+    const leaves=adds.filter(n=>!adds.some(other=>other!==n&&n.contains(other)));
+    ancestors.push({depth,tag:root.tagName,classes:root.getAttribute('class')||'',selector:diagnosticSelector(root),records:rows.filter(row=>root===row||root.contains(row)).length,addControls:leaves.slice(0,12).map(n=>({tag:n.tagName,classes:n.getAttribute('class')||'',label:n.innerText.trim(),selector:diagnosticSelector(n),insideRecord:rows.some(row=>row.contains(n))}))});
+    if(root===document.body)break;
+   }
+   return {title:group.title,selector:group.selector,count:rows.length,sameParent:rows.every(row=>row.parentElement===rows[0]?.parentElement),ancestors};
+  });
+ }
  if(spec?.operation==='repeatDiscovery'){
   // Read only. A section heading and its add button are tied by the id the form framework gives them.
   const found=[];
@@ -223,11 +360,17 @@ export function controlDOM(spec){
   }
   for(const title of spec.titles||[]){
    if(!/^[A-Za-z][A-Za-z0-9_]*$/.test(title))continue;
+   const formily=formilyRepeatGroup(title);
+   if(formily?.buttons.length===1){
+    const addLabel=formily.buttons[0].innerText.trim();
+    found.push({title,selector:formily.selector,addLabel,addSelector:'phoenixq:'+JSON.stringify({part:'formilyRepeatAdd',section:title,addLabel})});
+    continue;
+   }
    const selectors=[`.resumeEditForm-item.resumeEditForm-${title}`,`#formily-item-${title}_list [class^="apply-form-array-card__"]`];
    for(const selector of selectors){
     const rows=[...document.querySelectorAll(selector)].filter(visible);
     if(!rows.length||!rows[0].parentElement||rows.some(row=>row.parentElement!==rows[0].parentElement))continue;
-    const candidates=[...rows[0].parentElement.querySelectorAll('button[type="button"],[role="button"]')].filter(node=>visible(node)&&!rows.some(row=>row.contains(node))&&/^(?:添加|新增|Add)(?:$|\s|[\p{Script=Han}])/iu.test(node.innerText?.trim()||''));
+    const candidates=scopedRepeatCandidates(rows,selector);
     if(candidates.length!==1)continue;
     const addLabel=candidates[0].innerText.trim();
     found.push({title,selector,addLabel,addSelector:'phoenixq:'+JSON.stringify({part:'scopedRepeatAdd',recordSelector:selector,addLabel})});
@@ -240,6 +383,12 @@ export function controlDOM(spec){
  // This never grants presence, equivalence or a successful field check.
  // Writes retain strict resolution; malformed or changed controls still fail.
  if(['resolvePhoenixAliases','resolvePhoenixReadback'].includes(spec?.operation))return (spec.references||[]).map(reference=>{
+  // Old brokers can still send write targets in a readback request. The
+  // add button is resolved strictly by the repeat writer after layout changes.
+  if(spec.operation==='resolvePhoenixReadback'){
+   let part;try{part=JSON.parse(reference.slice(9)).part;}catch{throw Error('PHOENIX_REFERENCE_INVALID');}
+   if(['repeatAdd','scopedRepeatAdd','formilyRepeatAdd'].includes(part))return null;
+  }
   try{return phoenixResolve(reference);}catch(error){if(error.message==='PHOENIX_QUESTION_NOT_FOUND')return null;throw error;}
  });
  if(spec?.operation==='recruiting_disclosure'){
@@ -284,7 +433,7 @@ export function controlDOM(spec){
         const y=n.querySelector('[data-cy="year"]'),m=n.querySelector('[data-cy="month"]');
         o.value=text(n)==='至今'?'至今':y&&m?`${text(y)}-${text(m)}`:null;
       }else if(r.kind==='radio'){
-        o.value=(()=>{const custom=[...n.querySelectorAll('.phoenix-radio')].filter(e=>visible(e)&&/(?:--|__)checked(?:\s|$)/.test(e.className));if(custom.length===1)return custom[0].querySelector('.phoenix-radio__radio-text')?.textContent.trim()||null;const selected=[...n.querySelectorAll('input:checked,[role=\"radio\"][aria-checked=\"true\"]')].filter(eligible);return selected.length===1?(selected[0].closest('label')?.textContent||selected[0].getAttribute('aria-label')||selected[0].textContent)?.trim()??null:null;})();
+        o.value=(()=>{const custom=[...n.querySelectorAll('.phoenix-radio')].filter(e=>visible(e)&&/(?:--|__)checked(?:\s|$)/.test(e.className));if(custom.length===1)return custom[0].querySelector('.phoenix-radio__radio-text')?.textContent.trim()||null;if(n.closest('.ud-formily-item')||n.querySelector('.ud__radio,.ud__radio__wrapper')){const selected=radioRecords(n).filter(record=>record.selected);return selected.length===1?selected[0].label||null:null;}const selected=[...n.querySelectorAll('input:checked,[role="radio"][aria-checked="true"]')].filter(eligible);return selected.length===1?(selected[0].closest('label')?.textContent||selected[0].getAttribute('aria-label')||selected[0].textContent)?.trim()??null:null;})();
       }else if(r.kind==='files'){
         const names=r.filenameSelector?[...n.querySelectorAll(r.filenameSelector)].filter(visible).map(text):[];
         o.value=names;
@@ -379,7 +528,7 @@ export function controlDOM(spec){
   const dateAuxiliaries=new Set(phoenixRoots().filter(r=>r.querySelector('[id$="field_date_time_picker"]')).map(phoenixInlineOngoing).filter(Boolean).map(a=>a.node));
   const controls=[...document.querySelectorAll('input,textarea,select,[role="combobox"],[role="checkbox"],[role="radio"]')]
     // Styled checkbox/radio inputs can have zero layout rectangles while their labels remain visible.
-    .filter(n=> !dateAuxiliaries.has(n)&&!n.closest('.form-item--phoenix')&&(visible(n)||n.type==='file'||(['checkbox','radio'].includes(n.type)&&visible(n.closest('label')))) && n.type!=='hidden');
+    .filter(n=> !dateAuxiliaries.has(n)&&!n.closest('.form-item--phoenix')&&(visible(n)||n.type==='file'||(['checkbox','radio'].includes(n.type)&&visible(n.closest('label,.ud__radio,.ud__radio__wrapper,[role="radio"]')))) && n.type!=='hidden'&&!(n.tagName!=='INPUT'&&n.getAttribute('role')==='radio'&&n.querySelector('input[type="radio"]')));
   // Some custom selectors and read-only answers contain no native/ARIA input.
   // Register their labeled question container so they cannot disappear from coverage.
   const containers=[...document.querySelectorAll('.atsx-form-item,[data-form-question],.ud-formily-item')]
@@ -393,7 +542,22 @@ export function controlDOM(spec){
       const root=n.closest('.ud-formily-item');if(!root)return f;
       const label=root.querySelector(':scope > .ud-formily-item-label')?.innerText?.trim();
       const group=n.closest('[id^="formily-item-"][id$="_list"]'),row=n.closest('.register-form-group-wrapper');
-      return {...f,label:label?.replace(/[＊*\s]+$/gu,'')||f.label,required:f.required||!!label&&/[＊*]/u.test(label),readonly:f.readonly||f.type==='custom_question',contextProvider:'.ud-formily-item',questionSelector:selector(root),labelSelector:selector(root)+' > .ud-formily-item-label',selectedSelector:root.querySelector('.ud__select__selector')?selector(root)+' .ud__select__selector':null,multiple:n.getAttribute('aria-multiselectable')==='true'||!!root.querySelector('.ud__select--multiple'),group:group?.id?.replace('formily-item-','')||null,groupSelector:group?selector(group):null,rowSelector:row?selector(row):null,repeatIndex:group&&row?[...group.querySelectorAll('.register-form-group-wrapper')].indexOf(row):null,fieldKey:root.id?.replace('formily-item-','')||null,controlIndex:[...root.querySelectorAll('input,textarea,select,[role="combobox"]')].indexOf(n)};
+      const radio=f.type==='radio'?radioRecords(root):[];
+      const complete=radio.length&&radio.every(item=>item.label&&item.targetSelector)&&new Set(radio.map(item=>item.label)).size===radio.length;
+      const radioOptions=radio.length?{options:complete?radio.map(item=>item.label):[],optionRecords:complete?radio.map(({label,disabled})=>({label,disabled})):[]}:{};
+      const extra={};
+      if(n.tagName==='INPUT'&&n.closest('.throne-biz-date-range-picker-input'))extra.semanticType=!n.value||/^\d{4}-\d{2}$|^至今$/u.test(n.value)?'month_picker':'unsupported_date_range';
+      if(f.type==='custom_question'&&root.querySelector('.ud-formily-item-control-content-component'))extra.readSelector=selector(root)+' .ud-formily-item-control-content-component';
+      if(f.type==='file'&&root.querySelector('.uploadFile')&&root.querySelectorAll('input[type="file"]').length===1){
+       Object.assign(extra,{uploadContainerSelector:selector(root),filenameSelector:'.uploadFile-loadedFilename',uploadedSelector:selector(root)+' .uploadFile-loadedWrapper'});
+       for(let owner=root;owner&&owner!==document.body;owner=owner.parentElement){
+        if(owner.querySelectorAll('input[type="file"]').length!==1)break;
+        const headings=[...owner.querySelectorAll('.applyFormModuleWrapper-title,.createFormSection-title,h2,h3,legend,[role="heading"]')].filter(visible);
+        if(headings.length===1){extra.displayLabel=headings[0].innerText.trim().replace(/[＊*\s]+$/gu,'');break;}
+        if(headings.length>1)break;
+       }
+      }
+      return {...f,...radioOptions,...extra,label:label?.replace(/[＊*\s]+$/gu,'')||f.label,required:f.required||!!label&&/[＊*]/u.test(label),readonly:f.readonly||f.type==='custom_question',contextProvider:'.ud-formily-item',questionSelector:selector(root),labelSelector:selector(root)+' > .ud-formily-item-label',selectedSelector:root.querySelector('.ud__select__selector')?selector(root)+' .ud__select__selector':null,multiple:n.getAttribute('aria-multiselectable')==='true'||!!root.querySelector('.ud__select--multiple'),group:group?.id?.replace('formily-item-','')||null,groupSelector:group?selector(group):null,rowSelector:row?selector(row):null,repeatIndex:group&&row?[...group.querySelectorAll('.register-form-group-wrapper')].indexOf(row):null,fieldKey:root.id?.replace('formily-item-','')||null,controlIndex:[...root.querySelectorAll('input,textarea,select,[role="combobox"]')].indexOf(n)};
     }).concat(phoenixFields.map(f=>{
       if(f.type!=='file')return f;
       const actual=phoenixResolve(f.selector),input=actual&&document.querySelector(actual),entry=uploadRoots().find(e=>e.input===input);

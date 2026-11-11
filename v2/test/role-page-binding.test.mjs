@@ -66,6 +66,22 @@ test('a binding carried over from a re-import keeps using that tab (no new tab) 
  const f=fixture({tabs:[['chrome:kept',home]],prior:{queueId:'queue-1',taskId:'task-1',pageId:'chrome:kept',status:'rebind_required'}}),r=await f.flow.open({});
  assert.equal(r.pageId,'chrome:kept');assert.equal(f.pages.size,1);const o=opens(f);assert.equal(o.length,1);assert.equal(o[0].pageId,'chrome:kept');assert.equal(o[0].pageUrl,roleLink);
 });
+test('role advance refuses a task for a different explicitly requested role before opening a tab',async()=>{
+ const f=fixture();
+ await assert.rejects(f.flow.advance({roleId:'J000157',authorization:{login:true,evidence:'resume requested role'}}),/ROLE_TASK_SELECTION_MISMATCH/);
+ assert.equal(f.calls.length,0);
+});
+test('role advance verifies an inherited application tab after re-import before resuming it',async()=>{
+ const pageId='chrome:kept';
+ const f=fixture({officialId:siteId,url:detail(siteId),tabs:[[pageId,form(siteId)]],
+  prior:{queueId:'queue-1',taskId:'task-1',pageId,status:'rebind_required',carriedFrom:{hadFill:true}}});
+ const result=await f.flow.advance({authorization:{login:true,evidence:'resume confirmed role'}});
+ assert.equal(result.status,'ready_to_fill');
+ assert.equal(result.pageId,pageId);
+ assert.equal(f.state().reusedPage,'carried_binding');
+ assert.equal(opens(f).length,0);
+ assert.equal(f.calls.filter(c=>c.method==='cta').length,0);
+});
 test('after login the site lands on its home page: the same tab goes back to the role link',async()=>{
  const f=fixture({loggedIn:false});const first=await f.flow.open({});assert.equal(first.status,'needs_login');
  f.setLoggedIn(true);f.pages.get(first.pageId).url=home;
@@ -87,12 +103,12 @@ test('new-tab sites: tabs that existed before the first click never count as the
  const g=fixture({target:'new',officialId:siteId,url:detail(siteId),redirect:{},tabs:[['chrome:bound',detail(siteId)],['chrome:stray',form(siteId)],['chrome:clicked',form(siteId)]],prior:{queueId:'queue-1',taskId:'task-1',pageId:'chrome:bound',status:'authenticated_at_role',entryStarted:{at:'t',preexisting:['chrome:stray']}}});
  const again=await g.flow.enter({});assert.equal(again.pageId,'chrome:clicked');assert.equal(g.calls.some(c=>c.method==='cta'),false);assert.equal(g.state().entryStarted,undefined);
 });
-test('close extra pages: plain extra tabs close at once; form-like extras need the user first; bound and identity pages and other sites stay',async()=>{
+test('close extra pages: plain extra tabs close at once; form-like extras need the user first; bound pages and other sites stay; retired proof pages are ordinary extras',async()=>{
  const tabs=[['chrome:bound',detail(siteId)],['chrome:dup',detail(siteId)],['chrome:home',home],['chrome:verify',origin+'/personal/vertifyUser?state=4'],['chrome:oldform',form(siteId)],['chrome:identity',home],['chrome:else','https://other.example.test/x']];
  const f=fixture({officialId:siteId,url:detail(siteId),redirect:{},tabs,prior:{queueId:'queue-1',taskId:'task-1',pageId:'chrome:bound',status:'authenticated_at_role'},identity:{pageId:'chrome:identity'}});
  const r=await f.flow.closeExtraPages({});
- assert.deepEqual(r.closed.map(c=>c.pageId).sort(),['chrome:dup','chrome:home','chrome:verify']);assert.deepEqual(r.formPagesAwaitingUser.map(p=>[p.pageId,p.screenshot]),[['chrome:oldform','/private/shot-chrome:oldform.png']]);
- assert.deepEqual([...f.pages.keys()].sort(),['chrome:bound','chrome:else','chrome:identity','chrome:oldform']);
+ assert.deepEqual(r.closed.map(c=>c.pageId).sort(),['chrome:dup','chrome:home','chrome:identity','chrome:verify']);assert.deepEqual(r.formPagesAwaitingUser.map(p=>[p.pageId,p.screenshot]),[['chrome:oldform','/private/shot-chrome:oldform.png']]);
+ assert.deepEqual([...f.pages.keys()].sort(),['chrome:bound','chrome:else','chrome:oldform']);
  await assert.rejects(f.flow.closeExtraPages({authorization:{closeFormPages:['chrome:bound'],evidence:'可以关'}}),/FORM_PAGE_NOT_EXTRA/);
  await assert.rejects(f.flow.closeExtraPages({authorization:{closeFormPages:['chrome:oldform'],evidence:' '}}),/FORM_PAGE_CLOSE_AUTHORIZATION_REQUIRED/);
  const done=await f.flow.closeExtraPages({authorization:{closeFormPages:['chrome:oldform'],evidence:'用户：旧申请表可以关'}});assert.deepEqual(done.closed.map(c=>c.pageId),['chrome:oldform']);assert.equal(done.browserClosed,false);

@@ -1,5 +1,7 @@
 # 交接消费接口
 
+公司/岗位定位由固定代码完成：公司编码读取唯一公司控件定义，岗位编码读取roleBindings中的引用；同公司岗位共享全部控件。岗位标题、链接和官方编号来自确认交接，页面身份来自原任务。采集sourceUrl仅用于证据，不作为其它岗位的执行路径。`template_rebind_role`仅补岗位引用，不生成新的控件资产。
+
 ## 职责边界
 
 唯一输入是工作区 `岗位交接/公司/<公司编码>.json`：每家公司一份宽表，由搜索端 `company_store.py refresh/forward` 从主表投影生成；「批次」部分在用户正向评审确认（`forward-confirm` 登记原话与该公司的内容指纹）后才可读取。目录 `RECRUITING_HANDOFF_DIR` 指定，默认 `<工作区>/岗位交接`。旧的公司方案 JSON 文件或对象输入一律拒绝（`HANDOFF_BATCH_REQUIRED`）。本组件不做选岗、不转换 Excel；投递结果与链接观察回传见 application-outcome.md。
@@ -21,9 +23,9 @@
 ## 执行顺序
 
 1. 以相同私有档案、队列目录、浏览器socket、申请资产目录启动两个MCP；`role_queue_import`先离线接收方案。
-2. `role_open({queueId,queueHash,taskId})`按冻结顺序直接打开岗位URL，保留原标签身份、原岗位和目标表单。首次导航不是公司登录首页。
-3. 需要登录则返回绑定原岗位的 `loginPlan`；调用 `login_prepare`、按已授权声明处理、请求一次当前短信；图形验证及本人操作交用户。
-4. 用户完成后 `role_resume` 在原标签返回原岗位，核对账号、完整URL及标题，返回 `ready_to_fill` 才能继续。
+2. 从派发结果按本轮明确的岗位编码选择任务。定向续跑用 `role_advance({queueId,queueHash,taskId,roleId,authorization:{login:true,evidence}})` 连续推进本岗位到可填写状态；本次任务已有标签直接复用。
+3. 返回 needs_user_login 时交给用户在原分身登录；用户完成后再次调用 role_advance，组件实际复查登录态。
+4. 已登录后组件内部校验目标 URL 与岗位，并进入对应填写页；ready_to_fill 后继续原准备流程。
 5. `role_prepare` 核对同一任务→全部字段离线编译→填写→独立只读核验；新增问题强制登记私有JSON。`role_verify`可额外核验；`role_screenshot`保存原标签截图并遮盖密码/短信码。
 6. 返回 `ready_for_user_review` 后交用户校验；该岗位准备完成才可开始顺序中的下一岗位。用户明确授权具体岗位的当前表单后，调用 `role_submit`，传当前模板 Hash、已通过核验的 `reviewRunId` 与用户原话。内核重新核验字段、敏感来源及附件，先记录尝试再点击一个真实按钮；只认官网回执，随后用返回的 outcome 调用 `application_closeout`。不确定结果禁止自动重试；普通填写工具与模板不能提交。
 
@@ -38,7 +40,7 @@
 - 已进入过申请页、但标签现在不在申请页（例如登录过期被送到别处）：回到岗位链接重新点进入，原有填写、核验证明作废；`role_resume` 经用户允许恢复丢失标签时同样从岗位链接重新进入。
 - 页面卡住（一直转圈）：`role_reload_page` 刷新这张标签，不另开；已开始填写的页面刷新会丢掉未保存的填写，须带用户同意的原话，刷新后填写与核验证明作废。
 - 多余标签：`role_close_extra_pages` 关闭本站点不属于任何任务、也不是登记账号核对页的标签。岗位页、首页、验证页、空白页直接关；申请页样式的标签先截图返回，用户看过同意后带 `authorization.closeFormPages` 与用户原话再关。只关本站点标签，不关最后一张，不关浏览器。
-- 账号先在绑定标签上读；读不到时才读站点账号核对页。账号核对页由 `login_open_identity` 打开并按站点登记（每个站点一张，已开着就复用）；未打开时返回 `ACCOUNT_PROOF_PAGE_NOT_OPEN`，下一步 `login_open_identity`，执行端不得自己另开页面。
+- 登录态在本任务当前标签观察，支持已登录、未登录和未知；用户完成登录后调用 role_advance 实际复查，再校验目标页面。
 - 同一批次重复导入（`role_queue_import` / `company_batch_create`）：确认内容和执行方式都没变就返回原队列、原批次运行，不新建任务。仅改变 companyOrder 时在原队列更新次序和 queueHash，保留任务状态及页面绑定；没有新的 companyOrder 时不重置此前排序。内容变了才建新队列：旧队列与旧任务记录删除，旧批次运行关闭并释放它占着的公司；同一岗位的任务编号不变（按批次 + 岗位编码固定），已绑定的标签延续到新任务（`rebind_required`）。
 
 登录后首页不等于返回原岗位。公司 `login_open` 只供内部调试。
@@ -47,13 +49,13 @@
 
 ## 一条脚本运行
 
-在本包目录运行 `node scripts/run-confirmed-roles.mjs`。设置 `RECRUITING_HANDOFF_DIR`、`RECRUITING_PROFILE_JSON`、`RECRUITING_LOGIN_PRIVATE_DIR`、`RECRUITING_PRIVATE_DIR`（已有申请模板）、`RECRUITING_RUN_EVIDENCE_DIR` 和 `RECRUITING_RUN_AUTHORIZATION_FILE`（已有本轮用户授权文件）；可选 `RECRUITING_ROLE_QUEUE_DIR`、`RECRUITING_BROWSER_SOCKET`、`RECRUITING_BROWSER_PROFILE_DIR`。
+在本包目录运行 `node scripts/run-confirmed-roles.mjs`。设置 `RECRUITING_HANDOFF_DIR`、`RECRUITING_PROFILE_JSON`、`RECRUITING_LOGIN_PRIVATE_DIR`、`RECRUITING_PRIVATE_DIR`（已有申请模板） 和 `RECRUITING_RUN_AUTHORIZATION_FILE`（已有本轮用户授权文件）；可选 `RECRUITING_ROLE_QUEUE_DIR`、`RECRUITING_BROWSER_SOCKET`、`RECRUITING_BROWSER_PROFILE_DIR`。
 
 脚本通过正式 stdio MCP 协议读取已确认的公司文件、打开岗位、准备登录并按授权请求一次短信；到人工步骤暂停。用户在原页面完成后向该进程输入 `resume`，脚本只读确认并恢复原岗位，继续填写及独立核验，保存计时和截图，停在用户校验。`close`只关闭MCP客户端，浏览器/broker保留。人工未完成时不重复发码；错误明确返回，不自动重启浏览器。它不实现Excel处理或最终提交。
 
 ## 同账号多岗位并发
 
-`role_queue_import({parallelRoles:true,authorizationRef:'明确并发授权引用'})` 启用同公司岗位并发；角色次序仅作枚举，跨公司边界仍按确认次序。登录保持账号级独占，一岗登录后其他岗位刷新并核对账号复用；填写用 `roles_prepare_batch`，一次账号租约内按独立 pageId/URL 并发执行。所有计划先编译；任何任务失败后等待其他工作者结束再释放锁。不得用多个站点编码伪造同公司的并发。
+`role_queue_import({parallelRoles:true,authorizationRef:'明确并发授权引用'})` 启用同公司岗位并发；角色次序仅作枚举，跨公司边界仍按确认次序。登录保持账号级独占，一岗登录后其他岗位刷新并检查登录态复用；填写用 `roles_prepare_batch`，一次账号租约内按独立 pageId/URL 并发执行。所有计划先编译；任何任务失败后等待其他工作者结束再释放锁。不得用多个站点编码伪造同公司的并发。
 
 链接只在三种情况下回报，都只记到 `投递回传.json`（按编码每条覆盖写），不改交接区：
 
@@ -63,16 +65,18 @@
 
 编号不变的跳转不算变化，不回报。搜索端 `apply-observations` 预览“J000184 投递链接：空 → X”，用户确认后在原编码下覆盖主表、只重生成并按“链接变更”重新确认这一家；投递端只刷新这一家。有入口配方的站点一律从岗位页进入；没有入口配方的站点在已有覆盖申请页的表单模板时才直接打开投递链接，还没有模板时仍从岗位页进入，进入后先建库。`form_assets_status` 按站点编码列出登录配置、已封存模板和投递链接的缺口。
 
-`role_enter_application` 只允许从核实的详情页进入申请表，核对岗位标题、同账号和真实返回 URL；在表单页不会点击提交按钮。表单字段仍须各岗位完整建库。运行前已有 broker 时固定本轮实例，连接断开或窗口不明确时返回恢复问题，不能通过另开浏览器试错。
+`role_enter_application` 只允许从核实的详情页进入申请表，核对岗位标题、登录态和真实返回 URL；在表单页不会点击提交按钮。表单字段仍须各岗位完整建库。运行前已有 broker 时固定本轮实例，连接断开或窗口不明确时返回恢复问题，不能通过另开浏览器试错。
 
-本人操作登录配置可以用 `account.pageUrl` 声明同源的独立身份页。通用详情→申请表入口在进入前后都重新定位唯一的身份页，并精确核对已声明的账号字段；身份页缺失、重复、跨源或账号变化都会阻断。岗位标题与返回路径仍在原岗位标签校验。身份页里的姓名不能代替用户指定登录账号的核实；用户指出账号不对时，原账号核验及应聘记录结论失效，待本人重新登录后再核对。
+本人操作登录使用当前任务标签上的登录态证据。旧 account.pageUrl 字段保留在私有配置中，但执行流程不读取或打开该页；账号文字不与主档比对。登录重定向由同一任务接续，完成登录后再校验岗位及填写页面。
 
 用户视角计时使用 `RECRUITING_RUN_STARTED_AT` 传入本轮开始时间戳，直到最终结束时间戳，不扣模型思考、修复、人工等待。没有传入时只能声明进程耗时。表单与JSON一致仅证明执行一致性，正式文本仍先对照来源审核；来源备注与待核说明放元数据。
 
 分身未运行时由 `browser_initialize_chrome`（或 `node scripts/chrome-clone.mjs start`）启动一次；普通执行不启动，分身缺失即返回明确缺口，不自动开第二实例。已连接broker可被两MCP客户端复用，客户端重启不重启浏览器。
 
-原标签身份失效时，role_resume 只可恢复到同一浏览器通道中、URL 与原任务完全一致且唯一的现有页面；恢复后重新核对账号和岗位。不存在或重复时拒绝，不另开页面。
+原标签身份失效时，role_resume 只可恢复到同一浏览器通道中、URL 与原任务完全一致且唯一的现有页面；恢复后重新检查登录态和岗位。不存在或重复时拒绝，不另开页面。
 
 ## 声明式通用入口
 
 已有飞书与简历弹窗配方保持兼容。其他已核实的详情页到申请页跳转可用 `entry.kind=declarative_transition`，合同与实际证据要求见 [声明式入口](declarative-entry.md)。Chrome 和内置浏览器共同执行一个共享驱动；仅观察真实返回页，不构造申请 URL。未采到真实按钮或结果页证据时仍阻断，不以手工填表替代建库。
+
+连续执行由 shared/confirmed-runner.mjs 编排，脚本只负责命令行输入输出；当前状态通过 Store 覆盖保存在私有 runs/confirmed-runner-current.json，业务结果沿用核心 TaskRecords。

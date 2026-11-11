@@ -7,7 +7,8 @@ import {uploadOriginKey,uploadOriginScope} from './upload-origin.mjs';
 import {saveSearchableCommit,searchableWitnessScope,verifySearchableCommits,attachSearchableCommits} from './searchable-commit.mjs';
 import {assertMaterialDestinationsRemainAbsent} from './business-materials.mjs';
 import {safeControlErrorDetails} from './control-error-details.mjs';
-import {verifyDropdownSelections,attachChoiceProofs} from './choice-verification.mjs';
+import {verifyDropdownSelections,attachChoiceProofs,choiceMenuUnrestored} from './choice-verification.mjs';
+import {choiceActionWithReadback} from './choice-actions.mjs';
 import {verifyDateRanges,attachDateRangeProofs} from './date-range-verification.mjs';
 import {attachProfileFillProofs} from './profile-fill-authorization.mjs';
 import {templateMethods} from './control-registry.mjs';
@@ -89,9 +90,14 @@ export function validateTemplate(t) {
   if (!Array.isArray(t.pages) || !t.pages.length) throw Error('EMPTY_TEMPLATE');
   if (!t.evidence?.sourceUrl || !t.evidence?.observedAt) throw Error('MISSING_CAPTURE_EVIDENCE');
   const fields = new Set();
+  if(t.companyTemplateVersion===2){
+    const keys=t.pages.map(p=>p.pageKey);
+    if(keys.some(k=>typeof k!=='string'||!k)||new Set(keys).size!==keys.length||!t.roleBindings)throw Error('COMPANY_ROLE_TEMPLATE_INVALID');
+    for(const [role,binding] of Object.entries(t.roleBindings))if(!/^J\d{6}$/.test(role)||Object.keys(binding).some(k=>k!=='pageKeys')||!binding.pageKeys?.length||binding.pageKeys.some(k=>!keys.includes(k)))throw Error('ROLE_BINDING_MUST_SHARE_CONTROLS');
+  }
   for (const p of t.pages) {
-    if (!p.pathPrefix?.startsWith('/') || !p.readySelector || !Array.isArray(p.fields) || !p.fields.length) throw Error('INVALID_PAGE');
-    if(!p.roleTitle || (!p.roleSelector&&!p.roleIdentity?.parameter))throw Error('ROLE_IDENTITY_REQUIRED');
+    if ((t.companyTemplateVersion!==2&&!p.pathPrefix?.startsWith('/')) || !p.readySelector || !Array.isArray(p.fields) || !p.fields.length) throw Error('INVALID_PAGE');
+    if((t.companyTemplateVersion!==2&&!p.roleTitle) || (!p.roleSelector&&!p.roleIdentity?.parameter))throw Error('ROLE_IDENTITY_REQUIRED');
     if(p.rolePrefix!==undefined&&(typeof p.rolePrefix!=='string'||!p.rolePrefix.trim()||/[\r\n\u2028\u2029]/u.test(p.rolePrefix)||typeof p.roleSelector!=='string'||!p.roleSelector.trim()))throw Error('ROLE_PREFIX_CONTRACT_REQUIRED');
     if(!p.sections?.length||!p.sectionDiscovery?.selector||!p.sectionDiscovery?.titleSelector)throw Error('SECTION_COVERAGE_PLAN_REQUIRED');
     if(p.sections.some(section=>typeof section?.title!=='string'||!section.title.trim()))throw Error('SECTION_TITLES_REQUIRED');
@@ -172,7 +178,7 @@ export function compare(actual, expected) {
 }
 
 export class Engine {
-  constructor({store,companies,browser,onInventory,onTemplateUpdated,refreshCompanies,resolveTask,profileFields,loadProfile,attachmentCapture,visionReviewer,privacyFields,leaseRoot=defaultLeaseRoot()}) { Object.assign(this,{store,companies,browser,onInventory,onTemplateUpdated,refreshCompanies,resolveTask,profileFields,loadProfile,attachmentCapture,visionReviewer,privacyFields,leaseRoot}); this.locks = new Set(); }
+  constructor({store,companies,browser,onInventory,onTemplateUpdated,refreshCompanies,resolveTask,profileFields,loadProfile,attachmentCapture,visionReviewer,privacyFields,routeTemplate=async t=>t,leaseRoot=defaultLeaseRoot()}) { Object.assign(this,{store,companies,browser,onInventory,onTemplateUpdated,refreshCompanies,resolveTask,profileFields,loadProfile,attachmentCapture,visionReviewer,privacyFields,routeTemplate,leaseRoot}); this.locks = new Set(); }
   async taskPage(task){
     const pageId=task.pageId||task.browserBinding?.pageId,binding=task.browserBinding;
     if((task.roleId||task.roleQueueArgs)&&(!pageId||!binding))throw Error('VERIFIED_ROLE_PAGE_BINDING_REQUIRED');
@@ -183,7 +189,7 @@ export class Engine {
   async profileProofs(task,template,page,prepare=false){if(!task.profileFillContext)return {};if(!this.profileFields)throw Error('PROFILE_FILL_KERNEL_REQUIRED');return this.profileFields({task,template,page,prepare});}
   async privacyProofs(task,template,page,prepare=false){if(!task.privacyFillContext)return {};if(!this.privacyFields)throw Error('PRIVACY_FILL_KERNEL_REQUIRED');return this.privacyFields({task,template,page,prepare});}
   attachPrivacyProofs(observation,proofs){for(const[id,proof]of Object.entries(proofs))if(observation.fields?.[id])observation.fields[id].privacyFillProof=proof;return observation;}
-  formRoute(task){return new FormRouter({store:this.store,companies:this.companies,validateTemplate,...(this.loadProfile?{loadProfile:this.loadProfile}:{})}).resolve(task);}
+  formRoute(task){return new FormRouter({store:this.store,companies:this.companies,validateTemplate,routeTemplate:this.routeTemplate,...(this.loadProfile?{loadProfile:this.loadProfile}:{})}).resolve(task);}
   companyForTask(task){const c=this.companies.find(c=>c.id===task.companyId);return c?{...companyContext(c,task),templateId:c.templateId}:null;}
   async acquireCompanies(companies){
     const origins=[...new Set(companies.flatMap(c=>c.origins||[c.origin]).filter(Boolean).map(origin=>new URL(origin).origin))].sort(),releases=[];
@@ -205,9 +211,9 @@ export class Engine {
       if(new URL(task.pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
       const template=validateTemplate(await constructionTemplate(this.store,company.templateId,task.templateHash));
       if(hash(template)!==task.templateHash)throw Error('TEMPLATE_VERSION_CHANGED');
-      const matches=template.pages.filter(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix));
+      const matches=(await this.routeTemplate(template,task)).pages.filter(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix));
       if(matches.length!==1)throw Error('AMBIGUOUS_PROBE_PAGE');
-      const run={id:'draft-probe-'+template.id,operation:'internal_condition_probe',companyId:company.id,templateHash:hash(template),startedAt:new Date().toISOString(),status:'running',submission:'not_performed',save:'not_verified',authorizationEvidence:authorization.evidence};
+      const run={id:'draft-probe-'+template.id,operation:'internal_condition_probe',companyId:company.id,pageUrl:task.pageUrl,pageId:task.pageId,browserBinding:task.browserBinding,templateHash:hash(template),startedAt:new Date().toISOString(),status:'running',submission:'not_performed',save:'not_verified',authorizationEvidence:authorization.evidence};
       const started=performance.now();
       try{
         await this.store.put('runs',run.id,run);
@@ -230,8 +236,9 @@ export class Engine {
     if(new URL(task.pageUrl).origin!==company.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
     const template=validateTemplate(await this.store.get('templates',company.templateId));
     if(hash(template)!==task.templateHash)throw Error('TEMPLATE_VERSION_CHANGED');
-    if(!template.pages.some(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix)))throw Error('PLAN_PAGE_NOT_COVERED');
-    const plan=await compileExecutionPlan(template,task);
+    const routed=await this.routeTemplate(template,task);
+    if(!routed.pages.some(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix)))throw Error('PLAN_PAGE_NOT_COVERED');
+    const plan=await compileExecutionPlan(routed,task);
     if(!transient)await this.store.put('plans',plan.id,plan);
     return {...(transient?{compiled:plan}:{}),companyId:task.companyId,route:route.route,nextStage:route.nextStage,routeReason:route.reason,planId:plan.id,planHash:plan.planHash,templateHash:plan.templateHash,counts:plan.counts,allKnown:plan.allKnown,readyForExecution:plan.readyForExecution,constructionBlockers:plan.constructionBlockers,status:plan.constructionBlockers.length?'blocked_construction':plan.counts.needs_user?'needs_answers':plan.counts.user_only?'ready_with_user_steps':'ready',browserAccess:false,pending:plan.pages.flatMap(p=>p.fields).filter(f=>f.disposition==='needs_user').map(f=>({id:f.id,source:f.source,label:f.label,required:!!f.required,...(task.sources?.[f.source]?.datePrecisionGap?{datePrecisionGap:task.sources[f.source].datePrecisionGap}:{})}))};
   }
@@ -280,7 +287,7 @@ export class Engine {
         if(task.planId!==executionPlanId(task.companyId))throw Error('PREPARED_PLAN_NOT_FOUND');
         try{prepared=await this.store.get('plans',task.planId);}catch{throw Error('PREPARED_PLAN_NOT_FOUND');}
       }
-      await assertPreparedPlan(prepared,template,task,authorization);
+      await assertPreparedPlan(prepared,await this.routeTemplate(template,task),task,authorization);
       if(authorization.uploadFieldIds&&(new Set(authorization.uploadFieldIds).size!==authorization.uploadFieldIds.length||authorization.uploadFieldIds.some(id=>!prepared.pages.some(page=>page.fields.some(field=>field.id===id&&field.kind==='file'&&field.disposition==='fill')))))throw Error('UPLOAD_FIELD_SCOPE_INVALID');
       if((await this.formRoute(task)).route!=='reuse')throw Error('FORM_ASSET_NOT_SEALED');
       jobs.push({task,company,template,prepared,deferFinalVerification:independentVerificationFollows===true&&template.pages.length===1&&!template.pages[0].after?.length});
@@ -302,7 +309,7 @@ export class Engine {
       }
       if(this.resolveTask){
         const fresh=await this.resolveTask(job.task,job.template);
-        await assertPreparedPlan(job.prepared,job.template,fresh,authorization);
+        await assertPreparedPlan(job.prepared,await this.routeTemplate(job.template,fresh),fresh,authorization);
         job.task=fresh;
       }
     }
@@ -312,7 +319,7 @@ export class Engine {
     }
     const queueIds=[...new Set(jobs.map(j=>j.task.roleQueueArgs?.queueId).filter(Boolean))];
     const batchOwner=queueIds.length===0?jobs[0].task.taskId:null;
-    const batchRunId=queueIds.length===1?'batch-prepare-'+queueIds[0]:batchOwner?'batch-current-'+batchOwner:randomUUID();
+    const batchRunId=queueIds.length===1?'batch-prepare-'+queueIds[0]:batchOwner?'batch-current-'+batchOwner:'batch-current-'+hash(jobs.map(j=>[j.company.id,j.task.roleId||j.task.pageUrl]).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)))).slice(0,24);
     run={id:batchRunId,...(batchOwner?{taskId:batchOwner}:{}),operation:'batch_prepare',startedAt:new Date().toISOString(),status:'running',results:[],batchPrepareCalls:1,parallelRoles,requestedConcurrency:concurrency,modelRoundTrips:'not_measured'};
     keys.forEach(k=>this.locks.add(k));
       await this.store.put('runs',run.id,run);
@@ -356,7 +363,7 @@ export class Engine {
     const template=validateTemplate(await this.store.get('templates',company.templateId));
     if(task.templateHash!==hash(template))throw Error('TEMPLATE_VERSION_CHANGED');
     if((await this.formRoute(task)).route!=='reuse')throw Error('FORM_ASSET_NOT_SEALED');
-    const matches=withProfileRecords(template,task.recordPlan).pages.filter(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix));
+    const matches=withProfileRecords(await this.routeTemplate(template,task),task.recordPlan).pages.filter(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix));
     if(matches.length!==1)throw Error('AMBIGUOUS_VERIFICATION_PAGE');
     const plan=rolePageContract(matches[0],task.confirmedRole),page=await this.taskPage(task);
     await page.assertLocation(company.origin,plan.pathPrefix);await page.wait(plan.readySelector);
@@ -364,7 +371,7 @@ export class Engine {
     let mappingError=null;
     try{if(this.onInventory)await this.onInventory(company.id,task.pageUrl,inventory,plan);}catch(e){mappingError=/^[A-Z_]+$/.test(e.message)?e.message:'PROFILE_REGISTRATION_FAILED';}
     const choiceProofs=await verifyDropdownSelections(page,plan,task);
-    const dateProofs=await verifyDateRanges(page,plan,task);
+    const dateProofs=choiceMenuUnrestored(choiceProofs)?{}:await verifyDateRanges(page,plan,task);
     const profileProofs=await this.profileProofs(task,template,page),privacyProofs=await this.privacyProofs(task,template,page),searchableProofs=await verifySearchableCommits({store:this.store,page,plan,task});
     const observation=attachSearchableCommits(attachProfileFillProofs(attachDateRangeProofs(attachChoiceProofs(attachInventory(await page.observe(plan),plan,inventory),choiceProofs),dateProofs),profileProofs),searchableProofs),observationRunId=randomUUID();
     this.attachPrivacyProofs(observation,privacyProofs);
@@ -382,9 +389,9 @@ export class Engine {
   async learnRepeatContract(page,template,plan,live,recordPlan){
     const titles=sectionsWithoutAdd(plan,live,recordPlan);
     if(!titles.length||typeof page.repeatDiscovery!=='function'||!template.id)return;
-    const found=(await page.repeatDiscovery(titles)).filter(item=>titles.includes(item.title));
+    const found=(await page.repeatDiscovery(titles)).filter(item=>titles.includes(item.title)&&item.addSelector);
     if(!found.length)return;
-    const stored=await this.store.get('templates',template.id),target=stored.pages.find(p=>p.pathPrefix===plan.pathPrefix);
+    const stored=await this.store.get('templates',template.id),target=stored.pages.find(p=>plan.pageKey?p.pageKey===plan.pageKey:p.pathPrefix===(plan.sourcePathPrefix||plan.pathPrefix));
     target.groups=[...(target.groups||[]).filter(group=>!found.some(item=>item.title===groupSection(group))),...found.map(groupFromDiscovery)];
     await this.store.put('templates',template.id,stored);
     await this.onTemplateUpdated?.(stored);
@@ -397,7 +404,7 @@ export class Engine {
     try {
       const page=await this.taskPage(task);
       activePage=page;
-      for (const [pageIndex,storedPage] of withProfileRecords(template,task.recordPlan).pages.entries()) {
+      for (const [pageIndex,storedPage] of withProfileRecords(await this.routeTemplate(template,task),task.recordPlan).pages.entries()) {
         const plan=rolePageContract(storedPage,task.confirmedRole);
         const compiled=prepared.pages[pageIndex],frozenFields=compiled.fields;
         activePlan=plan;
@@ -405,7 +412,6 @@ export class Engine {
         await page.wait(plan.readySelector);
         const inventory=()=>liveControls(page,plan);
         const live=await inventory();
-        await this.learnRepeatContract(page,template,plan,live,task.recordPlan);
         assertMaterialDestinationsRemainAbsent(prepared.materialCoverage,live);
         if(this.onInventory)await this.onInventory(company.id,task.pageUrl,live,plan);
         const mapped=new Set(plan.fields.flatMap(f=>f.inventorySelectors||[f.read.selector]));
@@ -417,8 +423,6 @@ export class Engine {
         // reads what is on the page: a strict reference to an absent record throws instead of
         // reporting it, and records are only added further down.
         const repeatFieldIds=plannedRepeatFieldIds(plan);
-        const uncontracted=sectionsWithoutAdd(plan,live).filter(section=>plan.groups?.some(group=>groupSection(group)===section&&!group.addSelector));
-        if(uncontracted.length)throw Object.assign(Error('REPEAT_ADD_CONTROL_NOT_OBSERVED'),{details:{sections:uncontracted}});
         const renderedFields=controls=>{const rendered=new Set(controls.map(control=>control.selector));return plan.fields.filter(field=>(field.inventorySelectors||[field.read.selector]).some(selector=>rendered.has(selector)||!repeatFieldIds.has(field.id)&&!selector?.startsWith('phoenixq:')));};
         let initial=await page.observe({...plan,fields:renderedFields(live)});
         if(!samePage(initial.pageUrl,task.pageUrl)||!matchesRole(plan,initial))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
@@ -438,27 +442,39 @@ export class Engine {
           for(const action of f.actions){const result=await page.act(action,f.value,prepared.files);if(result?.uploadOrigin)await this.store.put('runs',uploadOriginKey(task,f),{...result.uploadOrigin,operation:'field_upload_origin',fieldId:f.id,scopeHash:uploadOriginScope(task,f)});}
           materialWrites++;
         }
-        for(const f of frozenFields.filter(f=>f.prepareBeforeGroups&&f.disposition==='fill')){
-          for(const action of f.actions||[])await page.act(action,f.value,prepared.files);
+        const layoutInputs=frozenFields.filter(f=>f.prepareBeforeGroups&&f.disposition==='fill');
+        for(const f of layoutInputs){
+          for(const action of f.actions||[])await page.act(choiceActionWithReadback(action,f.read?.selectedSelector),f.value,prepared.files);
         }
+        // The portal can render an entire group only after a material or a
+        // prerequisite field has been applied. Discover against that state.
+        const layoutChanged=materialWrites>0||layoutInputs.length>0;
+        const beforeExpansion=layoutChanged?await inventory():live;
+        await this.learnRepeatContract(page,template,plan,beforeExpansion,task.recordPlan);
+        const uncontracted=sectionsWithoutAdd(plan,beforeExpansion).filter(section=>plan.groups?.some(group=>groupSection(group)===section&&!group.addSelector));
+        if(uncontracted.length)throw Object.assign(Error('REPEAT_ADD_CONTROL_NOT_OBSERVED'),{details:{sections:uncontracted}});
         if(plan.groups?.length)await page.ensureGroups(plan.groups);
-        const expanded=materialWrites||plan.groups?.length?await inventory():live;
+        const expanded=plan.groups?.length?await inventory():beforeExpansion;
         assertMaterialDestinationsRemainAbsent(prepared.materialCoverage,expanded);
-        if((materialWrites||plan.groups?.length)&&this.onInventory)await this.onInventory(company.id,task.pageUrl,expanded,plan);
+        if((layoutChanged||plan.groups?.length)&&this.onInventory)await this.onInventory(company.id,task.pageUrl,expanded,plan);
         if(expanded.some(f=>!mapped.has(f.selector)))throw Error('UNMAPPED_FORM_FIELDS_AFTER_EXPANSION');
         if(controlContractChanges(plan,expanded).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
-        if(materialWrites||plan.groups?.length){
+        if(layoutChanged||plan.groups?.length){
           const beforeMaterial=initial;initial=await page.observe({...plan,fields:renderedFields(expanded)});
           if(!samePage(initial.pageUrl,task.pageUrl)||!matchesRole(plan,initial))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
           result.pageChecks.at(-1).postMaterialReadAt=initial.readAt;
           result.pageChecks.at(-1).changedAfterMaterial=plan.fields.filter(f=>!f.userOnly&&JSON.stringify(beforeMaterial.fields[f.id]?.value)!==JSON.stringify(initial.fields[f.id]?.value)).map(f=>f.id);
+          if(plan.groups?.length)result.pageChecks.at(-1).repeatCounts=plan.groups.map(group=>({
+            id:group.id,expected:group.count,before:beforeMaterial.groups?.[group.id]??null,after:initial.groups?.[group.id]??null
+          }));
         }
         const fillOrder=compiled.executionOrder?.find(step=>step.stage==='fill')?.fieldIds;
         const fillFields=fillOrder?fillOrder.map(id=>frozenFields.find(f=>f.id===id)):frozenFields;
         const unverifiedSources=new Set(),completedWrites=new Set();
         // Records are in place now. A control still absent means the company changed it:
         // mark only those fields for repair and fill everything else on the page.
-        const notOnPage=frozenFields.filter(f=>!['inactive','omitted','user_only'].includes(f.disposition)&&!initial.fields[f.id]?.present&&!canActivate(f));
+        const renderedControl=field=>expanded.some(control=>(field.inventorySelectors||[field.read.selector]).includes(control.selector));
+        const notOnPage=frozenFields.filter(f=>!['inactive','omitted','user_only'].includes(f.disposition)&&!initial.fields[f.id]?.present&&!renderedControl(f)&&!canActivate(f));
         if(notOnPage.length)await recordRealFillFailure(this.store,template,company.id,notOnPage.map(f=>f.id));
         for(const f of notOnPage){unverifiedSources.add(f.source);(result.deferredControls??=[]).push({id:f.id,source:f.source,kind:f.kind,label:f.label,status:'not_on_page',reason:'CONTROL_NOT_ON_PAGE'});}
         for(const f of fillFields){
@@ -475,17 +491,17 @@ export class Engine {
           if(!samePage(latest.pageUrl,task.pageUrl)||!matchesRole(plan,latest))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
           const current=latest.fields[f.id];
           try{
-          if(f.control?.type==='searchable_text'&&current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'){
+          if(!task.testInteractions&&f.control?.type==='searchable_text'&&current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'){
             const proofs=await verifySearchableCommits({store:this.store,page,plan:{fields:[f]},task});
             if(proofs[f.id]?.status==='verified'){(result.skippedMatchingFields??=[]).push(f.id);continue;}
           }
-          if(f.control?.type!=='searchable_text'&&current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'&&(!['choice','date'].includes(f.kind)||current.selected===true)){
+          if(!task.testInteractions&&f.control?.type!=='searchable_text'&&current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'&&(!['choice','date'].includes(f.kind)||current.selected===true)){
             if(f.control?.type==='dropdown'&&!f.read.nativeSelect){const proofs=await verifyDropdownSelections(page,{fields:[f]},task);if(proofs[f.id]?.status!=='verified'){const proof=proofs[f.id],details=safeControlErrorDetails(proof?.errorDetails),error=Error(details?.phase==='restored_control_failure'?proof.reason:'EXISTING_CHOICE_NOT_VERIFIED');error.details=details;throw error;}}
             (result.skippedMatchingFields??=[]).push(f.id);continue;
           }
             for(const action of f.actions||[]){
               await page.assertLocation(company.origin,plan.pathPrefix);
-              const actionResult=await page.act(f.control?.type==='searchable_text'?{...action,witnessScope:searchableWitnessScope(task,f)}:action, f.value, prepared.files);
+              const actionResult=await page.act(f.control?.type==='searchable_text'?{...action,witnessScope:searchableWitnessScope(task,f)}:choiceActionWithReadback(action,f.read?.selectedSelector), f.value, prepared.files);
               if(f.control?.type==='searchable_text')await saveSearchableCommit(this.store,task,f,actionResult);
             }
             completedWrites.add(f.id);
@@ -517,7 +533,7 @@ export class Engine {
             const current=await page.observe({...plan,fields:[f]});
             if(!samePage(current.pageUrl,task.pageUrl)||!matchesRole(plan,current))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
             if(current.fields[f.id]?.value!==afterMaterial.fields[f.id].value)continue;
-            await page.act(f.actions[0],f.value,prepared.files);corrected.push(f.id);
+            await page.act(choiceActionWithReadback(f.actions[0],f.read?.selectedSelector),f.value,prepared.files);corrected.push(f.id);
           }
           if(corrected.length){result.lateMaterialCorrections=corrected;finalInventory=await inventory();if(this.onInventory)await this.onInventory(company.id,task.pageUrl,finalInventory,plan);if(controlContractChanges(plan,finalInventory).length||finalInventory.some(c=>!mapped.has(c.selector)))throw Error('FORM_CONTROL_CONTRACT_CHANGED');}
         }
@@ -525,7 +541,7 @@ export class Engine {
         // Verification reads every planned field and is the read-only verify_current's job here.
         if(notOnPage.length){result.fields.push(...notOnPage.map(f=>({id:f.id,label:f.label,status:'unverified',reason:'CONTROL_NOT_ON_PAGE'})));break;}
         const choiceProofs=await verifyDropdownSelections(page,plan,task);
-        const dateProofs=await verifyDateRanges(page,plan,task);
+        const dateProofs=choiceMenuUnrestored(choiceProofs)?{}:await verifyDateRanges(page,plan,task);
         const profileProofs=await this.profileProofs(task,template,page),privacyProofs=await this.privacyProofs(task,template,page),searchableProofs=await verifySearchableCommits({store:this.store,page,plan,task});
         const observation=attachSearchableCommits(attachProfileFillProofs(attachDateRangeProofs(attachChoiceProofs(attachInventory(await page.observe(plan),plan,finalInventory),choiceProofs),dateProofs),profileProofs),searchableProofs);
         result.selectionProofs={...(result.selectionProofs||{}),...choiceProofs};

@@ -30,7 +30,7 @@ function entryDetails(value){
  return v;
 }
 // 标签绑定类错误：下一步该用哪个工具、涉及哪些标签编号（只有编号，不带网址）。
-const bindingTools=new Set(['role_open','role_resume','role_close_extra_pages','role_report_link_failure','login_open_identity',null]);
+const bindingTools=new Set(['role_open','role_resume','role_close_extra_pages','role_report_link_failure','role_advance',null]);
 function bindingDetails(value){
  const own=Reflect.ownKeys(value);if(own.length!==3||own.some(k=>!['phase','nextTool','pageIds'].includes(k)))return null;
  if(!bindingTools.has(value.nextTool)||!Array.isArray(value.pageIds)||value.pageIds.length>12||value.pageIds.some(id=>typeof id!=='string'||!/^(?:(?:chrome|iab):)?[A-Za-z0-9_-]{1,80}$/.test(id)))return null;

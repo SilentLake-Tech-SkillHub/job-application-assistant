@@ -49,6 +49,20 @@ test('roles with a recorded outcome are protected by role code until the user re
  assert.deepEqual(q.protectedRoles.map(p=>[p.roleId,p.reason]),[['J000001','outcome_requires_resolution'],['J000002','already_submitted']]);
 }));
 
+test('a submission written back to the company row protects the old and next queue without a return file',()=>fixture(async({doc,save,queues})=>{
+ const original=await queues.import({});
+ const submitted=confirm(doc);
+ submitted['岗位'].find(r=>r['岗位编码']==='J000001')['投递状态']='岗位已投递';
+ await save(submitted);
+ await assert.rejects(queues.task({...original,taskId:original.tasks[0].taskId}),/ROLE_INPUT_CHANGED/);
+ const oldTasks=await queues.hydratedTasks(original.queueId);
+ assert.equal(oldTasks.get(original.tasks[0].taskId).protectedReason,'already_submitted');
+ assert.equal((await queues.task({...original,taskId:original.tasks[1].taskId})).t.roleId,'J000002');
+ const current=await queues.import({});
+ assert.deepEqual(current.protectedRoles.map(r=>[r.roleId,r.reason]),[['J000001','already_submitted']]);
+ assert.deepEqual(current.tasks.map(t=>t.roleId),['J000002']);
+}));
+
 test('first navigation is role URL, login redirect preserves task and resume restores original tab',()=>fixture(async({queues})=>{
  const q=await queues.import({}),args={...q,taskId:q.tasks[0].taskId};let loggedIn=false,wrongTitle=false,closed=false;let pageUrl='about:blank';const calls=[];
  const browser={request:async(method,a)=>{calls.push({method,...a});if(method==='tabs'){if(closed)throw Error('ROLE_BROWSER_PAGE_LOST');return [{id:'same-tab',url:pageUrl}];}if(method==='openPage'){pageUrl=loggedIn?a.pageUrl:'https://example.com/campus/login';return {pageId:'same-tab',pageUrl};}if(method==='roleSnapshot'){if(closed)throw Error('ROLE_BROWSER_PAGE_LOST');return {pageUrl,roleTitle:loggedIn?(wrongTitle?'Wrong role':'Role A'):null,account:loggedIn?'1380****234':null,loginFormPresent:!loggedIn,readAt:new Date().toISOString()};}}};

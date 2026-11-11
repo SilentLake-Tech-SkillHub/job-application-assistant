@@ -1,8 +1,9 @@
+import {sessionFromSnapshot} from './login-state.mjs';
 import {samePage} from './page-scope.mjs';
 import {transitionLocationMatches,transitionRoleIdFromLocation,canonicalLocationUrl} from './entry-transition.mjs';
 import {matchesRole,readRoleIdentity,bindRoleTitleProof,rolePageContract} from './role-identity.mjs';
 import {resolveEntry,matchEntryPath} from './entry-recipe.mjs';
-import {matchesAccount,resolveAccount,assertScope} from '../login/contracts.mjs';
+import {assertScope} from '../login/contracts.mjs';
 // 一个岗位任务 = 一张绑定的标签（任务记录里的 pageId）。所有步骤只操作这张标签；网址只用来判断它现在走到了哪一步，
 // 不拿网址去整个浏览器里另找页面。
 // 有入口配方的站点（岗位页 → 点“投递”进入申请页）只走一条线：
@@ -33,7 +34,7 @@ export class RoleFlow{
  // onObservation：链接观察只记到 投递回传.json（见 application-outcome.mjs recordObservation），
  // 由搜索端预览、用户确认后写主表；这里不改交接区的任何链接。触发：链接打不开（role_report_link_failure，附证据）、
  // 投递链接为空时第一次进入申请页、岗位链接跳转后岗位编号变了（岗位名核对一致）。只是跳转、编号不变不算变化。
- constructor({queues,login,templates,browser,onObservation=null}){Object.assign(this,{queues,login,templates,browser,onObservation});}
+ constructor({queues,login,templates,browser,onObservation=null,resolveTemplate=async t=>t}){Object.assign(this,{queues,login,templates,browser,onObservation,resolveTemplate});}
  roleId(t,state){return state?.siteRoleId||t.officialId;}
  // 浏览器主控进程不随 MCP 重载：旧进程不认识刷新、关闭标签，会报错或悄悄忽略。调用前先确认它支持。
  async assertPageTool(pageId,tool){let s;try{s=await this.browser.request('status');}catch{s=null;}const ch=String(pageId).split(':')[0],info=s?.channels?.[ch]||s;
@@ -41,7 +42,7 @@ export class RoleFlow{
  // 记“岗位链接跳转后编号变了”的观察；上次写失败的，下次核对时补记。
  async recordLanding(x,state){if(!this.onObservation||!state.landedDetailUrl||state.linkObservation&&!String(state.linkObservation).startsWith('write_failed'))return;
   try{state.linkObservation=(await this.onObservation({kind:'role',code:x.t.roleId,field:'岗位链接',value:state.landedDetailUrl,evidence:'岗位链接跳转后岗位编号由 '+x.t.officialId+' 变为 '+state.siteRoleId+'；页面岗位名与确认岗位名一致'})).status;}catch(err){state.linkObservation='write_failed:'+(/^[A-Z_]+$/.test(err.message)?err.message:'UNKNOWN');}}
- entryOnlyPlan(c,entry,template){return {entryOnly:true,readySelector:entry?.detailReadySelector||c.account.selector,roleSelector:entry?.roleSelector||template?.pages[0]?.roleSelector};}
+ entryOnlyPlan(c,entry,template){return {entryOnly:true,readySelector:entry?.detailReadySelector||c.account?.selector,roleSelector:entry?.roleSelector||template?.pages[0]?.roleSelector};}
  async base(args){
   let {q,t}=await this.queues.task(args);const c=await this.login.company(t.companyId,t),entry=resolveEntry(c),recipe=entry&&RECIPES.has(entry.kind)?entry:null;let template;
   try{template=await this.templates?.(t.companyId,t.roleId);}catch(e){if(e.code!=='ENOENT')throw e;}
@@ -57,7 +58,8 @@ export class RoleFlow{
   let plan;
   if(recipe&&!stored)plan=this.entryOnlyPlan(c,entry,template);
   else{
-   const plans=template?.pages.filter(p=>new URL(target).pathname.startsWith(p.pathPrefix))||[];
+   const resolved=template?await this.resolveTemplate(template,{...t,pageUrl:target},c):null;
+   const plans=resolved?.pages.filter(p=>new URL(target).pathname.startsWith(p.pathPrefix))||[];
    if(plans.length>1)throw Error('ROLE_ENTRY_RECIPE_REQUIRED');
    plan=plans[0];
    // 已存申请页链接但还没有覆盖该页的表单模板：仍从岗位页进入，进入后先建库。
@@ -70,11 +72,8 @@ export class RoleFlow{
   if(!plan.entryOnly)plan=rolePageContract(plan,{title:t.title,officialId:this.roleId(t,prior)});
   return {q,t,c,entry,recipe,template,plan,target,prior};
  }
- // 账号只在这张绑定的标签上读；读不到时才看站点登记的账号核对页（login_open_identity 打开并登记）。
- async loginSession(c,pageId,raw){return typeof this.login.stateForPage==='function'?this.login.stateForPage(c,{pageId,snapshot:raw}):this.login.state(c,raw.pageUrl);}
- async snapshot(x,pageId){const raw=await this.browser.request('roleSnapshot',{pageId,roleSelector:x.plan.roleSelector,roleIdentity:x.plan.roleIdentity,accountSelector:x.c.account.selector,loginRoot:x.c.fields?.root});
-  await bindRoleTitleProof(this.browser,x.plan,pageId,raw);
-  if(x.c.loginMethod==='user_operated'){const session=await this.loginSession(x.c,pageId,raw);raw.account=session.account;raw.loginFormPresent=session.form;}return raw;}
+ async snapshot(x,pageId){const raw=await this.browser.request('roleSnapshot',{pageId,roleSelector:x.plan.roleSelector,roleIdentity:x.plan.roleIdentity,accountSelector:x.c.account?.selector,loginRoot:x.c.fields?.root,sessionSelectors:x.c.session});
+  Object.assign(raw,sessionFromSnapshot(raw));if(raw.authenticated)await bindRoleTitleProof(this.browser,x.plan,pageId,raw);return raw;}
  // 别的任务已绑定的标签（pageId → taskId）；本任务自己的不算。
  async boundElsewhere(taskId){const m=typeof this.queues.boundPages==='function'?await this.queues.boundPages():new Map();for(const [k,v] of [...m])if(v===taskId)m.delete(k);return m;}
  // 打开前先找本岗位已有的标签：重新导入延续下来的绑定、或唯一一张本岗位的页面（岗位链接原址 / 按入口规则认出的本岗位岗位页、申请页）。
@@ -88,6 +87,25 @@ export class RoleFlow{
   if(candidates.length>1)throw bindingError('ROLE_PAGES_DUPLICATED',{nextTool:'role_close_extra_pages',pageIds:candidates.map(p=>p.pageId)});
   return candidates.length?{...candidates[0],reason:'existing_role_page'}:null;
  }
+ async advance(args){
+  if(!args.authorization?.login||!args.authorization.evidence?.trim())throw Error('LOGIN_AUTHORIZATION_REQUIRED');
+  const {t}=await this.queues.task(args);
+  if(args.roleId&&args.roleId!==t.roleId)throw Error('ROLE_TASK_SELECTION_MISMATCH');
+  let prior;try{prior=await this.queues.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}
+  if(prior?.status==='ready_for_user_review')return {status:prior.status,taskId:t.taskId,pageId:prior.pageId,verifyRunId:prior.verifyRunId,submission:'not_performed'};
+  const canResume=prior?.pageId&&prior.status!=='rebind_required';
+  let result=canResume?await this.resume(args):await this.open(args);
+  if(result.status==='needs_login'){
+   if(prior?.loginWait)return {status:'needs_user_login',taskId:t.taskId,pageId:result.pageId,continuation:{state:'user_input',owner:'user',requiresUser:true,shouldContinue:false,nextTools:['role_advance']}};
+   let prepared=await this.login.prepare({...result.loginPlan,authorization:args.authorization});
+   if(prepared.status==='ready_to_request_sms')prepared=await this.login.send({...result.loginPlan,acceptanceId:prepared.acceptanceId,authorization:args.authorization});
+   if(prepared.status!=='authenticated'){const state=await this.queues.read(t.taskId);await this.queues.put(t.taskId,{...state,loginWait:true});}
+   if(prepared.status==='authenticated')result=await this.resume(args);
+   else return {...prepared,taskId:t.taskId,pageId:result.pageId,continuation:{state:'user_input',owner:'user',requiresUser:true,shouldContinue:false,nextTools:['role_advance']}};
+  }
+  if(result.status==='authenticated_at_role')return this.enter(args);
+  return result;
+ }
  async open(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{
   const prior=x.prior;
   if(prior?.status==='ready_for_user_review')throw Error('ROLE_ALREADY_PREPARED_FOR_REVIEW');
@@ -98,7 +116,7 @@ export class RoleFlow{
    return this.resumeBoundPage(x,prior,{allowNavigation:false});
   }
   if(prior?.status==='rebind_required'&&prior.queueId!==x.q.id)throw Error('ROLE_TASK_STATE_CHANGED');
-  const readySelectors=[x.c.fields?.root,x.c.account.selector,x.plan.readySelector].filter(Boolean);
+  const readySelectors=[x.c.fields?.root,x.c.account?.selector,x.plan.readySelector].filter(Boolean);
   const found=await this.findRolePage(x,prior);
   // 延续下来的标签停在一张认不出的申请页上、且旧任务已经填过：不把它导航走（会丢掉填写），交给用户决定。
   if(found?.reason==='carried_binding'&&!found.kind&&prior?.carriedFrom?.hadFill&&formLikePage(x.entry,found.url,x.template))throw bindingError('ROLE_CARRIED_FORM_NOT_RECOGNIZED',{nextTool:null,pageIds:[found.pageId]});
@@ -118,9 +136,8 @@ export class RoleFlow{
   state.siteRoleId=landed;state.landedDetailUrl=canonicalLocationUrl(e.detail.location,s.pageUrl);
   return 'detail';
  }
- async assess(x,state,{allowNavigation=true}={}){let s=await this.snapshot(x,state.pageId);const account=resolveAccount(await this.login.profile(),x.c);
-  if(s.account&&!matchesAccount(s.account,account))throw Error('LOGIN_ACCOUNT_MISMATCH');
-  if(matchesAccount(s.account,account)&&!s.loginFormPresent){
+ async assess(x,state,{allowNavigation=true}={}){let s=await this.snapshot(x,state.pageId);
+  if(s.authenticated===true&&!s.loginFormPresent){
    // 已进入过申请页的任务：上次没写成的岗位链接观察在这里补记。
    if(x.recipe&&!x.plan.entryOnly&&state.landedDetailUrl&&String(state.linkObservation||'').startsWith('write_failed')){await this.recordLanding(x,state);await this.queues.put(x.t.taskId,state);}
    if(x.plan.entryOnly&&x.recipe){
@@ -129,12 +146,12 @@ export class RoleFlow{
     if(!kind){
      if(!allowNavigation)throw Error('ROLE_BOUND_PAGE_LOCATION_CHANGED');
      await this.browser.request('openPage',{pageId:state.pageId,pageUrl:x.t.url,readySelectors:[x.plan.readySelector,x.c.fields?.root].filter(Boolean)});
-     s=await this.snapshot(x,state.pageId);if(s.account&&!matchesAccount(s.account,account))throw Error('LOGIN_ACCOUNT_MISMATCH');
+     s=await this.snapshot(x,state.pageId);
      kind=await this.locate(x,state,s);if(!kind)throw bindingError('ROLE_LINK_LANDING_NOT_RECOGNIZED',{nextTool:'role_report_link_failure',pageIds:[state.pageId]});
     }
     if(state.landedDetailUrl)await this.recordLanding(x,state);
-    state.status='authenticated_at_role';state.accountMatched=true;state.pageKind=kind;await this.queues.put(x.t.taskId,state);
-    return {status:state.status,taskId:state.taskId,pageId:state.pageId,companyId:x.t.companyId,roleId:x.t.roleId,pageUrl:s.pageUrl,pageKind:kind,accountMatched:true,nextTools:['role_enter_application'],...(state.siteRoleId?{siteRoleId:state.siteRoleId,linkObservation:state.linkObservation||null}:{}),formAssetRequiredBeforeFill:true,submission:'not_performed'};
+    state.status='authenticated_at_role';state.authenticated=true;state.pageKind=kind;await this.queues.put(x.t.taskId,state);
+    return {status:state.status,taskId:state.taskId,pageId:state.pageId,companyId:x.t.companyId,roleId:x.t.roleId,pageUrl:s.pageUrl,pageKind:kind,authenticated:true,nextTools:['role_enter_application'],...(state.siteRoleId?{siteRoleId:state.siteRoleId,linkObservation:state.linkObservation||null}:{}),formAssetRequiredBeforeFill:true,submission:'not_performed'};
    }
    if(!samePage(s.pageUrl,state.returnUrl)&&x.recipe){
     // 有入口配方的站点：已进入过申请页、但标签现在不在申请页（例如登录过期后被送到别处）：不直接打开申请页地址，
@@ -145,17 +162,17 @@ export class RoleFlow{
    }
    if(!samePage(s.pageUrl,state.returnUrl)){if(!allowNavigation)throw Error('ROLE_BOUND_PAGE_LOCATION_CHANGED');await this.browser.request('openPage',{pageId:state.pageId,pageUrl:state.returnUrl,readySelectors:[x.plan.readySelector,x.c.fields?.root].filter(Boolean)});}
    if(x.plan.entryOnly){
-    state.status='authenticated_at_role';state.accountMatched=true;await this.queues.put(x.t.taskId,state);
-    return {status:state.status,taskId:state.taskId,pageId:state.pageId,companyId:x.t.companyId,roleId:x.t.roleId,pageUrl:state.returnUrl,accountMatched:true,nextTools:['role_enter_application'],formAssetRequiredBeforeFill:true,submission:'not_performed'};
+    state.status='authenticated_at_role';state.authenticated=true;await this.queues.put(x.t.taskId,state);
+    return {status:state.status,taskId:state.taskId,pageId:state.pageId,companyId:x.t.companyId,roleId:x.t.roleId,pageUrl:state.returnUrl,authenticated:true,nextTools:['role_enter_application'],formAssetRequiredBeforeFill:true,submission:'not_performed'};
    }
    await this.browser.request('wait',{pageUrl:state.returnUrl,selector:x.plan.readySelector});
    const restored=await this.snapshot(x,state.pageId);
-   if(!samePage(restored.pageUrl,state.returnUrl)||!matchesRole(x.plan,restored)||restored.loginFormPresent||!matchesAccount(restored.account,account))throw Error('LOGIN_RETURN_ROLE_VERIFICATION_FAILED');
+   if(!samePage(restored.pageUrl,state.returnUrl)||!matchesRole(x.plan,restored)||restored.loginFormPresent||restored.authenticated!==true)throw Error('LOGIN_RETURN_ROLE_VERIFICATION_FAILED');
    if(state.browserBinding&&(state.browserBinding.pageId!==state.pageId||state.browserBinding.pageUrl&&!samePage(state.browserBinding.pageUrl,state.returnUrl)))invalidateRolePageProofs(state);
-   state.status='ready_to_fill';state.restoredAt=restored.readAt;state.accountMatched=true;await this.queues.put(x.t.taskId,state);
-   return {status:state.status,taskId:state.taskId,pageId:state.pageId,companyId:x.t.companyId,roleId:x.t.roleId,roleTitle:restored.roleTitle,pageUrl:restored.pageUrl,accountMatched:true,originalRoleRestored:true,submission:'not_performed'};
+   state.status='ready_to_fill';state.restoredAt=restored.readAt;state.authenticated=true;await this.queues.put(x.t.taskId,state);
+   return {status:state.status,taskId:state.taskId,pageId:state.pageId,companyId:x.t.companyId,roleId:x.t.roleId,roleTitle:restored.roleTitle,pageUrl:restored.pageUrl,authenticated:true,originalRoleRestored:true,submission:'not_performed'};
   }
-  if(!s.loginFormPresent)throw Error('ROLE_LOGIN_ENTRY_RECIPE_REQUIRED');
+  if(!s.loginFormPresent)return {status:'session_unknown',taskId:state.taskId,pageId:state.pageId,continuation:{state:'technical_block',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['role_advance'],reason:'LOGIN_STATE_NOT_OBSERVED'}};
   if(new URL(s.pageUrl).origin!==x.c.origin)throw Error('LOGIN_PAGE_SCOPE_MISMATCH');
   const plan=await this.login.compile({companyId:x.t.companyId,pageUrl:s.pageUrl,taskContext:{queueId:x.q.id,queueHash:x.q.queueHash,taskId:x.t.taskId,pageId:state.pageId,returnUrl:state.returnUrl,roleTitle:state.expectedTitle}});
   state.status='needs_login';state.loginPlan=plan;await this.queues.put(x.t.taskId,state);
@@ -180,9 +197,9 @@ export class RoleFlow{
     if(state.submissionAttempt)throw Error('SUBMISSION_ALREADY_ATTEMPTED');
     // 有入口配方的站点：恢复也走同一条线，从岗位链接重新进入；没有配方时才重开存储的申请页地址。
     const reopen=x.recipe?x.t.url:state.returnUrl;
-    const opened=await this.browser.request('openPage',{pageUrl:reopen,readySelectors:[x.plan.readySelector,x.c.account.selector,x.c.fields?.root].filter(Boolean)});
+    const opened=await this.browser.request('openPage',{pageUrl:reopen,readySelectors:[x.plan.readySelector,x.c.account?.selector,x.c.fields?.root].filter(Boolean)});
     if(!opened.pageId||new URL(opened.pageUrl).origin!==x.c.origin)throw Error('ROLE_RESTORED_PAGE_SCOPE_CHANGED');
-    state.pageId=opened.pageId;state.status='restored_page_requires_verification';state.accountMatched=false;
+    state.pageId=opened.pageId;state.status='restored_page_requires_verification';state.authenticated=false;
     invalidateRolePageProofs(state);
     for(const key of ['fillRunId','verifyRunId','verifiedAt','selectedFieldRunId','previewAttempt','entryStarted'])delete state[key];
     state.pageRecovery={reopenedAt:new Date().toISOString(),evidence:recoveryEvidence};
@@ -218,16 +235,17 @@ export class RoleFlow{
    }
    opened={pageId:prior.pageId,pageUrl:bound.url};
   }else{
-   opened=await this.browser.request('openPage',{pageUrl:prior?.applicationUrl||t.url,...(prior?.pageId?{pageId:prior.pageId}:{}),readySelectors:[c.account.selector,c.fields?.root,entry?.detailReadySelector,entry?.formReadySelector].filter(Boolean)});
+   opened=await this.browser.request('openPage',{pageUrl:prior?.applicationUrl||t.url,...(prior?.pageId?{pageId:prior.pageId}:{}),readySelectors:[c.account?.selector,c.fields?.root,entry?.detailReadySelector,entry?.formReadySelector].filter(Boolean)});
   }
-  const snapshot=await this.browser.request('roleSnapshot',{pageId:opened.pageId,accountSelector:c.account.selector,loginRoot:c.fields?.root});if(c.loginMethod==='user_operated'){const session=await this.loginSession(c,opened.pageId,snapshot);snapshot.account=session.account;snapshot.loginFormPresent=session.form;}
-  if(snapshot.loginFormPresent||!matchesAccount(snapshot.account,resolveAccount(await this.login.profile(),c)))throw Error('SHARED_LOGIN_SESSION_REQUIRED');
-  const result=await this.browser.request('roleEnterApplication',{pageId:opened.pageId,originalRoleUrl:t.url,expectedTitle:t.title,accountSelector:c.account.selector,expectedAccount:snapshot.account,roleSelector:entry?.roleSelector,entry,expectedRoleId,sessionAccountPageUrl:c.account.pageUrl,...(excludePageIds.length?{excludePageIds}:{})});
+  const snapshot=await this.browser.request('roleSnapshot',{pageId:opened.pageId,accountSelector:c.account?.selector,loginRoot:c.fields?.root});Object.assign(snapshot,sessionFromSnapshot(snapshot));
+  if(snapshot.loginFormPresent||snapshot.authenticated!==true)throw Error('SHARED_LOGIN_SESSION_REQUIRED');
+  const result=await this.browser.request('roleEnterApplication',{pageId:opened.pageId,originalRoleUrl:t.url,expectedTitle:t.title,accountSelector:c.account?.selector,roleSelector:entry?.roleSelector,entry,expectedRoleId,...(excludePageIds.length?{excludePageIds}:{})});
   const roleChanged=entry?.kind==='resume_modal'?result.roleIdentity?.value!==expectedRoleId:entry?.kind==='declarative_transition'?
    (entry.form.roleIdentity&&(result.roleIdentity?.value!==expectedRoleId||result.roleIdentity?.parameter!==entry.form.roleIdentity.parameter)||entry.form.roleSelector&&result.roleTitle!==t.title):result.roleTitle!==t.title;
-  if(new URL(result.pageUrl).origin!==c.origin||roleChanged||result.accountMatched!==true)throw Error('APPLICATION_ENTRY_RESULT_CHANGED');
+  if(new URL(result.pageUrl).origin!==c.origin||roleChanged)throw Error('APPLICATION_ENTRY_RESULT_CHANGED');
   if(prior?.landedDetailUrl)await this.recordLanding(x,prior);
-  const next={...prior,queueId:q.id,taskId:t.taskId,pageId:result.pageId||opened.pageId,originalRoleUrl:t.url,applicationUrl:result.pageUrl,returnUrl:result.pageUrl,expectedTitle:t.title,status:'ready_to_fill',accountMatched:true,entryVerifiedAt:new Date().toISOString()};delete next.entryStarted;invalidateRolePageProofs(next);
+  const entered=await this.browser.request('roleSnapshot',{pageId:result.pageId||opened.pageId,accountSelector:c.account?.selector,loginRoot:c.fields?.root,sessionSelectors:c.session});if(!sessionFromSnapshot(entered).authenticated)throw Error('LOGIN_SESSION_REQUIRED');
+  const next={...prior,queueId:q.id,taskId:t.taskId,pageId:result.pageId||opened.pageId,originalRoleUrl:t.url,applicationUrl:result.pageUrl,returnUrl:result.pageUrl,expectedTitle:t.title,status:'ready_to_fill',authenticated:true,entryVerifiedAt:new Date().toISOString()};delete next.entryStarted;invalidateRolePageProofs(next);
   await this.queues.put(t.taskId,next);
   // 投递链接为空（或已报打不开）时，第一次核对进入的申请页地址记为观察；已有投递链接时不记。
   let observation=null;if(!t.applyUrl&&this.onObservation){const u=new URL(result.pageUrl);
@@ -248,23 +266,36 @@ export class RoleFlow{
  // 关闭本站点多余的标签：不属于任何任务、也不是登记的账号核对页。岗位页、首页、验证页、空白页直接关；
  // 申请页样式的标签可能有未保存的填写，先截图返回给用户，用户同意后带 closeFormPages 与用户原话再关。只关本站点的标签，不关浏览器。
  async inspectEntry(args){const x=await this.base(args);if(!x.prior?.pageId)throw bindingError('ROLE_PAGE_NOT_BOUND',{nextTool:'role_open'});
-  const identity=await this.browser.request('pageIdentity',{pageId:x.prior.pageId});
-  if(originOf(identity.pageUrl)!==x.c.origin)throw Error('ROLE_BOUND_PAGE_SCOPE_CHANGED');
-  let stage=rolePageKind(x.entry,identity.pageUrl,{roleUrl:x.t.url,roleId:this.roleId(x.t,x.prior)}),pageId=x.prior.pageId;
-  // Diagnostics may read the unique already-open detail of this same confirmed
+  let identity;
+  try{identity=await this.browser.request('pageIdentity',{pageId:x.prior.pageId});}
+  catch(error){if(error.message!=='ROLE_BROWSER_PAGE_LOST'||!args.stage)throw error;}
+  if(identity&&originOf(identity.pageUrl)!==x.c.origin)throw Error('ROLE_BOUND_PAGE_SCOPE_CHANGED');
+  const kind=url=>rolePageKind(x.entry,url,{roleUrl:x.t.url,roleId:this.roleId(x.t,x.prior)});
+  let stage=identity?kind(identity.pageUrl):null,pageId=x.prior.pageId;
+  // Diagnostics may read a unique already-open page of this same confirmed
   // role. Never navigate, open a page or replace the application task binding.
   if(args.stage&&args.stage!==stage){
    const others=await this.boundElsewhere(x.t.taskId),tabs=await this.browser.request('tabs',{pageUrl:x.t.url});
-   const matches=tabs.filter(p=>originOf(p.url)===x.c.origin&&!others.has(pageIdOf(p))&&rolePageKind(x.entry,p.url,{roleUrl:x.t.url,roleId:this.roleId(x.t,x.prior)})===args.stage);
+   const matches=tabs.filter(p=>pageIdOf(p)&&originOf(p.url)===x.c.origin&&!others.has(pageIdOf(p))&&kind(p.url)===args.stage);
    if(matches.length!==1)throw bindingError('ROLE_EXISTING_PAGE_NOT_UNIQUE',{nextTool:'role_close_extra_pages',pageIds:matches.map(pageIdOf).filter(Boolean)});
    stage=args.stage;pageId=pageIdOf(matches[0]);
   }
   if(!['detail','form'].includes(stage))throw Error('ROLE_BOUND_PAGE_NOT_AT_ROLE');
-  return this.browser.request('entryInspection',{pageId,entry:x.entry,expectedTitle:x.t.title,stage});
+  // Flat catalog recipes predate the declarative form object. Normalize the
+  // diagnostic payload at the caller so existing browser brokers can read it.
+  const entry={...x.entry,form:x.entry?.form||{}};
+  const inspection=await this.browser.request('entryInspection',{pageId,entry,expectedTitle:x.t.title,stage});
+  if(inspection.candidates?.length===0){
+   const current=await this.browser.request('pageIdentity',{pageId});
+   if(originOf(current.pageUrl)!==x.c.origin)throw Error('ROLE_BOUND_PAGE_SCOPE_CHANGED');
+   const page=await this.browser.existingPage(current.pageUrl,{pageId,readOnly:true});
+   inspection.pageHealth=await page.observe({entryHealth:true});
+  }
+  return inspection;
  }
  async closeExtraPages(args){const x=await this.base(args);return this.login.locked(x.c,async()=>{
   const bound=typeof this.queues.boundPages==='function'?await this.queues.boundPages():new Map(),keep=new Set(bound.keys());
-  const identity=typeof this.login.identityPage==='function'?await this.login.identityPage(x.c):null;if(identity?.pageId)keep.add(identity.pageId);
+
   const tabs=await this.browser.request('tabs',{pageUrl:x.t.url}).then(v=>Array.isArray(v)?v:[]);
   const extra=(tabs||[]).filter(p=>originOf(p.url)===x.c.origin).map(p=>({pageId:pageIdOf(p),url:p.url})).filter(p=>p.pageId&&!keep.has(p.pageId));
   const forms=extra.filter(p=>formLikePage(x.entry,p.url,x.template)||x.t.applyUrl&&p.url.split(/[?#]/)[0]===x.t.applyUrl.split(/[?#]/)[0]),plain=extra.filter(p=>!forms.includes(p));

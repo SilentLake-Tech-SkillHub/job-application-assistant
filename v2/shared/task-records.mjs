@@ -9,7 +9,7 @@ const context=new AsyncLocalStorage();
 export const withTaskRecords=(scope,fn)=>context.run(scope,fn);
 export const taskRecordScope=()=>context.getStore()||{};
 export function bindTaskRecordScope(taskId){const scope=context.getStore();if(!scope||!taskId)return;if(scope.taskId&&scope.taskId!==taskId)throw Error('TASK_RECORD_SCOPE_MISMATCH');scope.taskId=taskId;}
-const durableAsset=/^(?:sealed-probe-|draft-probe-|capture-|form-structure-|choices-|acquisition-|form-draft-|definition-|probe-|submission-proof-|submission-evidence-)/;
+const durableAsset=/^(?:sealed-probe-|draft-probe-|capture-|form-structure-|form-visual-|form-coverage-|choices-|acquisition-|form-draft-|definition-|probe-|submission-proof-|submission-evidence-)/;
 const read=async(file,fallback)=>{try{return JSON.parse(await readFile(file,'utf8'));}catch(e){if(e.code==='ENOENT')return fallback;throw e;}};
 async function write(file,value){await mkdir(path.dirname(file),{recursive:true,mode:0o700});const tmp=file+'.'+randomUUID()+'.tmp';await writeFile(tmp,JSON.stringify(value,null,2),{mode:0o600});await rename(tmp,file);}
 
@@ -25,7 +25,10 @@ export class TaskRecords{
   return record.value;
  }
  async put(group,id,value){
-  const scope=context.getStore()||{},taskId=value.taskId||scope.taskId;
+  // A company batch is shared across its tasks even when a company tool updates it.
+  if(group==='runs'&&value.id===id&&typeof value.batchHash==='string'&&typeof value.queueId==='string'&&Array.isArray(value.companies))return false;
+  const scope=context.getStore()||{},companyId=value.companyId||scope.companyId;
+  const taskId=value.taskId||scope.taskId||(group==='runs'&&/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(id)&&companyId?'company-'+companyId+'-'+(value.roleId||scope.roleId||'shared'):null);
   if(!taskId||!['runs','plans'].includes(group)||id.startsWith('batch-prepare-')||durableAsset.test(id)||value.operation==='internal_condition_probe')return false;
   if(!keyOK(taskId))throw Error('INVALID_TASK_RECORD_KEY');
   const operation=group==='plans'&&Number.isInteger(value.compilerVersion)?'execution_plan':value.operation||scope.tool||group;

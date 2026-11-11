@@ -15,11 +15,30 @@ const reference=selector=>parseReference(selector)?.value||null;
 export function scopeOf(selector){
  const r=reference(selector);if(r?.section&&Number.isInteger(r.occurrence))return [r.section,r.occurrence];
  let m=/#formily-item-([A-Za-z0-9_]+)_list\s+\[class\^="apply-form-array-card__"\]:nth-child\((\d+)\)/.exec(selector||'');if(m)return [m[1],Number(m[2])];
- m=/data-cy="([A-Za-z]+)\[(\d+)\]/.exec(selector||'');return m?[m[1],Number(m[2])]:null;
+ m=/(?:data-cy|id)="([A-Za-z]+)\[(\d+)\]/.exec(selector||'');return m?[m[1],Number(m[2])]:null;
 }
 function fieldScope(field){
  const scopes=[...new Set([...(field.inventorySelectors||[]),field.read?.selector].map(scopeOf).filter(Boolean).map(s=>JSON.stringify(s)))];
  return scopes.length===1?JSON.parse(scopes[0]):null;
+}
+export function excludedRepeatField(field,page,plan){
+ const scope=fieldScope(field),owner=recordOwner([field],plan?.parents||{});
+ return !!scope&&!!owner&&!!plan&&page.groups?.some(group=>groupSection(group)===scope[0]&&group.addSelector)&&!inProfile(owner,plan);
+}
+export function observedRepeatPrototype(field,page,controls){
+ const scope=fieldScope(field);
+ if(!scope||!page.groups?.some(group=>groupSection(group)===scope[0]&&group.addSelector))return false;
+ const rendered=new Set(controls.map(control=>control.selector));
+ const shown=controls.map(control=>scopeOf(control.selector)).filter(Boolean);
+ if(shown.some(other=>other[0]===scope[0]&&other[1]===scope[1]))return false;
+ const source=FAMILY.exec(field.source||'');if(!source)return false;
+ return page.fields.some(prototype=>{
+  const other=fieldScope(prototype),parent=FAMILY.exec(prototype.source||'');
+  if(!other||other[0]!==scope[0]||!parent||parent[2]!==source[2]||prototype.source.slice(parent[0].length)!==field.source.slice(source[0].length))return false;
+  if(!(prototype.inventorySelectors||[prototype.read.selector]).some(selector=>rendered.has(selector)))return false;
+  const projected=moveField(prototype,scope[0],scope[1]);
+  return projected.inventoryLabel===field.inventoryLabel&&projected.inventoryType===field.inventoryType&&!!projected.required===!!field.required&&projected.control?.type===field.control?.type&&projected.read.kind===field.read.kind&&projected.read.selector===field.read.selector&&projected.precision===field.precision&&JSON.stringify(projected.inventorySelectors)===JSON.stringify(field.inventorySelectors)&&JSON.stringify(projected.actions)===JSON.stringify(field.actions);
+ });
 }
 function moveSelector(selector,section,occurrence){
  const parsed=parseReference(selector);
@@ -28,7 +47,7 @@ function moveSelector(selector,section,occurrence){
   return `${parsed.kind}:${parsed.encoded?encodeURIComponent(body):body}`;
  }
  return selector.replace(new RegExp(`(#formily-item-${section}_list\\s+\\[class\\^="apply-form-array-card__"\\]:nth-child\\()\\d+`,'g'),`$1${occurrence}`)
-  .replace(new RegExp(`(data-cy="${section}\\[)\\d+`,'g'),`$1${occurrence}`);
+  .replace(new RegExp(`((?:data-cy|id)="${section}\\[)\\d+`,'g'),`$1${occurrence}`);
 }
 function moveField(field,section,occurrence){
  const walk=value=>typeof value==='string'?moveSelector(value,section,occurrence):Array.isArray(value)?value.map(walk):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).map(([k,v])=>[k,walk(v)])):value;
@@ -189,7 +208,7 @@ export function inheritPageContract(page,previous=[]){
  return result;
 }
 const UNMAPPED='unmapped.pending';
-export function inheritFields(fields,previous=[],pathPrefix){
+export function inheritFields(fields,previous=[],pathPrefix,{preserveObservedBlockers=false,mappings=[]}={}){
  const prior=previous.flatMap(t=>t?.pages||[]).filter(p=>p.pathPrefix===pathPrefix).flatMap(p=>p.fields||[]);
  if(!prior.length)return fields;
  const key=f=>f.inventorySelectors?.[0]||f.read?.selector,seen=new Set(fields.map(key));
@@ -198,7 +217,7 @@ export function inheritFields(fields,previous=[],pathPrefix){
   if(!old)return field;
   const next={...field};
   if(next.source===UNMAPPED&&old.source&&old.source!==UNMAPPED){next.source=old.source;if(old.enumMap)next.enumMap=old.enumMap;if(old.ongoingSource)next.ongoingSource=old.ongoingSource;}
-  if(next.constructionBlockers?.length&&!old.constructionBlockers?.length&&next.control?.type===old.control?.type){next.control=old.control;next.actions=old.actions;next.read=old.read;next.constructionBlockers=[];for(const k of ['choiceResolution','choiceGoal','choiceGoalRequired'])if(old[k])next[k]=old[k];}
+  if(!preserveObservedBlockers&&next.constructionBlockers?.length&&!old.constructionBlockers?.length&&next.control?.type===old.control?.type){next.control=old.control;next.actions=old.actions;next.read=old.read;next.constructionBlockers=[];for(const k of ['choiceResolution','choiceGoal','choiceGoalRequired'])if(old[k])next[k]=old[k];}
   return next;
  });
  // A record this capture never showed, or a condition not active now, says nothing
@@ -209,7 +228,22 @@ export function inheritFields(fields,previous=[],pathPrefix){
   if(seen.has(key(old)))continue;
   const scope=fieldScope(old);
   if(!old.when&&(!scope||shown.has(JSON.stringify(scope))))continue;
-  seen.add(key(old));unseen.push({constructionBlockers:[],...structuredClone(old)});
+  let retained={constructionBlockers:[],...structuredClone(old)};
+  const owner=FAMILY.exec(old.source||'');
+  if(scope&&owner&&!old.userOnly&&!['dropdown','radio','multiselect','searchable_text'].includes(old.control?.type)){
+   const prototypes=merged.filter(field=>{
+    const observed=fieldScope(field),parent=FAMILY.exec(field.source||'');
+    return observed?.[0]===scope[0]&&parent?.[2]===owner[2]&&field.source.slice(parent[0].length)===old.source.slice(owner[0].length)&&field.inventoryLabel===old.inventoryLabel&&!field.userOnly;
+   }).map(field=>moveField(field,scope[0],scope[1]));
+   const signature=field=>JSON.stringify({selectors:field.inventorySelectors,type:field.control?.type,kind:field.read.kind,precision:field.precision,methods:field.actions?.map(action=>action.method)});
+   if(prototypes.length&&prototypes.every(field=>signature(field)===signature(prototypes[0]))){
+    retained={...prototypes[0],id:old.id,source:old.source};
+    for(const property of ['when','ongoingSource','dateRepresentation','compose']){delete retained[property];if(old[property]!==undefined)retained[property]=structuredClone(old[property]);}
+   }
+  }
+  const mapped=[...new Set(mappings.filter(mapping=>mapping.status==='mapped'&&!mapping.factKey.startsWith('unmapped.')&&retained.inventorySelectors?.includes(mapping.selector)).map(mapping=>mapping.factKey))];
+  if(mapped.length===1){if(mapped[0]!==retained.source){const from=FAMILY.exec(retained.source||''),to=FAMILY.exec(mapped[0]);if(from&&to)retained=renameRecord(retained,from[1],to[1],{},[]);retained.source=mapped[0];}retained.constructionBlockers=(retained.constructionBlockers||[]).filter(reason=>reason!=='SEMANTIC_MAPPING_REQUIRED');}
+  seen.add(key(old));seen.add(key(retained));unseen.push(retained);
  }
  return [...merged,...unseen];
 }

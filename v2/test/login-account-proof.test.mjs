@@ -1,76 +1,32 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {LoginBrowser,observeUserOperatedSession} from '../login/browser.mjs';
-import {matchesAccount,resolveAccount} from '../login/contracts.mjs';
-const origin='https://example.test',roleUrl=origin+'/form?job=example',proofUrl=origin+'/account';
-const company=()=>({origin,loginMethod:'user_operated',account:{selector:'.actual-account',source:'account',mask:'exact',pageUrl:proofUrl}});
-const observed=(pageUrl,account,present=account!==null)=>({pageUrl,readAt:'observed-at',fields:{account:{present,value:account}}});
-function fixture(entries){
- const reads=[],observations=[],broker={existingPage:async url=>{
-  reads.push(url);const raw=entries[url];if(raw instanceof Error)throw raw;if(!raw)throw Error('EXISTING_PAGE_NOT_FOUND');
-  return {observe:async spec=>{observations.push(spec);assert.deepEqual(spec,{fields:[{id:'account',read:{selector:'.actual-account',kind:'text'}}]});return structuredClone(raw);}};
- },request:async()=>{throw Error('ACCOUNT_PROOF_MUST_NOT_NAVIGATE_OR_MUTATE');}};
- return {browser:new LoginBrowser('synthetic-account-socket',{broker}),reads,observations};
-}
-test('current page account is preferred and declared account page is never opened or read',async()=>{
- const f=fixture({[roleUrl]:observed(roleUrl,'current-person'),[proofUrl]:observed(proofUrl,'fallback-person')}),r=await f.browser.observe(company(),roleUrl);
- assert.equal(r.account,'current-person');assert.equal(r.identityPageUrl,roleUrl);assert.equal(r.url,roleUrl);assert.equal(r.form,false);assert.equal(r.userOperated,true);assert.deepEqual(f.reads,[roleUrl]);
+import {observeUserOperatedSession} from '../login/browser.mjs';
+const origin='https://example.test',url=origin+'/form',c={origin,account:{selector:'.session',pageUrl:origin+'/unused-proof'}};
+const forbidden={request:async()=>{throw Error('UNEXPECTED_BROWSER_CALL');}};
+for(const account of [undefined,'different-account'])test('authenticated session works without matching identity: '+account,async()=>{
+ const r=await observeUserOperatedSession(forbidden,c,url,{currentSnapshot:{pageUrl:url,authenticated:true,account,loginFormPresent:false}});
+ assert.equal(r.authenticated,true);assert.equal(r.form,false);assert.equal('account' in r,false);
 });
-test('wrong current account survives for downstream rejection instead of being hidden by a good fallback',async()=>{
- const c=company(),f=fixture({[roleUrl]:observed(roleUrl,'wrong-person'),[proofUrl]:observed(proofUrl,'expected-person')}),r=await f.browser.observe(c,roleUrl);
- const expected=resolveAccount({facts:{account:{status:'known',value:'expected-person',sourceIds:['fixture']}}},c);
- assert.equal(r.account,'wrong-person');assert.equal(matchesAccount(r.account,expected),false);assert.deepEqual(f.reads,[roleUrl]);assert.equal(r.identityPageUrl,roleUrl);
+test('visible login overrides stale authenticated evidence',async()=>{
+ const r=await observeUserOperatedSession(forbidden,c,url,{currentSnapshot:{pageUrl:url,authenticated:true,loginFormPresent:true}});assert.equal(r.authenticated,false);assert.equal(r.sessionStatus,'logged_out');
 });
-test('absent current account may use only the declared existing same-origin proof page',async()=>{
- for(const current of [observed(roleUrl,null),Error('EXISTING_PAGE_NOT_FOUND')]){
-  const f=fixture({[roleUrl]:current,[proofUrl]:observed(proofUrl,'expected-person')}),r=await f.browser.observe(company(),roleUrl);
-  assert.deepEqual(f.reads,[roleUrl,proofUrl]);assert.equal(r.account,'expected-person');assert.equal(r.identityPageUrl,proofUrl);assert.equal(r.url,roleUrl);assert.equal(r.form,false);
- }
+test('absence of both login form and positive session evidence remains unknown',async()=>{
+ const r=await observeUserOperatedSession(forbidden,c,url,{currentSnapshot:{pageUrl:url,loginFormPresent:false}});assert.equal(r.authenticated,false);assert.equal(r.sessionStatus,'unknown');
 });
-test('foreign requested role URL is rejected before reading any page',async()=>{
- const f=fixture({[proofUrl]:observed(proofUrl,'expected-person')});await assert.rejects(f.browser.observe(company(),'https://other.test/form'),/LOGIN_PAGE_SCOPE_MISMATCH/);assert.deepEqual(f.reads,[]);
+test('same tab redirected to login is observed by ID at its actual URL',async()=>{
+ const calls=[],broker={request:async(m,a)=>{calls.push(m);assert.equal(a.pageId,'chrome:original');return {pageUrl:origin+'/login',loginFormPresent:true};}};
+ const r=await observeUserOperatedSession(broker,c,url,{pageId:'chrome:original'});assert.equal(r.sessionStatus,'logged_out');assert.equal(r.url,origin+'/login');assert.deepEqual(calls,['roleSnapshot']);
 });
-test('foreign declared proof URL cannot supply a fallback identity',async()=>{
- const c=company();c.account.pageUrl='https://other.test/account';const f=fixture({[roleUrl]:observed(roleUrl,null),[c.account.pageUrl]:observed(c.account.pageUrl,'expected-person')});
- await assert.rejects(f.browser.observe(c,roleUrl),/LOGIN_PAGE_SCOPE_MISMATCH/);assert.deepEqual(f.reads,[roleUrl]);
+test('foreign requested and observed origins are rejected',async()=>{
+ await assert.rejects(observeUserOperatedSession(forbidden,c,'https://foreign.test/form'),/LOGIN_PAGE_SCOPE_MISMATCH/);
+ await assert.rejects(observeUserOperatedSession(forbidden,c,url,{currentSnapshot:{pageUrl:'https://foreign.test/form',authenticated:true}}),/LOGIN_PAGE_SCOPE_MISMATCH/);
 });
-test('missing declared proof page produces a typed actionable error without creating pages',async()=>{
- const f=fixture({[roleUrl]:observed(roleUrl,null)});
- await assert.rejects(f.browser.observe(company(),roleUrl),error=>{assert.equal(error.message,'ACCOUNT_PROOF_PAGE_NOT_OPEN');assert.deepEqual(error.details,{phase:'page_binding',nextTool:'login_open_identity',pageIds:[]});return true;});
- assert.deepEqual(f.reads,[roleUrl,proofUrl]);
+test('unbound read finds unique exact current page without opening an identity page',async()=>{
+ const calls=[],broker={request:async(m,a)=>{calls.push(m);if(m==='tabs')return [{id:'t',browserChannel:'chrome',url},{id:'other',browserChannel:'chrome',url:origin+'/job'}];assert.equal(a.pageId,'chrome:t');return {pageUrl:url,authenticated:true};}};
+ const r=await observeUserOperatedSession(broker,c,url);assert.equal(r.authenticated,true);assert.deepEqual(calls,['tabs','roleSnapshot']);
 });
-test('missing current identity page itself is typed and not retried',async()=>{
- const f=fixture({});await assert.rejects(f.browser.observe(company(),proofUrl),/ACCOUNT_PROOF_PAGE_NOT_OPEN/);assert.deepEqual(f.reads,[proofUrl]);
+test('unbound ambiguous pages are not silently chosen',async()=>{
+ const broker={request:async()=>[{id:'one',url},{id:'two',url}]};await assert.rejects(observeUserOperatedSession(broker,c,url),/LOGIN_PAGE_AMBIGUOUS/);
 });
-test('an existing proof page without the account element remains unauthenticated',async()=>{
- const f=fixture({[roleUrl]:observed(roleUrl,null),[proofUrl]:observed(proofUrl,null)}),r=await f.browser.observe(company(),roleUrl);
- assert.equal(r.account,null);assert.equal(r.form,true);assert.equal(r.identityPageUrl,proofUrl);
-});
-test('ambiguous or broken current-page observation is not masked by a fallback',async()=>{
- for(const code of ['AMBIGUOUS_PAGE','READBACK_FAILED']){
-  const f=fixture({[roleUrl]:Error(code),[proofUrl]:observed(proofUrl,'expected-person')});await assert.rejects(f.browser.observe(company(),roleUrl),error=>error.message===code);assert.deepEqual(f.reads,[roleUrl]);
- }
-});
-test('a same-origin request cannot accept an account observed after a cross-origin navigation',async()=>{
- for(const fallback of [false,true]){
-  const f=fixture({[roleUrl]:fallback?observed(roleUrl,null):observed('https://other.test/form','expected-person'),[proofUrl]:observed('https://other.test/account','expected-person')});
-  await assert.rejects(f.browser.observe(company(),roleUrl),/LOGIN_PAGE_SCOPE_MISMATCH/);
- }
-});
-test('bound-page snapshots use the current actual account without looking up a proof tab',async()=>{
- const broker={existingPage:async()=>{throw Error('PROOF_PAGE_MUST_NOT_BE_READ');}};
- for(const account of ['expected-person','wrong-person']){
-  const r=await observeUserOperatedSession(broker,company(),roleUrl,{currentSnapshot:{pageUrl:roleUrl,account,loginFormPresent:false,readAt:'current'}});
-  assert.equal(r.account,account);assert.equal(r.identityPageUrl,roleUrl);assert.equal(r.form,false);
- }
- const blocked=await observeUserOperatedSession(broker,company(),roleUrl,{currentSnapshot:{pageUrl:roleUrl,account:'expected-person',loginFormPresent:true}});assert.equal(blocked.form,true);
-});
-test('a missing account in a bound snapshot uses only the declared existing same-origin proof',async()=>{
- const f=fixture({[proofUrl]:observed(proofUrl,'expected-person')});
- const r=await observeUserOperatedSession(f.browser.broker,company(),roleUrl,{currentSnapshot:{pageUrl:roleUrl,account:null,loginFormPresent:false}});assert.deepEqual(f.reads,[proofUrl]);assert.equal(r.account,'expected-person');
- const absent=fixture({});await assert.rejects(observeUserOperatedSession(absent.browser.broker,company(),roleUrl,{currentSnapshot:{pageUrl:roleUrl,account:null}}),/ACCOUNT_PROOF_PAGE_NOT_OPEN/);
-});
-test('the registered identity tab is read by its ID; a second tab at the same address does not make it ambiguous',async()=>{
- const reads=[],broker={existingPage:async(url,o={})=>{reads.push([url,o.pageId||null]);if(!o.pageId)throw Error('AMBIGUOUS_PAGE');return {observe:async()=>observed(proofUrl,'expected-person')};}};
- const r=await observeUserOperatedSession(broker,company(),roleUrl,{currentSnapshot:{pageUrl:roleUrl,account:null,readAt:'t'},identityPageId:'chrome:identity'});
- assert.equal(r.account,'expected-person');assert.deepEqual(reads,[[proofUrl,'chrome:identity']]);
+test('no account proof page is opened when login evidence is missing',async()=>{
+ const r=await observeUserOperatedSession(forbidden,c,url,{currentSnapshot:{pageUrl:url}});assert.equal(r.sessionStatus,'unknown');
 });

@@ -37,3 +37,25 @@ export async function registerAgent({workspace,host,instance,mode='independent',
   finally{await release();}
  }
 }
+
+// The deployment supplies identity. Conversation, model and browser sessions
+// never participate in the Agent registry key.
+export async function runtimeAgent(env=process.env){
+ const workspace=env.RECRUITING_WORKSPACE_ROOT,host=env.RECRUITING_HOST_ID,configuredId=env.RECRUITING_AGENT_ID;
+ if(!workspace||!path.isAbsolute(workspace)||!identifier.test(host||''))return null;
+ try{
+  let agent;
+  if(configuredId){
+   const registry=JSON.parse(await readFile(path.join(workspace,'.runtime','agents.json'),'utf8'));
+   agent=registry.agents?.[configuredId];
+   if(agent?.id!==configuredId||agent.host!==host)return null;
+  }else{
+   agent=await registerAgent({workspace,host,instance:'default'});
+  }
+  const {id,instance,mode,group}=agent;
+  return {id,instance,mode,group,executionKey:group?'group:'+group:'agent:'+id};
+ }catch{
+  // Identity attribution is independent of MCP availability and site login.
+  return null;
+ }
+}

@@ -7,6 +7,7 @@ import {matchesRole} from './role-identity.mjs';
 import {validateControlContract} from './value-contract.mjs';
 import {verifyForm} from './verifier.mjs';
 import {safeControlErrorDetails} from './control-error-details.mjs';
+import {choiceActionWithReadback} from './choice-actions.mjs';
 import {saveSearchableCommit,searchableWitnessScope} from './searchable-commit.mjs';
 
 const code=error=>/^[A-Z_]+(?::[a-z0-9_-]+)?$/.test(error?.message)?error.message:'SELECTED_FIELD_OPERATION_FAILED';
@@ -69,7 +70,7 @@ export async function prepareSelectedFields({store,page,task,template,prepared,f
     for(const [index,action] of f.actions.entries()){
      await inventory();await observe([f]);
      const attempt={fieldId:f.id,index,method:action.method,status:'attempt_started'};run.actions.push(attempt);await checkpoint();
-     const result=await page.act(f.control.type==='searchable_text'?{...action,witnessScope:searchableWitnessScope(task,f)}:action,f.value,{});
+     const result=await page.act(f.control.type==='searchable_text'?{...action,witnessScope:searchableWitnessScope(task,f)}:choiceActionWithReadback(action,f.read?.selectedSelector),f.value,{});
      if(f.control.type==='searchable_text')await saveSearchableCommit(store,task,f,result);
      attempt.status='action_returned';await checkpoint();
     }

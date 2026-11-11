@@ -3,7 +3,6 @@ import {readRoleIdentity} from './role-identity.mjs';
 import {sharedRecordKey} from './shared-record.mjs';
 import {antDOM} from './ant-reference.mjs';
 import {observeDOM} from './observation.mjs';
-import {inventoryFeishuDOM} from './feishu-inventory.mjs';
 import {remapFeishuSpecDOM,canonicalizeInventory} from './feishu-selectors.mjs';
 import {stat} from 'node:fs/promises';
 
@@ -12,6 +11,7 @@ import {controlDOM as inventoryDOM,normalizePhoenixReference} from './control-do
 const currentReader=async(file,name)=>{const url=new URL(file,import.meta.url),info=await stat(url);url.searchParams.set('revision',String(info.mtimeMs));return (await import(url.href))[name];};
 const currentAnt=()=>currentReader('./ant-reference.mjs','antDOM');
 const currentNative=()=>currentReader('./control-dom.mjs','controlDOM');
+const currentFeishu=()=>currentReader('./feishu-inventory.mjs','inventoryFeishuDOM');
 export function uncoveredControlsDOM({coveredSelectors,controls,primary=[]}){
  const covered=new Map(coveredSelectors.flatMap((s,i)=>s?[...document.querySelectorAll(s)].map(n=>[n,i]):[])),result=[...primary];
  for(const c of controls){let nodes;try{nodes=[...document.querySelectorAll(c.observationSelector||c.selector)];}catch{nodes=[];}
@@ -64,9 +64,22 @@ export class PageAdapter {
     const controls=await this.page.evaluate(await currentNative());
     return this.page.evaluate(uncoveredControlsDOM,{coveredSelectors,controls,primary});
    }
-   const raw=await this.page.evaluate(plan?.provider==='feishu'?inventoryFeishuDOM:await currentNative());return plan?.provider==='feishu'&&!plan.rawKeys?canonicalizeInventory(raw).fields:raw;
+   const raw=await this.page.evaluate(plan?.provider==='feishu'?await currentFeishu():await currentNative());return plan?.provider==='feishu'&&!plan.rawKeys?canonicalizeInventory(raw).fields:raw;
   }
-  async observe(plan){plan=await this.resolveSpec(plan,{readback:true,keepUploadReferences:true});const result=await this.page.evaluate(await currentNative(),plan.provider==='feishu'&&!plan.selectorsResolved?await this.page.evaluate(remapFeishuSpecDOM,plan):plan);if(plan.roleIdentity)result.roleIdentity=readRoleIdentity(plan.roleIdentity,result.pageUrl);return result;}
+  async observe(plan){
+   // Only observation selectors participate in readback. Write selectors can
+   // legitimately be absent until materials or a preceding action render them.
+   const {fields,groups,after,...scope}=plan;
+   const observation={
+    ...scope,
+    ...(fields?{fields:fields.map(({id,kind,read,userOnly})=>({id,kind,read,userOnly}))}:{}),
+    ...(groups?{groups:groups.map(({id,title,selector,containsSelector})=>({id,title,selector,containsSelector}))}:{})
+   };
+   const resolved=await this.resolveSpec(observation,{readback:true,keepUploadReferences:true});
+   const result=await this.page.evaluate(await currentNative(),resolved.provider==='feishu'&&!resolved.selectorsResolved?await this.page.evaluate(remapFeishuSpecDOM,resolved):resolved);
+   if(resolved.roleIdentity)result.roleIdentity=readRoleIdentity(resolved.roleIdentity,result.pageUrl);
+   return result;
+  }
   async repeatDiscovery(titles){
     const args={operation:'repeatDiscovery',titles};
     const native=await this.page.evaluate(await currentNative(),args);
@@ -81,14 +94,21 @@ export class PageAdapter {
   async ensureGroups(groups){
     if(groups?.length)await this.assertSingleEditor();
     for(const group of groups||[]){
-      const groupSelector=()=>this.resolveSelector(group.selector);
+      const groupSelector=async()=>{const selector=await this.resolveSelector(group.selector);return group.visibleOnly?`:is(${selector}):visible`:selector;};
       let count=await this.page.locator(await groupSelector()).count();
       if(count>group.count)throw Error('EXCESS_REPEAT_ENTRIES_REQUIRE_REVIEW');
       while(count<group.count){
         const addLabel=group.addLabel||'添加';
-        const add=this.page.locator(await this.resolveSelector(group.addSelector)).filter({hasText:new RegExp('^'+addLabel.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$')});
+        let addSelector=await this.resolveSelector(group.addSelector);
+        if(group.ownerSelector){
+         const owner=this.page.locator(group.ownerSelector).filter({visible:true});
+         if(await owner.count()!==1||(await owner.innerText()).trim()!==group.ownerTitle)throw Error('REPEAT_ADD_CONTROL_CHANGED');
+         addSelector=`:is(${group.scopeSelector}) :is(${addSelector})`;
+        }
+        const add=this.page.locator(addSelector).filter({hasText:new RegExp('^'+addLabel.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$')});
         if(await add.count()!==1||(await add.innerText()).trim()!==addLabel)throw Error('REPEAT_ADD_CONTROL_CHANGED');
         await add.click({timeout:10000});
+        if(group.visibleOnly)await this.page.locator(await groupSelector()).first().waitFor({state:'visible',timeout:3000});
         const next=await this.page.locator(await groupSelector()).count();
         if(next!==count+1)throw Error('REPEAT_ADD_DID_NOT_CREATE_ONE_ENTRY');
         count=next;

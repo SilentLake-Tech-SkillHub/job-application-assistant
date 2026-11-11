@@ -1,5 +1,17 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {hash} from '../shared/engine.mjs';import {completeFormTemplate,draftTemplate} from '../shared/template-validation.mjs';
 const fixture=()=>{const f={id:'name',source:'name',label:'Name',kind:'text',required:true,inventorySelectors:['#name'],inventoryLabel:'Name',inventoryType:'text',control:{type:'text',valueType:'string',readbackType:'string'},read:{selector:'#name',kind:'value'},actions:[{method:'fill',selector:'#name'}]},t={id:'form',version:1,coverage:{allConditionalBranchesVerified:false},pages:[{fields:[f]}]};return {t,p:{id:'probe',operation:'internal_condition_probe',companyId:'a',templateHash:hash(t),status:'verified',restoration:'verified',branches:[{source:'__baseline__',value:null,selected:true,conditionFieldsMatched:true,roleMatched:true,status:'verified',newQuestions:0,inventory:[{selector:'#name',label:'Name',type:'text',required:true}]}]},options:{companyId:'a',profileMapped:true,channel:'iab'}};};
+test('an unrendered repeated record uses an observed matching column and captured add contract, never an absent ordinary field',()=>{
+ const x=fixture(),base=x.t.pages[0].fields[0];
+ const field=(index,key)=>{const selector='.atsx-form-item[data-cy="project['+index+'].name"]';return {...base,id:key,source:'projects.'+key+'.name',inventorySelectors:[selector],read:{...base.read,selector},actions:[{method:'fill',selector}]};};
+ x.t.pages[0]={fields:[field(0,'one'),field(1,'two')],groups:[{id:'project',sectionKey:'project',selector:'.records',addSelector:'#add'}]};
+ x.p.branches[0].inventory=[{selector:x.t.pages[0].fields[0].inventorySelectors[0],label:'Name',type:'text',required:true}];x.p.templateHash=hash(x.t);
+ assert.deepEqual(completeFormTemplate(x.t,x.p,x.options).coverage.proof.repeatPrototypeFieldIds,['two']);
+ const saved=structuredClone(x);
+ delete x.t.pages[0].groups;x.p.templateHash=hash(x.t);assert.throws(()=>completeFormTemplate(x.t,x.p,x.options),/FIELD_NOT_OBSERVED/);
+ Object.assign(x,structuredClone(saved));x.t.pages[0].fields[1].source='projects.two.description';x.p.templateHash=hash(x.t);assert.throws(()=>completeFormTemplate(x.t,x.p,x.options),/FIELD_NOT_OBSERVED/);
+ Object.assign(x,structuredClone(saved));x.t.pages[0].fields[1].read.selector='#unrelated';x.p.templateHash=hash(x.t);assert.throws(()=>completeFormTemplate(x.t,x.p,x.options),/FIELD_NOT_OBSERVED/);
+ Object.assign(x,structuredClone(saved));x.t.pages[0].fields.push({...base,id:'ordinary'});x.p.templateHash=hash(x.t);assert.throws(()=>completeFormTemplate(x.t,x.p,x.options),/FIELD_NOT_OBSERVED/);
+});
 test('only matching actual restored probe can seal a mapped form; values remain unresolved separately',()=>{const {t,p,options}=fixture(),s=completeFormTemplate(t,p,options);assert.equal(s.coverage.allConditionalBranchesVerified,true);assert.equal(s.coverage.proof.runId,'probe');assert.equal(s.validation.livePassed,false);});
 test('changed asset, failed restoration, unknown control and unmapped profile cannot be sealed',()=>{for(const mutate of [x=>x.p.templateHash='wrong',x=>x.p.restoration='failed',x=>x.p.branches[0].inventory.push({selector:'#unknown'}),x=>x.options.profileMapped=false]){const x=fixture();mutate(x);assert.throws(()=>completeFormTemplate(x.t,x.p,x.options),/PROOF_REQUIRED|UNMAPPED_CONTROL|MAPPING_INCOMPLETE/);}});
 

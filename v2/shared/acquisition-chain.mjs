@@ -6,6 +6,7 @@ import {assertRecordSourceBindings} from './record-source-binding.mjs';
 import {canonicalControlSpec} from './control-registry.mjs';
 import {scriptCoverage} from './page-structure.mjs';
 import {bindStructureControls} from './rea-structure.mjs';
+import {primaryCandidates,retainReviewedPrimary} from './form-visual-inventory.mjs';
 
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export const acquisitionReceiptId=formId=>formAssetKeys(formId).receipt;
@@ -26,7 +27,7 @@ export function assertAcquiredStructure(structure,capture,companyId){
  if(structureHash!==hash(body))throw Error('ACQUISITION_NATIVE_STRUCTURE_CHANGED');
  const complete=rea.completeness;
  if(!complete||['truncated_sections','unavailable_sections'].some(key=>(complete[key]||[]).some(section=>/dom|accessibility/.test(typeof section==='string'?section:section.section))))throw Error('ACQUISITION_STRUCTURE_INCOMPLETE');
- if(!capture.controls?.length||!Array.isArray(structure.controls)||structure.controls.length!==capture.controls.length)throw Error('ACQUISITION_CONTROL_INVENTORY_INCOMPLETE');
+ if((!capture.controls?.length&&!structure.primaryCandidates?.some(row=>row.kind==='expander'))||!Array.isArray(structure.controls)||structure.controls.length!==capture.controls.length)throw Error('ACQUISITION_CONTROL_INVENTORY_INCOMPLETE');
  if(hash(scriptCoverage(raw))!==hash(structure.scriptCoverage)||hash(raw.normalized_result?.scripts||null)!==hash(structure.scriptInventory||null))throw Error('ACQUISITION_SCRIPT_EVIDENCE_CHANGED');
  return true;
 }
@@ -57,9 +58,11 @@ export async function assertCapturedAcquisition(store,{companyId,captureId,pageU
 
 // Replace the current observation for this fixed form. Any previous template
 // must match this current record's hashes; superseded files are never read.
-export async function recordReaInspection(store,{companyId,pageUrl,structure,capture,rawEvidence,nativeStructure=null}){
+export async function recordReaInspection(store,{companyId,pageUrl,structure,capture,rawEvidence,nativeStructure=null,visual}){
  const joined=bindStructureControls(structure,capture),id=acquisitionStructureId(capture.formId);
- const asset={...joined,formId:capture.formId,controlCaptureHash:captureContentHash(capture),structure,rawEvidence,nativeStructure,scriptInventory:rawEvidence.normalized_result?.scripts||null,scriptCoverage:scriptCoverage(rawEvidence),operation:'rea_form_structure',observedAt:structure.observedAt};
+ let asset={...joined,formId:capture.formId,controlCaptureHash:captureContentHash(capture),structure,rawEvidence,nativeStructure,scriptInventory:rawEvidence.normalized_result?.scripts||null,scriptCoverage:scriptCoverage(rawEvidence),operation:'rea_form_structure',observedAt:structure.observedAt};
+ if(visual)Object.assign(asset,{visualPage:visual.page,visualInventoryHash:visual.inventoryHash,visualScreenshotId:visual.screenshotId,primaryCandidates:primaryCandidates({...capture,controls:joined.controls})});
+ if(visual){const keys=formAssetKeys(companyId),optional=async key=>{try{return await store.get('runs',key);}catch(error){if(error.code!=='ENOENT')throw error;return null;}};const [previous,coverage,table,draft]=await Promise.all([optional(id),optional(keys.coverage),optional(keys.visual),optional(keys.draft)]);asset=retainReviewedPrimary(asset,previous,table||{current:visual},coverage,{template:draft?.template});}
  assertAcquiredStructure(asset,capture,companyId);
  asset.contentHash=hash(asset);await store.put('runs',id,asset);
  return {id,asset,joined};

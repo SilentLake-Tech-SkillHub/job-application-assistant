@@ -14,7 +14,7 @@ export async function prepareRoleMaterials({args,boundRole,resolveContext,engine
  const {t,state,template}=await boundRole(args),context=await resolveContext(t,state);
  const task={companyId:t.companyId,roleId:t.roleId,pageUrl:state.returnUrl,templateHash:hash(template),...resolveMaterialValues(context)};
  if((await engine.formRoute(task)).route!=='reuse')throw Error('FORM_ASSET_NOT_SEALED');
- const pages=template.pages.filter(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix));if(pages.length!==1)throw Error('AMBIGUOUS_VERIFICATION_PAGE');
+ const pages=(await engine.routeTemplate(template,task)).pages.filter(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix));if(pages.length!==1)throw Error('AMBIGUOUS_VERIFICATION_PAGE');
  const pagePlan=pages[0],sources=context.materials.items.filter(m=>m.status==='available').map(m=>MATERIAL_SOURCES[m.key]);
  const fields=pagePlan.fields.filter(f=>sources.includes(f.source));
  if(!fields.length||sources.some(source=>!fields.some(f=>f.source===source)))throw Error('ROLE_MATERIAL_DESTINATION_REQUIRED');

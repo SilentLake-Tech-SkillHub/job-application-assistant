@@ -1,8 +1,8 @@
 // Report-only checks over a form template (no gate): which kind of experience
 // sits in which section, judged by the user's own placement rules, and which
 // record members do not come from the record itself (they need a declaration).
-const FAMILY=/^(education|employment|internship|projects|workProjects|awards|leadership|entrepreneurship)\.[^.]+\./;
-const CATEGORY=[['教育',/教育|学历|education/i],['实习',/实习|intern/i],['工作',/工作经历|工作|职业|work|career|employ/i],['创业',/创业|entrepreneur/i],['学生干部',/学生干部|社团|leadership/i],['校园',/校园|campus/i],['项目',/项目|project/i],['荣誉',/荣誉|获奖|奖项|award|honou?r/i]];
+const FAMILY=/^(education|employment|internship|projects|workProjects|awards|leadership|entrepreneurship|portfolio|languages)\.[^.]+\./;
+const CATEGORY=[['作品',/作品|^works(?:_list)?$|portfolio/i],['语言',/语言|language/i],['教育',/教育|学历|education/i],['实习',/实习|intern/i],['工作',/工作经历|工作|职业|work|career|employ/i],['创业',/创业|entrepreneur/i],['学生干部',/学生干部|社团|leadership/i],['校园',/校园|campus/i],['项目',/项目|project/i],['荣誉',/荣誉|获奖|奖项|award|honou?r/i]];
 export const sectionCategory=title=>CATEGORY.find(([,re])=>re.test(String(title||'')))?.[0]||null;
 const scopeOf=s=>{let m=/^(?:phoenixq|antq):(.*)$/.exec(s||'');if(m){try{const q=JSON.parse(m[1]);if(q.section&&Number.isInteger(q.occurrence))return [q.section,q.occurrence];}catch{}}
  m=/#formily-item-([A-Za-z0-9_]+)_list\s+\[class\^="apply-form-array-card__"\]:nth-child\((\d+)\)/.exec(s||'');if(m)return [m[1],Number(m[2])];
@@ -39,4 +39,25 @@ export function nonRecordMembers(template){
   for(const f of g.fields)if(!FAMILY.test(f.source||''))out.push({section:g.section,index:g.index,fieldId:f.id,label:f.inventoryLabel||f.label,source:f.source});
  }
  return out;
+}
+
+// Construction must cover the user's records as well as the controls currently
+// present on the page. Only existing, expandable sections require full lists.
+export function recordContentFindings(template,profile,rules){
+ const records=recordGroups(template),groups=template.pages.flatMap(page=>page.groups||[]),categoryOf=group=>sectionCategory(group.ownerTitle||group.title||group.sectionKey||group.id);
+ const present=new Set([...template.pages.flatMap(page=>(page.sections||[]).map(section=>sectionCategory(section.title||section))),...groups.map(categoryOf)].filter(Boolean));
+ const expandable=new Set(groups.filter(group=>group.addSelector).map(categoryOf).filter(Boolean)),findings=[];
+ const parents=template.evidence?.recordParents||{},owners=records.map(group=>({group,owners:[...new Set(group.fields.map(field=>FAMILY.exec(field.source||'')?.[0].replace(/\.$/,'' )).filter(Boolean))]})).map(item=>({...item,owners:item.owners.filter(owner=>!item.owners.some(child=>parents[child]===owner))}));
+ for(const [family,ids]of Object.entries(profile.entities||{})){
+  const rule=rules.find(rule=>rule['经历']===family)||({portfolio:{'栏目':['作品']},languages:{'栏目':['语言']}}[family]);if(!rule||!Array.isArray(ids))continue;
+  const primary=rule['栏目']||[],allowed=primary.some(category=>present.has(category))?primary:rule['没有这些栏目时']||primary;
+  const targets=allowed.filter(category=>expandable.has(category));if(!targets.length)continue;
+  const selected=family==='projects'?profile.applicationSelections?.projects?.projectIds:null;
+  for(const id of ids.filter(id=>!selected||selected.includes(id))){
+   const source=family+'.'+id,found=owners.filter(item=>item.owners.includes(source)&&targets.includes(sectionCategory(item.group.section)));
+   if(!found.length)findings.push({record:source,family,sections:targets,reason:'RECORD_CONTENT_MAPPING_REQUIRED'});
+   else if(found.length>1)findings.push({record:source,family,sections:targets,reason:'RECORD_CONTENT_DUPLICATED'});
+  }
+ }
+ return findings;
 }

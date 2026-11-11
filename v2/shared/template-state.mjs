@@ -17,6 +17,7 @@ export async function recordRealFillFailure(store,template,companyId,fields){
  template.validation={...template.validation,realFillFailure:{fields:[...new Set(fields)],at:new Date().toISOString()}};
  await store.put('templates',template.id,template);
 }
-export async function assertReaRequired({store,template}){
+export async function assertReaRequired({template,visual}){
+ if(visual?.inventoryHash)return;
  if(template){const state=await templateState(template);if(state.reason!=='never_built')throw Object.assign(Error('REA_NOT_REQUIRED'),{details:state});}
 }

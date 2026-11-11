@@ -5,6 +5,7 @@ const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const active=new Set(['dispatched','running','waiting_for_user']);
 // 批次运行记录只存任务引用（taskId、岗位编码）；链接、标题、材料一律经队列现读交接宽表，不复制保存。
 // MCP acquires companies and splits channels. Dispatch is never browser success.
+const remainingTasks=(company,live)=>company.tasks.map(task=>live.get(task.taskId)).filter(task=>task&&!task.protectedReason);
 export class CompanyBatch{
  constructor({store,queues,catalog,browser,loginRecords=null,clock=()=>Date.now(),leaseRoot=defaultLeaseRoot()}){Object.assign(this,{store,queues,catalog,browser,loginRecords,clock,leaseRoot});}
  async assertCapabilities(channels){const report=await this.browser?.executionCapabilities?.();const missing=channels.filter(ch=>!report?.channels?.[ch]?.available);if(missing.length){const error=Error(missing.includes('iab')?'IAB_HOST_BRIDGE_REQUIRED':'CHROME_EXECUTOR_REQUIRED');error.details={phase:'browser_initialization',requestedChannels:channels,missingChannels:missing,browserExecuted:false};throw error;}return report;}
@@ -106,7 +107,15 @@ export class CompanyBatch{
   const live=await this.queues.hydratedTasks(b.queueId);
   // 某家公司的交接内容在导入后变了：这一家先停下，等用户确认后 refresh 再继续；别家照常。
   for(const c of b.companies)if(c.status==='pending'&&c.tasks.some(t=>live.get(t.taskId)?.inputChanged))Object.assign(c,{status:'blocked',reason:'confirmed_input_changed'});
-  const owners=await this.owners(),assignments=[],counts=Object.fromEntries(b.channels.map(ch=>[ch,b.companies.filter(c=>c.channel===ch&&active.has(c.status)).length]));
+  const owners=await this.owners(),assignments=[];
+  for(const c of b.companies){
+   if(c.tasks.length&&remainingTasks(c,live).length===0){
+    c.status='protected';
+    c.reason='all_roles_protected';
+    if(owners[c.loginScope]?.batchId===b.id&&!b.companies.some(other=>other.loginScope===c.loginScope&&remainingTasks(other,live).length&&active.has(other.status)))delete owners[c.loginScope];
+   }
+  }
+  const counts=Object.fromEntries(b.channels.map(ch=>[ch,b.companies.filter(c=>c.channel===ch&&active.has(c.status)).length]));
   const affinity=new Map(b.companies.filter(c=>c.channel).map(c=>[c.loginScope,c.channel]));
   for(const c of b.companies.filter(c=>c.status==='pending')){
    if(owners[c.loginScope]&&owners[c.loginScope].batchId!==b.id)continue;
@@ -115,10 +124,10 @@ export class CompanyBatch{
    const channel=pinned||b.channels.filter(ch=>allowed.includes(ch)&&counts[ch]<b.companiesPerChannel).sort((a,z)=>counts[a]-counts[z])[0];if(!channel||counts[channel]>=b.companiesPerChannel)continue;
    Object.assign(c,{channel,status:'dispatched',leaseToken:randomUUID(),leaseExpiresAt:new Date(now+30*60*1000).toISOString()});counts[channel]++;affinity.set(c.loginScope,channel);
    owners[c.loginScope]={batchId:b.id,channel};
-   assignments.push({companyId:c.companyId,channel,loginScope:c.loginScope,leaseToken:c.leaseToken,leaseExpiresAt:c.leaseExpiresAt,tasks:c.tasks.map(t=>live.get(t.taskId)),queueId:b.queueId,queueHash:b.queueHash,firstAction:'open_confirmed_role_url',loginOncePerScope:true});
+   assignments.push({companyId:c.companyId,channel,loginScope:c.loginScope,leaseToken:c.leaseToken,leaseExpiresAt:c.leaseExpiresAt,tasks:remainingTasks(c,live),queueId:b.queueId,queueHash:b.queueHash,firstAction:'open_confirmed_role_url',loginOncePerScope:true});
   }
   let bindings;try{bindings=await this.store.get('runs','browser-channel-bindings');}catch(e){if(e.code!=='ENOENT')throw e;bindings={};}
-  for(const a of b.companies.filter(c=>c.channel))for(const ref of a.tasks){const t=live.get(ref.taskId);if(!t.inputChanged)bindings[new URL(t.url).origin]={channel:a.channel,batchId:b.id,companyId:a.companyId};}
+  for(const a of b.companies.filter(c=>c.channel))for(const ref of a.tasks){const t=live.get(ref.taskId);if(t&&!t.inputChanged&&!t.protectedReason)bindings[new URL(t.url).origin]={channel:a.channel,batchId:b.id,companyId:a.companyId};}
   b.revision++;await this.store.put('runs','company-channel-owners',owners);await this.store.put('runs','browser-channel-bindings',bindings);await this.store.put('runs',b.id,b);return {batchId:b.id,revision:b.revision,assignments,activeCompanies:counts,pendingCompanies:b.companies.filter(c=>c.status==='pending').length,browserExecuted:false,submission:'forbidden'};
  });}
  async resume(args){return this.locked(args,async b=>{
@@ -135,7 +144,7 @@ export class CompanyBatch{
   if(args.status==='ready_for_user_review'){
    if(!Array.isArray(args.runIds)||!args.runIds.length)throw Error('APPLICATION_RUN_EVIDENCE_REQUIRED');const runs=await Promise.all(args.runIds.map(id=>this.store.get('runs',id)));
    const live=await this.queues.hydratedTasks(b.queueId);
-   for(const ref of c.tasks){const task=live.get(ref.taskId);if(task.inputChanged)throw Error('ROLE_INPUT_CHANGED');let state;try{state=await this.queues.read(task.taskId);}catch{}
+   for(const task of remainingTasks(c,live)){if(task.inputChanged)throw Error('ROLE_INPUT_CHANGED');let state;try{state=await this.queues.read(task.taskId);}catch{}
     if(state?.status!=='ready_for_user_review'||!state.verifyRunId)throw Error('FULL_ROLE_VERIFICATION_REQUIRED');
     const expected=state.applicationUrl||state.returnUrl||task.applyUrl||task.url,verify=await this.store.get('runs',state.verifyRunId);
     if(verify.operation!=='verify_current'||verify.companyId!==c.companyId||verify.pageUrl!==expected||verify.status!=='verified'||!verify.checks?.length||!verify.checks.every(check=>['match','confirmed_omission'].includes(check.status))||!runs.some(run=>run.id===state.verifyRunId||run.id===state.fillRunId))throw Error('FULL_ROLE_VERIFICATION_REQUIRED');
@@ -154,5 +163,20 @@ export class CompanyBatch{
   }
   if(args.status==='blocked'&&!args.reason?.trim())throw Error('BLOCK_REASON_REQUIRED');Object.assign(c,{status:args.status,reason:args.reason||null,runIds:args.runIds||[],updatedAt:new Date(this.clock()).toISOString(),leaseExpiresAt:new Date(this.clock()+30*60*1000).toISOString()});b.revision++;await this.store.put('runs',b.id,b);if(c.status==='ready_for_user_review'&&!b.companies.some(x=>x.loginScope===c.loginScope&&active.has(x.status))){const owners=await this.owners();delete owners[c.loginScope];await this.store.put('runs','company-channel-owners',owners);}const remainingAgentWork=b.companies.filter(company=>['pending','dispatched','running'].includes(company.status)).length;return {companyId:c.companyId,channel:c.channel,status:c.status,remainingAgentWork,batchPreparationComplete:b.companies.every(company=>company.status==='ready_for_user_review'),continuation:remainingAgentWork?{state:'prepare',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['company_batch_take','workflow_advance']}:c.status==='blocked'?{state:'technical_block',owner:'supervisor',requiresUser:false,shouldContinue:false,handoffVerified:true,nextTools:[]}:{state:c.status==='waiting_for_user'?'user_input':'review',owner:'user',requiresUser:true,shouldContinue:false,nextTools:[]},submission:'not_performed'};
  });}
- async status(args){const b=await this.get(args);return {batchId:b.id,revision:b.revision,companiesPerChannel:b.companiesPerChannel,channels:b.channels,channelSelection:b.channelSelection,companies:b.companies.map(({leaseToken,tasks,...c})=>({...c,roleCount:tasks.length})),submission:'not_performed'};}
+ async status(args){
+  const b=await this.get(args),live=await this.queues.hydratedTasks(b.queueId);
+  const companies=b.companies.map(({leaseToken,tasks,...company})=>{
+   const protectedRoles=tasks.flatMap(task=>{
+    const reason=live.get(task.taskId)?.protectedReason;
+    return reason?[{roleId:task.roleId,reason}]:[];
+   });
+   const roleCount=remainingTasks({tasks},live).length;
+   if(tasks.length&&protectedRoles.length===tasks.length&&company.status!=='closed_preparation'){
+    company.status='protected';
+    company.reason='all_roles_protected';
+   }
+   return {...company,roleCount,protectedRoles};
+  });
+  return {batchId:b.id,revision:b.revision,companiesPerChannel:b.companiesPerChannel,channels:b.channels,channelSelection:b.channelSelection,companies,submission:'not_performed'};
+ }
 }

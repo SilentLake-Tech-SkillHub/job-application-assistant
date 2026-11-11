@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';
-import {registerWorkflowTool} from '../shared/workflow-contract.mjs';import {failureReasons,recordOutcome} from '../shared/stop-loss.mjs';
+import {registerWorkflowTool} from './fixtures/mcp-registration.mjs';import {failureReasons,recordOutcome} from '../shared/stop-loss.mjs';
 const setup=async(tool,responder,extra={})=>{const dir=await mkdtemp(path.join(os.tmpdir(),'stop-loss-'));const env={RECRUITING_PRIVATE_DIR:dir,RECRUITING_WORKER_SOURCE_SHA256:'v1',...extra};let handler,calls=0;
  registerWorkflowTool({registerTool:(n,d,h)=>{handler=h;}},tool,{},async a=>{calls++;return {content:[{type:'text',text:JSON.stringify(responder(a,calls))}]};},env);
  return {env,call:async a=>{const r=await handler(a);return {isError:r.isError===true,data:JSON.parse(r.content[0].text)};},calls:()=>calls};};

@@ -17,7 +17,10 @@
     "login_run_status",
     "login_verification_inspect",
     "inspect_choice",
-    "role_entry_inspect"
+    "role_entry_inspect",
+    "form_inspect_repeats",
+    "form_cycle_status",
+    "component_runtime"
   ],
   "stages": {
     "profile_select_projects": [
@@ -41,13 +44,6 @@
         "capture_rea_structure",
         "form_search_choices",
         "form_build_template"
-      ]
-    ],
-    "login_open_identity": [
-      "login",
-      [
-        "login_inspect",
-        "role_resume"
       ]
     ],
     "role_confirm_material_no_destination": [
@@ -146,9 +142,10 @@
     "material_import_run": [
       "construct",
       [
-        "capture_controls"
+        "material_import_inspect"
       ]
     ],
+    "material_import_inspect": ["construct", ["capture_controls"]],
     "company_batch_create": [
       "route",
       [
@@ -217,7 +214,7 @@
     "probe_conditions": [
       "construct",
       [
-        "template_finalize"
+        "form_test_interactions"
       ]
     ],
     "capture_form_definition": [
@@ -226,16 +223,29 @@
         "capture_rea_structure"
       ]
     ],
+    "form_capture_visual": [
+      "construct",
+      [
+        "form_capture_visual",
+        "capture_rea_structure"
+      ]
+    ],
+    "form_expand_sections": [
+      "construct",
+      [
+        "form_review_completeness"
+      ]
+    ],
     "capture_controls": [
       "construct",
       [
-        "form_mapping_candidates"
+        "form_review_completeness"
       ]
     ],
     "capture_rea_structure": [
       "construct",
       [
-        "form_mapping_candidates"
+        "form_review_completeness"
       ]
     ],
     "form_mapping_candidates": [
@@ -265,7 +275,7 @@
     "template_register": [
       "construct",
       [
-        "probe_conditions"
+        "form_test_interactions"
       ]
     ],
     "prepare_plan": [
@@ -434,6 +444,31 @@
       [
         "form_route",
         "prepare_plan"
+      ]
+    ],
+    "role_advance": [
+      "route",
+      [
+        "role_prepare"
+      ]
+    ],
+    "form_review_completeness": [
+      "construct",
+      [
+        "form_cycle_status"
+      ]
+    ],
+    "form_patch_controls": [
+      "construct",
+      [
+        "form_review_completeness"
+      ]
+    ],
+    "form_test_interactions": [
+      "construct",
+      [
+        "form_patch_controls",
+        "template_finalize"
       ]
     ]
   }

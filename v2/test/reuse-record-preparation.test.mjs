@@ -52,3 +52,27 @@ test('a half-filled form keeps its records and existing answers and only continu
 test('a repeat count not covered by the frozen field occurrences is not allowed to create records',async()=>{
  const f=fixture({count:3}),result=await f.run();assert.equal(result.errorCode,'REPEAT_GROUP_FIELD_COVERAGE_CHANGED');assert.deepEqual(f.writes,[]);
 });
+
+test('repeat discovery sees the form after its planned prerequisite makes the add control available',async()=>{
+ const url='https://fixture.test/form',events=[];
+ let activated=false;
+ const trigger={id:'trigger',label:'Import data',source:'trigger',kind:'text',prepareBeforeGroups:true,inventorySelectors:['#trigger'],read:{selector:'#trigger',kind:'value'},actions:[{method:'fill',selector:'#trigger'}]};
+ const records=[0,1].map(i=>({id:'record-'+i,label:'Organization',source:'org-'+i,kind:'text',inventorySelectors:[ref(i)],read:{selector:ref(i),kind:'value'}}));
+ const plan={pathPrefix:'/form',readySelector:'form',roleTitle:'Product',fields:[trigger,...records],groups:[{id:'experience',sectionKey:'Experience',selector:'.record',count:2}]};
+ const template={id:'sample',pages:[plan]};
+ const task={companyId:'sample',pageUrl:url,browserBinding:{sessionId:'fixture-session',pageId:'fixture-page',generation:'fixture-document'}};
+ const prepared={files:{},pages:[{fields:[{...trigger,disposition:'fill',value:'ready'}]}]};
+ const page={
+  assertLocation:async()=>{},wait:async()=>{},
+  inventory:async()=>[{selector:'#trigger',label:'Import data',type:'text'}],
+  observe:async()=>({source:'live_dom',pageUrl:url,roleTitle:'Product',fields:{trigger:{present:true,value:''}}}),
+  act:async()=>{events.push('prerequisite');activated=true;},
+  repeatDiscovery:async()=>{events.push('discovery');return activated?[{title:'Experience',sectionKey:'Experience',selector:'.record',addSelector:'#add'}]:[];}
+ };
+ const store={get:async()=>template,put:async()=>{}};
+ const engine=new Engine({store,companies:[],browser:{existingPage:async()=>page}});
+ const result=await engine.runCompany({task,company:{id:'sample',origin:'https://fixture.test'},template,prepared},{});
+ assert.deepEqual(events,['prerequisite','discovery']);
+ assert.equal(result.errorCode,'REPEAT_CONTRACT_LEARNED');
+ assert.equal(template.pages[0].groups[0].addSelector,'#add');
+});

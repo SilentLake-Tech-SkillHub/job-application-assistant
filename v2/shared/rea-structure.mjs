@@ -45,6 +45,16 @@ export function bindStructureControls(structure,capture){
  const {controls,bound}=correlateNativeControls(structure.accessibility,capture.controls);
  const excluded=correlateNativeControls(structure.accessibility,(capture.scopeExclusions||[]).filter(e=>e.kind==='navigation'&&e.reason==='outside_application_form'));
  const scopeExclusions=excluded.controls.flatMap(c=>c.reaBindings.map(binding=>({...binding,kind:'navigation',reason:'outside_application_form',containerSelector:c.containerSelector})));
- const uncorrelatedControls=structure.accessibility.filter(n=>['textbox','combobox','checkbox','radio'].includes(n.role)&&!bound.has(String(n.nodeId))&&!excluded.bound.has(String(n.nodeId)));
- return {companyId:capture.companyId,pageUrl:capture.pageUrl,pageId:structure.pageId,reaEvidenceId:structure.evidenceId,reaEvidenceHash:structure.evidenceHash,captureId:capture.captureId,controls,scopeExclusions,uncorrelatedControls,requiresLiveProbe:true};
+ const unbound=structure.accessibility.filter(n=>['textbox','combobox','checkbox','radio'].includes(n.role)&&!bound.has(String(n.nodeId))&&!excluded.bound.has(String(n.nodeId)));
+ const auxiliaryControls=[];
+ for(const node of unbound){
+  const dom=node.nativeDOM,bounds=dom?.bounds,parent=dom?.ancestors?.[0];
+  if(node.role!=='textbox'||dom?.documentIndex!==0||bounds?.[2]!==0||bounds?.[3]!==0||!parent?.class?.split(/\s+/u).includes('atsx-date-picker-period-month')||!dom.class?.split(/\s+/u).includes('atsx-date-picker-period-hidden-input'))continue;
+  const root=dom.path.slice(0,dom.path.lastIndexOf(' > '));
+  const owners=capture.controls.filter(control=>control.type==='month'&&['Begin','End'].includes(control.part)&&control.diagnosticSelector?.startsWith(root+' > '));
+  if(owners.length===2&&new Set(owners.map(control=>control.part)).size===2)auxiliaryControls.push({nodeId:node.nodeId,backendNodeId:node.backendNodeId,ownerSelectors:owners.map(control=>control.selector),reason:'zero_layout_date_range_auxiliary'});
+ }
+ const auxiliaryIds=new Set(auxiliaryControls.map(control=>control.nodeId));
+ const uncorrelatedControls=unbound.filter(node=>!auxiliaryIds.has(node.nodeId));
+ return {companyId:capture.companyId,pageUrl:capture.pageUrl,pageId:structure.pageId,reaEvidenceId:structure.evidenceId,reaEvidenceHash:structure.evidenceHash,captureId:capture.captureId,controls,scopeExclusions,...(auxiliaryControls.length?{auxiliaryControls}:{}),uncorrelatedControls,requiresLiveProbe:true};
 }

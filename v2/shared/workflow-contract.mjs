@@ -28,6 +28,8 @@ export function contractAuditSummary(audit){const {fields,ready,...summary}=audi
 // also consumed by the host Hook; nextTools alone is not a lifecycle contract.
 export function workflowEnvelope(data){
  if(!data||typeof data!=='object')return data;
+ const acquisitionNext={CURRENT_VISUAL_INVENTORY_REQUIRED:['form_capture_visual'],VISUAL_FORM_PAGE_CHANGED:['form_capture_visual'],CURRENT_VISUAL_REA_PAIR_REQUIRED:['capture_rea_structure','form_review_completeness'],PRIMARY_CONTROL_REVIEW_REQUIRED:['form_cycle_status'],FORM_SECTION_EXPANSION_REQUIRED:['form_expand_sections'],SECTION_EXPANSION_REOBSERVATION_REQUIRED:['form_capture_visual','capture_rea_structure'],CURRENT_CONSTRUCTION_DRAFT_REQUIRED:['form_build_template','template_register']}[data.error];
+ if(acquisitionNext)return {...data,continuation:{state:'construct',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:acquisitionNext,reason:data.error}};
  if(['PREPARED_PLAN_NOT_FOUND','PREPARED_PLAN_HASH_MISMATCH'].includes(data.error)){
   return {...data,completion:{complete:false,status:'company_plan_refresh_required',scope:'preparation'},continuation:{state:'prepare',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['prepare_plan'],reason:data.error}};
  }
@@ -35,7 +37,8 @@ export function workflowEnvelope(data){
  // Switch turned to 0 after a plan was frozen: recompile so those items become user-operated;
  // every other field keeps going. The switch itself is never re-asked.
  if(['PROFILE_FILL_AUTHORIZATION_REVOKED','RECRUITING_PRIVACY_AUTHORIZATION_REVOKED','BUSINESS_AUTHORIZATION_OFF'].includes(data.error))return {...data,completion:{complete:false,status:'business_authorization_off_recompile',scope:'preparation'},continuation:{state:'prepare',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['prepare_plan'],reason:data.error}};
- if(data.error==='ACCOUNT_PROOF_PAGE_NOT_OPEN')return {...data,completion:{complete:false,status:'identity_page_required',scope:'preparation'},continuation:{state:'login',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['login_open_identity','login_inspect','role_resume'],reason:data.error,retry:'only_after_identity_page_opened'}};
+ if(data.error==='LOGIN_SESSION_REQUIRED')return {...data,completion:{complete:false,status:'waiting_for_user',scope:'preparation'},continuation:{state:'user_input',owner:'user',requiresUser:true,shouldContinue:false,nextTools:['role_advance']}};
+ if(['NO_USABLE_BROWSER_CHANNEL','BROWSER_HOST_NOT_AVAILABLE','BROWSER_CAPABILITY_DETECTION_REQUIRED','BROWSER_EXECUTOR_IDENTITY_REQUIRED','EXISTING_BROWSER_SESSION_REQUIRED','BROWSER_NOT_CONNECTED','BROWSER_RESTORE_USER_AUTHORIZATION_REQUIRED'].includes(data.error))return {...data,completion:{complete:false,status:'environment_required',scope:'preparation'},continuation:{state:'environment',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['browser_status'],reason:data.error}};
  if(data.continuation){const review=data.continuation.state==='review'&&['verified','ready_for_user_review'].includes(data.status);return {...data,completion:data.completion||{complete:review,status:review?'ready_for_review':data.continuation.requiresUser?'waiting_for_user':'in_progress',scope:'preparation'}};}
  let nextTools,state='construct';
  if(data.error)nextTools=['form_template_audit','workflow_next'];
@@ -52,13 +55,13 @@ export function workflowEnvelope(data){
  }
  else if(data.readyToRegister!==undefined)nextTools=data.readyToRegister?['template_register']:data.nextTools||['form_mapping_candidates','capture_choice_options','form_build_template'];
  else if(data.choicesId)nextTools=data.nextTools||['form_build_template'];
- else if(data.captureId)nextTools=data.nextTools||['form_mapping_candidates','capture_choice_options','form_build_template'];
- else if(data.status==='captured_not_live_verified')nextTools=['probe_conditions','template_finalize'];
- else if(data.status==='asset_sealed_require_profile_preflight'){nextTools=['prepare_plan'];state='prepare';}
+ else if(data.captureId||Array.isArray(data.nextTools))nextTools=data.nextTools||['form_mapping_candidates','capture_choice_options','form_build_template'];
+ else if(data.status==='captured_not_live_verified')nextTools=['form_test_interactions'];
+ else if(['company_template_ready','asset_sealed_require_profile_preflight'].includes(data.status)){nextTools=['prepare_plan'];state='prepare';}
  else if(data.mapped!==undefined)nextTools=['form_build_template'];
- else if(data.operation==='internal_condition_probe'){state=data.status==='verified'&&data.restoration==='verified'?'construct':'repair';nextTools=state==='construct'?['template_finalize']:['run_status','form_template_audit'];}
+ else if(data.operation==='internal_condition_probe'){state=data.status==='verified'&&data.restoration==='verified'?'construct':'repair';nextTools=state==='construct'?['form_test_interactions']:['run_status','form_template_audit'];}
  else if(data.status==='ready_for_material_staging')nextTools=['material_import_run'];
- else if(data.status==='input_uploaded_server_unverified')nextTools=['capture_controls','verify_current'];
+ else if(data.status==='input_uploaded_server_unverified')nextTools=['material_import_inspect'];
  if(!nextTools)return data;
  if(data.error)state='technical_block';
  return {...data,completion:{status:data.error?'blocked_on_agent':'in_progress',complete:false},continuation:{state,owner:'agent',requiresUser:false,shouldContinue:true,nextTools,...(data.error?{reason:data.error,retry:'only_after_evidence_or_inputs_change'}:{})}};
@@ -84,23 +87,16 @@ export function stageResult(tool,data){
 // this registration boundary, so new stages cannot silently omit their Hook.
 // A maintainer host gets read-only inspections only; stage tools are refused
 // before the handler runs, so no browser, profile or queue state is touched.
-export function registerWorkflowTool(server,tool,definition,handler,env=process.env){
+export async function executeWorkflowOperation(tool,args,handler,{env=process.env,context}={}){
  if(!inspections.has(tool)&&!stages[tool])throw Error('WORKFLOW_STAGE_DECLARATION_REQUIRED:'+tool);
- const role=hostRole(env);
- const handle=async(args,extra)=>{
-  if(role==='maintainer'&&!inspections.has(tool))return {isError:true,content:[{type:'text',text:JSON.stringify(stageResult(tool,maintainerRefusal(tool)))}]};
-  if(inspections.has(tool))return handler(args,extra);
-  const phase=stages[tool][0];
-  const result=await handler(args,extra);
-  const block=result.content?.find(x=>x.type==='text');if(!block)throw Error('WORKFLOW_RESPONSE_ENVELOPE_REQUIRED');
-  const staged=await recordOutcome({tool,phase,args,result:stageResult(tool,JSON.parse(block.text)),env});
-  return {...result,content:[{type:'text',text:JSON.stringify(staged)}]};
- };
- return server.registerTool(tool,definition,async(args,extra)=>{
-  const startedAt=Date.now(),response=await handle(args,extra);
-  await recordCall({tool,args,startedAt,bytes:Buffer.byteLength(JSON.stringify(response?.content||[])),isError:response?.isError===true,env});
-  return response;
- });
+ const startedAt=Date.now();let result;
+ if(hostRole(env)==='maintainer'&&!inspections.has(tool))result={...stageResult(tool,maintainerRefusal(tool)),isError:true};
+ else {
+  result=await handler(args,context);
+  if(!inspections.has(tool))result=await recordOutcome({tool,phase:stages[tool][0],args,result:stageResult(tool,result),env});
+ }
+ await recordCall({tool,args,startedAt,bytes:Buffer.byteLength(JSON.stringify(result)),isError:result?.isError===true,env});
+ return result;
 }
 
 export function technicalHandoffReasons(source){
@@ -112,7 +108,7 @@ export function technicalHandoffReasons(source){
  if(error&&(drivers.has(error)||technical.test(error)))return [error];
  // Real preparation/verification runs are themselves evidence IDs. Do not
  // force the executor to manufacture a second error to report a driver gap.
- const execution=/^(?:ANT_DATE_NAVIGATION_UNSTABLE$|[A-Z_]+_ACTION_TARGET_REQUIRED$|SUBMISSION_PREVIEW_|FORM_CONTROL_|CONTROL_OPERATION_|CONTROL_COMMIT_|AUTOCOMPLETE_|SEARCHABLE_COMMIT_|AREA_|LIST_POPUP_|PHOENIX_|CHOICE_|UPLOAD_(?:NOT_CONFIRMED_BY_SITE|DOWNLOAD_[A-Z_]+|RETRIEVAL_NOT_OFFERED|LINK_NOT_FILE|CONTENT_DIFFERS_FROM_SOURCE)$)/;
+ const execution=/^(?:REPEAT_ADD_CONTROL_NOT_OBSERVED$|REPEAT_ADD_CONTROL_CHANGED$|ANT_DATE_NAVIGATION_UNSTABLE$|[A-Z_]+_ACTION_TARGET_REQUIRED$|SUBMISSION_PREVIEW_|FORM_CONTROL_|CONTROL_OPERATION_|CONTROL_COMMIT_|AUTOCOMPLETE_|SEARCHABLE_COMMIT_|AREA_|LIST_POPUP_|PHOENIX_|CHOICE_|UPLOAD_(?:NOT_CONFIRMED_BY_SITE|DOWNLOAD_[A-Z_]+|RETRIEVAL_NOT_OFFERED|LINK_NOT_FILE|CONTENT_DIFFERS_FROM_SOURCE)$)/;
  const runs=[source,...(source.results||[]),...(source.pageChecks||[]).map(page=>page.verification).filter(Boolean)];
  const reasons=runs.flatMap(run=>[run.errorCode,...(run.checks||[]).filter(check=>['mismatch','unverified'].includes(check.status)).map(check=>check.reason),...(run.deferredControls||[]).map(control=>control.reason)]).filter(reason=>typeof reason==='string'&&(execution.test(reason)||drivers.has(reason)||technical.test(reason)));
  if(reasons.length)return [...new Set(reasons)];
