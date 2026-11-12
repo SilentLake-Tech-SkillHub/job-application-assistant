@@ -45,10 +45,3 @@ export function compactConstructionResult(built) {
   choiceGoals:built.choiceGoals,nextGoals:built.nextGoals,
   nextTools:built.nextTools,requiresUser:built.requiresUser};
 }
-
-export function templateFromDraft(draft, {companyId,draftHash}, digest) {
- if(draft.companyId!==companyId)throw Error('DRAFT_COMPANY_SCOPE_MISMATCH');
- if(!draftHash || digest(draft.template)!==draftHash)throw Error('DRAFT_TEMPLATE_HASH_CHANGED');
- if(!draft.readyToRegister || draft.blockers?.length)throw Error('DRAFT_CONSTRUCTION_INCOMPLETE');
- return draft.template;
-}

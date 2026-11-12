@@ -14,7 +14,7 @@ import {rolePageContract} from './role-identity.mjs';
 import {recordPlanOf,withProfileRecords,groupFromDiscovery,groupSection,scopeOf} from './repeat-groups.mjs';
 import {withTaskRecords,taskRecordScope,TaskRecords} from './task-records.mjs';
 import {evaluateBusinessAuthorization,businessAuthorizationSwitch} from './business-authorization.mjs';
-import {registerFormDraft,constructionTemplate,promoteSealedTemplate} from './template-lifecycle.mjs';
+import {updateCompanyTemplate,constructionTemplate,promoteSealedTemplate} from './template-lifecycle.mjs';
 import {templateState,assertReaRequired,clearTemplateFailures,recordRealFillFailure} from './template-state.mjs';
 import {repairFields} from './form-local-repair.mjs';
 import {retainControlChoices,bindControlChoices,formScope} from './control-choice-store.mjs';
@@ -67,10 +67,9 @@ import {compareControlStructures} from './control-structure.mjs';
 import {CompanyBatch} from './company-batch.mjs';
 import {MaterialImport} from './material-import.mjs';
 import {RoutedBrowserAdapter} from './routed-browser.mjs';
-import {completeFormTemplate,draftTemplate} from './template-validation.mjs';
+import {completeFormTemplate,unverifiedTemplate} from './template-validation.mjs';
 import {closeApplication} from './application-closeout.mjs';
 import {assertSubmissionPrepared,formAssetStatus} from './form-assets.mjs';
-import {retireLegacyQuestionMappings} from './profile-migration.mjs';
 import {restageAutocomplete,autocompleteRestagePlan} from './autocomplete-restage.mjs';
 import {selectApplicationProjects,assertSelectedProjects} from './project-selection.mjs';
 import {removeRoleProject} from './project-role-removal.mjs';
@@ -82,7 +81,7 @@ import {continuationFor,advanceCompanies} from './workflow-continuation.mjs';
 import {CompanyDirectory,companyContext} from './company-directory.mjs';
 import {formAssetKeys,validateFormIdentities} from './form-identity.mjs';
 import {keyOK} from './ids.mjs';
-import {acquisitionPlan,detectedAcquisitionPlan,assertCollectionProvider,captureContentId,isChoiceControl,isDateControl,capturedChoiceOptions,compactConstructionResult,templateFromDraft} from './form-acquisition.mjs';
+import {acquisitionPlan,detectedAcquisitionPlan,assertCollectionProvider,captureContentId,isChoiceControl,isDateControl,capturedChoiceOptions,compactConstructionResult} from './form-acquisition.mjs';
 import {scriptCoverage,searchCapturedScripts} from './page-structure.mjs';
 import {readProfileFile,contractRebuildRequired} from './rebuild-mark.mjs';
 import {auditStoredContract,contractAuditSummary,workflowEnvelope} from './workflow-contract.mjs';
@@ -135,25 +134,12 @@ async function boundRole(args,{construction=false,templateHash}={}){
   if(browserBinding){state.browserBinding=browserBinding;await queues.put(t.taskId,state);}
   return {q,t,state,template};
 }
-async function reconcileSelectorMappings(companyId,t,probe){
- if(probe.operation!=='internal_condition_probe'||probe.companyId!==companyId||probe.templateHash!==hash(t)||probe.status!=='verified'||probe.restoration!=='verified')throw Error('VERIFIED_MIGRATION_PROOF_REQUIRED');
- const profile=await loadProfile(profileFile),form=lookupCompanyForm(profile,companyId,t.evidence.sourceUrl).form;
- const alternatives=[...new Set(Object.values(form?.mappings||{}).filter(m=>m.active===false&&m.coverageRequired&&m.selector).map(m=>m.selector))];
- if(!alternatives.length)return probe;
- const references=[...new Set(t.pages.flatMap(p=>p.fields.flatMap(f=>f.inventorySelectors||[f.read.selector])))];
- const page=await browser.existingPage(t.evidence.sourceUrl),proof=await page.act({method:'wait',operation:'compare_control_aliases',selector:t.pages[0].readySelector,alternatives,references},null,{});
- probe.selectorEquivalences={companyId,pageUrl:t.evidence.sourceUrl,templateHash:hash(t),pairs:proof.pairs.map(({alternativeIndex,referenceIndex})=>({selector:alternatives[alternativeIndex],reference:references[referenceIndex]})),valuesRead:false};
- await store.put('runs',probe.id,probe);return probe;
-}
 async function refreshBindings(){
  const names=async group=>new Set(await readdir(path.join(store.root,group)).catch(error=>{if(error.code==='ENOENT')return [];throw error;}));
  const [templates,runs]=await Promise.all([names('templates'),names('runs')]);
  for(const c of catalog.companies){
   c.templateId=templates.has(c.id+'.json')?c.id:null;
-  if(!c.templateId&&runs.has(formAssetKeys(c.id).draft+'.json')){
-   const draft=await store.get('runs',formAssetKeys(c.id).draft);
-   if(draft.registered&&draft.template)c.templateId=c.id;
-  }
+
  }
 }
 
@@ -169,7 +155,7 @@ const engine=new Engine({store,companies:catalog.companies,browser,visionReviewe
 },resolveTask:async(task,template)=>{
   if(task.roleQueueArgs)await boundRole(task.roleQueueArgs,task.constructionTest?{construction:true,templateHash:task.constructionTest}:{});
   if(!profileFile)throw Error('PROFILE_REQUIRED_FOR_NEW_QUESTIONS');
-  const profile=await loadProfile(profileFile);assertQuestionsMapped(profile,task.companyId,task.pageUrl);
+  const profile=await loadProfile(profileFile);assertQuestionsMapped(profile,task.companyId,task.pageUrl,template);
   return {...task,...await resolveInputs(profile,template,task.decisions,task.companyId,task)};
 },onInventory:async(companyId,pageUrl,fields,plan,{discoveryOnly=false,constructionTemplate}={})=>{
   if(!profileFile)throw Error('PROFILE_REQUIRED_FOR_NEW_QUESTIONS');
@@ -179,7 +165,7 @@ const engine=new Engine({store,companies:catalog.companies,browser,visionReviewe
   if(plan?.provider!=='feishu')fields=await enrichControlContext(currentPage,fields);
   fields=normalizeControlPolicy(fields);
   await updateProfile(profileFile,p=>registerPlannedQuestions(p,{companyId,pageUrl,fields,observedAt:new Date().toISOString(),coverageRequired:discoveryOnly},plan));
-  if(!discoveryOnly)assertQuestionsMapped(await loadProfile(profileFile),companyId,pageUrl,constructionTemplate);
+  if(!discoveryOnly)assertQuestionsMapped(await loadProfile(profileFile),companyId,pageUrl,await store.get('templates',companyId));
 }});
 const packageInfo=JSON.parse(await readFile(path.join(root,'package.json'),'utf8'));
 export const service=new OperationService({name:'recruiting-form-batch',version:packageInfo.version});
@@ -264,12 +250,12 @@ registerOperation('role_prepare_profile_fields',{description:'按私有主档的
   await store.put('runs',id,result);delete state.verifyRunId;delete state.verifiedAt;state.status='ready_to_fill';await queues.put(t.taskId,state);return result;
  });
 }));
-registerOperation('runtime_info',{description:'只读返回当前实际运行版本与能力，识别旧安装端；不连接浏览器。',annotations:{readOnlyHint:true}},wrap(async()=>({runtime:residentRuntime,version:packageInfo.version,compilerVersion:3,controlCapabilities:controlCapabilities(),pipelineRevision:'rea-contract-6',capabilities:['mandatory_acquisition_chain','mcp_draft_only_registration','run_evidence_handoff','live_choice_event_witness','goal_bound_choice_search','retrieval_identity_separation','mandatory_choice_goals','current_autocomplete_entity_proof','global_profile_fill','profile_reference_only_freeze','captured_date_ranges','authorized_attachment_removal','locked_enum_presentation','canonical_live_inventory','scoped_material_preparation','external_material_mapping_gate','business_material_first','selector_identity_reconciliation','scoped_ongoing_asof','collector_mapping_guard','verified_user_decision_wait','readiness_presence','captured_date_options','major_real_first','disabled_selected_readback','empty_search_evidence','sourced_ongoing_dates','string_array_fact_ingestion','mandatory_role_materials','material_amendment_preserves_pages','business_required_referral','company_batch','form_route','workflow_next','role_bindings','frozen_plan','independent_readback','fixed_closeout','official_form_definition','semantic_question_locators','rea_form_structure','generic_form_construction','typed_continuation','explicit_construction_provider','rendered_choice_options','draft_reference_registration','mandatory_workflow_contract','persisted_field_contract','observed_choice_resolution','incremental_choice_evidence','choice_resolution_pending_diagnostics','field_bound_choice_audit','dropdown_reopen_selection_proof'],browserAccess:false,visionVerification:{mode:process.env.RECRUITING_VISION_SOCKET?'host_socket':'mcp_sampling',available:await visionReviewer.isAvailable()},browserEnvironment:await browser.executionCapabilities?.()}),false));
+registerOperation('runtime_info',{description:'只读返回当前实际运行版本与能力，识别旧安装端；不连接浏览器。',annotations:{readOnlyHint:true}},wrap(async()=>({runtime:residentRuntime,version:packageInfo.version,compilerVersion:3,controlCapabilities:controlCapabilities(),pipelineRevision:'rea-contract-6',capabilities:['mandatory_acquisition_chain','single_official_company_template','run_evidence_handoff','live_choice_event_witness','goal_bound_choice_search','retrieval_identity_separation','mandatory_choice_goals','current_autocomplete_entity_proof','global_profile_fill','profile_reference_only_freeze','captured_date_ranges','authorized_attachment_removal','locked_enum_presentation','canonical_live_inventory','scoped_material_preparation','external_material_mapping_gate','business_material_first','selector_identity_reconciliation','scoped_ongoing_asof','collector_mapping_guard','verified_user_decision_wait','readiness_presence','captured_date_options','major_real_first','disabled_selected_readback','empty_search_evidence','sourced_ongoing_dates','string_array_fact_ingestion','mandatory_role_materials','material_amendment_preserves_pages','business_required_referral','company_batch','form_route','workflow_next','role_bindings','frozen_plan','independent_readback','fixed_closeout','official_form_definition','semantic_question_locators','rea_form_structure','generic_form_construction','typed_continuation','explicit_construction_provider','rendered_choice_options','official_template_reference_registration','mandatory_workflow_contract','persisted_field_contract','observed_choice_resolution','incremental_choice_evidence','choice_resolution_pending_diagnostics','field_bound_choice_audit','dropdown_reopen_selection_proof'],browserAccess:false,visionVerification:{mode:process.env.RECRUITING_VISION_SOCKET?'host_socket':'mcp_sampling',available:await visionReviewer.isAvailable()},browserEnvironment:await browser.executionCapabilities?.()}),false));
 registerOperation('workflow_next',{description:'确定性调用路由：先判断公司资产，复用则离线映射与编译；缺失或失效才返回增量建库接口。只返回下一调用及真实阻塞，不替模型宣称完成。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),roleId:z.string().optional()},annotations:{readOnlyHint:true}},wrap(async task=>{
  const route=await engine.formRoute(task);
  if(route.route!=='reuse')return {...route,continuation:{state:route.route==='migrate'?'repair':'construct',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:route.nextTools},submission:'not_performed'};
  const profile=await loadProfile(profileFile),company=engine.companyForTask(task),template=await store.get('templates',company.templateId);
- try{assertQuestionsMapped(profile,task.companyId,task.pageUrl);}catch{return {...route,nextStage:'local_mapping',continuation:{state:'map',owner:'agent',requiresUser:false,shouldContinue:true},nextTools:['form_mapping_candidates','profile_map_questions'],submission:'not_performed'};}
+ try{assertQuestionsMapped(profile,task.companyId,task.pageUrl,template);}catch{return {...route,nextStage:'local_mapping',continuation:{state:'map',owner:'agent',requiresUser:false,shouldContinue:true},nextTools:['form_mapping_candidates','profile_map_questions'],submission:'not_performed'};}
  const plan=await engine.preparePlan({...task,templateHash:hash(template),...await resolveInputs(profile,template,{},task.companyId,task)});
  const continuation=continuationFor({route,plan,template,profile});
  return {...route,...plan,continuation,nextTools:continuation.nextTools,submission:'not_performed'};
@@ -334,7 +320,7 @@ async function prepareRole(args){
   const formRoute=await engine.formRoute({companyId:queued.t.companyId,roleId:queued.t.roleId,pageUrl:queuedState.returnUrl});
   if(formRoute.route!=='reuse')return {status:'needs_form_acquisition',...formRoute,submission:'not_performed'};
   const {t,state,template}=await boundRole(args),profile=await loadProfile(profileFile);
-  assertQuestionsMapped(profile,t.companyId,state.returnUrl);
+  assertQuestionsMapped(profile,t.companyId,state.returnUrl,template);
   const task={companyId:t.companyId,roleId:t.roleId,pageUrl:state.returnUrl,pageId:state.pageId,browserBinding:state.browserBinding,taskId:t.taskId,templateHash:hash(template),...await resolveInputs(profile,template,{},t.companyId,{roleId:t.roleId,pageUrl:state.returnUrl,confirmedOfficialId:state.siteRoleId||t.officialId}),roleQueueArgs:{queueId:args.queueId,queueHash:args.queueHash,taskId:args.taskId}};
   const plan=await engine.preparePlan(task);
   if(!plan.readyForExecution&&!(args.authorization.allowPartialPreparation&&plan.status==='needs_answers'&&!plan.constructionBlockers?.length))return {...plan,status:plan.status,continuation:continuationFor({plan,template,profile}),submission:'not_performed'};
@@ -353,7 +339,7 @@ registerOperation('role_prepare_fields',{description:'从当前完整冻结计�
  const queued=await queues.task(args);
  return engine.withCompanyLease(queued.t.companyId,async()=>{
   const {t,state,template}=await boundRole(args),profile=await loadProfile(profileFile);
-  assertQuestionsMapped(profile,t.companyId,state.returnUrl);
+  assertQuestionsMapped(profile,t.companyId,state.returnUrl,template);
   const task={companyId:t.companyId,roleId:t.roleId,pageUrl:state.returnUrl,pageId:state.pageId,browserBinding:state.browserBinding,taskId:t.taskId,templateHash:hash(template),...await resolveInputs(profile,template,{},t.companyId,{roleId:t.roleId,pageUrl:state.returnUrl,confirmedOfficialId:state.siteRoleId||t.officialId})};
   const plan=await engine.preparePlan(task,{leaseHeld:true}),frozenTask={...task,planId:plan.planId,planHash:plan.planHash};
   if(!plan.planId)return {...plan,submission:'not_performed'};
@@ -381,7 +367,7 @@ registerOperation('roles_prepare_batch',{description:'按已确认并发模式�
   if(sameCompanyMultiRole&&(q.executionMode!=='parallel_roles'&&!q.parallelRoles))throw Error('PARALLEL_ROLE_AUTHORIZATION_REQUIRED');
   if(!sameCompanyMultiRole&&!['parallel_roles','parallel_companies'].includes(q.executionMode)&&!q.parallelRoles)throw Error('PARALLEL_ROLE_AUTHORIZATION_REQUIRED');
   const tasks=[],bound=[],preparedPlans=[];
-  for(const taskId of args.taskIds){const a={queueId:args.queueId,queueHash:args.queueHash,taskId};const queued=await queues.task(a),state=await queues.read(taskId);const route=await engine.formRoute({companyId:queued.t.companyId,roleId:queued.t.roleId,pageUrl:state.returnUrl||queued.t.applyUrl||queued.t.url});if(route.route!=='reuse')return {status:'needs_form_acquisition',...route,taskId,submission:'not_performed'};const b=await boundRole(a),profile=await loadProfile(profileFile);assertQuestionsMapped(profile,b.t.companyId,b.state.returnUrl);
+  for(const taskId of args.taskIds){const a={queueId:args.queueId,queueHash:args.queueHash,taskId};const queued=await queues.task(a),state=await queues.read(taskId);const route=await engine.formRoute({companyId:queued.t.companyId,roleId:queued.t.roleId,pageUrl:state.returnUrl||queued.t.applyUrl||queued.t.url});if(route.route!=='reuse')return {status:'needs_form_acquisition',...route,taskId,submission:'not_performed'};const b=await boundRole(a),profile=await loadProfile(profileFile);assertQuestionsMapped(profile,b.t.companyId,b.state.returnUrl,b.template);
     const task={companyId:b.t.companyId,roleId:b.t.roleId,pageUrl:b.state.returnUrl,pageId:b.state.pageId,browserBinding:b.state.browserBinding,taskId:b.t.taskId,templateHash:hash(b.template),...await resolveInputs(profile,b.template,{},b.t.companyId,{roleId:b.t.roleId,pageUrl:b.state.returnUrl}),roleQueueArgs:a};
     const {compiled,...plan}=await engine.preparePlan(task,{transient:true});if(!plan.readyForExecution&&!(args.authorization.allowPartialPreparation&&plan.status==='needs_answers'&&!plan.constructionBlockers?.length))return {...plan,status:plan.status,submission:'not_performed'};tasks.push({...task,planId:plan.planId,planHash:plan.planHash});bound.push(b);preparedPlans.push(compiled);
   }
@@ -462,6 +448,7 @@ async function mappingCapture(args){
  if(template)template=await engine.routeTemplate(template,args);
  return assertMappingCapture(store,{...args,template});
 }
+const optionalTemplate=async id=>{try{return await store.get('templates',id);}catch(error){if(error.code==='ENOENT')return null;throw error;}};
 const optionalRun=async id=>{try{return await store.get('runs',id);}catch(error){if(error.code!=='ENOENT')throw error;return null;}};
 async function acquisitionPage({companyId,pageId,pageUrl}){
  const company=companyContext(catalog.companies.find(c=>c.id===companyId),{pageUrl});
@@ -651,33 +638,35 @@ registerOperation('form_expand_sections',{description:'一级视觉与REA对照�
 }));
 registerOperation('form_cycle_status',{description:'读取公司当前建库循环，返回解析、Agent完整性检查、交互测试、回补或档案确认的下一步；不以条件探测代替实际控件测试。',inputSchema:{companyId:z.string()},annotations:{readOnlyHint:true}},wrap(async a=>{
  const keys=formAssetKeys(a.companyId),read=async id=>{try{return await store.get('runs',id);}catch(e){if(e.code==='ENOENT')return null;throw e;}};
- const [capture,draft,visual,structure,coverage]=await Promise.all([read(keys.capture),read(keys.draft),read(keys.visual),read(keys.structure),read(keys.coverage)]);
+ const [capture,update,visual,structure,coverage]=await Promise.all([read(keys.capture),read(keys.update),read(keys.visual),read(keys.structure),read(keys.coverage)]);
+ const official=await optionalTemplate(a.companyId);
  const current=visual?.current,review=coverage?.review;
  let next;
  if(current?.surveyRevision!==2||!current.inventoryHash||!sameVisualPage(current.page,capture?.visualPage))next={stage:'visual_inventory',nextTools:['form_capture_visual']};
  else if(structure?.visualScreenshotId!==current.screenshotId||structure?.visualInventoryHash!==current.inventoryHash)next={stage:'parse',nextTools:['capture_rea_structure']};
  else if(review?.status!=='passed'||review.screenshotId!==current.screenshotId||review.structureHash!==primaryStructureHash(structure))next={stage:'primary_review',nextTools:['form_review_completeness']};
  else if(requiredExpansionIds(review,coverage.expansions).length)next={stage:'section_expansion',nextTools:['form_expand_sections']};
- else next=constructionNext({capture,template:draft?.registered?draft.template:null,interaction:draft?.construction?.interaction});
- return {companyId:a.companyId,...next,draftId:draft?.id||keys.draft,templateHash:draft?.template?hash(draft.template):null,continuation:{state:next.stage==='backfill'?'repair':'construct',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:next.nextTools},submission:'not_performed'};
+ else if(!update&&(await templateState(official)).route==='reuse')next={stage:'ready',nextTools:['role_prepare']};
+ else next=constructionNext({capture,template:update?.registered?official:null,interaction:update?.construction?.interaction});
+ return {companyId:a.companyId,...next,templateId:a.companyId,templateHash:official?hash(official):null,continuation:{state:next.stage==='backfill'?'repair':'construct',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:next.nextTools},submission:'not_performed'};
 }));
-registerOperation('form_patch_controls',{description:'按当前采集回补公司共享控件的动作、读回或重复栏目；生成同公司当前草稿，所有岗位共用；随后完整性检查和真实交互测试，不修改组件代码。',inputSchema:{...queueTask,captureId:z.string(),templateHash:z.string(),patches:z.array(z.object({fieldId:z.string(),actions:z.array(z.record(z.string(),z.unknown())).optional(),read:z.record(z.string(),z.unknown()).optional()})).default([]),repeatSections:z.array(z.string()).default([])}},wrap(async a=>{
+registerOperation('form_patch_controls',{description:'按当前采集回补公司共享控件的动作、读回或重复栏目；覆盖更新同公司唯一正式模板，所有岗位共用；随后完整性检查和真实交互测试，不修改组件代码。',inputSchema:{...queueTask,captureId:z.string(),templateHash:z.string(),patches:z.array(z.object({fieldId:z.string(),actions:z.array(z.record(z.string(),z.unknown())).optional(),read:z.record(z.string(),z.unknown()).optional()})).default([]),repeatSections:z.array(z.string()).default([])}},wrap(async a=>{
  const {t,state,template}=await boundRole(a,{construction:true,templateHash:a.templateHash});if(hash(template)!==a.templateHash)throw Error('TEMPLATE_VERSION_CHANGED');
  return engine.withCompanyLease(t.companyId,async()=>{
   const capture=await store.get('runs',a.captureId);if(capture.companyId!==t.companyId||!samePage(capture.pageUrl,state.returnUrl))throw Error('ACQUISITION_CAPTURE_SCOPE_CHANGED');
   const expanded=withProfileRecords(template,recordPlanOf(await loadProfile(profileFile)));
-  const patched=patchCapturedControls(expanded,capture,a),draft=await registerFormDraft(store,{companyId:t.companyId,template:patched}),draftId=formAssetKeys(t.companyId).draft;
-  await store.update('runs',draftId,d=>({...d,construction:{revision:1,stage:'agent_completeness'}}));
+  const patched=patchCapturedControls(expanded,capture,a),current=await updateCompanyTemplate(store,{companyId:t.companyId,template:patched}),updateId=formAssetKeys(t.companyId).update;
+  await store.update('runs',updateId,d=>({...d,construction:{revision:1,stage:'agent_completeness'}}));
   delete capture.completenessReview;await store.put('runs',a.captureId,capture);
-  await updateProfile(profileFile,p=>registerTemplateContract(p,{companyId:t.companyId,template:draft,templateHash:hash(draft),stage:'construction'}));
-  return {companyId:t.companyId,draftId,templateHash:hash(draft),updatedFields:a.patches.map(p=>p.fieldId),updatedRepeatSections:a.repeatSections,nextTools:['form_review_completeness'],submission:'not_performed'};
+  await updateProfile(profileFile,p=>registerTemplateContract(p,{companyId:t.companyId,template:current,templateHash:hash(current),stage:'construction'}));
+  return {companyId:t.companyId,updateId,templateHash:hash(current),updatedFields:a.patches.map(p=>p.fieldId),updatedRepeatSections:a.repeatSections,nextTools:['form_review_completeness'],submission:'not_performed'};
  });
 }));
-registerOperation('form_test_interactions',{description:'在原岗位页面测试公司草稿：自动执行条件探测，按已确认资料实际操作控件并独立读回；失败返回回补步骤，通过后进入档案确认。不提交。',inputSchema:{...queueTask,templateHash:z.string(),authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1),uploads:z.boolean().default(false),sensitiveFields:z.boolean().default(false)})}},wrap(async a=>{
+registerOperation('form_test_interactions',{description:'在原岗位页面测试已更新的唯一正式公司模板：自动执行条件探测，按已确认资料实际操作控件并独立读回；失败返回回补步骤，通过后进入档案确认。不提交。',inputSchema:{...queueTask,templateHash:z.string(),authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1),uploads:z.boolean().default(false),sensitiveFields:z.boolean().default(false)})}},wrap(async a=>{
  const b=await boundRole(a,{construction:true,templateHash:a.templateHash}),{t,state,template}=b;if(hash(template)!==a.templateHash)throw Error('TEMPLATE_VERSION_CHANGED');
  const keys=formAssetKeys(t.companyId),capture=await store.get('runs',keys.capture);await assertConstructionCoverage(capture);assertCompleteness(capture);
- const draft=await store.get('runs',keys.draft);
- if(draft.construction?.captureHash!==constructionCaptureHash(capture))throw Error('CURRENT_CONSTRUCTION_DRAFT_REQUIRED');
+ const progress=await store.get('runs',keys.update);
+ if(progress.construction?.captureHash!==constructionCaptureHash(capture))throw Error('CURRENT_COMPANY_UPDATE_REQUIRED');
  const contentFindings=await constructionRecordFindings(template,await loadProfile(profileFile));
  if(contentFindings.length)return {companyId:t.companyId,status:'needs_record_content_mapping',recordContentFindings:contentFindings,nextTools:['capture_repeat_slots','profile_map_questions','form_build_template'],continuation:{state:'construct',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['capture_repeat_slots','profile_map_questions','form_build_template']},submission:'not_performed'};
  const task={companyId:t.companyId,roleId:t.roleId,taskId:t.taskId,pageUrl:state.returnUrl,pageId:state.pageId,browserBinding:state.browserBinding,templateHash:a.templateHash,roleQueueArgs:a,constructionTest:a.templateHash,...await resolveInputs(await loadProfile(profileFile),template,{},t.companyId,{roleId:t.roleId,pageUrl:state.returnUrl,confirmedOfficialId:state.siteRoleId||t.officialId})};
@@ -691,7 +680,7 @@ registerOperation('form_test_interactions',{description:'在原岗位页面测�
    const reason=/^[A-Z_]+$/.test(error.message)?error.message:'INTERACTION_TEST_FAILED';
    interaction={operation:'form_interaction_test',companyId:t.companyId,roleId:t.roleId,templateHash:a.templateHash,status:'needs_backfill',browserExecuted:false,testedFieldIds:[],inactiveFieldIds:[],omittedFieldIds:[],failures:[{reason}],conditionProbeId:probe.id};
   }
-  await store.update('runs',keys.draft,d=>({...d,construction:{revision:1,captureHash:constructionCaptureHash(capture),conditionProbeId:probe.id,interaction}}));
+  await store.update('runs',keys.update,d=>({...d,construction:{revision:1,captureHash:constructionCaptureHash(capture),conditionProbeId:probe.id,interaction}}));
   const nextTools=interaction.status==='verified'?['template_finalize']:['form_patch_controls','capture_controls'];
   return {companyId:t.companyId,templateHash:a.templateHash,probeRunId:probe.id,status:interaction.status,error:interaction.failures[0]?.reason||null,testedFields:interaction.testedFieldIds.length,failures:interaction.failures,nextTools,continuation:{state:interaction.status==='verified'?'construct':'repair',owner:'agent',requiresUser:false,shouldContinue:true,nextTools},completion:{complete:false,status:'company_template_testing'},submission:'not_performed'};
  });
@@ -737,7 +726,7 @@ registerOperation('form_script_search',{description:'只读检索本次REA已采
  const asset=await store.get('runs',a.structureId);if(asset.companyId!==a.companyId||asset.operation!=='rea_form_structure')throw Error('REA_CONTROL_CAPTURE_SCOPE_MISMATCH');
  return {structureId:a.structureId,scriptCoverage:asset.scriptCoverage,...searchCapturedScripts(asset.scriptInventory,a.queries,{limit:a.limit}),browserAccess:false,executionVerified:false};
 }));
-registerOperation('form_build_template',{description:'统一控件合集按真实采集、已确认语义映射及选项证据生成未封存模板。page各项必须来自本次实际页面，不能用通用form/h1猜测。默认仅返回缺口、计数与draftId/draftHash，由template_register直接读取私有草稿，避免模型往返抄写整份模板；compact=false才返回完整模板。技术缺口不能转成userOnly，无公司/字段编号分支。',inputSchema:{companyId:z.string(),captureId:z.string().optional(),structureId:z.string().optional(),choiceIds:z.array(z.string()).default([]),version:z.number().int().min(1).default(1),page:constructionPage,compact:z.boolean().default(true),reaReconciliation:z.array(z.object({nodeId:z.string(),selector:z.string().optional(),exclusion:z.enum(['outside_application_form','duplicate_accessibility_node']).optional(),evidence:z.string().min(1)})).default([])}},wrap(async a=>{
+registerOperation('form_build_template',{description:'统一控件合集按真实采集、已确认语义映射及选项证据生成未封存模板。page各项必须来自本次实际页面，不能用通用form/h1猜测。默认仅返回缺口、计数与templateId/templateHash，由后续工具唯一读取正式公司模板，避免模型往返抄写整份模板；正式模板与内容版本先覆盖更新后才返回。技术缺口不能转成userOnly，无公司/字段编号分支。',inputSchema:{companyId:z.string(),captureId:z.string().optional(),structureId:z.string().optional(),choiceIds:z.array(z.string()).default([]),version:z.number().int().min(1).default(1),page:constructionPage,compact:z.boolean().default(true),reaReconciliation:z.array(z.object({nodeId:z.string(),selector:z.string().optional(),exclusion:z.enum(['outside_application_form','duplicate_accessibility_node']).optional(),evidence:z.string().min(1)})).default([])}},wrap(async a=>{
  let reaStructure=a.structureId?await store.get('runs',a.structureId):null;const captureId=a.captureId||reaStructure?.captureId||formAssetKeys(a.companyId).capture;
  const capture=await store.get('runs',captureId);if(!capture.controls?.length)throw Error('FORM_CONTROLS_NOT_OBSERVED');if(capture.companyId!==a.companyId)throw Error('CAPTURE_COMPANY_MISMATCH');
  const {structure:reviewedStructure,expansions}=await assertConstructionCoverage(capture);assertCompleteness(capture);
@@ -754,8 +743,8 @@ registerOperation('form_build_template',{description:'统一控件合集按真�
  reaStructure??=acquisition.structure||null;
  if(reaStructure){if(reaStructure.operation!=='rea_form_structure'||reaStructure.structure?.provider!=='rea'||reaStructure.reaEvidenceHash!==reaStructure.structure.evidenceHash)throw Error('REA_STRUCTURE_EVIDENCE_REQUIRED');assertCurrentStructure(reaStructure,capture,a.companyId);}
  const baseline=reaStructure?originalStructureCapture(reaStructure,capture):capture,currentSelectors=new Set(capture.controls.map(c=>c.selector)),retained=baseline.controls.filter(c=>!currentSelectors.has(c.selector)&&c.repeatIndex>0&&c.group);
- const previous=[];for(const read of [()=>store.get('templates',capture.formId),async()=>(await store.get('runs',formAssetKeys(capture.formId).draft)).template])try{previous.push(await read());}catch(e){if(e.code!=='ENOENT')throw e;}
- const conditional=conditionalControlBackfill({capture,previous,probe:await optionalRun('draft-probe-'+capture.formId),mappings:Object.values(form.mappings)});
+ const previous=[];try{previous.push(await store.get('templates',capture.formId));}catch(e){if(e.code!=='ENOENT')throw e;}
+ const conditional=conditionalControlBackfill({capture,previous,probe:await optionalRun('condition-probe-'+capture.formId),mappings:Object.values(form.mappings)});
  if(conditional.mappings.length){const args={companyId:a.companyId,pageUrl:capture.pageUrl,mappings:conditional.mappings,evidence:'Actual restored conditional probe compared both locators to the same live input; retain the existing company question meaning.'};await updateProfile(profileFile,p=>mapProfileQuestions(p,args));mapProfileQuestions(profile,args);}
  if(conditional.obsoleteSelectors.length)for(const prior of previous)for(const page of prior.pages)page.fields=page.fields.filter(field=>!field.inventorySelectors?.some(selector=>conditional.obsoleteSelectors.includes(selector)));
  const {role:buildingRole}=await companyRoleContext({companyId:a.companyId,roleId:capture.roleId,pageUrl:capture.pageUrl,pageId:capture.pageId},directory,queues);
@@ -772,6 +761,7 @@ registerOperation('form_build_template',{description:'统一控件合集按真�
  });
  const observedGroups=[...(a.page.groups||[]).filter(group=>!repeatGroups.some(seen=>seen.id===group.id)),...repeatGroups,...replayGroups];
  for(let i=0;i<previous.length;i++)previous[i]=await engine.routeTemplate(previous[i],{companyId:a.companyId,pageUrl:capture.pageUrl});
+ a.version=Math.max(a.version,(previous[0]?.version||0)+1);
  const built=buildFormTemplate({capture:{...capture,controls:[...capture.controls,...retained,...conditional.controls]},profile,mappings:Object.values(form.mappings),choices,page:observedGroups.length?{...a.page,groups:observedGroups}:a.page,templateId:capture.formId,version:a.version,reaStructure,reaReconciliation:a.reaReconciliation,previous});
  const contentFindings=await constructionRecordFindings(built.template,profile);
  if(contentFindings.length){built.recordContentFindings=contentFindings;built.blockers.push(...contentFindings.map(finding=>({id:'record-'+finding.record,label:finding.record,reason:finding.reason})));built.pending.push(...contentFindings.map(finding=>({id:'record-'+finding.record,source:finding.record,kind:'mapping',owner:'agent',...finding})));built.readyToRegister=false;built.contentReady=false;built.nextTools=[...new Set([...built.nextTools,'capture_repeat_slots','profile_map_questions','form_build_template'])];}
@@ -780,10 +770,12 @@ registerOperation('form_build_template',{description:'统一控件合集按真�
  if(reaStructure)await recordAcquisitionChain(store,{companyId:a.companyId,structureId:a.structureId,structure:reaStructure,capture,template:built.template});
  built.construction={revision:1,stage:'interaction_test',captureHash:constructionCaptureHash(capture)};
  for(const id of new Set(built.choices.map(c=>c.choicesId).filter(Boolean)))await store.update('runs',id,asset=>({...asset,choices:asset.choices.map(choice=>{const updated=built.choices.find(c=>c.choicesId===id&&c.selector===choice.selector);return updated?{...choice,...(updated.resolutions?{resolutions:updated.resolutions}:{}),...(updated.goal?{goal:updated.goal}:{})}:choice;})}));
+ built.template=await updateCompanyTemplate(store,{companyId:a.companyId,template:built.template});
  await updateProfile(profileFile,p=>registerTemplateContract(p,{companyId:a.companyId,template:built.template,templateHash:hash(built.template),stage:'construction'}));
- const draftId=formAssetKeys(capture.formId).draft;await store.put('runs',draftId,{...built,companyId:a.companyId,captureId});
- const persisted=await store.get('runs',draftId);if(hash(persisted.template)!==hash(built.template))throw Error('TEMPLATE_STORAGE_READBACK_FAILED');assertStoredExecutionContract(await loadProfile(profileFile),a.companyId,persisted.template);
- return {...(a.compact?compactConstructionResult(built):built),draftId,draftHash:hash(built.template),storageReadback:'verified',storageAudit:contractAuditSummary(auditStoredContract(built.template))};
+ const {template:ignoredTemplate,...progress}=built;
+ await store.put('runs',formAssetKeys(capture.formId).update,{...progress,companyId:a.companyId,captureId});
+ const persisted=await store.get('templates',capture.formId);if(hash(persisted)!==hash(built.template))throw Error('TEMPLATE_STORAGE_READBACK_FAILED');assertStoredExecutionContract(await loadProfile(profileFile),a.companyId,persisted);
+ return {...(a.compact?compactConstructionResult(built):progress),templateId:capture.formId,templateHash:hash(built.template),storageReadback:'verified',storageAudit:contractAuditSummary(auditStoredContract(built.template))};
 }));
 registerOperation('form_repair_fields',{description:'局部修复：真实填写发现控件变了时，只读当前页面，只更新失败的那几个字段的定位；不调用REA、不重采其他控件、不改已有映射、选项和栏目条数。认不出的字段在 unresolved 里列出候选，用 mappings 指定后再调。不填写、不提交。',inputSchema:{...queueTask,mappings:z.array(z.object({fieldId:z.string(),selector:z.string()})).default([])}},wrap(async a=>{
  const {t,state,template}=await boundRole(a);
@@ -799,11 +791,11 @@ registerOperation('form_repair_fields',{description:'局部修复：真实填写
   const result=repairFields({template,failedIds,controls:await liveControls(page,plan),mappings:a.mappings});
   validateTemplate(result.template);
   const captureResult=await captureCompanyControls({companyId:t.companyId,pageUrl:state.returnUrl,pageId:state.pageId,compact:true});
-  const candidate=await registerFormDraft(store,{companyId:t.companyId,template:result.template}),draftId=formAssetKeys(t.companyId).draft;
-  await store.update('runs',draftId,d=>({...d,construction:{revision:1,stage:'agent_completeness'}}));
+  const candidate=await updateCompanyTemplate(store,{companyId:t.companyId,template:result.template}),updateId=formAssetKeys(t.companyId).update;
+  await store.update('runs',updateId,d=>({...d,construction:{revision:1,stage:'agent_completeness'}}));
   const templateHash=hash(candidate);
   await updateProfile(profileFile,p=>registerTemplateContract(p,{companyId:t.companyId,template:candidate,templateHash,stage:'construction'}));
-  return {templateId:result.template.id,draftId,captureId:captureResult.captureId,templateHash,status:result.unresolved.length?'needs_mapping':'needs_interaction_test',repaired:result.repaired,unresolved:result.unresolved,nextTools:['form_review_completeness','form_test_interactions'],submission:'not_performed'};
+  return {templateId:result.template.id,updateId,captureId:captureResult.captureId,templateHash,status:result.unresolved.length?'needs_mapping':'needs_interaction_test',repaired:result.repaired,unresolved:result.unresolved,nextTools:['form_review_completeness','form_test_interactions'],submission:'not_performed'};
  });
 }));
 registerOperation('form_template_audit',{description:'只读逐字段区分技术建库缺口、语义映射缺口、真实用户答案和本人操作；不会将普通字段userOnly误报为用户缺资料。',inputSchema:{companyId:z.string(),roleId:z.string().optional()}},wrap(async a=>{
@@ -812,45 +804,32 @@ registerOperation('form_template_audit',{description:'只读逐字段区分技�
 }));
 registerOperation('template_finalize',{description:'确认公司档案：核对当前Agent完整性检查、条件探测及完整控件交互测试均通过，覆盖保存公司共享模板；岗位只引用共享控件。',inputSchema:{companyId:z.string(),roleId:z.string().optional(),templateHash:z.string(),probeRunId:z.string()}},wrap(args=>engine.withCompanyLease(args.companyId,async()=>{
  const c=engine.companyForTask(args),t=await constructionTemplate(store,c.templateId,args.templateHash);if(hash(t)!==args.templateHash)throw Error('TEMPLATE_VERSION_CHANGED');
- const draft=await store.get('runs',formAssetKeys(args.companyId).draft),capture=await store.get('runs',formAssetKeys(args.companyId).capture);await assertConstructionCoverage(capture);assertCompleteness(capture);
- if(draft.construction?.captureHash!==constructionCaptureHash(capture))throw Error('AGENT_COMPLETENESS_REVIEW_REQUIRED');
- assertInteractionEvidence(t,draft.construction?.interaction);
+ const progress=await store.get('runs',formAssetKeys(args.companyId).update),capture=await store.get('runs',formAssetKeys(args.companyId).capture);await assertConstructionCoverage(capture);assertCompleteness(capture);
+ if(progress.construction?.captureHash!==constructionCaptureHash(capture))throw Error('AGENT_COMPLETENESS_REVIEW_REQUIRED');
+ assertInteractionEvidence(t,progress.construction?.interaction);
  if((await constructionRecordFindings(t,await loadProfile(profileFile))).length)throw Error('RECORD_CONTENT_MAPPING_REQUIRED');
- if(draft.construction.conditionProbeId!==args.probeRunId)throw Error('INTERACTION_CONDITION_PROBE_CHANGED');
- const probe=await reconcileSelectorMappings(args.companyId,t,await store.get('runs',args.probeRunId));await updateProfile(profileFile,p=>retireLegacyQuestionMappings(p,{companyId:args.companyId,template:t,probe}));const profile=await loadProfile(profileFile);assertQuestionsMapped(profile,args.companyId,t.evidence.sourceUrl,t);assertDefinitionMapped(profile,args.companyId,t);
- const channel=await browser.channel({pageUrl:t.evidence.sourceUrl});const sealed=await promoteSealedTemplate(store,{companyId:args.companyId,template:t,probe,channel,confirmation:{status:'confirmed',captureHash:constructionCaptureHash(capture),agentReviewHash:hash(capture.completenessReview),interaction:draft.construction.interaction,confirmedAt:new Date().toISOString()},validate:validateTemplate,beforeCommit:async sealed=>{const prior=new Map();await updateProfile(profileFile,p=>{for(const [id,form]of Object.entries(p.companyForms||{}))if(form.companyId===args.companyId)prior.set(id,structuredClone(form.executionContract));return registerTemplateContract(p,{companyId:args.companyId,template:sealed,templateHash:hash(sealed)});});return ()=>updateProfile(profileFile,p=>{for(const [id,contract]of prior)if(contract===undefined)delete p.companyForms[id].executionContract;else p.companyForms[id].executionContract=contract;return p;});}});
+ if(progress.construction.conditionProbeId!==args.probeRunId)throw Error('INTERACTION_CONDITION_PROBE_CHANGED');
+ const probe=await store.get('runs',args.probeRunId);const profile=await loadProfile(profileFile);assertQuestionsMapped(profile,args.companyId,t.evidence.sourceUrl,t);assertDefinitionMapped(profile,args.companyId,t);
+ const channel=await browser.channel({pageUrl:t.evidence.sourceUrl});const sealed=await promoteSealedTemplate(store,{companyId:args.companyId,template:t,probe,channel,confirmation:{status:'confirmed',captureHash:constructionCaptureHash(capture),agentReviewHash:hash(capture.completenessReview),interaction:progress.construction.interaction,confirmedAt:new Date().toISOString()},validate:validateTemplate,beforeCommit:async sealed=>{const prior=new Map();await updateProfile(profileFile,p=>{for(const [id,form]of Object.entries(p.companyForms||{}))if(form.companyId===args.companyId)prior.set(id,structuredClone(form.executionContract));return registerTemplateContract(p,{companyId:args.companyId,template:sealed,templateHash:hash(sealed)});});return ()=>updateProfile(profileFile,p=>{for(const [id,contract]of prior)if(contract===undefined)delete p.companyForms[id].executionContract;else p.companyForms[id].executionContract=contract;return p;});}});
  assertStoredExecutionContract(await loadProfile(profileFile),args.companyId,await store.get('templates',sealed.id));
- await store.remove('runs',formAssetKeys(args.companyId).draft);
- await updateProfile(profileFile,p=>{const form=lookupCompanyForm(p,args.companyId,t.evidence.sourceUrl).form;if(form)delete form.draftExecutionContract;return p;});
+ await store.remove('runs',formAssetKeys(args.companyId).update);
+ await updateProfile(profileFile,p=>{const form=lookupCompanyForm(p,args.companyId,t.evidence.sourceUrl).form;if(form)delete form.executionContract;return p;});
  return {templateId:sealed.id,templateHash:hash(sealed),status:'company_template_ready',probeRunId:probe.id,interactionTest:'verified',browserAccess:false,submission:'not_performed'};
 })));
 registerOperation('template_rebind_role',{description:'按当前确认岗位编号绑定公司公共控件定义；同公司所有岗位共享一套控件，不生成岗位独立资产、不要求重新解析。',inputSchema:{...queueTask}},wrap(async args=>{
  const {t}=await queues.task(args),template=await loadCompanyTemplate(store,directory,t.companyId,t.roleId);
  return {companyId:t.companyId,roleId:t.roleId,templateId:template.id,binding:template.roleBindings[t.roleId],sharedControlDefinition:true,templateHash:hash(template),nextTools:['role_advance','workflow_next'],submission:'not_performed'};
 }));
-registerOperation('template_register',{description:'持久化已采集并确定的操作方案。只接受form_build_template返回的draftId和draftHash，MCP核对归属、缺口与Hash后直接读取完整草稿，无须模型抄写模板；拒绝inline template及缺完整采集建库回执的导入。不把建库等同于实测通过。',inputSchema:{companyId:z.string(),roleId:z.string().optional(),template:z.record(z.string(), z.unknown()).optional(),draftId:z.string().optional(),draftHash:z.string().length(64).optional()}},wrap(async ({companyId,roleId,template,draftId,draftHash})=>engine.withCompanyLease(companyId,async()=>{
-  let c=catalog.companies.find(c=>c.id===companyId);if(!c)throw Error('UNKNOWN_COMPANY');
-  if(template&&(draftId||draftHash)||!template&&!draftId||draftId&&!draftHash||draftHash&&!draftId)throw Error('EXACTLY_ONE_TEMPLATE_INPUT_REQUIRED');
-  if(template)throw Error('MCP_BUILT_DRAFT_REQUIRED');
-  if(draftId!==formAssetKeys(companyId).draft)throw Error('MCP_BUILT_DRAFT_REQUIRED');
-  if(draftId)template=templateFromDraft(await store.get('runs',draftId),{companyId,draftHash},hash);
-  template=canonicalControlSpec(template);validateTemplate(template);c=companyContext(c,{pageUrl:template.evidence.sourceUrl});if(new URL(template.evidence.sourceUrl).origin!==c.origin)throw Error('COMPANY_ORIGIN_MISMATCH');
-  const capture=await store.get('runs',formAssetKeys(companyId).capture);await assertConstructionCoverage(capture);assertCompleteness(capture);
-  await mappingCapture({companyId,captureId:capture.captureId,pageUrl:capture.pageUrl});
-  const t=draftTemplate(template);
-  await assertStoredChoiceGoals(t,{store,companyId,profile:await loadProfile(profileFile),required:true});
-  await assertStoredChoiceResolutions(t,{store,companyId,profile:await loadProfile(profileFile)});
-  if(!profileFile)throw Error('PROFILE_REQUIRED_FOR_NEW_QUESTIONS');
-  await registerFormDraft(store,{companyId,template:t});
-  await updateProfile(profileFile,p=>registerTemplateContract(p,{companyId,template:t,templateHash:hash(t),stage:'construction'}));
-  // Persist company-to-template binding privately; shipped catalog contains no user answers.
-  // The finalized template already occupies this company code; no secondary binding map.
-  await refreshBindings();
-  const [saved,personal]=await Promise.all([constructionTemplate(store,t.id),loadProfile(profileFile)]);
-  if(hash(saved)!==hash(t))throw Error('TEMPLATE_STORAGE_READBACK_FAILED');
-  for(const page of t.pages){const original=new URL(t.evidence.sourceUrl),pageUrl=original.pathname.startsWith(page.pathPrefix)?original.href:new URL(page.pathPrefix,original).href,contract=lookupCompanyForm(personal,companyId,pageUrl).form?.draftExecutionContract;
-   if(contract?.templateHash!==hash(t)||hash((contract.fields||[]).map(({index,...f})=>f))!==hash(page.fields))throw Error('PROFILE_CONTRACT_STORAGE_READBACK_FAILED');}
-  return {templateId:t.id,templateHash:hash(t),status:'captured_not_live_verified',storageAudit:contractAuditSummary(auditStoredContract(saved)),storageReadback:'verified'};
+registerOperation('template_register',{description:'核对form_build_template已覆盖保存的唯一正式公司模板及内容版本；只接受templateId和templateHash，不接收草稿或内联模板。',inputSchema:{companyId:z.string(),roleId:z.string().optional(),templateId:z.string(),templateHash:z.string().length(64)}},wrap(async a=>engine.withCompanyLease(a.companyId,async()=>{
+ if(a.templateId!==a.companyId)throw Error('COMPANY_TEMPLATE_ID_MISMATCH');
+ const t=await constructionTemplate(store,a.templateId,a.templateHash);
+ const progress=await store.get('runs',formAssetKeys(a.companyId).update);
+ if(!progress.readyToRegister||progress.blockers?.length)throw Error('COMPANY_TEMPLATE_UPDATE_INCOMPLETE');
+ const capture=await store.get('runs',formAssetKeys(a.companyId).capture);await assertConstructionCoverage(capture);assertCompleteness(capture);
+ await assertStoredChoiceGoals(t,{store,companyId:a.companyId,profile:await loadProfile(profileFile),required:true});
+ await assertStoredChoiceResolutions(t,{store,companyId:a.companyId,profile:await loadProfile(profileFile)});
+ assertStoredExecutionContract(await loadProfile(profileFile),a.companyId,t);await refreshBindings();
+ return {templateId:t.id,templateHash:hash(t),status:'captured_not_live_verified',storageReadback:'verified'};
 })));
 registerOperation('prepare_plan',{description:'正式填写前编译并保存全部字段的类型、位置、动作、依赖、选项和预期读回。严格校验个人JSON类型与本地附件；不访问浏览器。返回冻结计划ID与Hash，未通过不得开始填写。',inputSchema:{tasks:z.array(z.object({companyId:z.string(),pageUrl:z.string().url(),roleId:z.string().optional(),templateHash:z.string(),decisions:z.record(z.string(), z.unknown()).optional()})).min(1).max(20)}},wrap(async({tasks})=>{
   if(!profileFile)throw Error('PROFILE_REQUIRED_FOR_NEW_QUESTIONS');
@@ -859,9 +838,9 @@ registerOperation('prepare_plan',{description:'正式填写前编译并保存全
   for(const task of tasks){
     const formRoute=await engine.formRoute(task);
     if(formRoute.route!=='reuse'){plans.push({...formRoute,status:'needs_form_acquisition',readyForExecution:false});continue;}
-    assertQuestionsMapped(profile,task.companyId,task.pageUrl);
     const company=engine.companyForTask(task);if(!company?.templateId)throw Error('COMPANY_NOT_COVERED');
     const template=await store.get('templates',company.templateId);
+    assertQuestionsMapped(profile,task.companyId,task.pageUrl,template);
     plans.push(await engine.preparePlan({...task,...await resolveInputs(profile,template,task.decisions,task.companyId,task)}));
   }
   return {plans,browserAccess:false};
@@ -870,9 +849,9 @@ registerOperation('batch_prepare',{description:'仅执行填写前已编译冻�
   if(!profileFile)throw Error('PROFILE_REQUIRED_FOR_NEW_QUESTIONS');
   const profile=await loadProfile(profileFile),tasks=[];
   for(const task of args.tasks){
-    assertQuestionsMapped(profile,task.companyId,task.pageUrl);
     const c=engine.companyForTask(task);if(!c?.templateId)throw Error('COMPANY_NOT_COVERED');
-    const t=await store.get('templates',c.templateId), resolved=await resolveInputs(profile,t,task.decisions,task.companyId,task);
+    const t=await store.get('templates',c.templateId);assertQuestionsMapped(profile,task.companyId,task.pageUrl,t);
+    const resolved=await resolveInputs(profile,t,task.decisions,task.companyId,task);
     tasks.push({...task,...resolved});
   }
   return engine.prepare({...args,tasks});

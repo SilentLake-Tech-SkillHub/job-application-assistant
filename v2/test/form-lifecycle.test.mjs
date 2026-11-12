@@ -4,18 +4,18 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import os from 'node:os';import path from 'node:path';
 import {Store,hash} from '../shared/engine.mjs';
 import {observedSeal} from './fixtures/observed-seal.mjs';
-import {registerFormDraft,constructionTemplate,promoteSealedTemplate} from '../shared/template-lifecycle.mjs';
+import {updateCompanyTemplate,constructionTemplate,promoteSealedTemplate} from '../shared/template-lifecycle.mjs';
 import {templateState,assertReaRequired,clearTemplateFailures,recordRealFillFailure} from '../shared/template-state.mjs';
 import {retainControlChoices,bindControlChoices,formScope,compatibleInventory} from '../shared/control-choice-store.mjs';
 const template=()=>({id:'C00001',version:1,evidence:{formId:'C00001',sourceUrl:'https://example.com/form?jobAdId=one&userId=old',observedAt:'synthetic'},pages:[{pathPrefix:'/form',fields:[{id:'name',source:'name',label:'Name',kind:'text',control:{type:'text',valueType:'string',readbackType:'string'},read:{selector:'#name',kind:'value'},actions:[{method:'fill',selector:'#name'}]}]}]});
 async function setup(fn){const root=await mkdtemp(path.join(os.tmpdir(),'form-lifecycle-'));try{const store=new Store(root),o=observedSeal(template(),'S0001');await o.persist(store);await store.put('runs',o.probe.id,o.probe);await store.put('templates',o.template.id,o.template);await fn(store,o);}finally{await rm(root,{recursive:true,force:true});}}
-test('registering a draft and failing finalization leave official hash and seal intact',()=>setup(async(store,o)=>{
+test('updating the official definition precedes validation; failed finalization retains that updated definition',()=>setup(async(store,o)=>{
  const before=hash(o.template),draft=structuredClone(o.template);draft.pages[0].fields[0].label='Revised';
- await registerFormDraft(store,{companyId:'S0001',template:draft});
- assert.equal(hash(await store.get('templates',draft.id)),before);
+ await updateCompanyTemplate(store,{companyId:'S0001',template:draft});
+ assert.notEqual(hash(await store.get('templates',draft.id)),before);
  const candidate=await constructionTemplate(store,draft.id);assert.equal(candidate.pages[0].fields[0].label,'Revised');
  await assert.rejects(promoteSealedTemplate(store,{companyId:'S0001',template:candidate,probe:{...o.probe,status:'failed'}}));
- assert.equal(hash(await store.get('templates',draft.id)),before);assert.equal((await templateState(o.template,'S0001')).reason,'available');
+ assert.equal(hash(await store.get('templates',draft.id)),hash(candidate));assert.equal((await templateState(o.template,'S0001')).reason,'available');
 }));
 test('a built form stays available whatever the later evidence looks like, until a real fill fails',()=>setup(async(store,o)=>{
  await clearTemplateFailures(store,o.template);await assert.rejects(store.get('runs','seal-C00001'),{code:'ENOENT'});
@@ -66,7 +66,7 @@ test('a closed extra repeat row preserves its evidenced definition; a missing or
 });
 
 test('a promoted proof survives the next failed draft probe under the same form key',()=>setup(async(store,o)=>{
- const draft=await registerFormDraft(store,{companyId:'S0001',template:o.template});const probe={...o.probe,id:'draft-probe-C00001',templateHash:hash(draft)};await store.put('runs',probe.id,probe);
+ const draft=await updateCompanyTemplate(store,{companyId:'S0001',template:o.template});const probe={...o.probe,id:'condition-probe-C00001',templateHash:hash(draft)};await store.put('runs',probe.id,probe);
  const sealed=await promoteSealedTemplate(store,{companyId:'S0001',template:draft,probe});assert.equal(sealed.coverage.proof.runId,'sealed-probe-C00001');
  await store.put('runs',probe.id,{...probe,status:'failed'});assert.equal((await templateState(sealed,'S0001')).reason,'available');
  await assert.rejects(store.put('runs',sealed.coverage.proof.runId,{operation:'unrelated'}),/SEALED_EVIDENCE_PROTECTED/);

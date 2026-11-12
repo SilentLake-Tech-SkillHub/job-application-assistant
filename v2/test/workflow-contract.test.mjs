@@ -7,7 +7,7 @@ const profile=()=>({schemaVersion:1,entities:{},sources:{},facts:{},companyForms
 test('each observed field persists full content/component/actions/readback even when construction blocked',()=>{
  const t=template();t.pages[0].fields[0].actions=[];t.pages[0].fields[0].constructionBlockers=['CONTROL_DRIVER_REQUIRED'];const p=profile();
  registerTemplateContract(p,{companyId:'synthetic',template:t,templateHash:'hash',stage:'construction'});
- const stored=Object.values(p.companyForms)[0].draftExecutionContract;assert.equal(stored.status,'construction_incomplete');assert.deepEqual(stored.fields[0].constructionBlockers,['CONTROL_DRIVER_REQUIRED']);assert.equal(stored.fields[0].inventoryType,'combobox');assert.equal(stored.storageAudit.ready,false);
+ const stored=Object.values(p.companyForms)[0].executionContract;assert.equal(stored.status,'construction_incomplete');assert.deepEqual(stored.fields[0].constructionBlockers,['CONTROL_DRIVER_REQUIRED']);assert.equal(stored.fields[0].inventoryType,'combobox');assert.equal(stored.storageAudit.ready,false);
  assert.throws(()=>registerTemplateContract(p,{companyId:'synthetic',template:t,templateHash:'hash'}),/COMPLETE_EXECUTION_CONTRACT_REQUIRED/);
 });
 test('interactive school cannot be parked as readonly text or ordinary user action',()=>{
@@ -83,4 +83,24 @@ test('a genuine new question can be semantically defined without inventing a per
  assert.throws(()=>mapProfileQuestions(p,{...args,evidence:'observed question',mappings:[{questionId,factKey:'preferences.locations'}]}),/UNKNOWN_QUESTION_OR_FACT/);
  mapProfileQuestions(p,{...args,evidence:'observed new location preference, no existing semantic source',mappings:[{questionId,factKey:'preferences.locations',define:{label:'Preferred locations',canonicalType:'string[]'}}]});
  assert.equal(p.facts['preferences.locations'].status,'missing');assert.equal(p.facts['preferences.locations'].value,null);assert.equal(p.companyForms[r.pageKey].mappings[questionId].status,'mapped');
+});
+
+test('official company content update removes retired locators, preserves facts and retains genuine new questions across companies',async()=>{
+ const {lookupCompanyForm,assertQuestionsMapped}=await import('../shared/profile.mjs');
+ for(const companyId of ['C00001','C00002']){
+  const p=profile();p.sources.fixture={kind:'test'};p.facts.school={status:'known',value:'One University',sourceIds:['fixture']};
+  const t=template();t.id=companyId;t.version=7;t.pages[0].fields[0].inventorySelectors=['#school'];
+  registerTemplateContract(p,{companyId,template:t,templateHash:'current',stage:'construction'});
+  const form=lookupCompanyForm(p,companyId,t.evidence.sourceUrl).form;
+  form.draftExecutionContract={templateVersion:4};
+  form.mappings.old={selector:'#old-school',factKey:'school',active:false,coverageRequired:true,status:'mapped'};
+  form.mappings.current={selector:'#school',factKey:'school',active:true,coverageRequired:true,status:'mapped'};
+  const original=JSON.stringify(p.facts);registerTemplateContract(p,{companyId,template:t,templateHash:'current',stage:'construction'});
+  assert.equal(form.draftExecutionContract,undefined);assert.equal(form.executionContract.templateVersion,7);assert.equal(form.mappings.old,undefined);assert.equal(JSON.stringify(p.facts),original);
+  assert.throws(()=>assertQuestionsMapped(p,companyId,t.evidence.sourceUrl),/CURRENT_OFFICIAL_TEMPLATE_REQUIRED/);
+  form.executionContract={templateVersion:4,fields:[]};
+  assertQuestionsMapped(p,companyId,t.evidence.sourceUrl,t);
+  form.mappings.newQuestion={selector:'#unmapped-current',factKey:'school',active:true,coverageRequired:true,status:'mapped'};
+  assert.throws(()=>assertQuestionsMapped(p,companyId,t.evidence.sourceUrl,t),/NEW_QUESTIONS_REQUIRE_TEMPLATE_MAPPING/);
+ }
 });

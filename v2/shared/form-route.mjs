@@ -13,8 +13,8 @@ export class FormRouter {
   let template=null;
   if(templateId)try{template=await this.store.get('templates',templateId);}catch(e){if(e.code!=='ENOENT')throw e;}
   let state=await templateState(template);
-  let draft;try{draft=await this.store.get('runs',formAssetKeys(companyId).draft);}catch(e){if(e.code!=='ENOENT')throw e;}
-  if(draft?.construction?.revision===1)return out({status:'unsealed',reason:'real_fill_failure',route:'incremental',blockers:['COMPANY_TEMPLATE_UPDATE_IN_PROGRESS']},'COMPANY_TEMPLATE_UPDATE_IN_PROGRESS',{nextStage:'construction_cycle',nextTools:['form_cycle_status']});
+  let update;try{update=await this.store.get('runs',formAssetKeys(companyId).update);}catch(e){if(e.code!=='ENOENT')throw e;}
+  if(update?.construction?.revision===1)return out({status:'unsealed',reason:'real_fill_failure',route:'incremental',blockers:['COMPANY_TEMPLATE_UPDATE_IN_PROGRESS']},'COMPANY_TEMPLATE_UPDATE_IN_PROGRESS',{nextStage:'construction_cycle',nextTools:['form_cycle_status']});
   if(!template)return out(state,templateId?'COMPANY_FORM_ASSET_MISSING':'NO_COMPANY_FORM_ASSET');
   const routed=await this.routeTemplate(template,{companyId,roleId,pageUrl});
   if(routed.pages.filter(p=>new URL(pageUrl).pathname.startsWith(p.pathPrefix)).length!==1)return out({status:'unsealed',reason:'real_fill_failure',route:'incremental',blockers:['FORM_PATH_NOT_COVERED']},'FORM_PATH_NOT_COVERED',{nextTools:['form_capture_visual','capture_rea_structure','form_review_completeness']});

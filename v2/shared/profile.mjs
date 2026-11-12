@@ -124,7 +124,8 @@ export function assertQuestionsMapped(profile,companyId,pageUrl,constructionTemp
   const {pageKey,form}=lookupCompanyForm(profile,companyId,pageUrl);
   if(!form)throw Error('FORM_QUESTIONS_NOT_REGISTERED');
   if(Object.values(form.mappings).some(m=>(m.active!==false||m.coverageRequired)&&!['mapped','user_only','authorized_profile','authorized_privacy'].includes(m.status)))throw Error('NEW_QUESTIONS_REQUIRE_PROFILE_MAPPING');
-  const contract=constructionTemplate&&form.draftExecutionContract?.templateHash===hash(constructionTemplate)?form.draftExecutionContract:form.executionContract;
+  if(!constructionTemplate?.pages)throw Error('CURRENT_OFFICIAL_TEMPLATE_REQUIRED');
+  const contract={fields:constructionTemplate.pages.flatMap(page=>page.fields)};
   for(const m of Object.values(form.mappings))if(m.coverageRequired&&m.status==='mapped'&&!contract?.fields?.some(f=>f.source===m.factKey&&f.inventorySelectors?.includes(m.selector)))throw Error('NEW_QUESTIONS_REQUIRE_TEMPLATE_MAPPING');
   for(const m of Object.values(form.mappings))if((m.active!==false||m.coverageRequired)&&!Object.values(MATERIAL_SOURCES).includes(m.factKey)&&!profile.facts[m.factKey])throw Error('MAPPED_FACT_MISSING');
 }
@@ -157,7 +158,12 @@ export function registerTemplateContract(profile,{companyId,template,templateHas
     const {pageKey,form}=lookupCompanyForm(profile,companyId,pageUrl,{create:true});
     const prior=form||{companyId,pageUrl,mappings:{}};
     const fields=page.fields.map((f,index)=>({...structuredClone(f),index}));
-    prior[stage==='construction'?'draftExecutionContract':'executionContract']={revision:2,status:stage==='construction'?(audit.ready?'construction_complete':'construction_incomplete'):'registered',validForCurrentInventory:true,templateId:template.id,templateVersion:template.version,templateHash,inventoryHash:prior.inventoryHash||null,sections:page.sections,groups:page.groups||[],fields,evidence:template.evidence,storageAudit:audit};
+    prior.executionContract={revision:2,status:stage==='construction'?(audit.ready?'construction_complete':'construction_incomplete'):'registered',validForCurrentInventory:true,templateId:template.id,templateVersion:template.version,templateHash,inventoryHash:prior.inventoryHash||null,sections:page.sections,groups:page.groups||[],fields,evidence:template.evidence,storageAudit:audit};
+    delete prior.draftExecutionContract;
+    // Retired locators cannot constrain a newly persisted official definition.
+    // Facts stay in the profile; current/unknown active questions stay registered.
+    const selectors=new Set(fields.flatMap(f=>f.inventorySelectors||[f.read?.selector]));
+    for(const [id,m]of Object.entries(prior.mappings||{}))if(m.active===false&&m.selector&&!selectors.has(m.selector))delete prior.mappings[id];
     profile.companyForms[pageKey]=prior;
     if(stage==='construction')continue;
     for(const f of page.fields){
@@ -175,7 +181,7 @@ export function registerTemplateContract(profile,{companyId,template,templateHas
 }
 export function assertStoredExecutionContract(profile,companyId,template){
  for(const page of template.pages){const source=new URL(template.evidence.sourceUrl),url=template.companyTemplateVersion===2?source.href:source.pathname.startsWith(page.pathPrefix)?source.href:new URL(page.pathPrefix,source).href,stored=lookupCompanyForm(profile,companyId,url).form?.executionContract;
-  const candidate=stored?.templateHash===hash(template)?stored:lookupCompanyForm(profile,companyId,url).form?.draftExecutionContract;
+  const candidate=stored;
   if(!candidate||candidate.templateHash!==hash(template)||hash((candidate.fields||[]).map(({index,...f})=>f))!==hash(page.fields))throw Error('PROFILE_CONTRACT_STORAGE_READBACK_FAILED');
  }
  return true;

@@ -213,7 +213,7 @@ export class Engine {
       if(hash(template)!==task.templateHash)throw Error('TEMPLATE_VERSION_CHANGED');
       const matches=(await this.routeTemplate(template,task)).pages.filter(p=>new URL(task.pageUrl).pathname.startsWith(p.pathPrefix));
       if(matches.length!==1)throw Error('AMBIGUOUS_PROBE_PAGE');
-      const run={id:'draft-probe-'+template.id,operation:'internal_condition_probe',companyId:company.id,pageUrl:task.pageUrl,pageId:task.pageId,browserBinding:task.browserBinding,templateHash:hash(template),startedAt:new Date().toISOString(),status:'running',submission:'not_performed',save:'not_verified',authorizationEvidence:authorization.evidence};
+      const run={id:'condition-probe-'+template.id,operation:'internal_condition_probe',companyId:company.id,pageUrl:task.pageUrl,pageId:task.pageId,browserBinding:task.browserBinding,templateHash:hash(template),startedAt:new Date().toISOString(),status:'running',submission:'not_performed',save:'not_verified',authorizationEvidence:authorization.evidence};
       const started=performance.now();
       try{
         await this.store.put('runs',run.id,run);

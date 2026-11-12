@@ -26,7 +26,7 @@
 | 已确认投递输入 | `岗位交接/公司/<公司编码>.json` | company_store.py |
 | 个人事实 | `产品管理/网申个人信息主档.json` | profile 模块 |
 | 公司公共控件与岗位绑定 | `.runtime/application/templates/<公司编码>.json` | 建库固定操作 |
-| 草稿、计划、核验、当前执行状态 | `.runtime/application`、`.runtime/login`、`.runtime/role-queue` | Store、TaskRecords、RoleQueue |
+| 建库进度元数据、计划、核验、当前执行状态 | `.runtime/application`、`.runtime/login`、`.runtime/role-queue` | Store、TaskRecords、RoleQueue |
 | 浏览器能力 | `.runtime/browser-capability.json` | 能力配置入口 |
 | 投递结果 | `岗位交接/投递回传.json` | application_closeout |
 | 依赖缓存及安装/分发 | 部署选定位置 | 安装脚本生成并读回 |
@@ -54,3 +54,5 @@
 `node scripts/update-runtime.mjs --preview` 从当前调用进程的祖先链定位实际执行宿主，只列出该宿主直接管理、本组件目录内的登录/申请进程。正式执行去掉 `--preview`：旧版接口利用Node本机调试接口发现旧SDK服务，检查请求空闲后，在原stdin/stdout管道内交接新版；进程和宿主连接保留。已接入新版的接口先比较常驻适配器指纹，接口本身落后时也在原管道内交接；之后完成核心update和版本核验。Agent随后用当前聊天里的runtime_info与CLI读回同一版本，再接续原任务。
 
 调试接口只在本机短时开启，先核对PID及组件启动命令；端口被占用时拒绝，不连接其他服务。完成或失败后关闭本次开启的调试接口。旧SDK请求仍在执行时拒绝交接；新适配器加载失败时恢复旧监听。该兼容桥限定当前已测试的Node与SDK接口，入口不执行网页业务、不改变部署权限。未来更新继续使用同一组件命令和component_runtime，不需要用户另行提出宿主重连事项。
+
+公司模板先覆盖更新内容及版本，主档仅登记同一正式模板的当前执行契约；调用只读取templates/<公司编码>.json。form-update只存进度和结果，不存模板定义。draft是临时文件，更新完成后删除，不存在并行执行来源。

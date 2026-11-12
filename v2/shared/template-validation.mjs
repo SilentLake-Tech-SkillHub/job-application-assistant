@@ -16,7 +16,7 @@ export function assertTemplateContract(template,probe,companyId){
  return true;
 }
 // An imported model-authored asset cannot certify its own execution readiness.
-export function draftTemplate(template){
+export function unverifiedTemplate(template){
  const t=structuredClone(template);
  t.coverage={...t.coverage,allConditionalBranchesVerified:false,allControlsMapped:false,allDriversSupported:false};
  delete t.coverage.proof;

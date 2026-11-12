@@ -50,7 +50,7 @@ test('prefix contracts require a literal single-line prefix and a real selector'
 });
 test('bound role reads prefix proof from the exact original page without replacing account or ID',async()=>{
  const source=await readFile(new URL('../shared/application-service.mjs',import.meta.url),'utf8');
- const body=source.slice(source.indexOf('async function boundRole(args,'),source.indexOf('async function reconcileSelectorMappings'));
+ const body=source.slice(source.indexOf('async function boundRole(args,'),source.indexOf('async function refreshBindings()'));
  async function run({prefix=true,snapshotId='actual',account='User',proofUrl=url,proofSource='live_dom',userOperated=false}={}){
   const plan={...page};if(!prefix)delete plan.rolePrefix;const calls=[];
   const snapshot={pageUrl:url,roleTitle:prefix?'Applying for: Product':'Product',roleIdentity:{parameter:'id',value:snapshotId},account,loginFormPresent:false};

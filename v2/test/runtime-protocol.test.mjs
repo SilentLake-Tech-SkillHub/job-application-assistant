@@ -31,7 +31,7 @@ test('actual application MCP reports new runtime and missing company form routes
  const unknown=await c.callTool({name:'workflow_next',arguments:{companyId:'absent-company',pageUrl}},undefined,{timeout:3000});assert.equal(unknown.isError,true);const failure=JSON.parse(unknown.content[0].text);assert.equal(failure.error,'COMPANY_ORIGIN_MISMATCH');assert.equal(failure.continuation.owner,'agent');assert.ok(failure.failureEvidenceId);
  const route=await call('workflow_next',{companyId,pageUrl});assert.equal(route.workflowContract.tracked,true);assert.equal(route.continuation.shouldContinue,true);assert.equal(route.completion.complete,false);assert.equal(route.route,'acquire');assert.equal(route.browserAccess,false);assert.equal(route.nextTools[0],'form_capture_visual');assert.ok(route.nextTools.includes('capture_rea_structure'));
  const template={id:'synthetic-import',version:1,evidence:{sourceUrl:pageUrl,observedAt:'synthetic'},coverage:{allControlsMapped:true,allConditionalBranchesVerified:true,allDriversSupported:true,proof:{runId:'model-authored'}},pages:[{pathPrefix:new URL(pageUrl).pathname,readySelector:'#form',roleSelector:'h1',roleTitle:'Synthetic',sections:[{title:'Basics'}],sectionDiscovery:{selector:'section',titleSelector:'h2'},fields:[{id:'name',label:'Name',source:'name',kind:'text',required:false,control:{type:'text',valueType:'string',readbackType:'string'},read:{kind:'value',selector:'#name'},actions:[{method:'fill',selector:'#name'}]}]}]};
- const inline=await c.callTool({name:'template_register',arguments:{companyId,template}});assert.equal(inline.isError,true);assert.equal(JSON.parse(inline.content[0].text).error,'MCP_BUILT_DRAFT_REQUIRED');
+ const inline=await c.callTool({name:'template_register',arguments:{companyId,template}});assert.equal(inline.isError,true);assert.match(JSON.parse(inline.content[0].text).error,/templateId|templateHash/);
  const privateStore=new Store(path.join(d,'application'));
  const withVisual=async(capture)=>{
   const keys=formAssetKeys(capture.formId),visualPage={pageId:capture.pageId,pageUrl:capture.pageUrl,generation:'fixture',sessionId:'fixture'},screenshotId=randomUUID();
@@ -44,7 +44,7 @@ test('actual application MCP reports new runtime and missing company form routes
  };
  await privateStore.put('runs','browser-channel-bindings',{[origin]:{channel:'chrome',batchId:'offline-fixture-assignment',companyId}});
  await privateStore.put('runs','test-draft',{companyId,template,readyToRegister:true,blockers:[]});
- const imported=await c.callTool({name:'template_register',arguments:{companyId,draftId:'test-draft',draftHash:hash(template)}});assert.equal(imported.isError,true);assert.equal(JSON.parse(imported.content[0].text).error,'MCP_BUILT_DRAFT_REQUIRED');
+ const imported=await c.callTool({name:'template_register',arguments:{companyId,draftId:'test-draft',draftHash:hash(template)}});assert.equal(imported.isError,true);assert.match(JSON.parse(imported.content[0].text).error,/templateId|templateHash/);
  for(const args of [{companyId,draftId:'test-draft',draftHash:'0'.repeat(64)},{companyId,template,draftId:'test-draft',draftHash:hash(template)},{companyId}]){
   const rejected=await c.callTool({name:'template_register',arguments:args},undefined,{timeout:3000});assert.equal(rejected.isError,true);
  }
@@ -73,9 +73,14 @@ test('actual application MCP reports new runtime and missing company form routes
  await prefixFixture.persist(privateStore);const prefixCaptureId=prefixFixture.capture.captureId,prefixStructureId=formAssetKeys(prefixFixture.capture.formId).structure;
  await call('form_review_completeness',{companyId,captureId:prefixCaptureId,reviewedSelectors:['#prefix-name'],primary:await withVisual(prefixFixture.capture),evidence:'Synthetic complete frontend review'});
  const prefixBuilt=await call('form_build_template',{companyId,captureId:prefixCaptureId,structureId:prefixStructureId,page:{roleTitle:'Product',roleSelector:'#role',rolePrefix:'Applying for: ',readySelector:'#form',sections:[{title:'Basics'}],sectionDiscovery:{selector:'section',titleSelector:'h2'}}});
- const prefixSaved=await privateStore.get('runs',prefixBuilt.draftId);assert.equal(prefixSaved.template.pages[0].rolePrefix,'Applying for: ');assert.equal(prefixSaved.template.pages[0].roleSelector,'#role');
+ const prefixSaved=await privateStore.get('templates',prefixBuilt.templateId);assert.equal(prefixSaved.pages[0].rolePrefix,'Applying for: ');assert.equal(prefixSaved.pages[0].roleSelector,'#role');
  // An established company can still reuse its old template, but structural rebuilding needs current REA evidence.
- const reusable=structuredClone(prefixSaved.template);reusable.coverage={allControlsMapped:true,allDriversSupported:true,allConditionalBranchesVerified:true,proof:{runId:'synthetic-built'}};await privateStore.put('templates',companyId,reusable);
+ const reusable=structuredClone(prefixSaved);reusable.coverage={allControlsMapped:true,allDriversSupported:true,allConditionalBranchesVerified:true,proof:{runId:'synthetic-built'}};await privateStore.put('templates',companyId,reusable);
+ for(const name of ['prepare_plan','batch_prepare']){
+  const task={companyId,pageUrl,templateHash:hash(reusable),...(name==='batch_prepare'?{planId:'execution-plan-'+companyId,planHash:'0'.repeat(64)}:{})};
+  const response=await c.callTool({name,arguments:{tasks:[task],...(name==='batch_prepare'?{authorization:{prepare:true,evidence:'synthetic',uploads:false,sensitiveFields:false}}:{})}});
+  if(response.isError)assert.doesNotMatch(JSON.parse(response.content[0].text).error,/before initialization|is not defined/);
+ }
  const observedCapture=await privateStore.get('runs',prefixCaptureId);observedCapture.contentHash=captureContentHash(observedCapture);await privateStore.put('runs',prefixCaptureId,observedCapture);await privateStore.remove('runs',prefixStructureId);
  const stale=await c.callTool({name:'form_build_template',arguments:{companyId,captureId:prefixCaptureId,page:{roleSelector:'#role',rolePrefix:'Applying for: ',readySelector:'#form',sections:[{title:'Basics'}],sectionDiscovery:{selector:'section',titleSelector:'h2'}}}});
  assert.equal(stale.isError,true);assert.equal(JSON.parse(stale.content[0].text).error,'PRIMARY_CONTROL_REVIEW_REQUIRED');
@@ -86,10 +91,10 @@ test('actual application MCP reports new runtime and missing company form routes
  const materialField={...template.pages[0].fields[0],id:'code',source:'material:referralCode',label:'推荐码',inventoryLabel:'推荐码',inventoryType:'text',inventorySelectors:['#code'],read:{kind:'value',selector:'#code'},actions:[{method:'fill',selector:'#code'}]};
  const materialTemplate={...template,id:'material-source',coverage:{},pages:[{...template.pages[0],fields:[materialField]}]};const materialFixture=acquisitionFixture(materialTemplate,companyId);await materialFixture.persist(privateStore);
  await call('form_review_completeness',{companyId,captureId:materialFixture.capture.captureId,reviewedSelectors:['#code'],primary:await withVisual(materialFixture.capture),evidence:'Synthetic material field complete review'});
- const materialBuilt=await call('form_build_template',{companyId,structureId:formAssetKeys(materialFixture.capture.formId).structure,page:{...template.pages[0],fields:undefined,pathPrefix:undefined}});await call('template_register',{companyId,draftId:materialBuilt.draftId,draftHash:materialBuilt.draftHash});
- await assert.rejects(privateStore.get('templates',materialFixture.capture.formId),{code:'ENOENT'});const stored=(await privateStore.get('runs',formAssetKeys(materialFixture.capture.formId).draft)).template,probeId=randomUUID();
+ const materialBuilt=await call('form_build_template',{companyId,structureId:formAssetKeys(materialFixture.capture.formId).structure,page:{...template.pages[0],fields:undefined,pathPrefix:undefined}});await call('template_register',{companyId,templateId:materialBuilt.templateId,templateHash:materialBuilt.templateHash});
+ const stored=await privateStore.get('templates',materialFixture.capture.formId),probeId=randomUUID();
  await privateStore.put('runs',probeId,{id:probeId,operation:'internal_condition_probe',companyId,templateHash:hash(stored),status:'verified',restoration:'verified',branches:[{source:'__baseline__',value:null,status:'verified',newQuestions:0,selected:true,roleMatched:true,conditionFieldsMatched:true,inventory:[{selector:'#code',label:'推荐码',type:'text',required:false}]}]});
- const premature=await c.callTool({name:'template_finalize',arguments:{companyId,templateHash:hash(stored),probeRunId:probeId}});assert.equal(premature.isError,true);assert.equal(JSON.parse(premature.content[0].text).error,'VERIFIED_CONTROL_INTERACTION_REQUIRED');await assert.rejects(privateStore.get('templates',companyId),{code:'ENOENT'});assert.equal(JSON.parse(await readFile(profile,'utf8')).facts['material:referralCode'],undefined);
+ const premature=await c.callTool({name:'template_finalize',arguments:{companyId,templateHash:hash(stored),probeRunId:probeId}});assert.equal(premature.isError,true);assert.equal(JSON.parse(premature.content[0].text).error,'VERIFIED_CONTROL_INTERACTION_REQUIRED');assert.equal(hash(await privateStore.get('templates',companyId)),hash(stored));assert.equal(JSON.parse(await readFile(profile,'utf8')).facts['material:referralCode'],undefined);
  const currentCapture=await privateStore.get('runs',materialFixture.capture.captureId);
  await privateStore.put('runs',currentCapture.captureId,{...currentCapture,visualPage:{...currentCapture.visualPage,generation:'new-document'}});
  const reopened=await call('form_cycle_status',{companyId});
