@@ -58,7 +58,7 @@ function partiallyRenderedRepeat(){
 test('a partial live inventory preserves mapped repeat fields covered by the current sealed contract',async()=>{
  const f=partiallyRenderedRepeat();
  assert.equal(f.repeat.active,false);
- assertQuestionsMapped(f.profile,'example',f.capture.pageUrl);
+ assertQuestionsMapped(f.profile,'example',f.capture.pageUrl,f.template);
  assert.equal((await assertAcquisitionChain(f.template,{store:f.store,companyId:'example',profile:f.profile})).version,2);
 });
 test('only the current official contract covers inactive mapped repeat fields',async()=>{

@@ -124,7 +124,8 @@ export function assertQuestionsMapped(profile,companyId,pageUrl,constructionTemp
   const {pageKey,form}=lookupCompanyForm(profile,companyId,pageUrl);
   if(!form)throw Error('FORM_QUESTIONS_NOT_REGISTERED');
   if(Object.values(form.mappings).some(m=>(m.active!==false||m.coverageRequired)&&!['mapped','user_only','authorized_profile','authorized_privacy'].includes(m.status)))throw Error('NEW_QUESTIONS_REQUIRE_PROFILE_MAPPING');
-  const contract=form.executionContract;
+  if(!constructionTemplate?.pages)throw Error('CURRENT_OFFICIAL_TEMPLATE_REQUIRED');
+  const contract={fields:constructionTemplate.pages.flatMap(page=>page.fields)};
   for(const m of Object.values(form.mappings))if(m.coverageRequired&&m.status==='mapped'&&!contract?.fields?.some(f=>f.source===m.factKey&&f.inventorySelectors?.includes(m.selector)))throw Error('NEW_QUESTIONS_REQUIRE_TEMPLATE_MAPPING');
   for(const m of Object.values(form.mappings))if((m.active!==false||m.coverageRequired)&&!Object.values(MATERIAL_SOURCES).includes(m.factKey)&&!profile.facts[m.factKey])throw Error('MAPPED_FACT_MISSING');
 }

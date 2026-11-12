@@ -165,7 +165,7 @@ const engine=new Engine({store,companies:catalog.companies,browser,visionReviewe
   if(plan?.provider!=='feishu')fields=await enrichControlContext(currentPage,fields);
   fields=normalizeControlPolicy(fields);
   await updateProfile(profileFile,p=>registerPlannedQuestions(p,{companyId,pageUrl,fields,observedAt:new Date().toISOString(),coverageRequired:discoveryOnly},plan));
-  if(!discoveryOnly)assertQuestionsMapped(await loadProfile(profileFile),companyId,pageUrl,constructionTemplate);
+  if(!discoveryOnly)assertQuestionsMapped(await loadProfile(profileFile),companyId,pageUrl,await store.get('templates',companyId));
 }});
 const packageInfo=JSON.parse(await readFile(path.join(root,'package.json'),'utf8'));
 export const service=new OperationService({name:'recruiting-form-batch',version:packageInfo.version});
@@ -320,7 +320,7 @@ async function prepareRole(args){
   const formRoute=await engine.formRoute({companyId:queued.t.companyId,roleId:queued.t.roleId,pageUrl:queuedState.returnUrl});
   if(formRoute.route!=='reuse')return {status:'needs_form_acquisition',...formRoute,submission:'not_performed'};
   const {t,state,template}=await boundRole(args),profile=await loadProfile(profileFile);
-  assertQuestionsMapped(profile,t.companyId,state.returnUrl);
+  assertQuestionsMapped(profile,t.companyId,state.returnUrl,template);
   const task={companyId:t.companyId,roleId:t.roleId,pageUrl:state.returnUrl,pageId:state.pageId,browserBinding:state.browserBinding,taskId:t.taskId,templateHash:hash(template),...await resolveInputs(profile,template,{},t.companyId,{roleId:t.roleId,pageUrl:state.returnUrl,confirmedOfficialId:state.siteRoleId||t.officialId}),roleQueueArgs:{queueId:args.queueId,queueHash:args.queueHash,taskId:args.taskId}};
   const plan=await engine.preparePlan(task);
   if(!plan.readyForExecution&&!(args.authorization.allowPartialPreparation&&plan.status==='needs_answers'&&!plan.constructionBlockers?.length))return {...plan,status:plan.status,continuation:continuationFor({plan,template,profile}),submission:'not_performed'};
@@ -339,7 +339,7 @@ registerOperation('role_prepare_fields',{description:'从当前完整冻结计�
  const queued=await queues.task(args);
  return engine.withCompanyLease(queued.t.companyId,async()=>{
   const {t,state,template}=await boundRole(args),profile=await loadProfile(profileFile);
-  assertQuestionsMapped(profile,t.companyId,state.returnUrl);
+  assertQuestionsMapped(profile,t.companyId,state.returnUrl,template);
   const task={companyId:t.companyId,roleId:t.roleId,pageUrl:state.returnUrl,pageId:state.pageId,browserBinding:state.browserBinding,taskId:t.taskId,templateHash:hash(template),...await resolveInputs(profile,template,{},t.companyId,{roleId:t.roleId,pageUrl:state.returnUrl,confirmedOfficialId:state.siteRoleId||t.officialId})};
   const plan=await engine.preparePlan(task,{leaseHeld:true}),frozenTask={...task,planId:plan.planId,planHash:plan.planHash};
   if(!plan.planId)return {...plan,submission:'not_performed'};
@@ -367,7 +367,7 @@ registerOperation('roles_prepare_batch',{description:'按已确认并发模式�
   if(sameCompanyMultiRole&&(q.executionMode!=='parallel_roles'&&!q.parallelRoles))throw Error('PARALLEL_ROLE_AUTHORIZATION_REQUIRED');
   if(!sameCompanyMultiRole&&!['parallel_roles','parallel_companies'].includes(q.executionMode)&&!q.parallelRoles)throw Error('PARALLEL_ROLE_AUTHORIZATION_REQUIRED');
   const tasks=[],bound=[],preparedPlans=[];
-  for(const taskId of args.taskIds){const a={queueId:args.queueId,queueHash:args.queueHash,taskId};const queued=await queues.task(a),state=await queues.read(taskId);const route=await engine.formRoute({companyId:queued.t.companyId,roleId:queued.t.roleId,pageUrl:state.returnUrl||queued.t.applyUrl||queued.t.url});if(route.route!=='reuse')return {status:'needs_form_acquisition',...route,taskId,submission:'not_performed'};const b=await boundRole(a),profile=await loadProfile(profileFile);assertQuestionsMapped(profile,b.t.companyId,b.state.returnUrl);
+  for(const taskId of args.taskIds){const a={queueId:args.queueId,queueHash:args.queueHash,taskId};const queued=await queues.task(a),state=await queues.read(taskId);const route=await engine.formRoute({companyId:queued.t.companyId,roleId:queued.t.roleId,pageUrl:state.returnUrl||queued.t.applyUrl||queued.t.url});if(route.route!=='reuse')return {status:'needs_form_acquisition',...route,taskId,submission:'not_performed'};const b=await boundRole(a),profile=await loadProfile(profileFile);assertQuestionsMapped(profile,b.t.companyId,b.state.returnUrl,b.template);
     const task={companyId:b.t.companyId,roleId:b.t.roleId,pageUrl:b.state.returnUrl,pageId:b.state.pageId,browserBinding:b.state.browserBinding,taskId:b.t.taskId,templateHash:hash(b.template),...await resolveInputs(profile,b.template,{},b.t.companyId,{roleId:b.t.roleId,pageUrl:b.state.returnUrl}),roleQueueArgs:a};
     const {compiled,...plan}=await engine.preparePlan(task,{transient:true});if(!plan.readyForExecution&&!(args.authorization.allowPartialPreparation&&plan.status==='needs_answers'&&!plan.constructionBlockers?.length))return {...plan,status:plan.status,submission:'not_performed'};tasks.push({...task,planId:plan.planId,planHash:plan.planHash});bound.push(b);preparedPlans.push(compiled);
   }
@@ -838,9 +838,9 @@ registerOperation('prepare_plan',{description:'正式填写前编译并保存全
   for(const task of tasks){
     const formRoute=await engine.formRoute(task);
     if(formRoute.route!=='reuse'){plans.push({...formRoute,status:'needs_form_acquisition',readyForExecution:false});continue;}
-    assertQuestionsMapped(profile,task.companyId,task.pageUrl,template);
     const company=engine.companyForTask(task);if(!company?.templateId)throw Error('COMPANY_NOT_COVERED');
     const template=await store.get('templates',company.templateId);
+    assertQuestionsMapped(profile,task.companyId,task.pageUrl,template);
     plans.push(await engine.preparePlan({...task,...await resolveInputs(profile,template,task.decisions,task.companyId,task)}));
   }
   return {plans,browserAccess:false};
@@ -849,9 +849,9 @@ registerOperation('batch_prepare',{description:'仅执行填写前已编译冻�
   if(!profileFile)throw Error('PROFILE_REQUIRED_FOR_NEW_QUESTIONS');
   const profile=await loadProfile(profileFile),tasks=[];
   for(const task of args.tasks){
-    assertQuestionsMapped(profile,task.companyId,task.pageUrl,template);
     const c=engine.companyForTask(task);if(!c?.templateId)throw Error('COMPANY_NOT_COVERED');
-    const t=await store.get('templates',c.templateId), resolved=await resolveInputs(profile,t,task.decisions,task.companyId,task);
+    const t=await store.get('templates',c.templateId);assertQuestionsMapped(profile,task.companyId,task.pageUrl,t);
+    const resolved=await resolveInputs(profile,t,task.decisions,task.companyId,task);
     tasks.push({...task,...resolved});
   }
   return engine.prepare({...args,tasks});

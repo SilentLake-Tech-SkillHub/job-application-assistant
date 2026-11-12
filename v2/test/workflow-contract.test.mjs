@@ -97,6 +97,8 @@ test('official company content update removes retired locators, preserves facts 
   form.mappings.current={selector:'#school',factKey:'school',active:true,coverageRequired:true,status:'mapped'};
   const original=JSON.stringify(p.facts);registerTemplateContract(p,{companyId,template:t,templateHash:'current',stage:'construction'});
   assert.equal(form.draftExecutionContract,undefined);assert.equal(form.executionContract.templateVersion,7);assert.equal(form.mappings.old,undefined);assert.equal(JSON.stringify(p.facts),original);
+  assert.throws(()=>assertQuestionsMapped(p,companyId,t.evidence.sourceUrl),/CURRENT_OFFICIAL_TEMPLATE_REQUIRED/);
+  form.executionContract={templateVersion:4,fields:[]};
   assertQuestionsMapped(p,companyId,t.evidence.sourceUrl,t);
   form.mappings.newQuestion={selector:'#unmapped-current',factKey:'school',active:true,coverageRequired:true,status:'mapped'};
   assert.throws(()=>assertQuestionsMapped(p,companyId,t.evidence.sourceUrl,t),/NEW_QUESTIONS_REQUIRE_TEMPLATE_MAPPING/);

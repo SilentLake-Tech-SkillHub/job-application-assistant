@@ -76,6 +76,11 @@ test('actual application MCP reports new runtime and missing company form routes
  const prefixSaved=await privateStore.get('templates',prefixBuilt.templateId);assert.equal(prefixSaved.pages[0].rolePrefix,'Applying for: ');assert.equal(prefixSaved.pages[0].roleSelector,'#role');
  // An established company can still reuse its old template, but structural rebuilding needs current REA evidence.
  const reusable=structuredClone(prefixSaved);reusable.coverage={allControlsMapped:true,allDriversSupported:true,allConditionalBranchesVerified:true,proof:{runId:'synthetic-built'}};await privateStore.put('templates',companyId,reusable);
+ for(const name of ['prepare_plan','batch_prepare']){
+  const task={companyId,pageUrl,templateHash:hash(reusable),...(name==='batch_prepare'?{planId:'execution-plan-'+companyId,planHash:'0'.repeat(64)}:{})};
+  const response=await c.callTool({name,arguments:{tasks:[task],...(name==='batch_prepare'?{authorization:{prepare:true,evidence:'synthetic',uploads:false,sensitiveFields:false}}:{})}});
+  if(response.isError)assert.doesNotMatch(JSON.parse(response.content[0].text).error,/before initialization|is not defined/);
+ }
  const observedCapture=await privateStore.get('runs',prefixCaptureId);observedCapture.contentHash=captureContentHash(observedCapture);await privateStore.put('runs',prefixCaptureId,observedCapture);await privateStore.remove('runs',prefixStructureId);
  const stale=await c.callTool({name:'form_build_template',arguments:{companyId,captureId:prefixCaptureId,page:{roleSelector:'#role',rolePrefix:'Applying for: ',readySelector:'#form',sections:[{title:'Basics'}],sectionDiscovery:{selector:'section',titleSelector:'h2'}}}});
  assert.equal(stale.isError,true);assert.equal(JSON.parse(stale.content[0].text).error,'PRIMARY_CONTROL_REVIEW_REQUIRED');
