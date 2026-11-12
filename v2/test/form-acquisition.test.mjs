@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {acquisitionPlan,detectedAcquisitionPlan,assertCollectionProvider,captureContentId,isChoiceControl,capturedChoiceOptions,compactConstructionResult,templateFromDraft} from '../shared/form-acquisition.mjs';
+import {acquisitionPlan,detectedAcquisitionPlan,assertCollectionProvider,captureContentId,isChoiceControl,capturedChoiceOptions,compactConstructionResult} from '../shared/form-acquisition.mjs';
 import {hash} from '../shared/engine.mjs';
 
 test('same-page observed framework chooses the collector without an agent flag; ambiguity stays explicit',async()=>{
@@ -35,16 +35,6 @@ test('compact construction avoids a full template roundtrip and retains every bl
  assert.equal(compact.template,undefined);assert.equal(compact.fieldCount,2);
  assert.deepEqual(compact.pendingCounts,{ready:1,construction:1});
  assert.deepEqual(compact.blockers,built.blockers);assert.equal(compact.pending.length,1);
-});
-
-test('draft reference registration checks company, exact template hash and completed construction',()=>{
- const draft={companyId:'fixture',template:{id:'form',pages:[]},readyToRegister:true,blockers:[]};
- const request={companyId:'fixture',draftHash:hash(draft.template)};
- assert.equal(templateFromDraft(draft,request,hash),draft.template);
- assert.throws(()=>templateFromDraft(draft,{...request,companyId:'other'},hash),/COMPANY_SCOPE/);
- assert.throws(()=>templateFromDraft({...draft,template:{id:'changed'}},request,hash),/HASH_CHANGED/);
- assert.throws(()=>templateFromDraft({...draft,readyToRegister:false},request,hash),/CONSTRUCTION_INCOMPLETE/);
- assert.throws(()=>templateFromDraft({...draft,blockers:[{reason:'uncaptured'}]},request,hash),/CONSTRUCTION_INCOMPLETE/);
 });
 
 test('radio and native select options are collected without a dropdown action or invented fallback',()=>{

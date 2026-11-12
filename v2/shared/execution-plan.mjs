@@ -56,7 +56,7 @@ async function validateFile(ref,files){
 // Pure form compilation plus local-file checks; never acquires a browser page.
 // All fields (including inactive branches and unanswered optional fields) retain
 // their position, source, type, action, constraints and readback specification.
-export async function compileExecutionPlan(storedTemplate,task){
+export async function compileExecutionPlan(storedTemplate,task,{verifiedConstructionCoverage=null}={}){
   const template=withProfileRecords(storedTemplate,task.recordPlan);
   if(task.values?.[PROTECTED_IDENTITY_SOURCE]!=null)throw Error('PROTECTED_PROFILE_VALUE_FORBIDDEN');
   assertContentPolicy(task.values,task.contentPolicy);assertApplicationText(task.values);
@@ -129,9 +129,10 @@ export async function compileExecutionPlan(storedTemplate,task){
   const unstableFields=template.pages.flatMap(p=>p.fields).filter(f=>!f.userOnly&&!f.readonly&&[f.read?.selector,f.read?.selectedSelector,...(f.inventorySelectors||[]),...(f.actions||[]).flatMap(a=>[a.selector,a.labelSelector,a.openSelector])].some(globalPositional)).map(f=>f.id);
   if(unstableFields.length)constructionBlockers.push('PAGE_GLOBAL_POSITIONAL_LOCATORS');
   if(template.pages.some(p=>p.fields.some(f=>f.prepareBeforeGroups)))constructionBlockers.push('PRE_GROUP_WRITES_REQUIRE_REBUILD');
-  if(template.coverage?.allConditionalBranchesVerified!==true)constructionBlockers.push('CONDITIONAL_BRANCHES_NOT_VERIFIED');
-  if(template.coverage?.allControlsMapped!==true)constructionBlockers.push('CONTROLS_NOT_FULLY_MAPPED');
-  if(template.coverage?.allDriversSupported!==true)constructionBlockers.push('CONTROL_DRIVERS_NOT_SUPPORTED');
+  const coverage=verifiedConstructionCoverage||template.coverage;
+  if(coverage?.allConditionalBranchesVerified!==true)constructionBlockers.push('CONDITIONAL_BRANCHES_NOT_VERIFIED');
+  if(coverage?.allControlsMapped!==true)constructionBlockers.push('CONTROLS_NOT_FULLY_MAPPED');
+  if(coverage?.allDriversSupported!==true)constructionBlockers.push('CONTROL_DRIVERS_NOT_SUPPORTED');
   const body=json({schemaVersion:1,compilerVersion:3,taskId:task.taskId||task.roleQueueArgs?.taskId||null,companyId:task.companyId,pageUrl:task.pageUrl,templateHash:task.templateHash,inputHash:digest(inputSnapshot(template,task)),files:inputSnapshot(template,task).files,fileMetadata,profileFillContext:task.profileFillContext||null,privacyFillContext:task.privacyFillContext||null,pages,counts,materialCoverage,constructionBlockers,unstableFields,readyForExecution:constructionBlockers.length===0&&counts.needs_user===0,allKnown:counts.needs_user===0&&counts.user_only===0});
   const planHash=digest(body);
   const id=executionPlanId(body.companyId);

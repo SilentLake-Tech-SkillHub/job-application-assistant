@@ -1,9 +1,9 @@
 // Synthetic UI evidence for unit fixtures. Production accepts only MCP probes.
 import {hash} from '../../shared/engine.mjs';
-import {completeFormTemplate,draftTemplate} from '../../shared/template-validation.mjs';
+import {completeFormTemplate,unverifiedTemplate} from '../../shared/template-validation.mjs';
 import {acquisitionFixture} from './acquisition.mjs';
 export function observedSeal(template,companyId){
- const source=draftTemplate(template);
+ const source=unverifiedTemplate(template);
  for(const field of source.pages.flatMap(p=>p.fields)){
   field.inventorySelectors??=[field.read.selector];field.inventoryLabel??=field.label;field.inventoryType??=field.kind==='text'?'text':field.kind;
  }

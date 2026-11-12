@@ -1,19 +1,21 @@
 import {createHash} from 'node:crypto';
 import {formAssetKeys} from './form-identity.mjs';
-import {draftTemplate,completeFormTemplate} from './template-validation.mjs';
+import {unverifiedTemplate,completeFormTemplate} from './template-validation.mjs';
 const hash=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
-export async function registerFormDraft(store,{companyId,template}){
- const t=draftTemplate(template),id=formAssetKeys(t.id).draft;
- let previous;try{previous=await store.get('runs',id);}catch(e){if(e.code!=='ENOENT')throw e;}
- const construction=previous?.construction?{revision:1,stage:'interaction_test',captureHash:previous.construction.captureHash}:undefined;
- await store.put('runs',id,{id,companyId,template:t,registered:true,readyToRegister:true,blockers:[],...(construction?{construction}:{}),registeredAt:new Date().toISOString()});
- if(hash((await store.get('runs',id)).template)!==hash(t))throw Error('TEMPLATE_STORAGE_READBACK_FAILED');
+// Updates replace the sole official company asset. Construction progress stores
+// metadata only; no consumer can select a second template from a draft file.
+export async function updateCompanyTemplate(store,{companyId,template}){
+ const t=unverifiedTemplate(template),keys=formAssetKeys(t.id);
+ await store.put('templates',t.id,t);
+ if(hash(await store.get('templates',t.id))!==hash(t))throw Error('TEMPLATE_STORAGE_READBACK_FAILED');
+ await store.put('runs',keys.update,{id:keys.update,companyId,registered:true,readyToRegister:true,blockers:[],construction:{revision:1,stage:'agent_completeness'},updatedAt:new Date().toISOString()});
+ await store.remove('runs','form-draft-'+t.id);
  return t;
 }
 export async function constructionTemplate(store,id,expectedHash){
- let draft;try{draft=await store.get('runs',formAssetKeys(id).draft);}catch(e){if(e.code!=='ENOENT')throw e;}
- if(draft?.registered&&(!expectedHash||hash(draft.template)===expectedHash))return draft.template;
- const official=await store.get('templates',id);if(expectedHash&&hash(official)!==expectedHash)throw Error('TEMPLATE_VERSION_CHANGED');return official;
+ const official=await store.get('templates',id);
+ if(expectedHash&&hash(official)!==expectedHash)throw Error('TEMPLATE_VERSION_CHANGED');
+ return official;
 }
 export async function promoteSealedTemplate(store,{companyId,template,probe,profileMapped=true,channel='chrome',beforeCommit=async()=>{},validate=()=>{},confirmation=null}){
  const sealed=completeFormTemplate(template,probe,{companyId,profileMapped,channel});
