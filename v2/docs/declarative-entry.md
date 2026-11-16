@@ -30,10 +30,11 @@
 - `target` 必须为 `same`、`new` 或 `same_or_new`。结果仅从浏览器实际页面清单中查找；结果有多个即阻断。
 - `location.pathnamePattern` 必须为首尾锚定的正则；可同时声明 `hashPathPattern`、`query`、`hashQuery`。`$roleId` 只在查询参数值中作为运行时身份比较值，不用于拼地址。重复的同名参数一律拒绝。
 - 入口配置对本站所有岗位通用：查询参数里像岗位编号的字面值（UUID、5 位以上数字、16 位以上带数字的串）、路径规则里的 UUID 或 9 位以上数字一律拒绝（`ENTRY_ROLE_ID_LITERAL`），岗位编号只能写 `$roleId`。路径里的站点租户号等短数字（如 `/051736/`）允许。
-- 入口配置只能用 `node scripts/site-entry.mjs --workspace <工作区> --site <站点编码> --input <改动.json>` 写：先预览（`show_user_exactly` + 指纹），把预览原样给用户，用户确认后带 `--quote "<用户原话>" --expected-sha <指纹>` 写入；只改 `entry`、`loginPath`，`loginPath` 同样不能带岗位编号；写入时版本加一并记下用户原话。不得用编辑工具直接改登录配置文件（门禁拦截）。
+- 站点还没有入口配置时，第一版由组件写入（C39，2026-11-16 用户决定“2.同意 3A”）：在已确认岗位页读标题、点一次唯一的投递按钮，按实际落地页生成本结构（`evidence.method=component_first_entry_observed_click`，`confirmation.mode=component_first_entry`），主表固定脚本只接受“在没有入口时新增 `entry`、允许路径只放宽且覆盖原路径与申请页、版本加一”的写入，见 [role entry](role-entry.md) 第 4 步。
+- 已有入口配置的修改只能用 `node scripts/site-entry.mjs --workspace <工作区> --site <站点编码> --input <改动.json>` 写：先预览（`show_user_exactly` + 指纹），把预览原样给用户，用户确认后带 `--quote "<用户原话>" --expected-sha <指纹>` 写入；只改 `entry`、`loginPath`，`loginPath` 同样不能带岗位编号；写入时版本加一并记下用户原话。不得用编辑工具直接改登录配置文件（门禁拦截）。
 - `detail`、`form` 均须声明真实 `roleSelector` 或 `roleIdentity`。标题必须精确匹配已确认岗位；URL 身份必须读回已确认岗位 ID，不能用预期值代替实际读回。
 - `roleIdentity.source` 支持 `query`、`hashQuery`、`pathname`；路径身份另需首尾锚定的 `pattern`，其命名捕获组须与 `parameter` 同名。
-- 入口定位可用 `{selector,label}` 、`{text,label}` 或 `{role,name,label}`；`text` 或 `name` 必须与 `label` 相同。实际元素必须唯一、可见且文字精确一致。
+- 入口定位可用 `{selector,label}` 、`{text,label}` 或 `{role,name,label}`；`text` 或 `name` 必须与 `label` 相同。实际元素必须唯一、可见且文字精确一致。同一文字的入口按钮有多个时（Agent 兜底记录，C39 追加），另记 `count`（一共几个，2–20）与 `index`（点第几个，页面元素顺序从 0 起）：每次进入先核对个数仍为 `count`，再点第 `index` 个，可见且文字精确一致。
 - 账号从原页面或配置声明的同源身份页核对，进入前后都必须精确匹配；身份页缺失或重复即阻断。
 - 已在表单页时不点击任何入口。点击会开新标签的站点（`new` / `same_or_new`），由任务在第一次点击前登记已有的同站标签（`excludePageIds`），之后只认点击新开出来的申请页；中断重试时沿用同一份登记，不重复触发入口，也不会把旧的申请页认作本次进入。
 - `evidence` 保存在公司私有资产，至少记录实际观察到的详情页与表单页，以及日期、方法。没有真实跳转证据，不猜表单地址，不以主页或列表页替代。

@@ -31,10 +31,8 @@ export class RoleQueue{
   if(input.confirmation?.status!=='confirmed'||!input.confirmation.reference)throw Error('COMPANY_PLAN_CONFIRMATION_REQUIRED');
   const selected=input.companies.filter(c=>Array.isArray(c.roles)&&c.roles.some(r=>r.selected===true));
   if(!selected.length)throw Error('NO_CONFIRMED_ROLES');
-  // 公司次序默认取正向评审的公司顺序；companyOrder（公司编码）只能重排本批全部公司。
-  const sequence=args.companyOrder||null;
-  if(sequence&&(sequence.length!==selected.length||new Set(sequence).size!==sequence.length||selected.some(c=>!sequence.includes(c.companyId))))throw Error('INVALID_CONFIRMED_COMPANY_ORDER');
-  selected.sort((a,b)=>sequence?sequence.indexOf(a.companyId)-sequence.indexOf(b.companyId):a.order-b.order);
+  // 公司次序只取正向评审时用户确认的「批次.公司顺序」；投递端不再接受另传的公司次序（2026-11-16 用户决定：“可以 处理这个参数吧 看上去好像没有用”）。
+  selected.sort((a,b)=>a.order-b.order);
   const identities=new Set();
   for(const c of selected){
    const roles=c.roles.filter(r=>r.selected===true),orders=new Set();
@@ -49,7 +47,7 @@ export class RoleQueue{
     if(reason){protectedRoles.push({companyId,roleId,reason});continue;}
     if(r.applicationStatus!=='岗位待投递')throw Error('ROLE_APPLICATION_STATE_UNRESOLVED');
     // 任务只存编码与顺序；链接、标题、材料执行时现读该公司宽表（见 hydrate）。
-    tasks.push({taskId:stableTaskId(input.batchId,roleId),companyId,siteId:r.siteId,companyCode:c.companyId,roleId,order:tasks.length+1,companyOrder:sequence?sequence.indexOf(c.companyId)+1:c.order,roleOrder:r.order});
+    tasks.push({taskId:stableTaskId(input.batchId,roleId),companyId,siteId:r.siteId,companyCode:c.companyId,roleId,order:tasks.length+1,companyOrder:c.order,roleOrder:r.order});
    }
   }
   const upstreamMode=args.parallelRoles?'parallel_roles':'sequential';
@@ -63,15 +61,7 @@ export class RoleQueue{
   const previous=(await this.queues()).filter(q=>q.batchId===input.batchId).sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt)));
   // 同一批次、确认内容和执行方式都没变：返回原队列，不新建（重复导入不产生新任务、新标签）。
   const same=previous.find(q=>q.inputHash===inputHash&&shape(q)===shape({executionMode,parallelRoles,batchPolicy:args.batchPolicy||null,tasks}));
-  if(same){
-   const reordered=!!sequence&&digest(same.tasks)!==digest(tasks);
-   if(reordered){
-    if(!String(args.authorizationRef||args.batchPolicy?.authorizationRef||'').trim())throw Error('QUEUE_REORDER_AUTHORIZATION_REQUIRED');
-    same.tasks=tasks;same.orderAuthorization=args.authorizationRef||args.batchPolicy.authorizationRef;
-    delete same.queueHash;same.queueHash=digest(same);await this.put(same.id,same);
-   }
-   return {...await this.public(same),reused:true,reordered};
-  }
+  if(same)return {...await this.public(same),reused:true};
   const queue={executionMode,parallelRoles,batchPolicy:args.batchPolicy||null,id:randomUUID(),createdAt:new Date().toISOString(),inputKind:'confirmed-handoff-batch',batchId:input.batchId,version:input.version||1,source,inputHash,tasks,protectedRoles,submission:'forbidden'};
   queue.queueHash=digest(queue);await this.put(queue.id,queue);
   const carried=await this.supersede(previous,queue);

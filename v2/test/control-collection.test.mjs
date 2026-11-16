@@ -47,8 +47,11 @@ test('same shared readback handles native select, ARIA radio, month and attachme
  const fields=[['select','value'],['radio','radio'],['month','month'],['files','files']].map(([id,kind])=>({id,read:{selector:'#'+id,kind,...(kind==='files'?{filenameSelector:'.filename',uploadedSelector:'#uploaded'}:{})}}));
  const r=read({fields}).fields;assert.equal(r.select.value,'A');assert.equal(r.radio.value,'B');assert.equal(r.month.value,'2026-10');assert.equal(r.files.uploadState,'site_rendered_uploaded');
 });
+// C33：找不到、多个、都不可见分开报，回补按真实原因处理。
 test('ambiguous actions cannot use first to bypass uniqueness; visible duplicate is resolved',async()=>{
- const l={count:async()=>2,filter:()=>({count:async()=>2})};await assert.rejects(locateControl({locator:()=>l},{selector:'.x',first:true}),/AMBIGUOUS/);
+ const l={count:async()=>2,filter:()=>({count:async()=>2})};await assert.rejects(locateControl({locator:()=>l},{selector:'.x',first:true}),/^Error: ACTION_TARGET_NOT_UNIQUE$/);
+ await assert.rejects(locateControl({locator:()=>({count:async()=>0,filter:()=>({count:async()=>0})})},{selector:'.x'}),/^Error: ACTION_TARGET_NOT_FOUND$/);
+ await assert.rejects(locateControl({locator:()=>({count:async()=>3,filter:()=>({count:async()=>0})})},{selector:'.x'}),/^Error: ACTION_TARGET_NOT_VISIBLE$/);
  const visible={count:async()=>1};assert.equal(await locateControl({locator:()=>({count:async()=>2,filter:()=>visible})},{selector:'.x'}),visible);
 });
 function fixture(family='ud',duplicate=false){

@@ -8,6 +8,7 @@
 - 连续准备：`node scripts/run-confirmed-roles.mjs`，读取 `RECRUITING_RUN_AUTHORIZATION_FILE`；输出等待登录或待审阅。`resume` 接续原岗位，`close` 关闭命令行客户端，保留浏览器和核心。
 - MCP 接口：`node scripts/start.mjs application|login`。stdio 只承载协议；客户端退出时业务核心继续运行。
 - 核心管理：MCP `component_runtime`，或 CLI `runtime`，输入 `{"action":"status|pause|reload|update|resume|stop"}`。启动在首次连接时完成。`stop` 只停止空闲核心。
+- 浏览器主控随核心更新（C43，2026-11-16）：`reload`／`update` 启动新核心时比对浏览器主控与当前代码的指纹；不一致且主控空闲（分身模式），先请主控自行退出（旧主控不认识该操作时按其自报进程号发 SIGTERM，主控只关自己），再拉起新主控。Chrome 分身是独立进程，标签编号按 CDP 目标编号不变；新主控不自动连接分身。主控正忙则不动，结果写在 `component_runtime` 返回的 `browserHost`（核心管理进程也更新后才显示）。核心每次请求主控前比对指纹（15 秒缓存），不一致报 `BROWSER_HOST_VERSION_MISMATCH`，下一步 `component_runtime`。
 
 ## 更新与恢复
 

@@ -5,7 +5,7 @@ test('passive status and unauthorized initialization launch zero browsers; concu
  const dir=await mkdtemp(path.join(os.tmpdir(),'chrome-init-'));let launches=0;
  const b=new BrowserAdapter('managed-chrome',{hostEnvironment:{RECRUITING_HOST_ROLE:'executor'},profileDir:dir,launcher:async()=>{launches++;return {on(){},pages:()=>[]};}});
  try{assert.equal(b.status().connectionAttempts,0);assert.equal(launches,0);
- for(const authorization of [undefined,{initialize:false,evidence:'wrong'},{initialize:true,evidence:''}])await assert.rejects(b.initializeConfiguredChrome({authorization}),/USER_AUTHORIZATION_REQUIRED/);
+ for(const authorization of [undefined,{initialize:false,evidence:'wrong'},{initialize:true,evidence:''}])await assert.rejects(b.initializeConfiguredChrome({authorization}),/BROWSER_INITIALIZE_AUTHORIZATION_REQUIRED/);
  assert.equal(launches,0);const result=await Promise.all([b.initializeConfiguredChrome(approved),b.initializeConfiguredChrome(approved)]);assert.equal(launches,1);assert.equal(result[0].executor.verified,true);assert.equal(result[0].initialized,true);
  const again=await b.initializeConfiguredChrome(approved);assert.equal(again.initialized,false);assert.equal(launches,1);
  }finally{await rm(dir,{recursive:true,force:true});}
@@ -18,7 +18,7 @@ test('initialization never selects everyday Chrome, an implicit profile, or a ma
 });
 test('initialized sessions that disconnect require distinct restore authorization rather than automatic relaunch',async()=>{
  const dir=await mkdtemp(path.join(os.tmpdir(),'chrome-init-lost-'));let launches=0;const b=new BrowserAdapter('managed-chrome',{hostEnvironment:{RECRUITING_HOST_ROLE:'executor'},profileDir:dir,launcher:async()=>{launches++;return {on(){},pages:()=>[]};}});b.state='disconnected';
- try{await assert.rejects(b.initializeConfiguredChrome(approved),/RESTORE_USER_AUTHORIZATION_REQUIRED/);assert.equal(launches,0);}finally{await rm(dir,{recursive:true,force:true});}
+ try{await assert.rejects(b.initializeConfiguredChrome(approved),/^Error: BROWSER_RESTORE_REQUIRED$/);assert.equal(launches,0);}finally{await rm(dir,{recursive:true,force:true});}
 });
 test('router can reach the explicit initialization RPC before executor verification without permitting ordinary page access',async()=>{
  const calls=[],b=new RoutedBrowserAdapter({chromeSocket:'dormant',store:{get:async()=>({})},brokerFactory:()=>({status:async()=>({state:'new',mode:'managed',executor:{verified:false}}),request:async(method,args)=>{calls.push({method,args});return {initialized:true};}})});
@@ -29,6 +29,6 @@ test('real broker starts dormant and rejects unauthorized initialize without cre
  const child=spawn(process.execPath,[fileURLToPath(new URL('../shared/browser-host.mjs',import.meta.url)),socket],{env:{PATH:process.env.PATH,HOME:process.env.HOME,RECRUITING_BROWSER_MODE:'managed',RECRUITING_BROWSER_PROFILE_DIR:profileDir},stdio:['ignore','pipe','pipe']});
  try{await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('broker did not start')),10000);child.stdout.once('data',()=>{clearTimeout(timer);resolve();});child.once('exit',code=>{clearTimeout(timer);reject(Error('broker exited '+code));});});
  const rpc=new BrokerBrowserAdapter(socket),status=await rpc.status();assert.equal(status.connectionAttempts,0);assert.equal(status.executor.verified,false);assert.equal(status.state,'new');await assert.rejects(access(profileDir),{code:'ENOENT'});
- await assert.rejects(rpc.request('initializeConfiguredChrome',{}),/USER_AUTHORIZATION_REQUIRED/);assert.equal((await rpc.status()).connectionAttempts,0);await assert.rejects(access(profileDir),{code:'ENOENT'});
+ await assert.rejects(rpc.request('initializeConfiguredChrome',{}),/BROWSER_INITIALIZE_AUTHORIZATION_REQUIRED/);assert.equal((await rpc.status()).connectionAttempts,0);await assert.rejects(access(profileDir),{code:'ENOENT'});
  }finally{child.kill('SIGTERM');await new Promise(resolve=>child.exitCode!==null?resolve():child.once('exit',resolve));await rm(dir,{recursive:true,force:true});}
 });

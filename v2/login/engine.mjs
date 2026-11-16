@@ -21,7 +21,9 @@ export class LoginEngine{
   async locked(c,fn,{waitMs=0}={}){const release=await acquireLease(leasePath(this.leaseRoot,'recruiting-origin:'+c.origin),{waitMs,busyCode:'COMPANY_ALREADY_RUNNING'});try{return await fn();}finally{await release();}}
   // 角色任务用：按绑定标签（pageId）上已读到的快照判断账号，不按网址另找页面。
   async stateForPage(c,{pageId,snapshot}){assertScope(c,snapshot.pageUrl);return {...await observeUserOperatedSession(this.browser.broker,c,snapshot.pageUrl,{currentSnapshot:snapshot,pageId}),pageId};}
-  async state(c,preferred){const url=await this.browser.locate(c,preferred);assertScope(c,url);const o=await this.browser.observe(c,url);return {...o,authenticated:o.authenticated===true||(!o.form&&typeof o.account==='string'&&!!o.account.trim()),unknownPopup:o.dialogs>0&&o.popupTitle!==c.popups?.[0]?.title};}
+  async state(c,preferred){const url=await this.browser.locate(c,preferred);assertScope(c,url);const o=await this.browser.observe(c,url);
+    // 登录阶段只认登录页是否已经消失（C32）；是否真正已登录，由回到岗位后点击真实入口的落地页证明。
+    return {...o,authenticated:!o.form,unknownPopup:o.dialogs>0&&o.popupTitle!==c.popups?.[0]?.title};}
   publicState(o){return {pageUrl:o.url,readAt:o.readAt,status:o.authenticated&&!o.form?'authenticated':o.challenges?'needs_user_verification':o.unknownPopup?'unknown_popup':o.form?'logged_out':'unknown',authenticated:o.authenticated===true,loginFormAbsent:!o.form,popup:o.dialogs?{title:o.popupTitle,known:!o.unknownPopup}:null,applicationSubmission:'not_performed'};}
   async inspect({companyId,pageUrl}){const c=await this.company(companyId,{pageUrl});assertScope(c,pageUrl);return this.locked(c,async()=>{const o=await this.state(c,pageUrl);return this.publicState(o);});}
   async capture({companyId,pageUrl,evidence}){

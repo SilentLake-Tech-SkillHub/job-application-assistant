@@ -20,7 +20,8 @@
     "role_entry_inspect",
     "form_inspect_repeats",
     "form_cycle_status",
-    "component_runtime"
+    "component_runtime",
+    "form_construction_records"
   ],
   "stages": {
     "profile_select_projects": [
@@ -145,7 +146,12 @@
         "material_import_inspect"
       ]
     ],
-    "material_import_inspect": ["construct", ["capture_controls"]],
+    "material_import_inspect": [
+      "construct",
+      [
+        "capture_controls"
+      ]
+    ],
     "company_batch_create": [
       "route",
       [
@@ -338,6 +344,12 @@
         "workflow_next"
       ]
     ],
+    "login_config_supplement": [
+      "login",
+      [
+        "role_advance"
+      ]
+    ],
     "login_open": [
       "login",
       [
@@ -469,6 +481,31 @@
       [
         "form_patch_controls",
         "template_finalize"
+      ]
+    ],
+    "form_construct_acquire": [
+      "construct",
+      [
+        "form_construct_build"
+      ]
+    ],
+    "form_construct_build": [
+      "construct",
+      [
+        "role_prepare"
+      ]
+    ],
+    "form_gui_fallback": [
+      "construct",
+      [
+        "form_construct_build",
+        "role_prepare"
+      ]
+    ],
+    "role_entry_fallback": [
+      "login",
+      [
+        "role_advance"
       ]
     ]
   }

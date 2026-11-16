@@ -58,11 +58,12 @@ export async function assertCapturedAcquisition(store,{companyId,captureId,pageU
 
 // Replace the current observation for this fixed form. Any previous template
 // must match this current record's hashes; superseded files are never read.
-export async function recordReaInspection(store,{companyId,pageUrl,structure,capture,rawEvidence,nativeStructure=null,visual}){
+// template：调用方读取的唯一正式公司模板（没有建过时为 null），只用于识别模板已登记的条件子控件。
+export async function recordReaInspection(store,{companyId,pageUrl,structure,capture,rawEvidence,nativeStructure=null,visual,template=null}){
  const joined=bindStructureControls(structure,capture),id=acquisitionStructureId(capture.formId);
  let asset={...joined,formId:capture.formId,controlCaptureHash:captureContentHash(capture),structure,rawEvidence,nativeStructure,scriptInventory:rawEvidence.normalized_result?.scripts||null,scriptCoverage:scriptCoverage(rawEvidence),operation:'rea_form_structure',observedAt:structure.observedAt};
  if(visual)Object.assign(asset,{visualPage:visual.page,visualInventoryHash:visual.inventoryHash,visualScreenshotId:visual.screenshotId,primaryCandidates:primaryCandidates({...capture,controls:joined.controls})});
- if(visual){const keys=formAssetKeys(companyId),optional=async key=>{try{return await store.get('runs',key);}catch(error){if(error.code!=='ENOENT')throw error;return null;}};const [previous,coverage,table,draft]=await Promise.all([optional(id),optional(keys.coverage),optional(keys.visual),optional(keys.draft)]);asset=retainReviewedPrimary(asset,previous,table||{current:visual},coverage,{template:draft?.template});}
+ if(visual){const keys=formAssetKeys(companyId),optional=async key=>{try{return await store.get('runs',key);}catch(error){if(error.code!=='ENOENT')throw error;return null;}};const [previous,coverage,table]=await Promise.all([optional(id),optional(keys.coverage),optional(keys.visual)]);asset=retainReviewedPrimary(asset,previous,table||{current:visual},coverage,{template});}
  assertAcquiredStructure(asset,capture,companyId);
  asset.contentHash=hash(asset);await store.put('runs',id,asset);
  return {id,asset,joined};

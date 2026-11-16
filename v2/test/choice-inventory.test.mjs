@@ -2,7 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {collectChoiceViews} from '../shared/choice-inventory.mjs';
 import {performControl} from '../shared/control-operations.mjs';
-import {treeChoiceDOM,UD_TREE_LEAF_LABEL} from '../shared/tree-choice.mjs';
+import {treeEvidence,UD_TREE_LEAF_LABEL} from '../shared/tree-choice.mjs';
+import {treeRowsDOM,treeKind} from '../shared/tree-expansion.mjs';
+globalThis.getComputedStyle??=()=>({visibility:'visible'});
+const treeChoiceDOM=menu=>treeEvidence(treeRowsDOM(menu,treeKind.ud()));
 
 test('virtual options are collected with real keyboard increments and overlapping windows',async()=>{
  let i=0;const keys=[],views=[['A','B','C'],['C','D','E'],['E','F','G']];
@@ -35,7 +38,7 @@ function fixture({editable=true,tree=false,leaf=true,empty=false,owned=false,stu
  const display={...input,innerText:async()=>selection};
  const option={...input,evaluate:async f=>f({tagName:'DIV',textContent:'中国',hasAttribute:()=>false,getAttribute:k=>k==='aria-selected'?String(selection==='中国'):null}),click:async()=>{selection='中国';query='';opened=false;}};
  const options={...input,count:async()=>leaf&&!empty?1:0,allTextContents:async()=>query?['中国']:['阿尔巴尼亚','阿联酋'],first:()=>input,waitFor:async()=>{},filter:o=>o.visible?options:option};
- const treeRow=(depth,isLeaf)=>({querySelector:s=>s==='.ud__tree__node__label'?{innerText:'中国'}:s==='button.ud__expandButton-as-placeholder'&&isLeaf?{}:null,querySelectorAll:()=>Array(depth).fill({})});
+ const treeRow=(depth,isLeaf)=>({getClientRects:()=>[{}],querySelector:s=>s==='.ud__tree__node__label'?{innerText:'中国'}:s==='button.ud__expandButton-as-placeholder'&&isLeaf?{}:null,querySelectorAll:()=>Array(depth).fill({})});
  const menu={count:async()=>opened?1:0,filter(){return this;},waitFor:async({state}={})=>{if(stuck&&state==='hidden'&&opened)throw Object.assign(Error('menu hidden timeout'),{name:'TimeoutError'});},evaluate:async (f,args)=>f({classList:{contains:()=>tree},querySelectorAll:s=>empty&&s.includes('.ud__select__empty')?[{getClientRects:()=>[{}],textContent:'暂无数据'}]:tree&&s==='.ud__tree__node'?[treeRow(0,false),treeRow(1,false),...(leaf?[treeRow(2,true)]:[])]:[],parentElement:null,clientHeight:100,scrollHeight:100},args),locator:s=>{menuSelectors.push(s);return s.startsWith('input')?none:options;}};
  const label={...input,click:async()=>{opened=false;}};
  const page={url:()=> 'https://fixture.test/form',locator:s=>s==='.ud__select__list'||s==='[id="bound-menu"]'?menu:s.endsWith('.ud-formily-item-label')?label:s.endsWith('.ud__select__selector')||s==='#selected'?display:input};
@@ -78,14 +81,14 @@ test('UD selection uses the same genuine search path as option inspection',async
 });
 
 test('tree evidence distinguishes same-name country, region and selectable leaf by rendered indent and placeholder',()=>{
- const row=(text,depth,leaf)=>({querySelector:s=>s==='.ud__tree__node__label'?{innerText:text}:s==='button.ud__expandButton-as-placeholder'&&leaf?{}:null,querySelectorAll:()=>Array(depth).fill({})});
+ const row=(text,depth,leaf)=>({getClientRects:()=>[{}],querySelector:s=>s==='.ud__tree__node__label'?{innerText:text}:s==='button.ud__expandButton-as-placeholder'&&leaf?{}:null,querySelectorAll:()=>Array(depth).fill({})});
  const r=treeChoiceDOM({querySelectorAll:()=>[row('Same',0,false),row('Same',1,false),row('Same',2,true),row('Other',1,false)]});
  assert.deepEqual(r.leafPaths,[['Same','Same','Same']]);assert.equal(r.nodes[0].leaf,false);assert.equal(r.nodes[2].leaf,true);
  assert.notEqual(r.leafPaths[0],r.nodes[2].path);
  assert.match(UD_TREE_LEAF_LABEL,/ud__expandButton-as-placeholder/);
 });
 test('a virtual tree window missing its ancestor never fabricates a full path',()=>{
- const r=treeChoiceDOM({querySelectorAll:()=>[{querySelector:s=>s==='.ud__tree__node__label'?{innerText:'Leaf'}:{},querySelectorAll:()=>[{},{}]}]});
+ const r=treeChoiceDOM({querySelectorAll:()=>[{getClientRects:()=>[{}],querySelector:s=>s==='.ud__tree__node__label'?{innerText:'Leaf'}:{},querySelectorAll:()=>[{},{}]}]});
  assert.equal(r.nodes[0].path,null);assert.deepEqual(r.leafPaths,[]);
 });
 test('the same-name tree search captures only selectable leaves with their observed path',async()=>{

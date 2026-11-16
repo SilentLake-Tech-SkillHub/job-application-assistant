@@ -13,16 +13,16 @@ export class CompanyBatch{
   const release=await acquireLease(leasePath(this.leaseRoot,'company-dispatch:'+this.store.root),{waitMs:30000,busyCode:'COMPANY_BATCH_BUSY'});
   try{return await this.createUnlocked(args);}finally{await release();}
  }
- async createUnlocked({rolesFile,companyPlan,companyOrder,authorizationRef,companiesPerChannel=10,parallelRoles=false,browserChannels}){
+ async createUnlocked({rolesFile,companyPlan,authorizationRef,companiesPerChannel=10,parallelRoles=false,browserChannels}){
   if(!authorizationRef?.trim())throw Error('BATCH_AUTHORIZATION_REQUIRED');
   if(!Number.isInteger(companiesPerChannel)||companiesPerChannel<1||companiesPerChannel>10)throw Error('INVALID_COMPANY_CHANNEL_CAPACITY');
-  const {input}=await this.queues.inputAdapter({rolesFile,companyPlan,companyOrder});
+  const {input}=await this.queues.inputAdapter({rolesFile,companyPlan});
   let index;try{index=await this.store.get('runs','company-batch-by-queue');}catch(e){if(e.code!=='ENOENT')throw e;index={};}
   let storedPolicy;try{storedPolicy=await this.store.get('runs','batch-browser-policy');}catch(e){if(e.code!=='ENOENT')throw e;}
   const requested=browserChannels||(storedPolicy?.batchId===input.batchId?storedPolicy.browserChannels||undefined:undefined);
   const initialization=await this.browser?.executionCapabilities?.(),channelSelection=resolveBatchChannels(initialization,requested),channels=channelSelection.channels;
   await this.store.put('runs','batch-browser-policy',{batchId:input.batchId,browserChannels:channelSelection.requestedChannels,authorizationRef:browserChannels?authorizationRef:storedPolicy?.authorizationRef||authorizationRef});
-  const queue=await this.queues.import({rolesFile,companyPlan,companyOrder,batchPolicy:{mode:'parallel_companies',authorizationRef,companiesPerChannel,parallelRoles:!!parallelRoles}}),companies=[];
+  const queue=await this.queues.import({rolesFile,companyPlan,batchPolicy:{mode:'parallel_companies',authorizationRef,companiesPerChannel,parallelRoles:!!parallelRoles}}),companies=[];
   // Reordering or changing browser preferences never recreates task records.
   if(queue.reused&&index[queue.queueId]){try{const existing=await this.store.get('runs',index[queue.queueId]);if(!existing.closedAt){
    if(existing.queueHash!==queue.queueHash){

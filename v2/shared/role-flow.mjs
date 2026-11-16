@@ -4,6 +4,12 @@ import {transitionLocationMatches,transitionRoleIdFromLocation,canonicalLocation
 import {matchesRole,readRoleIdentity,bindRoleTitleProof,rolePageContract} from './role-identity.mjs';
 import {resolveEntry,matchEntryPath} from './entry-recipe.mjs';
 import {assertScope} from '../login/contracts.mjs';
+import {FALLBACK_ENTRY_RULE,isRoleForm} from './entry-config-supplement.mjs';
+import {fallbackOperator} from './gui-fallback.mjs';
+// 入口兜底交给 Agent 的要求：两种方式都登记时先用 Agent 自己的浏览器，点不了再用组件代点（C41，2026-11-16 用户选择“A 作为第三种方式”）。
+const OWN_ENTRY_STEPS='只在这张已绑定的岗位页上，用鼠标点击本岗位的投递／申请入口，进入本岗位的申请表；先核对页面上的岗位名与 roleTitle 一致。不填写、不提交、不改其他内容，不自己另开标签（站点自己打开新标签就停在那里）；落到登录页就停下。完成后调用 role_entry_fallback（mode=report），回报 report.label：点的按钮上的完整文字；report.position：同样文字的按钮在页面上从上往下数是第几个（从 1 开始）。';
+const COMPONENT_ENTRY_STEPS='组件代点：先用 role_screenshot 看这张岗位页，核对页面上的岗位名与 roleTitle 一致，不要自己操作页面；从 candidates 里选本岗位的投递／申请按钮，调用 role_entry_fallback（mode=component），report.label 填按钮文字，report.position 填同样文字的按钮从上往下第几个（从 1 开始），由组件用自己连着分身的浏览器通道点一次并核对落地页。页面上没有本岗位内容（只有横幅、列表或报错）时不选按钮，改用 role_report_link_failure（岗位链接）。';
+const entryFallbackInstruction=surface=>!surface.surface?COMPONENT_ENTRY_STEPS:surface.componentClick?OWN_ENTRY_STEPS+' 你用自己的浏览器点不了这张页面时（例如插件没连上、宿主不给点击），改用'+COMPONENT_ENTRY_STEPS:OWN_ENTRY_STEPS;
 // 一个岗位任务 = 一张绑定的标签（任务记录里的 pageId）。所有步骤只操作这张标签；网址只用来判断它现在走到了哪一步，
 // 不拿网址去整个浏览器里另找页面。
 // 有入口配方的站点（岗位页 → 点“投递”进入申请页）只走一条线：
@@ -34,7 +40,9 @@ export class RoleFlow{
  // onObservation：链接观察只记到 投递回传.json（见 application-outcome.mjs recordObservation），
  // 由搜索端预览、用户确认后写主表；这里不改交接区的任何链接。触发：链接打不开（role_report_link_failure，附证据）、
  // 投递链接为空时第一次进入申请页、岗位链接跳转后岗位编号变了（岗位名核对一致）。只是跳转、编号不变不算变化。
- constructor({queues,login,templates,browser,onObservation=null,resolveTemplate=async t=>t}){Object.assign(this,{queues,login,templates,browser,onObservation,resolveTemplate});}
+ // entryConfigs：首版入口配置（C39，entry-config-supplement.mjs）；没有传入时不建首版、按原样报错。
+ // fallbackSurface(pageId)：按组件外登记表判断本执行端与页面所在浏览器能否交 Agent 浏览器兜底（gui-fallback.mjs）。
+ constructor({queues,login,templates,browser,onObservation=null,resolveTemplate=async t=>t,entryConfigs=null,fallbackSurface=null}){Object.assign(this,{queues,login,templates,browser,onObservation,resolveTemplate,entryConfigs,fallbackSurface});}
  roleId(t,state){return state?.siteRoleId||t.officialId;}
  // 浏览器主控进程不随 MCP 重载：旧进程不认识刷新、关闭标签，会报错或悄悄忽略。调用前先确认它支持。
  async assertPageTool(pageId,tool){let s;try{s=await this.browser.request('status');}catch{s=null;}const ch=String(pageId).split(':')[0],info=s?.channels?.[ch]||s;
@@ -72,8 +80,8 @@ export class RoleFlow{
   if(!plan.entryOnly)plan=rolePageContract(plan,{title:t.title,officialId:this.roleId(t,prior)});
   return {q,t,c,entry,recipe,template,plan,target,prior};
  }
- async snapshot(x,pageId){const raw=await this.browser.request('roleSnapshot',{pageId,roleSelector:x.plan.roleSelector,roleIdentity:x.plan.roleIdentity,accountSelector:x.c.account?.selector,loginRoot:x.c.fields?.root,sessionSelectors:x.c.session});
-  Object.assign(raw,sessionFromSnapshot(raw));if(raw.authenticated)await bindRoleTitleProof(this.browser,x.plan,pageId,raw);return raw;}
+ async snapshot(x,pageId){const raw=await this.browser.request('roleSnapshot',{pageId,roleSelector:x.plan.roleSelector,roleIdentity:x.plan.roleIdentity,loginRoot:x.c.fields?.root});
+  Object.assign(raw,sessionFromSnapshot(raw));if(!raw.loginFormPresent)await bindRoleTitleProof(this.browser,x.plan,pageId,raw);return raw;}
  // 别的任务已绑定的标签（pageId → taskId）；本任务自己的不算。
  async boundElsewhere(taskId){const m=typeof this.queues.boundPages==='function'?await this.queues.boundPages():new Map();for(const [k,v] of [...m])if(v===taskId)m.delete(k);return m;}
  // 打开前先找本岗位已有的标签：重新导入延续下来的绑定、或唯一一张本岗位的页面（岗位链接原址 / 按入口规则认出的本岗位岗位页、申请页）。
@@ -95,15 +103,20 @@ export class RoleFlow{
   if(prior?.status==='ready_for_user_review')return {status:prior.status,taskId:t.taskId,pageId:prior.pageId,verifyRunId:prior.verifyRunId,submission:'not_performed'};
   const canResume=prior?.pageId&&prior.status!=='rebind_required';
   let result=canResume?await this.resume(args):await this.open(args);
-  if(result.status==='needs_login'){
-   if(prior?.loginWait)return {status:'needs_user_login',taskId:t.taskId,pageId:result.pageId,continuation:{state:'user_input',owner:'user',requiresUser:true,shouldContinue:false,nextTools:['role_advance']}};
-   let prepared=await this.login.prepare({...result.loginPlan,authorization:args.authorization});
-   if(prepared.status==='ready_to_request_sms')prepared=await this.login.send({...result.loginPlan,acceptanceId:prepared.acceptanceId,authorization:args.authorization});
-   if(prepared.status!=='authenticated'){const state=await this.queues.read(t.taskId);await this.queues.put(t.taskId,{...state,loginWait:true});}
-   if(prepared.status==='authenticated')result=await this.resume(args);
-   else return {...prepared,taskId:t.taskId,pageId:result.pageId,continuation:{state:'user_input',owner:'user',requiresUser:true,shouldContinue:false,nextTools:['role_advance']}};
+  // 登录态由站点证明（C32）：在岗位页点一次真实入口，落到申请表即已登录；落到登录页则交本人登录，登录后回岗位再点一次。
+  for(let attempt=0;attempt<2;attempt++){
+   if(result.status==='needs_login'){
+    if(prior?.loginWait)return {status:'needs_user_login',taskId:t.taskId,pageId:result.pageId,continuation:{state:'user_input',owner:'user',requiresUser:true,shouldContinue:false,nextTools:['role_advance']}};
+    let prepared=await this.login.prepare({...result.loginPlan,authorization:args.authorization});
+    if(prepared.status==='ready_to_request_sms')prepared=await this.login.send({...result.loginPlan,acceptanceId:prepared.acceptanceId,authorization:args.authorization});
+    if(prepared.status!=='authenticated'){const state=await this.queues.read(t.taskId);await this.queues.put(t.taskId,{...state,loginWait:true});}
+    if(prepared.status==='authenticated')result=await this.resume(args);
+    else return {...prepared,taskId:t.taskId,pageId:result.pageId,continuation:{state:'user_input',owner:'user',requiresUser:true,shouldContinue:false,nextTools:['role_advance']}};
+   }
+   if(result.status!=='authenticated_at_role')return result;
+   result=await this.enter(args);
+   if(result.status!=='needs_login')return result;
   }
-  if(result.status==='authenticated_at_role')return this.enter(args);
   return result;
  }
  async open(args){const x=await this.context(args);return this.login.locked(x.c,async()=>{
@@ -136,8 +149,9 @@ export class RoleFlow{
   state.siteRoleId=landed;state.landedDetailUrl=canonicalLocationUrl(e.detail.location,s.pageUrl);
   return 'detail';
  }
+ // 绑定标签不是登录页：按岗位页推进到入口点击，是否已登录由点击后的落地页证明（C32）；是登录页：交登录流程。
  async assess(x,state,{allowNavigation=true}={}){let s=await this.snapshot(x,state.pageId);
-  if(s.authenticated===true&&!s.loginFormPresent){
+  if(!s.loginFormPresent){
    // 已进入过申请页的任务：上次没写成的岗位链接观察在这里补记。
    if(x.recipe&&!x.plan.entryOnly&&state.landedDetailUrl&&String(state.linkObservation||'').startsWith('write_failed')){await this.recordLanding(x,state);await this.queues.put(x.t.taskId,state);}
    if(x.plan.entryOnly&&x.recipe){
@@ -150,8 +164,8 @@ export class RoleFlow{
      kind=await this.locate(x,state,s);if(!kind)throw bindingError('ROLE_LINK_LANDING_NOT_RECOGNIZED',{nextTool:'role_report_link_failure',pageIds:[state.pageId]});
     }
     if(state.landedDetailUrl)await this.recordLanding(x,state);
-    state.status='authenticated_at_role';state.authenticated=true;state.pageKind=kind;await this.queues.put(x.t.taskId,state);
-    return {status:state.status,taskId:state.taskId,pageId:state.pageId,companyId:x.t.companyId,roleId:x.t.roleId,pageUrl:s.pageUrl,pageKind:kind,authenticated:true,nextTools:['role_enter_application'],...(state.siteRoleId?{siteRoleId:state.siteRoleId,linkObservation:state.linkObservation||null}:{}),formAssetRequiredBeforeFill:true,submission:'not_performed'};
+    state.status='authenticated_at_role';delete state.authenticated;state.pageKind=kind;await this.queues.put(x.t.taskId,state);
+    return {status:state.status,taskId:state.taskId,pageId:state.pageId,companyId:x.t.companyId,roleId:x.t.roleId,pageUrl:s.pageUrl,pageKind:kind,loginProof:'entry_click',nextTools:['role_enter_application'],...(state.siteRoleId?{siteRoleId:state.siteRoleId,linkObservation:state.linkObservation||null}:{}),formAssetRequiredBeforeFill:true,submission:'not_performed'};
    }
    if(!samePage(s.pageUrl,state.returnUrl)&&x.recipe){
     // 有入口配方的站点：已进入过申请页、但标签现在不在申请页（例如登录过期后被送到别处）：不直接打开申请页地址，
@@ -162,20 +176,23 @@ export class RoleFlow{
    }
    if(!samePage(s.pageUrl,state.returnUrl)){if(!allowNavigation)throw Error('ROLE_BOUND_PAGE_LOCATION_CHANGED');await this.browser.request('openPage',{pageId:state.pageId,pageUrl:state.returnUrl,readySelectors:[x.plan.readySelector,x.c.fields?.root].filter(Boolean)});}
    if(x.plan.entryOnly){
-    state.status='authenticated_at_role';state.authenticated=true;await this.queues.put(x.t.taskId,state);
-    return {status:state.status,taskId:state.taskId,pageId:state.pageId,companyId:x.t.companyId,roleId:x.t.roleId,pageUrl:state.returnUrl,authenticated:true,nextTools:['role_enter_application'],formAssetRequiredBeforeFill:true,submission:'not_performed'};
+    state.status='authenticated_at_role';delete state.authenticated;await this.queues.put(x.t.taskId,state);
+    return {status:state.status,taskId:state.taskId,pageId:state.pageId,companyId:x.t.companyId,roleId:x.t.roleId,pageUrl:state.returnUrl,loginProof:'entry_click',nextTools:['role_enter_application'],formAssetRequiredBeforeFill:true,submission:'not_performed'};
    }
    await this.browser.request('wait',{pageUrl:state.returnUrl,selector:x.plan.readySelector});
    const restored=await this.snapshot(x,state.pageId);
-   if(!samePage(restored.pageUrl,state.returnUrl)||!matchesRole(x.plan,restored)||restored.loginFormPresent||restored.authenticated!==true)throw Error('LOGIN_RETURN_ROLE_VERIFICATION_FAILED');
+   if(!samePage(restored.pageUrl,state.returnUrl)||!matchesRole(x.plan,restored)||restored.loginFormPresent)throw Error('LOGIN_RETURN_ROLE_VERIFICATION_FAILED');
    if(state.browserBinding&&(state.browserBinding.pageId!==state.pageId||state.browserBinding.pageUrl&&!samePage(state.browserBinding.pageUrl,state.returnUrl)))invalidateRolePageProofs(state);
    state.status='ready_to_fill';state.restoredAt=restored.readAt;state.authenticated=true;await this.queues.put(x.t.taskId,state);
    return {status:state.status,taskId:state.taskId,pageId:state.pageId,companyId:x.t.companyId,roleId:x.t.roleId,roleTitle:restored.roleTitle,pageUrl:restored.pageUrl,authenticated:true,originalRoleRestored:true,submission:'not_performed'};
   }
-  if(!s.loginFormPresent)return {status:'session_unknown',taskId:state.taskId,pageId:state.pageId,continuation:{state:'technical_block',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['role_advance'],reason:'LOGIN_STATE_NOT_OBSERVED'}};
+  return this.loginLanding(x,state,s);
+ }
+ // 落到登录页：编译绑定本任务原岗位、原标签的登录计划，交登录流程；登录后回到岗位链接再点入口。
+ async loginLanding(x,state,s){
   if(new URL(s.pageUrl).origin!==x.c.origin)throw Error('LOGIN_PAGE_SCOPE_MISMATCH');
   const plan=await this.login.compile({companyId:x.t.companyId,pageUrl:s.pageUrl,taskContext:{queueId:x.q.id,queueHash:x.q.queueHash,taskId:x.t.taskId,pageId:state.pageId,returnUrl:state.returnUrl,roleTitle:state.expectedTitle}});
-  state.status='needs_login';state.loginPlan=plan;await this.queues.put(x.t.taskId,state);
+  state.status='needs_login';state.loginPlan=plan;delete state.authenticated;await this.queues.put(x.t.taskId,state);
   return {status:'needs_login',taskId:state.taskId,pageId:state.pageId,originalRoleUrl:state.originalRoleUrl,returnUrl:state.returnUrl,loginPlan:plan,submission:'not_performed'};
  }
  async resume(args){const x=await this.context(args);return this.login.locked(x.c,async()=>this.resumeBoundPage(x,await this.queues.read(x.t.taskId),{restoreLostPage:args.authorization?.restoreLostPage===true,recoveryEvidence:args.authorization?.evidence}),{waitMs:x.q.parallelRoles||x.q.executionMode==='parallel_roles'?30000:0});}
@@ -217,7 +234,114 @@ export class RoleFlow{
    state.returnUrl=candidate.url;if(state.applicationUrl)state.applicationUrl=candidate.url;
   }
   return this.assess(x,state,{allowNavigation});}
- async enter(args){const x=await this.base(args);const {q,c,entry,recipe}=x;const t=x.t;return this.login.locked(c,async()=>{
+ async enter(args){let x=await this.base(args);const q=x.q;return this.login.locked(x.c,async()=>{
+  // 站点还没有入口配置（C39）：先在绑定的岗位页读标题、点一次唯一的投递按钮，按落地的申请页写入首版入口配置并读回，
+  // 再按新配置进入（新配置认得出已经打开的申请页，不再点第二次）。落到登录页照常交本人登录。
+  if(!x.entry&&this.entryConfigs&&!x.prior?.applicationUrl){const handed=await this.firstEntry(x);if(handed)return handed;x=await this.base(args);}
+  return this.enterBound(x);
+ },{waitMs:q.parallelRoles||q.executionMode==='parallel_roles'?30000:0});}
+ // 点入口后落到登录页（含点击被登录框挡住）：交登录流程，登录后回岗位再点一次（C32）。
+ entryLogin(x,s,pageId){const {q,t,prior}=x;const state={...(prior||{}),queueId:q.id,taskId:t.taskId,pageId,originalRoleUrl:prior?.originalRoleUrl||t.url,returnUrl:prior?.returnUrl||t.url,expectedTitle:t.title};delete state.entryStarted;
+  return this.loginLanding(x,state,s);}
+ async entryLanding(c,pageId){const s=await this.browser.request('roleSnapshot',{pageId,loginRoot:c.fields?.root});return {...s,...sessionFromSnapshot(s)};}
+ // 首版入口配置：在本任务绑定的岗位页点一次，看落到哪里。登录页 → 返回登录交接；申请表 → 写入首版配置后返回 null 由调用方接着进入；
+ // 两者都不是 → 按原错误处理。
+ async firstEntry(x){
+  const {q,t,c,prior}=x;
+  if(prior?.queueId&&prior.queueId!==q.id)throw Error('ROLE_TASK_STATE_CHANGED');
+  if(!prior?.pageId)throw bindingError('ROLE_PAGE_NOT_BOUND',{nextTool:'role_open'});
+  await this.assertPageTool(prior.pageId,'firstEntry');
+  let tabs=await this.browser.request('tabs',{pageUrl:t.url});const bound=(tabs||[]).find(p=>pageIdOf(p)===prior.pageId);
+  if(!bound)throw bindingError('ROLE_EXISTING_PAGE_NOT_FOUND',{nextTool:'role_resume',pageIds:[prior.pageId]});
+  // 只从确认的岗位链接进入：绑定标签停在别处，就在这张标签回到岗位链接（还没有入口配置的站点此前不会有填写）。
+  if(bound.url!==t.url){await this.browser.request('openPage',{pageId:prior.pageId,pageUrl:t.url,readySelectors:[]});tabs=await this.browser.request('tabs',{pageUrl:t.url});}
+  // 先认登录再点（C42）：岗位页上已经有登录入口或登录框，就交登录流程，不点入口。
+  const pre=await this.entryLanding(c,prior.pageId);if(pre.loginFormPresent)return this.entryLogin(x,pre,prior.pageId);
+  // 点击前登记已有的同站标签：写入首版配置后按新配置进入时，只认这次点击新开出来的申请页。
+  const preexisting=(tabs||[]).filter(p=>originOf(p.url)===c.origin).map(pageIdOf).filter(id=>id&&id!==prior.pageId);
+  await this.queues.put(t.taskId,{...prior,entryStarted:{at:new Date().toISOString(),preexisting,firstEntry:true}});
+  const expectedRoleId=this.roleId(t,prior);let observed;
+  try{observed=await this.browser.request('roleFirstEntry',{pageId:prior.pageId,expectedTitle:t.title,expectedRoleId});}
+  catch(error){let s;try{s=await this.entryLanding(c,prior.pageId);}catch{throw error;}if(s.loginFormPresent)return this.entryLogin(x,s,prior.pageId);throw error;}
+  const s=await this.entryLanding(c,observed.pageId);if(s.loginFormPresent)return this.entryLogin(x,s,observed.pageId);
+  if(!isRoleForm(observed,expectedRoleId)){const e=Error('APPLICATION_ENTRY_FIRST_LANDING_NOT_FORM');e.details={phase:'first_entry',check:'landing',target:observed.target,inputs:observed.inputs,frames:observed.frames};throw e;}
+  await this.entryConfigs.create({companyId:t.companyId,siteId:t.siteId,roleId:expectedRoleId,observed});
+  return null;
+ }
+ // Agent 浏览器兜底：首版入口同一失败第二次（C39 追加，2026-11-16 用户“按B。推进”）。
+ // start：在本任务绑定的岗位页（不在就回岗位链接）只读盘点岗位标题和候选入口按钮，登记点击前已有的同站标签，交 Agent 用鼠标点进本岗位申请表。
+ // report：Agent 回报点的按钮文字和同文字按钮从上往下第几个；组件读落地页，是本岗位申请表就按 Agent 的操作写入首版入口配置并读回，由 role_advance 接续。
+ // 登记表外的执行端或浏览器、Agent 点了没反应、落地不是申请表、记录对不上：问用户。落到登录页：交用户登录。
+ async entryFallback(args){const x=await this.base(args);return this.login.locked(x.c,async()=>{
+  const {q,t,c,prior}=x;
+  if(prior?.queueId&&prior.queueId!==q.id)throw Error('ROLE_TASK_STATE_CHANGED');
+  if(!prior?.pageId)throw bindingError('ROLE_PAGE_NOT_BOUND',{nextTool:'role_open'});
+  if(x.entry)return {status:'entry_config_exists',taskId:t.taskId,continuation:{state:'login',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['role_advance']},submission:'not_performed'};
+  const ask=(reason,extra={})=>({status:'needs_user',reason,taskId:t.taskId,companyId:t.companyId,roleId:t.roleId,pageId:prior.pageId,...extra,continuation:{state:'user_input',owner:'user',requiresUser:true,shouldContinue:false,nextTools:[],reason},submission:'not_performed'});
+  const surface=this.fallbackSurface?await this.fallbackSurface(prior.pageId):{allowed:false,reason:'AGENT_FALLBACK_REGISTRY_MISSING'};
+  if(!surface.allowed)return ask(surface.reason,{fallback:surface});
+  await this.assertPageTool(prior.pageId,'entryFallback');
+  const now=new Date().toISOString(),expectedRoleId=this.roleId(t,prior);
+  if(args.mode==='start'){
+   let tabs=await this.browser.request('tabs',{pageUrl:t.url});const bound=(tabs||[]).find(p=>pageIdOf(p)===prior.pageId);
+   if(!bound)throw bindingError('ROLE_EXISTING_PAGE_NOT_FOUND',{nextTool:'role_resume',pageIds:[prior.pageId]});
+   // 上次点击可能把标签带到了别处：在这张标签回到岗位链接（还没有入口配置的站点此前不会有填写）。
+   if(bound.url!==t.url){await this.browser.request('openPage',{pageId:prior.pageId,pageUrl:t.url,readySelectors:[]});tabs=await this.browser.request('tabs',{pageUrl:t.url});}
+   // 先认登录（C42）：没登录时换谁来点都进不去，交登录流程，不开始兜底。
+   const pre=await this.entryLanding(c,prior.pageId);if(pre.loginFormPresent)return this.entryLogin(x,pre,prior.pageId);
+   const inventory=await this.browser.request('roleEntryInventory',{pageId:prior.pageId,expectedTitle:t.title});
+   const preexisting=(tabs||[]).filter(p=>originOf(p.url)===c.origin).map(pageIdOf).filter(id=>id&&id!==prior.pageId);
+   const session={at:now,pageId:prior.pageId,detailUrl:inventory.pageUrl,detailTitle:inventory.detailTitle,candidates:inventory.candidates,preexisting,surface:{agent:surface.agent,hostId:surface.hostId,surface:surface.surface,componentClick:!!surface.componentClick}};
+   await this.queues.put(t.taskId,{...prior,entryStarted:{at:now,preexisting,agentFallback:true},entryFallback:session});
+   return {status:'agent_fallback_ready',taskId:t.taskId,companyId:t.companyId,roleId:t.roleId,fallback:{agent:surface.agent,surface:surface.surface,surfaceLabel:surface.surfaceLabel,componentClick:surface.componentClick,...(surface.componentLabel?{componentLabel:surface.componentLabel}:{})},page:{pageId:prior.pageId},roleTitle:t.title,
+    titleFound:!!(inventory.detailTitle?.heading||inventory.detailTitle?.path),candidates:inventory.candidates.map(({role,label,count})=>({...(role?{role}:{}),label,count})),
+    instruction:entryFallbackInstruction(surface),
+    continuation:{state:'agent_fallback',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['role_entry_fallback']},submission:'not_performed'};
+  }
+  const session=prior.entryFallback;
+  if(!session||session.pageId!==prior.pageId)throw Error('ENTRY_FALLBACK_SESSION_REQUIRED');
+  // report：Agent 已用自己的浏览器点过；component：组件代点（C41），按 Agent 选的按钮由组件点一次。对应方式没有登记就拒绝。
+  const operator=fallbackOperator(surface,args.mode);
+  if(session.surface.hostId!==surface.hostId||(args.mode==='component'?!session.surface.componentClick:session.surface.surface!==surface.surface))throw Error('GUI_FALLBACK_SURFACE_CHANGED');
+  const label=String(args.report?.label||'').trim(),position=args.report?.position;
+  if(!label||label.length>30||!Number.isInteger(position)||position<1||position>20)throw Error('ENTRY_FALLBACK_REPORT_INVALID');
+  // 点的是哪个按钮：同文字按钮的个数和上下顺序取兜底前的盘点；回报的文字不在盘点里、岗位页还开着时，在岗位页按这段文字再盘点一次。
+  const pick=async canRecount=>{let cand=session.candidates.find(k=>k.label===label);
+   if(!cand&&canRecount)cand=(await this.browser.request('roleEntryInventory',{pageId:prior.pageId,expectedTitle:t.title,labels:[label]})).candidates.find(k=>k.label===label);
+   return cand&&position<=cand.domOrder.length?{cand,index:cand.domOrder[position-1]}:null;};
+  let landingId,target,chosen;
+  if(args.mode==='component'){
+   await this.assertPageTool(prior.pageId,'componentClick');
+   const bound=(await this.browser.request('tabs',{pageUrl:t.url})||[]).find(p=>pageIdOf(p)===prior.pageId);
+   if(!bound||bound.url!==session.detailUrl)return ask('ENTRY_FALLBACK_PAGE_MOVED');
+   const pre=await this.entryLanding(c,prior.pageId);if(pre.loginFormPresent)return this.entryLogin(x,pre,prior.pageId);
+   chosen=await pick(true);if(!chosen)return ask('ENTRY_FALLBACK_BUTTON_NOT_VERIFIED');
+   let clicked;
+   try{clicked=await this.browser.request('roleEntryClick',{pageId:prior.pageId,expectedTitle:t.title,label,role:chosen.cand.role||null,count:chosen.cand.count,index:chosen.index});}
+   catch(error){let s;try{s=await this.entryLanding(c,prior.pageId);}catch{throw error;}if(s.loginFormPresent)return this.entryLogin(x,s,prior.pageId);if(/^ENTRY_FALLBACK_/.test(error.message))return ask(error.message,error.details?{details:error.details}:{});throw error;}
+   landingId=clicked.pageId;target=clicked.target;
+  }else{
+   // 落地页：Agent 点击后新开出来的同站标签，或者本标签换了地址。
+   const tabs=await this.browser.request('tabs',{pageUrl:t.url}),before=new Set(session.preexisting),bound=(tabs||[]).find(p=>pageIdOf(p)===prior.pageId);
+   const fresh=(tabs||[]).filter(p=>originOf(p.url)===c.origin&&pageIdOf(p)&&pageIdOf(p)!==prior.pageId&&!before.has(pageIdOf(p)));
+   if(fresh.length>1)return ask('ENTRY_FALLBACK_LANDING_NOT_UNIQUE');
+   if(fresh.length===1){landingId=pageIdOf(fresh[0]);target='new';}
+   else if(bound&&bound.url!==session.detailUrl){landingId=prior.pageId;target='same';}
+   else return ask('ENTRY_FALLBACK_NO_NAVIGATION');
+  }
+  const s=await this.entryLanding(c,landingId);if(s.loginFormPresent)return this.entryLogin(x,s,landingId);
+  const landed=await this.browser.request('roleEntryLanding',{pageId:landingId,expectedTitle:t.title});
+  if(!isRoleForm(landed,expectedRoleId))return ask('ENTRY_FALLBACK_LANDING_NOT_FORM',{landing:{target,inputs:landed.inputs,frames:landed.frames,formFieldsVisible:landed.formFieldsVisible}});
+  chosen=chosen||await pick(target==='new');if(!chosen)return ask('ENTRY_FALLBACK_BUTTON_NOT_VERIFIED');
+  const {cand,index}=chosen;
+  const entryLocator={...(cand.role?{role:cand.role,name:label}:{text:label}),label,...(cand.count>1?{count:cand.count,index}:{})};
+  const observed={pageId:landingId,target,detailUrl:session.detailUrl,detailTitle:session.detailTitle,entryLocator,...landed};
+  try{await this.entryConfigs.create({companyId:t.companyId,siteId:t.siteId,roleId:expectedRoleId,observed,rule:FALLBACK_ENTRY_RULE,method:args.mode==='component'?'agent_choice_component_click':'agent_gui_fallback_observed_click',recordedBy:{agent:session.surface.agent,hostId:session.surface.hostId,surface:operator,at:now}});}
+  catch(error){if(/^APPLICATION_ENTRY_FIRST_/.test(error.message))return ask(error.message);throw error;}
+  const state=await this.queues.read(t.taskId);delete state.entryFallback;await this.queues.put(t.taskId,state);
+  return {status:'entry_config_ready',taskId:t.taskId,companyId:t.companyId,roleId:t.roleId,target,operator,continuation:{state:'login',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['role_advance']},submission:'not_performed'};
+ },{waitMs:x.q.parallelRoles||x.q.executionMode==='parallel_roles'?30000:0});}
+ async enterBound(x){const {q,c,entry,recipe}=x;const t=x.t;{
   const prior=x.prior;
   if(prior?.queueId&&prior.queueId!==q.id)throw Error('ROLE_TASK_STATE_CHANGED');
   let opened,expectedRoleId=this.roleId(t,prior),excludePageIds=[];
@@ -237,21 +361,23 @@ export class RoleFlow{
   }else{
    opened=await this.browser.request('openPage',{pageUrl:prior?.applicationUrl||t.url,...(prior?.pageId?{pageId:prior.pageId}:{}),readySelectors:[c.account?.selector,c.fields?.root,entry?.detailReadySelector,entry?.formReadySelector].filter(Boolean)});
   }
-  const snapshot=await this.browser.request('roleSnapshot',{pageId:opened.pageId,accountSelector:c.account?.selector,loginRoot:c.fields?.root});Object.assign(snapshot,sessionFromSnapshot(snapshot));
-  if(snapshot.loginFormPresent||snapshot.authenticated!==true)throw Error('SHARED_LOGIN_SESSION_REQUIRED');
-  const result=await this.browser.request('roleEnterApplication',{pageId:opened.pageId,originalRoleUrl:t.url,expectedTitle:t.title,accountSelector:c.account?.selector,roleSelector:entry?.roleSelector,entry,expectedRoleId,...(excludePageIds.length?{excludePageIds}:{})});
+  // 不先猜登录态：点一次真实入口，落到申请表即已登录；落到登录页（含点击前就停在登录页、点击被登录框挡住）即未登录（C32）。
+  const landing=pageId=>this.entryLanding(c,pageId),toLogin=(s,pageId)=>this.entryLogin(x,s,pageId);
+  let result;
+  try{result=await this.browser.request('roleEnterApplication',{pageId:opened.pageId,originalRoleUrl:t.url,expectedTitle:t.title,roleSelector:entry?.roleSelector,entry,expectedRoleId,...(excludePageIds.length?{excludePageIds}:{})});}
+  catch(error){let s;try{s=await landing(opened.pageId);}catch{throw error;}if(s.loginFormPresent)return toLogin(s,opened.pageId);throw error;}
   const roleChanged=entry?.kind==='resume_modal'?result.roleIdentity?.value!==expectedRoleId:entry?.kind==='declarative_transition'?
    (entry.form.roleIdentity&&(result.roleIdentity?.value!==expectedRoleId||result.roleIdentity?.parameter!==entry.form.roleIdentity.parameter)||entry.form.roleSelector&&result.roleTitle!==t.title):result.roleTitle!==t.title;
   if(new URL(result.pageUrl).origin!==c.origin||roleChanged)throw Error('APPLICATION_ENTRY_RESULT_CHANGED');
   if(prior?.landedDetailUrl)await this.recordLanding(x,prior);
-  const entered=await this.browser.request('roleSnapshot',{pageId:result.pageId||opened.pageId,accountSelector:c.account?.selector,loginRoot:c.fields?.root,sessionSelectors:c.session});if(!sessionFromSnapshot(entered).authenticated)throw Error('LOGIN_SESSION_REQUIRED');
+  const entered=await landing(result.pageId||opened.pageId);if(entered.loginFormPresent)return toLogin(entered,result.pageId||opened.pageId);
   const next={...prior,queueId:q.id,taskId:t.taskId,pageId:result.pageId||opened.pageId,originalRoleUrl:t.url,applicationUrl:result.pageUrl,returnUrl:result.pageUrl,expectedTitle:t.title,status:'ready_to_fill',authenticated:true,entryVerifiedAt:new Date().toISOString()};delete next.entryStarted;invalidateRolePageProofs(next);
   await this.queues.put(t.taskId,next);
   // 投递链接为空（或已报打不开）时，第一次核对进入的申请页地址记为观察；已有投递链接时不记。
   let observation=null;if(!t.applyUrl&&this.onObservation){const u=new URL(result.pageUrl);
    if(u.href!==new URL(t.url).href){try{observation=await this.onObservation({kind:'role',code:t.roleId,field:'投递链接',value:u.href,evidence:'role_enter_application_verified'});}catch(e){observation={status:'write_failed:'+(/^[A-Z_]+$/.test(e.message)?e.message:'UNKNOWN')};}}}
   return {...result,status:'ready_to_fill',taskId:t.taskId,applicationUrl:result.pageUrl,...(observation?{observation:observation.status}:{}),submission:'not_performed'};
- },{waitMs:q.parallelRoles||q.executionMode==='parallel_roles'?30000:0});}
+ }}
  // 页面卡住（一直转圈、没加载出来）：刷新这张绑定的标签，不另开。已经开始填写的页面刷新会丢掉未保存的填写，须用户同意。
  async reload(args){const x=await this.base(args);return this.login.locked(x.c,async()=>{
   const state=x.prior;if(!state?.pageId||state.queueId!==x.q.id)throw bindingError('ROLE_PAGE_NOT_BOUND',{nextTool:'role_open'});
@@ -270,7 +396,8 @@ export class RoleFlow{
   try{identity=await this.browser.request('pageIdentity',{pageId:x.prior.pageId});}
   catch(error){if(error.message!=='ROLE_BROWSER_PAGE_LOST'||!args.stage)throw error;}
   if(identity&&originOf(identity.pageUrl)!==x.c.origin)throw Error('ROLE_BOUND_PAGE_SCOPE_CHANGED');
-  const kind=url=>rolePageKind(x.entry,url,{roleUrl:x.t.url,roleId:this.roleId(x.t,x.prior)});
+  // 站点还没有入口配置时，确认的岗位链接打开的那张页面就是岗位页：只读检查按岗位页处理，不再因“认不出”而卡住。
+  const kind=url=>{const k=rolePageKind(x.entry,url,{roleUrl:x.t.url,roleId:this.roleId(x.t,x.prior)});return k==='role_link'&&!x.entry?'detail':k;};
   let stage=identity?kind(identity.pageUrl):null,pageId=x.prior.pageId;
   // Diagnostics may read a unique already-open page of this same confirmed
   // role. Never navigate, open a page or replace the application task binding.

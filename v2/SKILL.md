@@ -2,45 +2,128 @@
 name: job-application-assistant-v2
 description: Coordinate company-configured login and application MCP tools, stage checks and user review for confirmed recruiting roles. Use the single maintained V2 runtime for preparation and testing.
 metadata:
-  version: "2.0.0-alpha.62"
+  version: "2.0.0-alpha.63"
 ---
 
 # 岗位代投助手 V2
 
-Start from the workspace router, confirmed role scope, current materials and existing authorization. Reuse same-batch decisions; ask only genuinely missing facts. This package is the single maintained application runtime in the workspace. Project MCP and host Hook entrypoints resolve to this source tree. Private facts and new runtime state stay outside the package. Each company owns one filling template. All roles of that company share its control definitions. The company file indexes role bindings by the upstream role code; MCP resolves role targets from confirmed handoff and the bound task, never asks the agent to choose or substitute a captured job path. Shared helpers use its original capture and actual verification results; they never create or read a separate seal certificate or duplicate capture stored inside one.
+本组件是工作区唯一的投递运行源码：登录 MCP、申请 MCP、固定 CLI 和 Hook 入口都指向这里；个人资料和运行状态放在组件外。投递只处理用户确认过的岗位范围，沿用当前材料、已有授权和同批次已做的决定，只问确实缺的事实。
 
-## Start and route
+每家公司一份正式填写模板，公司全部岗位共用其控件定义；公司文件按上游岗位编码登记岗位绑定。MCP 从确认的交接和绑定任务解析岗位目标，Agent 不选择、不替换岗位路径。辅助工具只用原始采集和实际核验结果，不另建或读取封存证明。
 
-Start with the applicable business operation from any conversation. The Hook loads the route on the first stage call in that turn. Conversation and turn identifiers scope reminders and continuation reporting. They do not establish Agent identity or eligibility to call login or application tools. A new conversation or fork uses the same registered Agent or Agent group when the deployment identity is unchanged. Register separate instances through the host installer; group members retain individual codes. The optional conversation prompt setting is documented in [conversation hooks](docs/conversation-hooks.md). Use `runtime_info` for setup, diagnostics or update verification. Browser channels follow the detected capability file of this host and [host integration](docs/host-integration.md). The shared entry checks the loaded interface and core versions before dispatch. Use `workflow_next` / `form_route` for the existing-asset branch before filling.
+## 开始前：Hook
 
-1. Before opening websites, call `company_batch_create` with the current preparation authorization; it reads only the user-confirmed per-company wide files `岗位交接/公司/<company code>.json` (identities are fixed codes: company C00001, site S0001, role J000001; links are values read at execution; see [role entry](docs/role-entry.md)), then `company_batch_take`. MCP extracts companies and splits Chrome/IAB work; the default capacity is ten companies per channel, twenty total. Multiple roles count as one company, and a shared verified login scope stays on one channel. Read [dual-browser batches](docs/company-batches.md) and [role entry](docs/role-entry.md). The upstream workflow owns selection, approval and Excel-to-JSON preparation. The entry consumes the confirmed JSON without converting Excel; native company-plan outcome persistence belongs to MCP internals; spreadsheet conversion and external tracker synchronization are outside this package. Do not invent selections, reorder company/role priorities or silently bypass missing input. Legacy explicit sequential/same-company runners remain supported; they are not the default new-batch coordinator.
-2. Each assigned channel runs only on the executor recorded in the capability file: Chrome is the component's dedicated Chrome clone (fixed private profile, local DevTools port, shared by every host, started only by `scripts/chrome-clone.mjs` or `browser_initialize_chrome`), IAB is the host's built-in browser (only when it passed all three detection checks). The batch chooses the intersection of its browserChannels preference and live recorded application capabilities; if empty it uses the available channel and reports the reason. Use that returned assignment, never use Playwright, browser-use or another browser tool outside this MCP, and never launch a Chrome yourself; the user's daily Chrome and its extensions are never used. Follow each company's frozen role order; its first navigation is the confirmed role URL, and login stays bound to the original role and tab. Never attach to daily Chrome or invoke REA during normal use. Keep active browsers alive. Record user waits and blockers per company so independent tasks continue; dispatch alone is not execution evidence.
-3. Match the requested role code against the assignment before advancing. Call login MCP `role_advance` with that role code, its confirmed queue task and current preparation authority. It reuses/opens the bound role page, reads login state, resumes after user login, checks the role URL/title and enters the application form in one call. An authenticated result uses positive website session evidence and absent login UI, without comparing account text to private profile facts. A login redirect remains part of this task. When it returns `needs_user_login`, ask the user to log in on the original Chrome clone; after their reply call `role_advance` again, which reads the actual session before continuing. CAPTCHA and third-party login remain user-operated. Existing SMS APIs may be used for the confirmed phone input and user-provided current OTP; never store OTPs. The ordinary business authorization switch continues to govern consent.
-4. Login MCP invokes deterministic guards within every mutation. A failed guard stops dependent actions. A Hook does not schedule a model turn: this Skill reads the result and invokes the next permitted tool. Preserve independent work when one company waits for the user. Follow `continuation.owner/state`: construction, mapping and recoverable technical gaps belong to the agent, not the user. Continue permitted next calls instead of ending a turn after every partial fill. Use `workflow_advance` for distinct companies already ready to prepare; do not blindly retry unchanged failures. The same real failure twice on one task or company returns `continuation.state: ask_user` with `repeatedFailure`: put its fields and evidence to the user and keep going with other companies. Nothing is locked; a refresh, recovery or lost page does not count.
-5. Once `role_advance` returns `ready_to_fill`, use `workflow_next` / `form_route` to reuse the company template, then `role_prepare` to compile, fill and independently verify the confirmed task. Review actual application history/quota as required by the confirmed scope. Use `role_verify` for additional readback and provide the report for review. For explicitly authorized parallel roles, use the existing company-origin lease and independent task tabs with `roles_prepare_batch`.
-6. Application MCP keeps control capture, conditional discovery, private profile registration, offline plan compilation, batch preparation and independent current-page verification. All newly discovered questions, optional fields and explicit omissions remain registered. For a company with a verified official schema recipe, `workflow_next` routes to `capture_form_definition` before DOM capture; read [official form definitions](docs/official-form-definitions.md). The definition is construction evidence and does not certify completed UI mapping or filling. Resume import stages the approved local material and then recaptures portal-parsed fields. Attachment acceptance uses actual screenshots and the host image-capable model under the shared pipeline; CAPTCHA remains user-operated.
-7. Before compiling, review employer-facing text against the designated source: source/audit notes, model caveats and missing-data explanations belong only in metadata. Structural validity and JSON/page equality do not prove content quality. The compiler rejects recognized editorial leakage; source-based semantic review remains required. Record user-perspective timing from the first timestamp to the final timestamp, including model work, repair and waiting without deductions.
-8. Review the exact completed form and actual save state. Follow [persistent business authorization](docs/generic-form-pipeline.md#持久业务授权) and [attachment acceptance](docs/generic-form-pipeline.md#附件截图与模型验收): every attachment of a role is judged once in one vision-model call, the site's uploaded state is accepted when no vision model is reachable, and only a model mismatch blocks; never download attachments or compare file hashes, and never ask the user to confirm a photo. The login MCP and every preparation tool never submit. Final submission is only `role_submit`, after the user's explicit authorization for that exact role and current form; it binds the template hash and a verified review run, re-verifies the edit form once, enters a site's summary step directly without comparing it, counts only an official receipt, and is followed by `application_closeout` (see [application outcome](docs/application-outcome.md)). Keep target, review and final-submit authority separate.
+在对话中开始调用本组件时，先确认本宿主已为本项目装好组件 Hook 和工作区 Hook；没有就按自身宿主的方式装上，具体做法由 Agent 自己解决。
 
-One role task = one bound tab (`pageId` in the task record). Every step acts only on that tab; URLs only tell which step it is at. Never open, pick or switch pages yourself with a browser tool during a role task: `role_advance` reuses this role's existing tab (carried binding or the unique unbound page of this role) and only opens a new one when none exists; on sites with an entry recipe it always goes role link → login in the same task → the internal entry driver reaches the form, never straight to a stored application URL. Errors carry `details.nextTool` (`role_advance`, `role_close_extra_pages`); call that tool. Use `role_reload_page` for a stuck page and `role_close_extra_pages` for duplicate tabs (form-like extras need the user's look and words first). Site entry configs change only through `scripts/site-entry.mjs` (preview → user's words → write); see [role entry](docs/role-entry.md) and [declarative entry](docs/declarative-entry.md).
+- 范围：Hook 对本项目生效，跨项目不生效。宿主能写项目级配置的写项目级；只能写用户级配置的，Hook 脚本按会话工作目录判断，不在本项目就直接放行。
+- 组件 Hook：`hooks/workflow_hook.py`，事件 SessionStart、UserPromptSubmit、SubagentStart（注入调用顺序）和 PreToolUse、PostToolUse、Stop（阶段调用登记与接续检查）；所需环境变量见 [conversation hooks](docs/conversation-hooks.md)，可参照 Codex 的封装 `.codex/hooks/recruiting_workflow.py`。
+- 工作区 Hook（数据保护、投递状态、需求入口、生产验收台账）：照本项目现有的 `.claude/settings.json`、`.codex/hooks.json`、`.agents/hooks.json` 装同一组。
+- 修改 Hook 配置按工作区 `AGENTS.md`「组件软锁」执行。
 
-Use the installed tool descriptions; return compact counts, exceptions and evidence references instead of full successful inventories. Company assets contain selectors/rules, never personal values. Ordinary private facts live in the user's JSON, authentication secrets remain ephemeral. Browser pages and unsaved work stay open. See [installation and test instructions](docs/login-mcp.md).
+对话 ID 和回合 ID 只用于本轮提示和接续记录，不决定 Agent 身份或调用资格；新对话、分支沿用已登记的 Agent 或 Agent 组身份，另注册实例走宿主安装器，组成员各自保留编码。可选的对话预加载见 [conversation hooks](docs/conversation-hooks.md)。
 
-For the requested comparison of responsibilities still outside MCP, read [capability boundaries](docs/capability-boundaries.md). These boundaries distinguish implemented code from capabilities that still require work and live acceptance.
+## 环节表
 
-For first-time acquisition and observed structural gaps, follow the [generic form pipeline](docs/generic-form-pipeline.md). Use the same bound page for the screenshot-based primary inventory, REA, reconciliation and actual control tests. Reuse valid company templates during normal preparation. Follow form_cycle_status for the next step after a partial acquisition.
+按顺序执行；一个环节的“完成标准”达到后进入下一个。Hook 注入的调用顺序由本表的“环节”“调用”两列生成。
 
-Host responsibilities are deployment choices, not agent-brand rules. A single host may execute the workflow; a deployment may instead assign execution and maintenance to different hosts. Read [host integration](docs/host-integration.md) for the configuration source and installation/migration procedure. Only a host configured as `executor` calls website-facing component operations (MCP or fixed CLI). `RECRUITING_HOST_ROLE` defaults to `executor` for a new single-host installation; `maintainer` is an explicitly selected code-repair role. With `maintainer`, the shared business core answers read-only inspections only and refuse every stage tool with `HOST_ROLE_MAINTAINER_READ_ONLY` before any browser, profile or queue access; the launcher starts no browser and `conversation_scope.py enable` refuses registration. The maintenance host repairs shared code from MCP feedback and returns it for executor testing. Use the component for every application operation. The optional preloaded workflow also restricts external tools in that conversation. Company updates persist the sole official template, content mappings and version before any downstream check or operation. All readers use that official asset. Drafts are temporary and are deleted, never an alternative execution source. Already-built company forms reuse their stored assets without re-certification or reacquisition for missing legacy evidence or internal format drift; only an observed real fill failure routes to incremental repair. Independent readback and submission verification remain separate. Use `workflow_handoff` with actual preparation or verification run IDs for driver defects. The maintenance host follows [maintenance rules](docs/maintenance.md): aggregate failures with `scripts/failure-summary.mjs` and fix one class at a time, reproduce from stored evidence before live retest, assess the impact of any gate change on sealed assets before merging, and add frameworks only as registered adapters. Run `scripts/readiness.mjs` before merging a gate change, after the confirmed batch changes, and before an execution host starts.
+<!-- 环节表:开始 -->
+| 环节 | 进入条件 | 调用 | 组件返回 | 交给用户 | 完成标准 | 异常去向 |
+|---|---|---|---|---|---|---|
+| 建批次 | 用户确认了岗位范围，`岗位交接/公司/<公司编码>.json` 已确认 | `company_batch_create` → `company_batch_take` | 各公司的通道分配（Chrome 分身／内置浏览器）、冻结的岗位顺序、`form_assets_status`（各站点缺登录配置、正式模板、投递链接的情况） | 本批公司数、各通道分到的公司、缺资产的站点 | 每家公司拿到通道分配 | 没有可用通道 `NO_USABLE_BROWSER_CHANNEL`；分身没运行或没连上，Agent 直接调 `browser_initialize_chrome`／`browser_restore_chrome` |
+| 进岗位与登录 | 拿到分配；按公司冻结顺序逐个岗位，岗位编码与分配一致 | `role_advance` | `ready_to_fill`；或 `needs_user_login`；写了首版登录配置时带 `loginConfigsCreated`，写了首版入口配置时带 `entryConfigsCreated` | `needs_user_login`：请用户在原分身登录；`loginConfigsCreated`／`entryConfigsCreated`：写了哪几家公司 | `ready_to_fill`（点入口后落在申请表） | 用户登录后再调 `role_advance`；错误带 `details.nextTool` 就调它；首版入口同一失败第二次返回 `agent_fallback` 时调 `role_entry_fallback`；页面卡住 `role_reload_page`；多余标签 `role_close_extra_pages`；链接打不开 `role_report_link_failure` |
+| 选路线 | `ready_to_fill` | `workflow_next`／`form_route` | 下一步：复用公司模板去填写，或去建库；有已核实官方表单定义的公司先 `capture_form_definition` | 无 | 拿到下一步 | 按返回的 `continuation` 处理 |
+| 建库 | 公司没有正式模板，或填写时观察到真实结构缺口 | `form_construct_acquire` → `form_construct_build` | 第一段先返回脱敏截图，带 `observation` 再调返回 REA 一级候选；第二段在组件内完成展开、复核、已知事实映射、正式模板与版本更新、交互测试和确认，只返回一次：`agentItems`（新问题映射、页面定义）、`userItems`（缺的答案）、`fallbackItems`，附记录引用；完成时带 `controlSources`（各控件由哪一层做出） | `userItems` 里缺的答案，一次集中问；完成时告诉用户哪些控件靠兜底 | 返回 `company_template_ready` | `agentItems` 由 Agent 处理后再调 `form_construct_build`；`fallbackItems` 走 `form_gui_fallback`；看细节用 `form_construction_records`（不重采） |
+| 填写与核验 | 公司模板可用 | `role_prepare` | 填写结果和独立核验结果（同一次调用；组件能自修的定位变化已在内部修复、回放测试并重填一次） | 无（进入审阅） | 独立核验通过 | 不再调 `role_verify`；修不了的按 `continuation` 处理；用户明确授权的同公司并行岗位用 `roles_prepare_batch`，已就绪的不同公司用 `workflow_advance` |
+| 用户审阅 | 填写与核验完成 | 无工具（Agent 汇报） | 无 | 原分身标签里已填好的表单及实际保存状态、独立核验结果、附件验收结果、需要用户补充或决定的项；只报计数、异常和证据引用，不罗列全部成功项 | 用户对这个岗位、这张表给出具体提交授权，或提出修改 | 用户要改：改资料后回到填写与核验 |
+| 提交与收尾 | 用户对这个岗位和当前表单的明确提交授权 | `role_submit` | 官网回执；同一次调用写回固定收尾（`application_closeout`）的结果 | 是否拿到官网回执、收尾是否写回 | 拿到官网回执，收尾已写回 | 只有收尾写回失败：再调一次 `application_closeout`，不重新提交；没有官网回执不算提交 |
+<!-- 环节表:结束 -->
 
-## Business status rules
+## 接续与异常（所有环节）
 
-This component never changes the master table status. `application_closeout` validates fixed events against official evidence and overwrites the latest result for each role in `岗位交接/投递回传.json`. Only an official receipt or application-history confirmation counts as `submission_confirmed`; preparation, review and a submit click do not. `submission_confirmed` is also refused unless the role was filled by this component from the company's sealed form template in the current batch queue and passed independent verification (`role_prepare`/`role_verify`), so forms filled by hand cannot be recorded as submitted; build the company form first. This component never edits the handoff area's links. When a role's 投递链接 is empty, `role_enter_application` records the verified application page as an observation in `岗位交接/投递回传.json`; when a role link or application link does not open, `role_report_link_failure` records a failure observation with evidence (a redirect that still opens is not a change). The search side previews observations with `apply-observations` and writes the master table only after the user confirms; the next import reads the refreshed company file. `form_assets_status` (also returned by `company_batch_create`) lists, per site code, missing login config, sealed template and 投递链接. Uncertain or blocked results block retries until the user resolves them. The search side turns these results into “当前状态是X，更新状态是Y” through reverse review, and writes the master table only after the user confirms. The component does not read or write Excel; the model cannot assign arbitrary business labels.
+- 按 `continuation.owner/state` 接续：建库、映射、可恢复的技术缺口归 Agent，不交用户。Hook 不安排模型回合，由 Agent 读结果调下一个允许的工具；有允许的下一步就继续，不在每次部分填写后结束回合；不盲目重试没变化的失败。
+- 一家公司等用户时，其他公司照常推进；按公司记录用户等待和阻塞。派发本身不是执行证据。
+- 登录 MCP 每次变更都执行确定性守卫，守卫失败即停止依赖它的动作。
+- 同一真实失败在同一任务或公司出现两次：本宿主在组件外登记表 `产品管理/Agent浏览器兜底登记.json` 里、且页面所在浏览器也登记时，返回 `continuation.state: agent_fallback`，按下文“Agent 浏览器兜底”调 `form_gui_fallback`；表外宿主、表外浏览器，或兜底后同一失败再出现，返回 `ask_user` 和 `repeatedFailure`：把字段和证据交给用户，其他公司继续。不锁任何东西；刷新、恢复或丢页不计次。
+- 分身没运行或没连上：Agent 直接调 `browser_initialize_chrome`（`authorization.evidence` 填当前任务授权原话）；断开、原端口不在：`browser_restore_chrome`。
+- 接口或核心版本对不上被拒：重连该 MCP，或用 `component_runtime` 完成更新，不经已知过期的连接继续；用 `runtime_info` 读回（见 [runtime architecture](docs/runtime-architecture.md)）。
+- 代码更新后只需 `component_runtime reload`（C43）：业务核心换到当前代码，浏览器主控空闲且代码不同就随之换新，Chrome 分身和标签不关；返回 `browserHost.updated` 为 true 时先调 `browser_initialize_chrome` 连上分身。工具报 `BROWSER_HOST_VERSION_MISMATCH` 或 `BROWSER_HOST_RESTART_REQUIRED` 时同样直接 reload，不要手动结束主控进程。
+- `HOST_ROLE_MAINTAINER_READ_ONLY`：本宿主配置为维护角色，不执行投递（见 [host integration](docs/host-integration.md)）。
+- 确属通用代码缺陷：`workflow_handoff` 带实际准备或核验运行编号交维护。
 
-## Independent runtime
-Use the fixed CLI or MCP adapter for the same business core; see [runtime architecture](docs/runtime-architecture.md). Company data is re-read on each operation. Use `component_runtime` to pause/reload/resume a deployed core; keep the MCP adapter and browser running. The fixed CLI follows the same host role, workflow Hook, handoff confirmation and submission rules.
+## Agent 浏览器兜底
 
-CLI/MCP version agreement is required: business calls compare the installed release and actual core fingerprint, refresh an idle outdated core, and refuse mismatches before execution. An outdated adapter requires reconnecting that MCP interface; do not continue through a known stale connection. Use runtime_info to verify the actual connection after deployment or diagnose a mismatch.
+进入申请页：首版入口同一失败第二次、结果点名 `role_entry_fallback` 时使用。`start` 模式核对登记表，在任务绑定的岗位页（不在就回岗位链接）只读盘点岗位标题和候选按钮；Agent 只在这张标签上先核对岗位名，再用鼠标点进本岗位申请表，不填写、不提交、不自己开新标签（站点自己开就停在那里），落到登录页就停。然后用 `report` 模式回报按钮完整文字 `label` 和同文字按钮从上往下第几个 `position`；组件核对落地页是本岗位申请表后写入首版入口配置（`entryConfigsCreated`），再调 `role_advance` 接续。登记表外、点了没反应、落地不是本岗位申请表时交用户。
 
-Use `component_runtime` action `update` to finish a deployed update: wait for active operations, load and verify the installed release, then resume the original task. The stable MCP transport loads its internal dispatcher per request; long-running CLI orchestration uses the same path. Verify CLI/MCP identity and the original task continuation on the same connection.
+表单控件：只在结果点名 `form_gui_fallback` 时使用。`start` 模式检查组件外登记表（宿主 + 页面所在浏览器：装了 Agent 插件的 Chrome 分身，或内置浏览器），返回要做的字段、值和规则。只在任务绑定的那张申请页上用鼠标点击和键盘输入，不提交，不碰其他控件，不开新标签。然后用 `report` 模式回报每个字段的步骤（`click_field`、`click_text` 加准确文字、`type_value`、`type_text`、`press`）；组件把步骤写进正式公司模板的操作定义，回放、重测并接续原任务。“投递流程不用 Chrome AI 插件”只对这一处例外。
 
-If the current host still owns a legacy MCP adapter or needs backend reconciliation, run this component’s `node scripts/update-runtime.mjs` from the same host. It discovers only its own ancestor host’s component processes, upgrades legacy stdio adapters in place, and verifies managed core updates. Use `--preview` to list targets. Read the current conversation’s two runtime_info tools and compare with CLI before continuing. No host UI, application restart or user refresh is part of this route.
+组件代点（第三种方式，登记表里登记了 `component_playwright` 时可用）：Agent 自己的浏览器操作不了这张页面时（例如分身里的插件没连上、宿主不给点击），只看页面（`role_screenshot`）决定怎么点，不自己操作，把操作交组件用自己连着分身的浏览器通道执行——入口用 `role_entry_fallback`（`mode=component`，回报同样的 `label`、`position`，组件核对同文字按钮个数不变后点一次，再同样核对落地页）；表单控件用 `form_gui_fallback`（`mode=component`，回报同样的步骤，组件写进操作定义后回放测试、独立读回）。只能点盘点出的入口候选按钮或模板里登记的控件，不提交。页面没有本岗位内容时不选按钮，改用 `role_report_link_failure`。这不是“Agent 用组件外的 Playwright”：Agent 不另起浏览器工具。
+
+登记表是组件外数据：每行 `hostId` 必须等于该执行端安装时的 `RECRUITING_HOST_ID`（`scripts/install-host.mjs --host <id>`），且只对有适配器 `host/adapters/<id>.mjs` 的执行端有效。新接入一个 Agent：按该 id 安装并在登记表加一行；和已有适配器不是同一个产品的，先补适配器。改登记表不改组件。见 [host integration](docs/host-integration.md#agent-浏览器兜底登记与执行端标识)。
+
+## 规则
+
+### 批次与输入
+
+- `company_batch_create` 带当前准备授权，只读用户确认过的公司宽表 `岗位交接/公司/<公司编码>.json`（编码固定：公司 C00001、站点 S0001、岗位 J000001；链接在执行时现读，见 [role entry](docs/role-entry.md)），再 `company_batch_take`。MCP 按正向评审确认的公司顺序拆出公司并分配 Chrome／内置浏览器，每个通道取前 `companiesPerChannel` 家（默认 10 家、共 20 家），不另传公司次序或公司子集；同公司多个岗位算一家，已核实共享登录范围的放同一通道。见 [dual-browser batches](docs/company-batches.md)。
+- 选岗、审批和 Excel 转 JSON 属于上游流程；本组件只消费确认后的 JSON，不转换 Excel，不做外部表同步。不自造选择、不改公司和岗位的优先顺序、不跳过缺失的输入。旧的显式顺序／同公司运行器仍可用，不是新批次的默认方式。
+
+### 浏览器与标签
+
+- 通道只在能力文件记录的执行端上运行：Chrome 是组件的 Chrome 分身（固定私有资料目录和本机调试端口，所有宿主共用，只由 `scripts/chrome-clone.mjs` 或 `browser_initialize_chrome` 启动）；内置浏览器只在三步检测全过时使用。批次取 browserChannels 偏好与已记录可用能力的交集；为空时用可用通道并报告原因。
+- 不用 Playwright、browser-use 或组件外的浏览器工具，不自己启动 Chrome，不连接、不使用日常 Chrome 及其插件；正常使用不调 REA。保持浏览器和页面开着，未保存的内容不动。
+- 每家公司按冻结的岗位顺序执行，第一次导航打开确认的岗位链接；登录绑定原岗位和原标签。
+- 一个岗位任务 = 一张绑定标签（任务记录里的 `pageId`），每一步只在这张标签上做，URL 只说明走到哪一步。任务中不自己用浏览器工具开页、选页或切页：`role_advance` 复用本岗位已有标签，没有才新开；有入口配方的站点总是岗位链接 → 同一任务内登录 → 入口驱动到表单，不直接打开存储的申请链接。像表单的多余标签要先经用户查看并给出原话才关。
+- 站点还没有入口配置时，`role_advance` 进入申请页那一步由组件在原岗位页读出与岗位名一致的标题（读不到就不点）、点一次唯一的投递按钮，落地页是本岗位申请表（有输入框，且地址里有岗位编号或页面上有岗位名）就写入首版入口配置并读回，同一任务接着进入；结果的 `entryConfigsCreated` 列出写了哪几家，要告诉用户。落到登录页照常交用户登录。其余失败（读不到标题、按钮没有或不止一个、点了没换页、落地不是本岗位申请表）第一次按原错误处理，同一失败第二次交 Agent 浏览器兜底（见下文）。
+- 已有入口配置的修改只通过 `scripts/site-entry.mjs`（预览 → 用户原话 → 写入），见 [role entry](docs/role-entry.md) 和 [declarative entry](docs/declarative-entry.md)。
+
+### 登录
+
+- 登录态不从页面痕迹推断：点一次真实入口，落在申请表即已登录，落在登录页即未登录；只读“是不是登录页”的识别，不读账号文字。
+- 没登录时不跳登录页的站点（C42）：页头可点的“登录／请登录／登录注册”文字、带登录字样且有手机号／验证码／密码输入的对话框，也算登录入口。岗位页上认出登录入口时 `role_advance` 直接返回需要登录，不点入口、不进兜底；入口按钮被挡住或不可用时不点，错误详情写明挡住它的元素类型、是否对话框。
+- 没有登录配置的公司或站点，由组件按固定规则写入首版本人登录配置并读回，同一任务接着走；结果的 `loginConfigsCreated` 列出写了哪几家，要告诉用户。
+- 验证码和第三方登录由用户本人操作。已有短信接口可用于已确认的手机号输入和用户当前提供的验证码，验证码不保存。是否同意按普通业务授权开关。
+
+### 建库
+
+- 第一段 `form_construct_acquire`：不带 `observation` 时返回脱敏截图，Agent 自己看图列一级控件（标签、栏目、第几次出现，每个展开入口一行；不写 DOM、值或子控件），再带 `observation` 调用，组件在同一页做 REA 和实时采集，返回 REA 一级候选。
+- 第二段 `form_construct_build`：带视觉与 REA 的一级对照 `primary` 和 `evidence`（新公司另带 `page`）调用，组件内部完成其余步骤，见环节表。详情用 `form_construction_records` 按需读取摘要或完整记录，不重新采集。流程细节见 [generic form pipeline](docs/generic-form-pipeline.md)。
+- 记录规则：每家公司建库时，每个控件按统一格式记进这家公司的正式模板——类型、展开类型（不展开／弹出列表／输入后出候选／多级逐级展开）、操作方式；选择类控件记四块：字段外框、选择框（或点开它的按钮）、弹出的候选菜单、选中后显示的结果；多级控件按答案逐级展开，并记下到末级的路径。
+- 分类顺序：先按网页通用标注（ARIA）；标注不够时按识别出的招聘系统控件库（飞书、atsx／Ant、北森 phoenix）；两层都认不出，或交互测试同一原因失败两次，走下文“Agent 浏览器兜底”，手点的步骤写进这家公司的模板。只按控件种类和控件库写组件代码，不按公司写代码。
+- 实测通过才算记完。建库结果的 `controlSources` 列出由通用标注、控件库、兜底各做出几个控件，以及靠兜底的控件名。
+
+### 公司模板与资料
+
+- 公司资产只存选择器和规则，不存个人值；普通个人事实在用户 JSON，认证秘密不落盘。
+- 公司更新先写唯一正式模板、内容映射和版本，再做后续检查和操作，所有读取都用正式资产；draft 是临时文件，用完删除，不作为执行来源。已建好的公司直接复用存储资产，不因旧证据缺失或内部格式变化重新认证、重新采集；只有观察到真实填写失败才走增量回补。独立读回和提交核验分开。
+- 新发现的问题、可选字段和明确省略都要登记。有已核实官方表单定义的公司，先 `capture_form_definition` 再采 DOM（见 [official form definitions](docs/official-form-definitions.md)），它是建库证据，不证明映射或填写已完成。简历导入先放用户批准的本地材料，再重新采集门户解析出的字段。
+- 填写前按确认范围核对实际投递记录和投递数量限制。
+
+### 内容与附件
+
+- 发给雇主的文字对照指定来源复核；来源／审计说明、模型提示、缺数据说明只放 metadata。结构合法、JSON 与页面一致都不证明内容质量；编译器拒绝已识别的编辑痕迹，按来源的语义复核仍要做。
+- 用户视角耗时从第一个时间戳算到最后一个，包含模型思考、修复和等待，不扣除。
+- 附件验收按 [persistent business authorization](docs/generic-form-pipeline.md#持久业务授权) 和 [attachment acceptance](docs/generic-form-pipeline.md#附件截图与模型验收)：一个岗位的全部附件一次视觉模型调用判定；没有可用视觉模型时接受站点已上传状态；只有模型判定不符才阻断。不下载附件、不比文件哈希、不让用户确认照片。
+
+### 提交与授权
+
+- 登录 MCP 和所有准备工具都不提交。最终提交只用 `role_submit`，且必须有用户对这个岗位和当前表单的明确授权；它绑定模板哈希和已核验的审阅运行，提交前再核验一次编辑表单，站点的摘要步骤直接进入、不做比较，只认官网回执，同一次调用写回固定收尾（见 [application outcome](docs/application-outcome.md)）。目标、审阅和最终提交三种授权分开。
+
+### 业务状态
+
+- 本组件从不修改主表状态。`application_closeout` 按官方证据校验固定事件，覆盖写入 `岗位交接/投递回传.json` 中每个岗位的最新结果。只有官网回执或投递记录确认才算 `submission_confirmed`；准备、审阅和点击提交都不算。该岗位不是本组件按本批队列里公司正式模板填写并通过独立核验（`role_prepare`／`role_verify`）的，`submission_confirmed` 也被拒绝，手工填写的表单不能登记为已提交；先为该公司建库。
+- 本组件不改交接区的链接。岗位的投递链接为空时，`role_enter_application` 把核实过的申请页作为观察记录写进 `岗位交接/投递回传.json`；岗位链接或投递链接打不开时，`role_report_link_failure` 带证据记录失败观察（仍能打开的跳转不算变化）。搜索端用 `apply-observations` 预览观察记录，用户确认后才写主表，下次导入读刷新后的公司文件。`form_assets_status`（`company_batch_create` 也会返回）按站点编码列出缺的登录配置、正式模板和投递链接。
+- 不确定或受阻的结果在用户处理前不重试。搜索端通过反向评审把结果整理成“当前状态是X，更新状态是Y”，用户确认后才写主表。本组件不读写 Excel，模型不能自定业务标签。
+
+### 运行方式
+
+- 按已安装工具的说明传参。固定 CLI 和 MCP 使用同一业务核心，规则相同；公司数据每次操作重读。安装和测试见 [login MCP](docs/login-mcp.md)，运行与版本更新见 [runtime architecture](docs/runtime-architecture.md)。尚需建设的能力见 [capability boundaries](docs/capability-boundaries.md)。
+- 故障恢复见 [failure recovery](docs/failure-recovery.md)。
+
+## 维护、部署与运行更新
+
+这些内容不属于投递执行，按文档进行：
+
+- 宿主职责（执行端 `executor`／维护端 `maintainer`）、安装、迁移、浏览器能力检测：[host integration](docs/host-integration.md)。
+- 维护流程（失败聚合、一次修一类、先用已存证据复现、门禁变更影响评估、新框架适配器准入、`scripts/readiness.mjs`）：[maintenance](docs/maintenance.md)。
+- 运行核心更新（`component_runtime`、`scripts/update-runtime.mjs`、CLI／MCP 版本一致）：[runtime architecture](docs/runtime-architecture.md)。
+- Hook 与执行身份：[conversation hooks](docs/conversation-hooks.md)。

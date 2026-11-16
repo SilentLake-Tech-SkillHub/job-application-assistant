@@ -24,6 +24,8 @@ export function validateTransition(entry){
  if(entry.allowProvenanceIdentity!==undefined&&typeof entry.allowProvenanceIdentity!=='boolean')fail('ENTRY_PROVENANCE_FLAG_INVALID');
  const c=entry.entryLocator;if(!c||typeof c.label!=='string'||!c.label.trim()||[!!c.selector,!!(c.role&&c.name),!!c.text].filter(Boolean).length!==1)fail('ENTRY_CTA_CONTRACT_REQUIRED');
  if(c.selector&&typeof c.selector!=='string'||c.role&&typeof c.role!=='string'||c.name&&c.name!==c.label||c.text&&c.text!==c.label)fail('ENTRY_CTA_CONTRACT_REQUIRED');
+ // 同一文字的入口按钮有多个时（C39 追加，Agent 兜底记录）：记下一共几个、点第几个（页面元素顺序，从 0 起）；每次进入先核对个数不变。
+ if((c.count!==undefined||c.index!==undefined)&&(!Number.isInteger(c.count)||c.count<2||c.count>20||!Number.isInteger(c.index)||c.index<0||c.index>=c.count))fail('ENTRY_CTA_CONTRACT_REQUIRED');
  if(entry.preActions!==undefined){
   if(!Array.isArray(entry.preActions)||entry.preActions.length>5)fail('ENTRY_PREACTIONS_INVALID');
   for(const a of entry.preActions){if(!a||!['check','click'].includes(a.method)||typeof a.selector!=='string'||!a.selector.trim())fail('ENTRY_PREACTIONS_INVALID');if(a.label!==undefined&&typeof a.label!=='string')fail('ENTRY_PREACTIONS_INVALID');}
@@ -103,7 +105,7 @@ export async function executeTransition({entry,pageId,expectedTitle,expectedRole
   // that uniquely evidenced page instead of triggering a second application.
   // 点击前就已存在的其他标签（excludePageIds，由任务在第一次点击前登记）一律不算本次进入的申请页。
   let matches=await candidates();if(matches.length>1)fail('AMBIGUOUS_ROLE_FORM');
-  if(!matches.length){const c=entry.entryLocator,l=c.selector?original.locator(c.selector):c.text?original.getByText(c.text,{exact:true}):original.getByRole(c.role,{name:c.name,exact:true});try{await l.waitFor({state:'visible',timeout:READY_TIMEOUT_MS});}catch(error){error.operationStep='entry_locator_visible';error.operationLocator=c.selector||c.text||c.name;if(await l.count()===0){error.originalMessage=error.message;error.message='BROWSER_ELEMENT_NOT_FOUND';}throw error;}if(await l.count()!==1||(await l.innerText()).trim()!==c.label)fail('APPLICATION_ENTRY_BUTTON_CHANGED');try{await l.click({timeout:10000});}catch(error){error.operationStep='entry_click';error.operationLocator=c.selector||c.text||c.name;throw error;}clicked=true;
+  if(!matches.length){const c=entry.entryLocator,all=c.selector?original.locator(c.selector):c.text?original.getByText(c.text,{exact:true}):original.getByRole(c.role,{name:c.name,exact:true}),l=c.count?all.nth(c.index):all;try{await l.waitFor({state:'visible',timeout:READY_TIMEOUT_MS});}catch(error){error.operationStep='entry_locator_visible';error.operationLocator=c.selector||c.text||c.name;if(await all.count()===0){error.originalMessage=error.message;error.message='BROWSER_ELEMENT_NOT_FOUND';}throw error;}if(await all.count()!==(c.count||1)||(await l.innerText()).trim()!==c.label)fail('APPLICATION_ENTRY_BUTTON_CHANGED');try{await l.click({timeout:10000});}catch(error){error.operationStep='entry_click';error.operationLocator=c.selector||c.text||c.name;throw error;}clicked=true;
    const now=host.now||Date.now,deadline=now()+READY_TIMEOUT_MS;do{matches=await candidates();if(matches.length)break;await host.pause(50);}while(now()<deadline);
   }
   if(!matches.length){const error=Error('BROWSER_OPERATION_TIMEOUT');error.operationStep='entry_form_navigation';error.operationLocator=entry.form.readySelector;throw error;}if(matches.length!==1)fail('AMBIGUOUS_ROLE_FORM');targetId=matches[0].id;target=await host.getPage(targetId);

@@ -21,6 +21,10 @@ import {RoutedBrowserAdapter} from '../shared/routed-browser.mjs';
 import {safeCode} from './contracts.mjs';
 import {CompanyDirectory} from '../shared/company-directory.mjs';
 import {loadCompanyTemplate,resolveStoredCompanyRole} from '../shared/company-template-store.mjs';
+import {LoginConfigs,collectLoginConfigReports} from '../shared/login-config-supplement.mjs';
+import {EntryConfigs,collectEntryConfigReports} from '../shared/entry-config-supplement.mjs';
+import {fallbackRegistryFile,loadFallbackRegistry,fallbackSurface} from '../shared/gui-fallback.mjs';
+import {writeMasterLoginConfig} from '../shared/master-login-config.mjs';
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 if(!process.env.RECRUITING_PROFILE_JSON||!process.env.RECRUITING_LOGIN_PRIVATE_DIR)throw Error('PRIVATE_LOGIN_CONFIGURATION_REQUIRED');
 const channelStore=new Store(runtimePaths.application);
@@ -28,13 +32,17 @@ const browser=new LoginBrowser(process.env.RECRUITING_BROWSER_SOCKET,{broker:new
 // 目录项 = 站点（站点编码），来自工作区 岗位交接/公司/<公司编码>.json；登录配置通过公司和来源站点编码从主数据读取。
 const directory=new CompanyDirectory({store:channelStore});
 const catalog=await directory.load();
-const engine=new LoginEngine({loginConfig:(id,context)=>directory.loginConfig(id,context),privateRoot:process.env.RECRUITING_LOGIN_PRIVATE_DIR,profileFile:process.env.RECRUITING_PROFILE_JSON,browser});
+// 登录配置先判断存在再读取；缺失时按固定规则写入首版配置并读回，原任务在同一次调用里继续（C31）。
+const loginConfigs=new LoginConfigs({directory,write:item=>writeMasterLoginConfig(path.dirname(directory.handoffDir),item)});
+// 站点还没有入口配置时，进入申请页那一步由组件写入首版入口配置并读回，原任务在同一次调用里继续（C39）。
+const entryConfigs=new EntryConfigs({directory,write:item=>writeMasterLoginConfig(path.dirname(directory.handoffDir),item)});
+const engine=new LoginEngine({loginConfig:(id,context)=>loginConfigs.ensure(id,context),privateRoot:process.env.RECRUITING_LOGIN_PRIVATE_DIR,profileFile:process.env.RECRUITING_PROFILE_JSON,browser});
 const queues=queueFromEnv(catalog);engine.roleQueues=queues;
 const appStore=new Store(runtimePaths.application);
-const flow=new RoleFlow({queues,login:engine,browser:browser.broker,templates:async(companyId,roleId)=>{try{return await loadCompanyTemplate(appStore,directory,companyId,roleId);}catch(error){if(error.code==='ENOENT')return null;throw error;}},resolveTemplate:(template,task)=>resolveStoredCompanyRole(template,task,directory,queues),onObservation:o=>recordObservation({...o,handoffDir:directory.handoffDir})});
+const flow=new RoleFlow({queues,login:engine,browser:browser.broker,templates:async(companyId,roleId)=>{try{return await loadCompanyTemplate(appStore,directory,companyId,roleId);}catch(error){if(error.code==='ENOENT')return null;throw error;}},resolveTemplate:(template,task)=>resolveStoredCompanyRole(template,task,directory,queues),onObservation:o=>recordObservation({...o,handoffDir:directory.handoffDir}),entryConfigs,fallbackSurface:async pageId=>fallbackSurface({registry:await loadFallbackRegistry(fallbackRegistryFile()),hostId:process.env.RECRUITING_HOST_ID||null,pageId})});
 const packageInfo=JSON.parse(await readFile(path.join(root,'package.json'),'utf8'));
 export const service=new OperationService({name:'recruiting-login-v2',version:packageInfo.version});
-const registerOperation=(name,definition,handler)=>service.registerOperation(name,definition,args=>withTaskRecords({taskId:args.taskId,queueId:args.queueId,companyId:args.companyId,roleId:args.roleId,tool:name},()=>handler(args)));
+const registerOperation=(name,definition,handler)=>service.registerOperation(name,definition,args=>withTaskRecords({taskId:args.taskId,queueId:args.queueId,companyId:args.companyId,roleId:args.roleId,tool:name},()=>collectLoginConfigReports(()=>collectEntryConfigReports(()=>handler(args)))));
 const output=v=>v;
 const wrap=fn=>async args=>{try{return output(await fn(args));}catch(e){const error=safeCode(e),failureEvidenceId=args.taskId?randomUUID():'error-'+(typeof args.companyId==='string'&&/^[CS][0-9]+$/.test(args.companyId)?args.companyId:'host')+'-'+(taskRecordScope().tool||'operation'),details=safeControlErrorDetails(e.details);await appStore.put('runs',failureEvidenceId,{id:failureEvidenceId,operation:'mcp_error',companyId:args.companyId||null,taskId:args.taskId||null,error,...(details?{details}:{}),observedAt:new Date().toISOString()});return {isError:true,...output(workflowEnvelope({error,failureEvidenceId,...(details?{details}:{})}))};}};
 const location={companyId:z.string(),pageUrl:z.string().url()};
@@ -42,11 +50,12 @@ const plan={planId:z.string(),planHash:z.string().length(64)};
 const authorization=z.object({login:z.literal(true),evidence:z.string().min(1)});
 const queueTask={queueId:z.string().uuid(),queueHash:z.string().length(64),taskId:z.string().uuid()};
 registerOperation('runtime_info',{description:'只读当前登录MCP实际版本，不连接或重启浏览器。',annotations:{readOnlyHint:true}},wrap(()=>({runtime:residentRuntime,version:packageInfo.version,capabilities:['role_queue_import','role_open','role_resume','role_enter_application','role_report_link_failure','role_close_extra_pages','role_reload_page','human_verification','user_operated_session_identity'],browserAccess:false})));
-registerOperation('role_queue_import',{description:'读取用户正向评审确认后的各公司宽表 岗位交接/公司/<公司编码>.json（不接受旧公司方案文件或对象），按用户次序冻结队列；任务只存公司/站点/岗位编码，链接执行时现读并核对确认指纹；不处理Excel。',inputSchema:{rolesFile:z.string().optional(),companyPlan:z.record(z.string(), z.unknown()).optional(),companyOrder:z.array(z.string()).optional(),parallelRoles:z.boolean().optional(),authorizationRef:z.string().optional()}},wrap(a=>queues.import(a)));
-registerOperation('role_advance',{description:'按已确认岗位推进。定向续跑时传 roleId，内核核对它与 taskId 一致。复用原页、检查登录态、等待本人登录后接续、核对目标页面并进入填写页；正常步骤在MCP内部完成。不提交。',inputSchema:{...queueTask,roleId:z.string().regex(/^J\d{6}$/).optional(),authorization:z.object({login:z.literal(true),evidence:z.string().min(1)})}},wrap(a=>flow.advance(a)));
+registerOperation('role_queue_import',{description:'读取用户正向评审确认后的各公司宽表 岗位交接/公司/<公司编码>.json（不接受旧公司方案文件或对象），按正向评审确认的公司顺序与志愿顺序冻结队列；任务只存公司/站点/岗位编码，链接执行时现读并核对确认指纹；不处理Excel。',inputSchema:{rolesFile:z.string().optional(),companyPlan:z.record(z.string(), z.unknown()).optional(),parallelRoles:z.boolean().optional(),authorizationRef:z.string().optional()}},wrap(a=>queues.import(a)));
+registerOperation('role_advance',{description:'按已确认岗位推进。定向续跑时传 roleId，内核核对它与 taskId 一致。复用原页、检查登录态、等待本人登录后接续、核对目标页面并进入填写页；站点还没有入口配置时由组件写入首版入口配置后接着进入，结果的 entryConfigsCreated 列出写入的公司；正常步骤在MCP内部完成。不提交。',inputSchema:{...queueTask,roleId:z.string().regex(/^J\d{6}$/).optional(),authorization:z.object({login:z.literal(true),evidence:z.string().min(1)})}},wrap(a=>flow.advance(a)));
 registerOperation('role_open',{description:'按冻结队列顺序直接打开岗位；需要登录时返回绑定原岗位的登录计划，不从公司首页选岗。',inputSchema:queueTask},wrap(a=>flow.open(a)));
 registerOperation('role_resume',{description:'用户完成登录后，返回原岗位原标签并检查登录态、岗位标题和完整URL；仅用户明确允许恢复丢失页面时可按队列既存申请URL重开，清除旧填写/核验就绪证明并重新检查登录态，不猜URL、不提交。',inputSchema:{...queueTask,authorization:z.object({restoreLostPage:z.literal(true),evidence:z.string().min(1)}).optional()}},wrap(a=>flow.resume(a)));
-registerOperation('role_enter_application',{description:'在冻结队列的岗位详情页点击真实投递入口并核对返回的申请页；投递链接为空时把核对到的申请页地址记为观察（投递回传.json，用户确认后才写主表）；要求已有同账号登录，不发码、不提交简历。',inputSchema:queueTask},wrap(a=>flow.enter(a)));
+registerOperation('role_enter_application',{description:'在冻结队列的岗位详情页点击真实投递入口并核对返回的申请页；站点还没有入口配置时，先读岗位标题、点一次唯一的投递按钮，按落地的申请页写入首版入口配置并读回（entryConfigsCreated 列出），再按新配置进入；投递链接为空时把核对到的申请页地址记为观察（投递回传.json，用户确认后才写主表）；要求已有同账号登录，不发码、不提交简历。',inputSchema:queueTask},wrap(a=>flow.enter(a)));
+registerOperation('role_entry_fallback',{description:'Agent 浏览器兜底（进入申请页）：首版入口同一失败两次后，结果点名本工具时使用。mode=start：按组件外登记表核对本执行端与页面所在浏览器，在本任务绑定的岗位页（不在就回岗位链接）只读盘点岗位标题与候选入口按钮，返回 Agent 要做的事——只在这张标签用鼠标点进本岗位申请表，不填写、不提交、不另开标签。mode=report：回报 report.label（点的按钮完整文字）与 report.position（同文字按钮从上往下第几个，从 1 起）；组件读落地页，是本岗位申请表就按这次操作写入首版入口配置并读回（entryConfigsCreated 列出），之后用 role_advance 接续。mode=component（组件代点，登记表登记时可用）：Agent 自己的浏览器点不了时，看截图选定按钮、同样回报 label 与 position，由组件用自己连着分身的通道点一次，再同样核对落地页。登记表外、点了没反应、落地不是本岗位申请表时返回交用户；落到登录页交用户登录。不提交。',inputSchema:{...queueTask,mode:z.enum(['start','report','component']),report:z.object({label:z.string().trim().min(1).max(30),position:z.number().int().min(1).max(20)}).strict().optional()}},wrap(a=>flow.entryFallback(a)));
 registerOperation('role_report_link_failure',{description:'岗位链接或投递链接打不开（报错、到首页/列表页、岗位名对不上）时调用：按岗位编码在投递回传.json 记一条“失效”观察并附证据；不改交接区。投递链接失效后该任务改从岗位链接进入；岗位链接失效的岗位等搜索端 apply-observations 由用户确认新链接。能打开只是跳转不算失效。',inputSchema:{...queueTask,field:z.enum(['岗位链接','投递链接']),evidence:z.string().min(1)}},wrap(a=>flow.reportLinkFailure(a)));
 registerOperation('role_close_extra_pages',{description:'关闭本岗位所在站点的多余标签：不属于任何任务、也不是登记的账号核对页的标签。岗位页、首页、验证页、空白页直接关；申请页样式的标签可能有未保存的填写，先截图返回，用户看过并同意后带 authorization.closeFormPages（标签编号）和用户原话再调用。只关本站点标签，不关浏览器，不提交。',inputSchema:{...queueTask,authorization:z.object({closeFormPages:z.array(z.string()).min(1),evidence:z.string().min(1)}).optional()}},wrap(a=>flow.closeExtraPages(a)));
 registerOperation('role_reload_page',{description:'页面卡住（一直转圈、没加载出来）时刷新本任务绑定的这张标签，不另开页面。已开始填写的页面刷新会丢掉未保存的填写，须带用户同意的原话（authorization.evidence），刷新后原填写和核验证明作废。不提交。',inputSchema:{...queueTask,authorization:z.object({evidence:z.string().min(1)}).optional()}},wrap(a=>flow.reload(a)));
@@ -54,6 +63,10 @@ registerOperation('role_entry_inspect',{description:'只读检查当前绑定标
 registerOperation('role_screenshot',{description:'保存本次岗位标签的截图供用户核对，遮盖验证码及密码输入框。',inputSchema:queueTask,annotations:{readOnlyHint:true}},wrap(a=>flow.screenshot(a)));
 registerOperation('login_open',{description:'在 MCP 管理的独立 Chrome 中打开公司配置指定的登录页；不连接日常 Chrome，不发码或提交。',inputSchema:{companyId:z.string()}},wrap(a=>engine.open(a)));
 registerOperation('login_browser_status',{description:'只读共享浏览器连接状态，不连接或重启 Chrome。',annotations:{readOnlyHint:true}},wrap(()=>browser.status()));
+registerOperation('login_config_supplement',{description:'登录配置补充阶段：先查公司／站点有没有登录配置，有就直接返回；没有就按固定规则写入首版最小配置（只有本人登录契约）、读回核对，结果的 loginConfigsCreated 列出本次写入的公司。之后用 role_advance 继续原岗位任务。不打开页面、不登录、不提交。',inputSchema:{companyId:z.string(),siteId:z.string().regex(/^S\d{4}$/).optional(),pageUrl:z.string().url().optional()}},wrap(async a=>{
+ const context={...(a.siteId?{siteId:a.siteId}:{}),...(a.pageUrl?{pageUrl:a.pageUrl}:{})},existed=await loginConfigs.exists(a.companyId,context),config=await loginConfigs.ensure(a.companyId,context);
+ return {status:'login_config_ready',companyId:a.companyId,siteId:loginConfigs.site(a.companyId,context).siteId,created:!existed,loginMethod:config.loginMethod,nextTools:['role_advance'],applicationSubmission:'not_performed'};
+}));
 registerOperation('login_capture',{description:'内部建库：盘点当前公司登录页，强制登记到用户私有 JSON，不读取密码、验证码或 Cookie。',inputSchema:{...location,evidence:z.string().min(1)}},wrap(a=>engine.capture(a)));
 registerOperation('login_inspect',{description:'只读核对登录页、账号匹配和阻塞弹窗；不以账号文本单独证明登录成功。',inputSchema:location,annotations:{readOnlyHint:true}},wrap(a=>engine.inspect(a)));
 registerOperation('login_compile',{description:'离线编译公司登录方案，绑定公司资产和私有账号事实的 Hash；不访问页面。',inputSchema:location},wrap(a=>engine.compile(a)));

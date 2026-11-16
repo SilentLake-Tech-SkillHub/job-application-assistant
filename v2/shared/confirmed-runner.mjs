@@ -18,9 +18,10 @@ async function handoff(result){waiting=true;timing.stage='waiting_for_user_login
 async function fill(){
  const prepared=await call('application','role_prepare',{...currentArgs,authorization:fillAuth});
  if(prepared.status!=='ready_for_user_review'){timing.stage='needs_attention';await persist();emit(JSON.stringify({event:'needs_attention',...prepared}));return false;}
- const verified=await call('application','role_verify',currentArgs);if(verified.status!=='verified')throw Error('INDEPENDENT_ROLE_VERIFICATION_FAILED');
+ // role_prepare 已在填写后做过独立整表核验（verifyRunId）；不再紧跟一次 role_verify（2026-11-14 用户决定 D4）。提交前复核由 role_submit 执行。
+ if(!prepared.verifyRunId)throw Error('INDEPENDENT_ROLE_VERIFICATION_FAILED');
  const screenshot=await call('login','role_screenshot',currentArgs);
- (timing.completedTasks??=[]).push({...queue.tasks[index],...prepared,independentVerification:verified,screenshot});
+ (timing.completedTasks??=[]).push({...queue.tasks[index],...prepared,independentVerification:{id:prepared.verifyRunId,status:'verified'},screenshot});
  index++;await persist();return true;
 }
 async function nextParallel(){

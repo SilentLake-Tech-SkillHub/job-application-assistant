@@ -12,10 +12,31 @@ import {stat,readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
 import {collectChoiceViews,choiceViewport} from './choice-inventory.mjs';
-import {UD_TREE_LEAF_LABEL,treeChoiceDOM} from './tree-choice.mjs';
+import {treeEvidence} from './tree-choice.mjs';
+import {treeRowsDOM,treePaths,findTreePath,expandTreePath,treeKind,leafOptionSelector,cascadeLabel,CASCADE_SEPARATOR} from './tree-expansion.mjs';
 import {browserErrorDetails} from './browser-errors.mjs';
 import {controlDOM} from './control-dom.mjs';
 const exact = value => new RegExp('^'+String(value).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$');
+// 多级控件的页面读取与展开（C33）：通用标注的树形按方向键展开，平铺树点本行的展开按钮，级联点本项；展开后等到下一级出现。
+const treeView=(menus,spec)=>({
+ rows:()=>menus.evaluate(treeRowsDOM,spec),
+ async expand(row){
+  if(spec.kind==='aria'){const node=menus.locator('[role="treeitem"]').nth(row.index);await node.focus();await node.press('ArrowRight');}
+  else if(spec.kind==='columns')await menus.locator(spec.item).nth(row.index).click({timeout:10000});
+  else{const toggle=menus.locator(spec.row).nth(row.index).locator(spec.toggle);if(await toggle.count()!==1)throw Error('TREE_EXPAND_CONTROL_NOT_FOUND');await toggle.click({timeout:10000});}
+  const end=Date.now()+3000;
+  do{const rows=treePaths(await menus.evaluate(treeRowsDOM,spec)),at=rows.find(r=>r.index===row.index);if(at?.expanded)return;await new Promise(r=>setTimeout(r,50));}while(Date.now()<end);
+ }
+});
+// 打开的菜单是哪种多级控件：飞书树形、通用标注树形、Ant 风格（ant／atsx 前缀）的树形下拉或级联选择。
+async function multiLevelKind(menus,family){
+ if(family==='ud')return await menus.evaluate(n=>!!n.classList?.contains('ud__treeSelect__overlay')||!!n.querySelector?.('.ud__tree'))?{spec:treeKind.ud(),renderer:'ud_tree_select'}:null;
+ if(family==='aria'&&await menus.evaluate(n=>n.getAttribute?.('role')==='tree'||!!n.querySelector?.('[role="tree"],[role="treeitem"]')))return {spec:treeKind.aria(),renderer:'aria_tree'};
+ if(!['ant','aria'].includes(family))return null;
+ const found=await menus.evaluate(n=>{const el=n.querySelector?.('[class*="-cascader-menu-item"],[class*="-select-tree-treenode"]');const m=el&&String(el.className).match(/(?:^|\s)([a-z]+)-(cascader-menu-item|select-tree-treenode)(?:\s|$)/);return m?{prefix:m[1],cascade:m[2]==='cascader-menu-item'}:null;});
+ if(!found)return null;
+ return found.cascade?{spec:treeKind.cascader(found.prefix),renderer:'cascader',cascade:true}:{spec:treeKind.antTree(found.prefix),renderer:'ant_tree_select'};
+}
 export function choiceEmptyEvidenceDOM(menu){
  const pattern=/^(?:暂无(?:数据|选项|匹配(?:结果)?)|无(?:数据|结果|匹配(?:结果)?)|未找到(?:匹配项|匹配结果)?|没有(?:匹配项|匹配结果)|not found|no (?:data|options|results))$/i;
  const nodes=[menu,...menu.querySelectorAll('.ant-empty-description,.ant-select-item-empty,.ant-select-not-found,.ant-select-dropdown-menu-item-disabled,.ud__select__empty,[role="status"],div,span,p')];
@@ -25,9 +46,13 @@ export async function locateControl(page,action){
  let l=page.locator(action.selector);
  // Hidden native file/boolean inputs remain legitimate targets. Ambiguous
  // targets are never silently accepted through first().
- if(await l.count()!==1){
+ // 找不到、找到多个、找到但都不可见分开报，回补时按真实原因处理（C33）。
+ const total=await l.count();
+ if(total!==1){
+  if(!total)throw Error('ACTION_TARGET_NOT_FOUND');
   l=l.filter({visible:true});
-  if(await l.count()!==1)throw Error('AMBIGUOUS_ACTION_TARGET');
+  const visible=await l.count();
+  if(visible!==1)throw Error(visible?'ACTION_TARGET_NOT_UNIQUE':'ACTION_TARGET_NOT_VISIBLE');
  }
  return l;
 }
@@ -163,15 +188,65 @@ async function performChoice(adapter,action,value,family){
   const renderedTarget=family==='phoenix'&&!action.method.endsWith('_inspect')&&
    await menus.locator('.phoenix-selectList__listItem').filter({visible:true}).filter({hasText:exact(targetText)}).count()===1;
   if(searchable&&!inputTriggered){initialQuery=await search.evaluate(n=>n.value);if((action.query||!action.method.endsWith('_inspect'))&&!renderedTarget){queryApplied=true;await search.fill(action.query||String(value),{timeout:10000});await assertValue(search,action.query||String(value));}}
-  const tree=family==='ud'&&await menus.evaluate(n=>!!n.classList?.contains('ud__treeSelect__overlay')||!!n.querySelector?.('.ud__tree'));
-  let optionSelector=tree?UD_TREE_LEAF_LABEL:family==='phoenix'?'.phoenix-selectList__listItem':family==='ud'?'.ud__select__list__item':family==='ant'?'.ant-select-item-option, .ant-select-dropdown-menu-item':'[role="option"]';
+  const multi=await multiLevelKind(menus,family);
+  if(multi?.cascade){
+   // 级联选择（C33）：选项值与显示值都是各级文字以“ / ”连接；建库检查按查询词逐列展开，填写按路径逐列点开再点末级。
+   const spec=multi.spec,view=treeView(menus,spec),inspect=action.method.endsWith('_inspect'),rowsNow=async()=>treePaths(await view.rows()),searched=queryApplied;
+   const target=inspect?action.query||null:action.optionTextMap?.[value]||String(value);
+   const clearSearch=async()=>{if(queryApplied&&initialQuery!==undefined){await search.fill(initialQuery,{timeout:10000});queryApplied=false;}};
+   step='choice_tree_expand';
+   if(inspect){
+    let path=null;
+    // 带搜索的级联把匹配结果显示成一列完整路径；没有匹配就清掉搜索按列查找。
+    if(target&&!(await rowsNow()).some(r=>r.leaf&&r.text.split(CASCADE_SEPARATOR).at(-1)===target)){await clearSearch();path=target.includes(CASCADE_SEPARATOR)?target.split(CASCADE_SEPARATOR):await findTreePath(view,target);if(path)await expandTreePath(view,path);}
+    const rows=await rowsNow(),deepest=Math.max(-1,...rows.map(r=>r.depth));
+    const options=rows.filter(r=>r.leaf&&r.path&&r.depth===deepest).map(r=>r.depth===0&&r.text.includes(CASCADE_SEPARATOR)?r.text:cascadeLabel(r.path));
+    const evidence=treeEvidence(rows);
+    await clearSearch();await closeMenu();
+    step='choice_readback';locator=action.selectedSelector||action.selector;
+    const restored=await readSelected()===initial&&await menus.count()===0;
+    return {options,optionRecords:[],restored,searchable,queryApplied:searched,renderer:multi.renderer,tree:evidence,...(path?{treePaths:{[cascadeLabel(path)]:path}}:{}),scope:path?'expanded_cascade_branch':'rendered_cascade_columns',coverage:{complete:false,reason:'cascade_branch_only'},status:options.length?'captured':'branches_only'};
+   }
+   if(!action.options?.includes(String(value)))throw Error('UNSUPPORTED_CHOICE_NO_FALLBACK');
+   const path=action.treePaths?.[target]||target.split(CASCADE_SEPARATOR);
+   await clearSearch();
+   if(verifyOnly){
+    // 重新打开时级联按当前值标出各级（active）；各级文字与目标路径一致才算选中证明。
+    const chain=(await rowsNow()).filter(r=>r.active).sort((a,b)=>a.depth-b.depth).map(r=>r.text);
+    await closeMenu();
+    step='choice_readback';locator=action.selectedSelector||action.selector;
+    if(await readSelected()!==target)throw Error('CHOICE_SELECTED_LABEL_MISMATCH');
+    if(cascadeLabel(chain)!==cascadeLabel(path))throw Error('CHOICE_REOPENED_OPTION_NOT_SELECTED');
+    return {performed:false,selectionProof:{label:target,value:null,valueAttribute:null,blurConfirmed:true,reopenedOptionSelected:true,valueCompared:false,activePath:chain,renderer:multi.renderer},verification:'requires_independent_readback'};
+   }
+   const leaf=await expandTreePath(view,path);
+   step='choice_option';
+   await menus.locator(spec.item).nth(leaf.index).click({timeout:10000});
+   await closeMenu();
+   step='choice_readback';locator=action.selectedSelector||action.selector;
+   if(await readSelected()!==target)throw Error('CHOICE_SELECTED_LABEL_MISMATCH');
+   const checked=await performChoice(adapter,{...action,method:action.method+'_verify'},value,family);
+   return {performed:true,selectionProof:checked.selectionProof,verification:'requires_independent_readback'};
+  }
+  const tree=!!multi,treeRenderer=multi?.renderer,readTree=async()=>treeEvidence(await menus.evaluate(treeRowsDOM,multi.spec));
+  let optionSelector=tree?leafOptionSelector(multi.spec):family==='phoenix'?'.phoenix-selectList__listItem':family==='ud'?'.ud__select__list__item':family==='ant'?'.ant-select-item-option, .ant-select-dropdown-menu-item':'[role="option"]';
   // Prefer actual renderer rows; the hidden rc-select ARIA mirror is not a click target.
-  if(family==='ant'&&await menus.locator(optionSelector).filter({visible:true}).count()===0)optionSelector='[role="option"]';
+  if(family==='ant'&&!tree&&await menus.locator(optionSelector).filter({visible:true}).count()===0)optionSelector='[role="option"]';
   const options=menus.locator(optionSelector).filter({visible:true});
+  // 多级控件：目标末级没显示时逐级展开（C33）。检查以查询词为目标，填写以选项文字为目标；有模板记录的路径按路径走，没有就逐个分支查找。
+  const treeTarget=tree?(action.method.endsWith('_inspect')?action.query||null:action.optionTextMap?.[value]||String(value)):null;
+  let treePath=null;
+  if(treeTarget&&await options.filter({hasText:exact(treeTarget)}).count()===0){
+   step='choice_tree_expand';
+   const view=treeView(menus,multi.spec);
+   treePath=action.treePaths?.[treeTarget]||await findTreePath(view,treeTarget);
+   if(treePath)await expandTreePath(view,treePath);
+   step='choice_option';
+  }
   if(tree&&action.method.endsWith('_inspect')&&await options.count()===0){
-   const treeEvidence=await menus.evaluate(treeChoiceDOM);
+   const evidence=await readTree();
    if(queryApplied&&initialQuery!==undefined)await search.fill(initialQuery,{timeout:10000});await closeMenu();
-   return {options:[],tree:treeEvidence,renderer:'ud_tree_select',restored:await readSelected()===initial&&await menus.count()===0,searchable,queryApplied,scope:'rendered_tree_branches',coverage:{complete:false,reason:'no_rendered_leaf_options'},status:'branches_only'};
+   return {options:[],tree:evidence,renderer:treeRenderer,restored:await readSelected()===initial&&await menus.count()===0,searchable,queryApplied,scope:'rendered_tree_branches',coverage:{complete:false,reason:'no_rendered_leaf_options'},status:'branches_only'};
   }
   const emptyEvidence=()=>menus.evaluate(choiceEmptyEvidenceDOM);
   let empty=await emptyEvidence();
@@ -187,12 +262,12 @@ async function performChoice(adapter,action,value,family){
   const captured=await collectChoiceViews({read:()=>choiceViewport(menus,options,optionSelector),press:key=>(search||l).press(key),target:action.method.endsWith('_inspect')?undefined:optionText});
   const values=captured.options;
   if(action.method.endsWith('_inspect')){
-   const treeEvidence=tree?await menus.evaluate(treeChoiceDOM):null;
+   const evidence=tree?await readTree():null;
    if(queryApplied&&initialQuery!==undefined)await search.fill(initialQuery,{timeout:10000});
    await closeMenu();
    step='choice_readback';locator=action.selectedSelector||action.selector;
    const restored=await readSelected()===initial&&await menus.count()===0;
-   return {options:values,optionRecords:captured.optionRecords,restored,searchable,queryApplied,...(tree?{renderer:'ud_tree_select',tree:treeEvidence}:{}),scope:queryApplied&&action.query?'exact_search_results':tree?'rendered_tree_leaves':captured.complete?'all_menu_options':captured.steps?'partial_menu_options':'current_visible_menu',coverage:{complete:tree?false:captured.complete,reason:tree?'rendered_leaf_paths_only':captured.reason,keyboardSteps:captured.steps},status:'captured'};
+   return {options:values,optionRecords:captured.optionRecords,restored,searchable,queryApplied,...(tree?{renderer:treeRenderer,tree:evidence,...(treePath?{treePaths:{[treeTarget]:treePath}}:{})}:{}),scope:queryApplied&&action.query?'exact_search_results':tree?'rendered_tree_leaves':captured.complete?'all_menu_options':captured.steps?'partial_menu_options':'current_visible_menu',coverage:{complete:tree?false:captured.complete,reason:tree?'rendered_leaf_paths_only':captured.reason,keyboardSteps:captured.steps},status:'captured'};
   }
   if(action.optionTextMap&&(!action.observedOptionTexts?.includes(optionText)))throw Error('CHOICE_ALIAS_REQUIRES_CAPTURED_OPTION_TEXT');
   if(!action.options?.includes(String(value))||!values.includes(optionText))throw Error('UNSUPPORTED_CHOICE_NO_FALLBACK');
@@ -245,6 +320,32 @@ async function performAntMulti(adapter,action,value){
  for(const text of current){const chip=root.locator('.ant-select-selection-item, .ant-select-selection__choice').filter({has:adapter.page.locator(content).filter({hasText:exact(text)})});if(await chip.count()!==1)throw Error('MULTISELECT_CHIP_NOT_UNIQUE');const remove=chip.locator('.ant-select-selection-item-remove, .ant-select-selection__choice__remove');if(await remove.count()!==1)throw Error('MULTISELECT_REMOVE_CONTROL_REQUIRED');await remove.click({timeout:10000});current=current.filter(v=>v!==text);await waitCommit(read,current);}
  for(const text of value)await performChoice(adapter,{...action,method:'ant_dropdown',query:action.queryMap?.[text]||text},text,'ant');
  await waitCommit(read,value);return {performed:true,verification:'requires_independent_readback'};
+}
+// Agent 浏览器兜底写回的操作定义：从本控件出发，按记录的点击文字、输入与按键回放；独立读回仍由填写流程负责。
+const RECORDED_KEYS=new Set(['Enter','Escape','Tab','ArrowDown','ArrowUp']);
+const BLOCKED_TEXT=/提交|投递|撤回|删除|签名|submit|apply|withdraw|delete/i;
+export function validateRecordedSteps(steps){
+ if(!Array.isArray(steps)||!steps.length||steps.length>20)throw Error('RECORDED_SEQUENCE_STEPS_REQUIRED');
+ for(const step of steps){
+  const own=Object.keys(step||{});
+  if(step?.kind==='click_field'||step?.kind==='type_value'){if(own.length!==1)throw Error('RECORDED_SEQUENCE_STEP_INVALID');continue;}
+  if(step?.kind==='click_text'||step?.kind==='type_text'){if(own.length!==2||typeof step.text!=='string'||!step.text.trim()||step.text.length>120)throw Error('RECORDED_SEQUENCE_STEP_INVALID');if(step.kind==='click_text'&&BLOCKED_TEXT.test(step.text))throw Error('POTENTIAL_SUBMISSION_BLOCKED');continue;}
+  if(step?.kind==='press'){if(own.length!==2||!RECORDED_KEYS.has(step.key))throw Error('RECORDED_SEQUENCE_STEP_INVALID');continue;}
+  throw Error('RECORDED_SEQUENCE_STEP_INVALID');
+ }
+ return steps;
+}
+export async function performRecordedSequence(page,l,action,value){
+ validateRecordedSteps(action.steps);
+ for(const step of action.steps){
+  if(step.kind==='click_field')await l.click({timeout:10000});
+  else if(step.kind==='click_text'){const target=page.getByText(step.text,{exact:true}).filter({visible:true}),n=await target.count();if(n!==1)throw Error(n?'ACTION_TARGET_NOT_UNIQUE':'ACTION_TARGET_NOT_FOUND');await target.click({timeout:10000});}
+  else if(step.kind==='type_value'){if(!['string','number'].includes(typeof value))throw Error('RECORDED_SEQUENCE_VALUE_REQUIRED');await page.keyboard.type(String(value));}
+  else if(step.kind==='type_text')await page.keyboard.type(step.text);
+  else if(step.kind==='press')await page.keyboard.press(step.key);
+  await new Promise(resolve=>setTimeout(resolve,150));
+ }
+ return {performed:true,verification:'requires_independent_readback'};
 }
 export async function performControl(adapter,action,value,files={}){
 
@@ -312,6 +413,7 @@ export async function performControl(adapter,action,value,files={}){
       await l.evaluate((n,block)=>n.scrollIntoView({block,inline:'nearest',behavior:'instant'}),block);return;
     }
     if(action.method==='press'){if(!['Escape','Tab'].includes(action.key))throw Error('INVALID_CONTROL_KEY');await l.press(action.key);return;}
+    if(action.method==='recorded_sequence')return performRecordedSequence(adapter.page,l,action,value);
     const meta=await l.evaluate(n=>({tag:n.tagName,type:n.type||n.getAttribute('type'),role:n.getAttribute('role'),label:n.getAttribute('aria-label')||n.querySelector(':scope > .ant-form-item-label')?.innerText?.replace(/[＊*\s:：]+$/gu,'').trim()||n.textContent?.trim(),readonly:n.readOnly}));
     if(['ant_dropdown','ant_dropdown_inspect','ant_dropdown_verify'].includes(action.method))return performChoice(adapter,action,value,'ant');
     if(['phoenix_dropdown','phoenix_dropdown_inspect','phoenix_dropdown_verify'].includes(action.method))return performChoice(adapter,action,value,'phoenix');

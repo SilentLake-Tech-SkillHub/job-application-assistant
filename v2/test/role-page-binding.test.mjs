@@ -167,3 +167,25 @@ test('a task that entered the form while its template is still being built can b
  const g=fixture({prior:{...prior,pageId:'chrome:bound',linkObservation:'observed'},tabs:[['chrome:bound',form(siteId)+'&userId=1']]});g.task.applyUrl=form(siteId)+'&userId=1';
  const again=await g.flow.open({});assert.equal(again.pageKind,'form');assert.equal(opens(g).length,0);
 });
+
+// C32：不猜登录态，让站点证明——点一次入口，落到申请表=已登录，落到登录页=未登录；两者都不是按原错误处理。
+test('logged in without any readable account text: the role page proceeds to one entry click and lands on the form',async()=>{
+ const f=fixture({account:null}),r=await f.flow.open({});
+ assert.equal(r.status,'authenticated_at_role');assert.equal(r.loginProof,'entry_click');assert.equal('authenticated' in r,false);
+ const e=await f.flow.enter({});assert.equal(e.status,'ready_to_fill');assert.equal(f.state().authenticated,true);
+ assert.equal(f.calls.filter(c=>c.method==='cta').length,1);
+ for(const c of f.calls.filter(c=>c.method==='roleSnapshot'))for(const key of ['accountSelector','sessionSelectors'])assert.equal(key in c,false);
+});
+test('the entry click landing on a login page returns the login handoff bound to the same task and tab, no exception',async()=>{
+ const f=fixture();await f.flow.open({});f.setLoggedIn(false);
+ const e=await f.flow.enter({});assert.equal(e.status,'needs_login');assert.deepEqual(e.loginPlan,{planId:'p',planHash:'h'});
+ assert.equal(f.calls.filter(c=>c.method==='cta').length,1);assert.equal(f.state().status,'needs_login');assert.equal(f.state().pageId,e.pageId);assert.equal(f.state().authenticated,undefined);
+});
+test('a click that fails on a login page is the logged-out landing; a click that fails elsewhere keeps its own error',async()=>{
+ for(const [loginLanding,expected] of [[true,'needs_login'],[false,'ROLE_FORM_NOT_OPEN']]){
+  const f=fixture();await f.flow.open({});const request=f.flow.browser.request;
+  f.flow.browser.request=async(method,a)=>{if(method==='roleEnterApplication'){f.calls.push({method});const p=f.pages.get(a.pageId);if(loginLanding){p.url=origin+'/login';f.setLoggedIn(false);}throw Error('ROLE_FORM_NOT_OPEN');}return request(method,a);};
+  if(loginLanding)assert.equal((await f.flow.enter({})).status,expected);
+  else await assert.rejects(f.flow.enter({}),new RegExp(expected));
+ }
+});

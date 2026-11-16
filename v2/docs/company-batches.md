@@ -1,12 +1,12 @@
 # 双通道公司批次
 
-`company_batch_create({authorizationRef,browserChannels?,companyOrder?})` 读取正向评审确认后的公司宽表，按公司和岗位编码派发；不转换 Excel，不打开网站。`company_batch_take({batchId,batchHash})` 原子领取。每通道默认最多十家公司，同公司多个岗位只占一个名额；共享账号范围按已核实的 loginScope 固定，不仅凭平台名称合并账号。
+`company_batch_create({authorizationRef,browserChannels?,companiesPerChannel?})` 读取正向评审确认后的公司宽表，按用户确认的「批次.公司顺序」与岗位编码派发，每个通道取前 `companiesPerChannel` 家；公司次序只有这一个来源，接口不接受另传的公司次序或公司子集（2026-11-16 用户决定：“可以 处理这个参数吧 看上去好像没有用”）；不转换 Excel，不打开网站。`company_batch_take({batchId,batchHash})` 原子领取。每通道默认最多十家公司，同公司多个岗位只占一个名额；共享账号范围按已核实的 loginScope 固定，不仅凭平台名称合并账号。
 
 浏览器要求的唯一运行来源是 `runs/batch-browser-policy.json` 的当前批次 `browserChannels`；创建接口的同名参数覆盖它，不进入公司选岗、岗位链接或材料的确认指纹。创建时计算“本批要求 ∩ 本执行端已登记且当前可用的投递通道”；交集为空时自动使用可用通道，并在 `channelSelection` 返回要求、可用通道、实际通道与切换原因。没有能力记录或没有任何可用执行器仍拒绝。搜索可用与投递可用分开判定，模型可操作的内置浏览器不等于组件可填写的执行器。
 
 重复创建保留本批浏览器要求；显式传入新的 `browserChannels` 才更新要求。原队列因确认内容变化而必须替换时，仍保留本批要求。运行中通道失效时重新按同一规则选择；受影响任务保留旧页面信息，但要求在实际新通道核实岗位和账号后再填。不能把旧页面绑定复制成新浏览器的有效证明，也不关闭已有页面。通道政策统一经本批参数更新，不另设按公司只改运行记录的通道限制接口。
 
-同一确认内容重复导入返回原队列。显式 `companyOrder` 调整次序时更新原队列的 order 和 queueHash，保留 taskId、任务状态、页面绑定及已有核验引用；调用方使用返回的新 queueHash。公司批次同步更新队列引用并保留租约。确认内容确实改变时才替换队列并按原有规则重新核实受影响任务。
+同一确认内容重复导入返回原队列。确认内容确实改变时才替换队列并按原有规则重新核实受影响任务。要换公司或调整次序，回到搜索组件重新生成正向评审并由用户确认。
 
 `company_batch_record` 绑定公司、通道和租约令牌。ready_for_user_review 必须覆盖公司全部岗位的真实独立核验；blocked 需有技术交接回执。租约过期不会自动重试验证码或提交。`company_batch_status` 隐藏租约令牌并返回通道选择依据。
 

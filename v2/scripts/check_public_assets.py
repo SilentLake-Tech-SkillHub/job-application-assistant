@@ -112,6 +112,14 @@ def public_json_files(root):
         text = json.dumps(recipe, ensure_ascii=False)
         assert not re.search(r'https?://', text), 'entry recipes must not hardcode domains'
     no_personal_data(json.dumps(recipes, ensure_ascii=False))
+    # 首版入口配置（C39）只收通用按钮文字和通用表单控件选择器，不写域名或站点名。
+    first = json.loads((root / 'catalog/first-entry.json').read_text(encoding='utf-8'))
+    assert set(first) == {'schemaVersion', 'description', 'entryLabels', 'formFieldSelector'} and first['schemaVersion'] == 1
+    assert first['entryLabels'] and all(isinstance(v, str) and v.strip() for v in first['entryLabels'])
+    assert len(first['entryLabels']) == len(set(first['entryLabels'])) and isinstance(first['formFieldSelector'], str)
+    assert not re.search(r'https?://', json.dumps(first, ensure_ascii=False)), 'first entry catalog must not hardcode domains'
+    no_personal_data(json.dumps(first, ensure_ascii=False))
+    allowed.add('catalog/first-entry.json')
     lifecycle = json.loads((root / 'catalog/workflow-tools.json').read_text(encoding='utf-8'))
     assert set(lifecycle) == {'revision', 'inspections', 'stages'} and lifecycle['revision'] == 1
     assert isinstance(lifecycle['inspections'], list) and isinstance(lifecycle['stages'], dict)

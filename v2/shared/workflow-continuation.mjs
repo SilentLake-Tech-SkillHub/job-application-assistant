@@ -1,6 +1,7 @@
 import {withProfileRecords,recordPlanOf} from './repeat-groups.mjs';
 import {classifyPending} from './field-policy.mjs';
-const STRUCTURE_RECAPTURE=['form_capture_visual','capture_rea_structure','form_review_completeness'];
+// 结构缺口回到建库两段编排（C33）：第一段采集，第二段组件内部完成建库。
+const STRUCTURE_RECAPTURE=['form_construct_acquire','form_construct_build'];
 // The component names the one route for a failure; the agent only carries it out.
 const ROUTE_BY_ERROR=new Map([
  ['REPEAT_CONTRACT_LEARNED',['prepare_plan','batch_prepare']],

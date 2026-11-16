@@ -1,4 +1,5 @@
 import {DRIVERS,safeTargetCandidates} from './learned-targets.mjs';
+import {FIRST_ENTRY} from './first-entry.mjs';
 // Public diagnostic schema only. Never forward arbitrary driver exception data,
 // raw values, URLs, selectors, source facts or model-provided additional keys.
 // One exception: driver_target_gap carries row-relative structural selectors
@@ -36,6 +37,27 @@ function bindingDetails(value){
  if(!bindingTools.has(value.nextTool)||!Array.isArray(value.pageIds)||value.pageIds.length>12||value.pageIds.some(id=>typeof id!=='string'||!/^(?:(?:chrome|iab):)?[A-Za-z0-9_-]{1,80}$/.test(id)))return null;
  return {phase:'page_binding',nextTool:value.nextTool,pageIds:[...value.pageIds]};
 }
+// 首版入口（C39）：哪一步不行，候选按钮的通用文字与个数，落在原标签还是新标签，输入框与内嵌框架个数。
+// 不带网址、岗位名或选择器；按钮文字只收 catalog/first-entry.json 里的通用词。
+const firstEntryChecks=new Set(['title','button','navigation','landing']);
+function firstEntryDetails(value){
+ const own=Reflect.ownKeys(value);if(own.some(k=>!['phase','check','candidates','target','inputs','frames','dialogs','covered','coverTag','coverDialog','disabled'].includes(k))||!firstEntryChecks.has(value.check))return null;
+ const out={phase:'first_entry',check:value.check};
+ if(Object.hasOwn(value,'candidates')){
+  if(!Array.isArray(value.candidates)||value.candidates.length>40)return null;out.candidates=[];
+  for(const c of value.candidates){
+   if(!c||typeof c!=='object'||Array.isArray(c)||Reflect.ownKeys(c).some(k=>!['role','label','count'].includes(k)))return null;
+   if(!FIRST_ENTRY.entryLabels.includes(c.label)||!Number.isInteger(c.count)||c.count<0||c.count>200||c.role!==undefined&&!['button','link'].includes(c.role))return null;
+   out.candidates.push({...(c.role?{role:c.role}:{}),label:c.label,count:c.count});
+  }
+ }
+ if(Object.hasOwn(value,'target')){if(!['same','new'].includes(value.target))return null;out.target=value.target;}
+ for(const k of ['inputs','frames'])if(Object.hasOwn(value,k)){if(!Number.isInteger(value[k])||value[k]<0||value[k]>10000)return null;out[k]=value[k];}
+ for(const k of ['covered','coverDialog','disabled'])if(Object.hasOwn(value,k)){if(typeof value[k]!=='boolean')return null;out[k]=value[k];}
+ if(Object.hasOwn(value,'dialogs')){if(!Number.isInteger(value.dialogs)||value.dialogs<0||value.dialogs>100)return null;out.dialogs=value.dialogs;}
+ if(Object.hasOwn(value,'coverTag')){if(typeof value.coverTag!=='string'||!/^[a-z][a-z0-9-]{0,30}$/.test(value.coverTag))return null;out.coverTag=value.coverTag;}
+ return out;
+}
 export function safeControlErrorDetails(value){
  try{
  if(value&&typeof value==='object'&&Object.getPrototypeOf(value)===Object.prototype&&Object.getOwnPropertyDescriptor(value,'phase')?.value==='browser_operation'){
@@ -49,6 +71,7 @@ export function safeControlErrorDetails(value){
  if(value&&typeof value==='object'&&!Array.isArray(value)&&[Object.prototype,null].includes(Object.getPrototypeOf(value))&&Object.getOwnPropertyDescriptor(value,'phase')?.value==='page_binding')return bindingDetails(value);
  if(value&&typeof value==='object'&&!Array.isArray(value)&&[Object.prototype,null].includes(Object.getPrototypeOf(value))&&Object.getOwnPropertyDescriptor(value,'phase')?.value==='entry_role_identity')return entryDetails(value);
  if(value&&typeof value==='object'&&!Array.isArray(value)&&[Object.prototype,null].includes(Object.getPrototypeOf(value))&&Object.getOwnPropertyDescriptor(value,'phase')?.value==='driver_target_gap')return targetGapDetails(value);
+ if(value&&typeof value==='object'&&!Array.isArray(value)&&[Object.prototype,null].includes(Object.getPrototypeOf(value))&&Object.getOwnPropertyDescriptor(value,'phase')?.value==='first_entry')return firstEntryDetails(value);
  if(!value||typeof value!=='object'||Array.isArray(value)||![Object.prototype,null].includes(Object.getPrototypeOf(value)))return null;
  const descriptors=Object.getOwnPropertyDescriptors(value),phase=descriptors.phase?.value;if(!phases.has(phase))return null;
  const restored=['originalValueHash','unchangedFromBefore','popupClosed','stableReadback','pageUnchanged'];

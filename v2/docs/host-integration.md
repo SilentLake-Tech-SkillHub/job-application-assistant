@@ -6,7 +6,7 @@
 
 每个用户或项目可以只使用一个执行宿主，也可以把执行、维护分配给不同宿主。Agent 品牌不决定权限：任一已适配宿主均可配置为 `executor` 或 `maintainer`；适配器只描述接入方式与能力，不分配业务职责。角色配置不能替代真实浏览器能力、当前会话身份、任务绑定或用户提交授权。
 
-每个宿主的部署配置是其 `RECRUITING_HOST_ROLE` 的唯一配置来源；MCP、Hook 和 shell 必须获得相同值。新安装未指定角色时为 `executor`，已有部署重新安装时保留已配置角色；有冲突就报告并要求明确选择，不能静默覆盖。项目说明只引用这份配置，不另写按品牌分工的规则。Agent 不得为绕过拒绝自行改变角色。
+每个宿主的部署配置是其 `RECRUITING_HOST_ROLE` 的唯一配置来源；MCP、Hook 和 shell 必须获得相同值。新安装未指定角色时为 `executor`，已有部署重新安装时保留已配置角色；有冲突就报告并要求明确选择，不能静默覆盖。项目说明只引用这份配置，不另写按品牌分工的规则。Agent 不得为绕过拒绝自行改变角色。只有配置为 `executor` 的宿主调用面向网站的组件操作；`maintainer` 下共享业务核心只回答只读检查，阶段工具在接触浏览器、资料或队列之前以 `HOST_ROLE_MAINTAINER_READ_ONLY` 拒绝，启动器不启动浏览器，`conversation_scope.py enable` 拒绝登记。维护宿主依据 MCP 反馈修共享代码，交回执行端测试。
 
 启动子宿主时，由安装或启动接线清除从父宿主继承的角色与会话标识，再显式注入目标宿主的配置和真实会话身份；不能通过假造 ID 或移除限制来临场提权。单宿主维护时，先暂停执行并用 `conversation_scope.py disable` 退出当前执行作用域，按用户的组件维护授权修复；恢复时重新启用作用域并核验运行版本。若用户确需改变部署角色，更新接线、重载受影响进程后读回；不要求另装第二个 Agent。
 
@@ -29,6 +29,14 @@ Codex 适配器会将所选角色同时写入两个 MCP 与 `shell_environment_p
 
 迁移到新机器时，按目标工作区、Node 路径和用户选择重新生成配置，再重新核验浏览器能力。复制旧配置会保留旧分工及绝对路径，不能当作通用产品默认安装。安装预览和文件写入都不证明驻留 MCP/Hook 已重载；两个 MCP 的 `runtime_info.runtime.hostId/hostRole` 返回进程启动时实际加载的身份与角色，用于重载后的核对。
 
+## Agent 浏览器兜底登记与执行端标识
+
+- 哪些 Agent、哪些浏览器能做兜底，只登记在组件外表单（默认 `<工作区>/产品管理/Agent浏览器兜底登记.json`，或用 `RECRUITING_AGENT_FALLBACK_REGISTRY` 指定），组件内不登记、不做能力检测；改登记表不改组件（2026-11-14 用户决定）。
+- 组件用执行端的 `RECRUITING_HOST_ID` 对表里的 `hostId`。这个值来自 `install-host.mjs --host <id>` 写进该执行端 MCP 配置的环境变量，所以登记表里的 `hostId` 必须和安装时用的 `<id>` 一字不差；对不上就当表外执行端，同一失败两次直接问用户。
+- 只有已有适配器 `host/adapters/<id>.mjs` 的执行端才能按上面方式安装。新接入一个 Agent：先确认它有自己的适配器（和已有适配器不是同一个产品时要先补适配器），按该 id 安装，再在登记表加一行。
+- 浏览器按页面所在通道对应：页面在 Chrome 分身（`chrome:`）对应“分身插件”，插件要装在投递 Chrome 分身上；页面在内置浏览器（`iab:`）对应“内置浏览器”。兜底只在任务绑定的同一张标签上做。
+- 第三种方式“组件代点”（`component_playwright`，C41，2026-11-16 用户选择“A 作为第三种方式”“入口和表单控件都加”）：不看页面所在通道，登记了就可用；Agent 只看页面决定怎么点，由组件自己连着分身（或内置浏览器）的通道执行。开始兜底时组件同时给出可用方式：页面所在浏览器也登记了，就先用 Agent 自己的浏览器，操作不了再用组件代点；只登记了组件代点，就直接用它。组件不检测插件是否连上，由 Agent 判断。浏览器主控进程 `pageTools` 含 `componentClick` 才能入口代点，旧进程报 `BROWSER_HOST_RESTART_REQUIRED`。
+
 ## 浏览器能力：一次检测，写入文件
 
 结果写入 `RECRUITING_BROWSER_CAPABILITY_FILE`（私有，schemaVersion 2）。`chrome` 是全机一条分身记录（路径、版本、资料目录、端口、连接地址、启动入口）；`hosts.<RECRUITING_HOST_ID>.iab` 是各执行端的内置浏览器检测结果。之后启动、建批次和注册浏览器桥一律读这个文件，不再临场探测或猜测；插件时代的 schema 1 文件视为未检测，必须重测。
@@ -43,7 +51,7 @@ Codex 适配器会将所选角色同时写入两个 MCP 与 `shell_environment_p
 
 `RECRUITING_IAB_SOCKET` 只有对端由当前宿主真实内置浏览器 SDK 注册时可用，另一份 Chromium 不属于 IAB。桌面 AX 点击/截图工具不具备 tab/DOM SDK，不能冒充该桥。
 
-执行宿主启动只创建休眠 broker 服务，不连接、不启动 Chrome；维护宿主连休眠 broker 也不创建。首次使用通过显式 `browser_initialize_chrome({authorization:{initialize:true,evidence}})`（分身未运行时先启动分身再连接），恢复通过 `browser_restore_chrome`（原端口不在时以 `--restore-last-session` 启动分身再连接）；两者均由宿主真实会话 Hook 及维护宿主门禁约束。缺连接时启动仍能读运行能力；创建批次和网站阶段拒绝不可用通道，不暗中切换。源码不自动关闭旧 broker、用户窗口或页面。恢复绑定原生 target ID、真实浏览器会话及文档代际；相同 URL 的新标签不能替代原标签。所有读写优先用任务已绑定的实际 pageId；origin 路由只负责初次分配，不能覆盖旧任务身份。
+执行宿主启动只创建休眠 broker 服务，不连接、不启动 Chrome；维护宿主连休眠 broker 也不创建。分身没运行或没连上时，Agent 发现后直接调用 `browser_initialize_chrome({authorization:{initialize:true,evidence}})`（分身未运行时先启动分身再连接；evidence 填当前任务授权原话），断开时直接调用 `browser_restore_chrome`（原端口不在时以 `--restore-last-session` 启动分身再连接），不等用户（需求文档 6.2）；两者均由宿主真实会话 Hook 及维护宿主门禁约束。缺连接时启动仍能读运行能力；创建批次和网站阶段拒绝不可用通道，不暗中切换。源码不自动关闭旧 broker、用户窗口或页面。恢复绑定原生 target ID、真实浏览器会话及文档代际；相同 URL 的新标签不能替代原标签。所有读写优先用任务已绑定的实际 pageId；origin 路由只负责初次分配，不能覆盖旧任务身份。
 
 ## 视觉模型桥
 

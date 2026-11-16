@@ -9,6 +9,7 @@ import {evaluateChoiceGoals} from './choice-goal-contract.mjs';
 import {createHash} from 'node:crypto';
 import {CONTROL_TYPES} from './control-registry.mjs';
 import {capturedChoiceAction} from './choice-actions.mjs';
+import {anatomyControls} from './control-anatomy.mjs';
 import {humanActionReason,classifyPending,templateConstructionIssues} from './field-policy.mjs';
 import {suggestSemanticMappings,enrichRegistryCandidate,rankMappingSuggestions} from './mapping-candidates.mjs';
 const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
@@ -22,6 +23,7 @@ export function mappingCandidates(controls,profile){
  });
 }
 export function inferControl(c){
+ if(c.genericChoice)return 'dropdown'; // 未识别表单框架、按通用标注分类出的选择框（C33）
  if(c.contextProvider==='.ud-formily-item'&&c.semanticType)return c.semanticType==='month_picker'?'month_picker':null;
  if(c.multiple&&(c.renderer==='ant_select'||c.tag==='select'))return 'multiselect';
  if(c.contextProvider==='.atsx-form-item'){
@@ -47,6 +49,7 @@ function fieldFromControl(c,m,choice){
  const phoenixDate=c.renderer==='phoenix_date_picker'&&choice?.status==='captured_date_options'&&choice.restored===true&&['day','month','year'].includes(choice.dateOptions?.precision),type=phoenixDate?({day:'day_picker',month:'month_picker',year:'year_picker'})[choice.dateOptions.precision]:inferControl(c),contract=CONTROL_TYPES[type],human=humanActionReason({inventoryLabel:c.label,inventoryType:c.type,inventoryRenderer:c.renderer,role:c.role});
  const f={id:'field-'+digest([c.selector,c.label]).slice(0,20),source:m?.factKey||'unmapped.pending',label:c.label||'未识别题目',required:!!c.required,inventorySelectors:c.inventorySelectors||[c.selector],inventoryLabel:c.label,inventoryType:c.type,inventoryReadonly:c.readonly===true||c.type==='readonly',inventoryDisabled:!!c.disabled,inventoryRenderer:c.renderer||null,read:{selector:c.selector,kind:'value'},actions:[],constructionBlockers:[]};
  if(c.semanticType)f.inventorySemanticType=c.semanticType;
+ if(c.anatomy)f.controlAnatomy=c.anatomy;
  if(!c.label)f.constructionBlockers.push('QUESTION_LABEL_NOT_CAPTURED');
  if(!m?.factKey||m.factKey.startsWith('unmapped.'))f.constructionBlockers.push('SEMANTIC_MAPPING_REQUIRED');
  if(!type){f.constructionBlockers.push(c.renderer==='phoenix_date_picker'?'DATE_OPTIONS_NOT_CAPTURED':'CONTROL_DRIVER_REQUIRED');return f;}
@@ -63,6 +66,8 @@ function fieldFromControl(c,m,choice){
  else if(type==='dropdown'||type==='radio'||type==='multiselect'){
   const options=choice?.restored&&choice.status==='captured'?choice.options:c.tag==='select'||c.type==='select'||type==='radio'?c.options:null;
   f.control.options=options||[];
+  // 多级控件：建库时逐级展开找到的路径随动作记录，填写时按路径展开（C33）。
+  const treeAction=choice?.treePaths?{treePaths:choice.treePaths}:{};
   if(!options?.length)f.constructionBlockers.push('OPTIONS_NOT_CAPTURED');
   f.read.selectedSelector=c.selectedSelector||c.questionSelector||c.selector;
   if(type==='multiselect'){f.read={selector:c.tag==='select'?c.selector:c.questionSelector||c.selector,kind:'selected_values',selectedSelector:c.selectedSelector||c.selector,...(c.tag==='select'?{nativeSelect:true}:{itemSelector:'.ant-select-selection-item-content, .ant-select-selection__choice__content'})};f.actions=[{...action(c.tag==='select'?'select_multiple':'ant_multiselect'),labelSelector:c.labelSelector,options:options||[],queryMap:choice?.optionQueries||{}}];}
@@ -75,8 +80,8 @@ function fieldFromControl(c,m,choice){
   else if(framework==='.ant-form-item'||framework==='.ud-formily-item'){
    const method=framework==='.ant-form-item'?'ant_dropdown':'ud_dropdown';
    f.read.kind='text';f.read.selector=c.selectedSelector||c.questionSelector||c.selector;
-   if(!human)f.actions=[{...capturedChoiceAction(c,method),options:options||[]}];
-  }else if(c.role==='combobox'&&c.selectedSelector){f.read.kind=c.searchSelector?'value':'text';f.read.selector=c.searchSelector||c.selectedSelector;f.selectionVerificationRequired=true;f.actions=[{...capturedChoiceAction(c,'dropdown'),options:options||[]}];}
+   if(!human)f.actions=[{...capturedChoiceAction(c,method),options:options||[],...treeAction}];
+  }else if(c.role==='combobox'&&c.selectedSelector){f.read.kind=c.searchSelector?'value':'text';f.read.selector=c.searchSelector||c.selectedSelector;f.selectionVerificationRequired=true;f.actions=[{...capturedChoiceAction(c,'dropdown'),options:options||[],...treeAction}];}
   else f.constructionBlockers.push('CONTROL_DRIVER_REQUIRED');
  }else if(f.kind==='date'){
   f.precision=type==='year_picker'?'year':type==='month_picker'?'month':'day';f.read.selectedSelector=c.selector;
@@ -116,7 +121,7 @@ export function buildFormTemplate({capture,profile,mappings=[],choices=[],page,t
  const sectionSelectors=[...new Set(capture.controls.map(c=>c.sectionSelector).filter(Boolean))];
  if(capture.provider==='ant'&&sectionSelectors.length)page.sectionDiscovery={...page.sectionDiscovery,selectors:sectionSelectors};
  const groups=new Map();
- for(const c of capture.controls){const identity=c.type==='radio'&&c.questionSelector?c.questionSelector:c.selector;const prior=groups.get(identity);if(prior&&c.type!=='radio')throw Error('DUPLICATE_CAPTURED_SELECTOR');if(prior)prior.inventorySelectors.push(c.selector);else groups.set(identity,{...c,inventorySelectors:[c.selector]});}
+ for(const c of anatomyControls(capture)){const identity=c.type==='radio'&&c.questionSelector?c.questionSelector:c.selector;const prior=groups.get(identity);if(prior&&c.type!=='radio')throw Error('DUPLICATE_CAPTURED_SELECTOR');if(prior)prior.inventorySelectors.push(c.selector);else groups.set(identity,{...c,inventorySelectors:[c.selector]});}
  let fields=[...groups.values()].map(c=>{
   const f=fieldFromControl(c,mappings.find(m=>(m.active!==false||c.when)&&c.inventorySelectors.includes(m.selector)),choices.find(x=>x.selector===c.selector));
   const priorWhen=previous.flatMap(t=>t?.pages||[]).flatMap(p=>p.fields||[]).find(x=>x.when&&x.read?.selector===f.read?.selector)?.when;

@@ -13,7 +13,7 @@ export async function serveRemoteMcp(mode,{clientState,beforeConnect}={}){
  const server=new Server(serverInfo,{capabilities:{tools:{listChanged:true}}});
  server._recruitingTransportFingerprint=loadedTransportFingerprint;
  const sampling=await openSamplingBridge(server);server._recruitingDispose=()=>sampling.close();server.onclose=()=>{void sampling.close();};
- const management={name:'component_runtime',description:'管理本组件业务核心：读取状态、暂停、更新核心、恢复或停止空闲核心。浏览器保持运行。',inputSchema:{type:'object',properties:{action:{type:'string',enum:['status','pause','reload','update','resume','stop']}},required:['action'],additionalProperties:false}};
+ const management={name:'component_runtime',description:'管理本组件业务核心：读取状态、暂停、更新核心、恢复或停止空闲核心。reload／update 时浏览器主控空闲且代码不同就随之换新（Chrome 分身和标签不关，结果见 browserHost）。',inputSchema:{type:'object',properties:{action:{type:'string',enum:['status','pause','reload','update','resume','stop']}},required:['action'],additionalProperties:false}};
  server.setRequestHandler(ListToolsRequestSchema,async()=>{const operations=await core.listOperations();if(operations.isError)throw Error(operations.error);serverInfo.version=(await core.control('status')).version;return {tools:[...operations,management]};});
  server.setRequestHandler(CallToolRequestSchema,async request=>{
   let value;

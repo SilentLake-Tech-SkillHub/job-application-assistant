@@ -2,6 +2,7 @@ import {loginStateDOM} from './login-state.mjs';
 import {samePage} from './page-scope.mjs';
 import {pageFailureState,missingPageFailureState} from './page-failure-state.mjs';
 import {inspectEntryPage} from './entry-inspection.mjs';
+import {observeFirstEntry,inventoryEntryPage,observeEntryLanding,clickEntryCandidate} from './first-entry.mjs';
 import {executeTransition} from './entry-transition.mjs';
 import {inspectRea} from './rea-structure.mjs';
 import {captureNativePageStructure} from './page-structure.mjs';
@@ -123,7 +124,7 @@ export class BrowserAdapter {
   async initializeConfiguredChrome({authorization}={}){
     // Initialization is an explicit stage; status/startup never calls it.
     if(hostRole(this.hostEnvironment)!=='executor')throw Error('HOST_ROLE_MAINTAINER_READ_ONLY');
-    if(authorization?.initialize!==true||!authorization.evidence?.trim())throw Error('BROWSER_INITIALIZE_USER_AUTHORIZATION_REQUIRED');
+    if(authorization?.initialize!==true||!authorization.evidence?.trim())throw Error('BROWSER_INITIALIZE_AUTHORIZATION_REQUIRED');
     if(this.initializing)return this.initializing;
     this.initializing=(async()=>{
       await this.assertPrivateProfile();
@@ -133,7 +134,8 @@ export class BrowserAdapter {
         if(!this.executor.verified)throw Error('BROWSER_EXECUTOR_IDENTITY_REQUIRED');
         return {...this.status(),initialized:false,reason:'already_connected',browserLaunched:false};
       }
-      if(this.state==='failed'||this.state==='disconnected')throw Error('BROWSER_RESTORE_USER_AUTHORIZATION_REQUIRED');
+      // 原分身断开：改走恢复入口（同样由 Agent 发现后直接调用，需求文档 6.2）。
+      if(this.state==='failed'||this.state==='disconnected')throw Error('BROWSER_RESTORE_REQUIRED');
       let cloneLaunched=false;
       if(this.endpoint!=='managed-chrome'&&this.cloneLauncher&&!(await this.endpointProbe(this.endpoint))){await this.cloneLauncher({restoreLastSession:false});cloneLaunched=true;}
       await this.connect();if(!this.executor.verified)throw Error('BROWSER_EXECUTOR_IDENTITY_REQUIRED');
@@ -142,7 +144,7 @@ export class BrowserAdapter {
     try{return await this.initializing;}finally{this.initializing=null;}
   }
   async restoreConfiguredChrome({authorization}={}){
-    if(authorization?.restore!==true||!authorization.evidence?.trim())throw Error('BROWSER_RESTORE_USER_AUTHORIZATION_REQUIRED');
+    if(authorization?.restore!==true||!authorization.evidence?.trim())throw Error('BROWSER_RESTORE_AUTHORIZATION_REQUIRED');
     if(this.state==='connected')return {...this.status(),restored:false,reason:'already_connected'};
     if(this.connecting)throw Error('BROWSER_RESTORE_CONNECTION_IN_PROGRESS');
     await this.assertPrivateProfile();
@@ -219,10 +221,10 @@ export class BrowserAdapter {
       return {evidence,nativeStructure,binding:{pageId,targetId:targetInfo.targetId,beforeUrl,afterUrl:page.url()}};
     }finally{await cdp.detach();}
   }
-  async roleSnapshot({pageId,roleSelector,accountSelector,loginRoot,roleIdentity,sessionSelectors}){
+  async roleSnapshot({pageId,roleSelector,loginRoot,roleIdentity}){
     const page=await this.trackedPage(pageId);
     const read=async s=>{if(!s)return null;const l=page.locator(s);if(await l.count()!==1)return null;return ((await l.innerText())||'').trim()||null;};
-    return {pageUrl:page.url(),roleTitle:await read(roleSelector),...(roleIdentity?{roleIdentity:readRoleIdentity(roleIdentity,page.url())}:{}),...await page.evaluate(loginStateDOM,{loginRoot,accountSelector,sessionSelectors}),readAt:new Date().toISOString()};
+    return {pageUrl:page.url(),roleTitle:await read(roleSelector),...(roleIdentity?{roleIdentity:readRoleIdentity(roleIdentity,page.url())}:{}),...await page.evaluate(loginStateDOM,{loginRoot}),readAt:new Date().toISOString()};
   }
   async screenshot(pageId,{selector}={}){const page=await this.trackedPage(pageId);const dir=this.screenshotDir||(this.profileDir?path.join(path.dirname(this.profileDir),'screenshots'):null);if(!dir)throw Error('SCREENSHOT_DIRECTORY_REQUIRED');await mkdir(dir,{recursive:true,mode:0o700});const file=path.join(dir,randomUUID()+'.png');const masks=await page.evaluate(screenshotMaskDOM),options={path:file,mask:masks.map(selector=>page.locator(selector))};if(selector){const actual=await new PageAdapter(page).resolveSelector(selector),target=page.locator(actual);if(await target.count()!==1)throw Error('SCREENSHOT_TARGET_NOT_UNIQUE');await target.screenshot(options);}else await page.screenshot({...options,fullPage:true});await chmod(file,0o600);return {path:file,scope:selector?'captured_field':'full_page',sensitiveFieldsMasked:masks.length};}
   async closePage(pageId){const page=await this.trackedPage(pageId);if(page.context().pages().filter(p=>!p.isClosed()).length<=1)throw Error('LAST_PAGE_NOT_CLOSABLE');await page.close();this.pageIds.delete(pageId);return {pageId,closed:true};}
@@ -240,6 +242,16 @@ export class BrowserAdapter {
     const id=await this.trackPage(page);
     return {pageId:id,pageUrl:page.url(),reused};
   }
+  // 首版入口配置（C39）：在绑定的岗位页读标题、点一次唯一的投递按钮并报告落地页；不写配置（first-entry.mjs）。
+  async firstEntry({pageId,expectedTitle,expectedRoleId}){
+    const identify=p=>this.trackPage(p);
+    return observeFirstEntry({pageId,expectedTitle,expectedRoleId},{getPage:id=>this.trackedPage(id),listPages:async()=>{const b=await this.connect();return Promise.all(b.contexts().flatMap(c=>c.pages()).filter(p=>!p.isClosed()).map(async p=>({id:await identify(p),url:p.url()})));},pause:ms=>new Promise(r=>setTimeout(r,ms))});
+  }
+  // Agent 入口兜底（C39 追加）：兜底前只读盘点岗位页，兜底后只读落地页；都不点击。
+  async entryInventory({pageId,expectedTitle,labels}){return inventoryEntryPage({pageId,expectedTitle,labels},{getPage:id=>this.trackedPage(id)});}
+  async entryLanding({pageId,expectedTitle}){return observeEntryLanding({pageId,expectedTitle},{getPage:id=>this.trackedPage(id)});}
+  // 组件代点（C41）：按 Agent 选定的入口按钮点一次。
+  async entryClick(args){const identify=p=>this.trackPage(p);return clickEntryCandidate(args,{getPage:id=>this.trackedPage(id),listPages:async()=>{const b=await this.connect();return Promise.all(b.contexts().flatMap(c=>c.pages()).filter(p=>!p.isClosed()).map(async p=>({id:await identify(p),url:p.url()})));},pause:ms=>new Promise(r=>setTimeout(r,ms))});}
   async enterApplication({pageId,expectedTitle,accountSelector,roleSelector,entry,expectedRoleId}){
     const page=await this.trackedPage(pageId),before=new URL(page.url());
     if(entry?.kind==='declarative_transition'){

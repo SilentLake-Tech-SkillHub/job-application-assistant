@@ -3,7 +3,7 @@ import {BrowserAdapter} from '../shared/browser.mjs';
 test('manual Chrome restore starts the dedicated clone (never a Playwright launch) and reattaches on the exact local CDP port',async()=>{
  const dir=await mkdtemp(path.join(os.tmpdir(),'chrome-explicit-restore-'));await writeFile(path.join(dir,'Local State'),'{}');let launches=0,closed;
  let playwrightLaunches=0;const b=new BrowserAdapter('http://127.0.0.1:9345',{profileDir:dir,endpointProbe:async()=>false,launcher:async()=>{playwrightLaunches++;},cloneLauncher:async opts=>{launches++;assert.equal(opts.restoreLastSession,true);},connector:async url=>{assert.equal(url,'http://127.0.0.1:9345/');return {on:(_,fn)=>{closed=fn;}};}});b.state='disconnected';
- try{await assert.rejects(b.connect(),/NO_AUTOMATIC_RECONNECT/);await assert.rejects(b.restoreConfiguredChrome(),/USER_AUTHORIZATION_REQUIRED/);assert.equal(launches,0);
+ try{await assert.rejects(b.connect(),/NO_AUTOMATIC_RECONNECT/);await assert.rejects(b.restoreConfiguredChrome(),/BROWSER_RESTORE_AUTHORIZATION_REQUIRED/);assert.equal(launches,0);
   const r=await b.restoreConfiguredChrome({authorization:{restore:true,evidence:'Human approved restoring the original dedicated Chrome'}});assert.equal(r.profileReused,true);assert.equal(launches,1);assert.equal(r.automaticRetries,0);assert.equal(playwrightLaunches,0);closed();const again=await b.restoreConfiguredChrome({authorization:{restore:true,evidence:'second loss'}});assert.equal(again.profileReused,true);
  }finally{await rm(dir,{recursive:true,force:true});}
 });

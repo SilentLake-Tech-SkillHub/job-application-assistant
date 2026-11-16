@@ -16,7 +16,7 @@
 
 登录同意框只看[持久业务授权](generic-form-pipeline.md#持久业务授权)的单一开关：为 1 时 `login_prepare` 直接勾选并读回，不打开声明全文，不按公司、声明文字或会话重新确认；为 0 或未设定时组件不勾，返回 `needs_user_login`，用户在同一标签完成登录后调用 `role_resume`。验证码使用 `login_verification_inspect` 只读识别，返回 `needs_user_verification` 后交用户操作。用户完成后调用 `login_resume_verification`；仍有验证码则保持等待，消失后必须读到短信倒计时才能进入短信码步骤。没有倒计时返回 `verification_completed_sms_unverified`，不自动重发、不假定发送成功。正式 MCP 和 broker 均不提供滑块拖动入口。短信有效期从实际观察到的短信发送倒计时计算，人工验证码等待时间不计入短信码有效期。
 
-准备遇到有效登录态直接返回，不发码。登录结果由当前网站的正向登录证据和登录界面状态确定。全部操作通过现有 broker 的真实输入和点击，不调用网站私有登录 API。每次写操作都在引擎内调用 `hooks/login-gate.mjs`，且与申请 MCP 使用相同 origin 锁；不依赖模型记得执行检查。宿主 PreToolUse 的适配安装尚未完成，不能声称该宿主全局 Hook 已启用。
+准备时页面已经不是登录页就直接返回，不发码。登录阶段只认登录页是否消失，不读账号文本；是否真正已登录由回到岗位后点击真实入口的落地页证明（见 role-entry.md）。全部操作通过现有 broker 的真实输入和点击，不调用网站私有登录 API。每次写操作都在引擎内调用 `hooks/login-gate.mjs`，且与申请 MCP 使用相同 origin 锁；不依赖模型记得执行检查。宿主 PreToolUse 的适配安装尚未完成，不能声称该宿主全局 Hook 已启用。
 
 ## 数据与产物
 

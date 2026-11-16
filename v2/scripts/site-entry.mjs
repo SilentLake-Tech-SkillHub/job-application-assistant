@@ -6,7 +6,7 @@
 //   node scripts/site-entry.mjs --workspace <工作区> --site <站点编码> --input <改动.json> --quote "<用户原话>" --expected-sha <预览给出的指纹>
 // 改动.json 只能含 entry、loginPath 两个键（整体替换）；其余字段（账号核对、登录方式等）不在本命令范围。
 import {readFile,writeFile,rename} from 'node:fs/promises';import path from 'node:path';import {pathToFileURL} from 'node:url';import {createHash,randomUUID} from 'node:crypto';
-import {spawn} from 'node:child_process';
+import {writeMasterLoginConfig} from '../shared/master-login-config.mjs';
 import {CompanyDirectory,pyJson} from '../shared/company-directory.mjs';
 import {validateCompany} from '../login/contracts.mjs';
 import {resolveEntry} from '../shared/entry-recipe.mjs';
@@ -18,17 +18,7 @@ const show=v=>v===undefined?'（无）':JSON.stringify(v);
 // 只列出真正变了的字段（按路径逐项），不整段倒出配置。
 const leaves=(v,p,out)=>{if(v&&typeof v==='object'&&!Array.isArray(v)){for(const k of Object.keys(v))leaves(v[k],p+'.'+k,out);}else out.set(p,v);return out;};
 export function changedFields(current,patch){const lines=[];for(const k of Object.keys(patch)){const a=leaves(current[k],k,new Map()),b=leaves(patch[k],k,new Map());for(const p of new Set([...a.keys(),...b.keys()]))if(JSON.stringify(a.get(p))!==JSON.stringify(b.get(p)))lines.push(`${p}：当前 ${show(a.get(p))} → 更新 ${show(b.get(p))}`);}return lines;}
-function writeMasterConfig(workspace,{company,site,config,quote,expectedSha}){
- const script=path.join(workspace,'.agents','skills','campus-job-application','scripts','json_excel_sync.py');
- const python=path.join(workspace,'tools','.venv-search-mcp','bin','python');
- return new Promise((resolve,reject)=>{
-  const process=spawn(python,[script,'--workspace',workspace,'set-site-login-config','--quote',quote,'--expect-sha',expectedSha],{stdio:['pipe','ignore','ignore']});
-  process.stdin.on('error',reject);
-  process.once('error',reject);
-  process.once('close',code=>code===0?resolve():reject(Error('SITE_ENTRY_MASTER_WRITE_FAILED')));
-  process.stdin.end(JSON.stringify({company,site,config}));
- });
-}
+const writeMasterConfig=writeMasterLoginConfig;
 export async function siteEntry({workspace,site,patch,quote=null,expectedSha=null,now=()=>new Date().toISOString()}){
  const keys=Object.keys(patch||{});if(!keys.length||keys.some(k=>!['entry','loginPath'].includes(k)))throw Error('SITE_ENTRY_PATCH_KEYS: 只能改 entry、loginPath');
  const directory=new CompanyDirectory({handoffDir:path.join(workspace,'岗位交接')});const catalog=await directory.load();

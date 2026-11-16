@@ -32,19 +32,23 @@ if(hostMode==='cdp'&&process.env.RECRUITING_BROWSER_PROFILE_DIR){const config=cl
 const browser=new BrowserAdapter(hostMode==='cdp'?(process.env.RECRUITING_CDP_URL):hostMode==='iab'?'managed-iab':'managed-chrome',{profileDir:process.env.RECRUITING_BROWSER_PROFILE_DIR,screenshotDir:path.join(path.dirname(socketPath),'screenshots'),cloneLauncher});
 // pageTools：本进程代码支持的标签操作。浏览器主控进程不随 MCP 重载，旧进程没有这些操作；工具调用前按它判断。
 const residentSource=await genericSourceManifest();
-const status=()=>({sourceFingerprint:residentSource.sourceFingerprint,pid:process.pid,brokerPid:process.pid,protocolVersion:4,pageTools:['newPage','reload','closePage'],...browser.status(),runtimeHealth:diagnostics.isDegraded()?'degraded_read_only':'healthy'});
+// activeOperations：正在处理的请求数。业务核心 reload 时据此判断主控是否空闲，空闲才换新主控（C43）。
+let activeOperations=0;
+const status=()=>({sourceFingerprint:residentSource.sourceFingerprint,pid:process.pid,brokerPid:process.pid,protocolVersion:4,activeOperations,pageTools:['newPage','reload','closePage','firstEntry','entryFallback','componentClick'],...browser.status(),runtimeHealth:diagnostics.isDegraded()?'degraded_read_only':'healthy'});
 const methods=new Set(['assertLocation','wait','inventory','observe','act','ensureGroups','repeatDiscovery','verificationInspect']);
 const code=browserErrorCode;
 const server=http.createServer(async(req,res)=>{
   res.setHeader('content-type','application/json');
   if(req.url==='/health'){res.end(JSON.stringify(status()));return;}
   if(req.method!=='POST'||req.url!=='/rpc'){res.writeHead(404).end('{}');return;}
-  let method,args;
+  let method,args;activeOperations++;
   try{
     const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>8*1024*1024)throw Error('REQUEST_TOO_LARGE');chunks.push(chunk);}
     ({method,args={}}=JSON.parse(Buffer.concat(chunks)));let data;
-    if(diagnostics.isDegraded()&&!['status','tabs','pageIdentity','roleSnapshot','entryInspection','failureSnapshot','existingPage','inventory','observe','screenshot','assertLocation'].includes(method))throw Error('BROKER_DEGRADED_WRITES_BLOCKED');
-    const retrySafe=['tabs','pageIdentity','failureSnapshot','roleSnapshot','existingPage','inventory','observe','assertLocation','reaInspect','openPage','roleEnterApplication'].includes(method);
+    // 代码更新后由业务核心 reload 让旧主控退出（C43）：只在没有其他请求时退出，只关本进程，不关 Chrome 分身和标签。
+    if(method==='shutdown'){if(activeOperations>1)throw Error('BROWSER_HOST_BUSY');res.end(JSON.stringify({data:{stopping:true,pid:process.pid,sourceFingerprint:residentSource.sourceFingerprint}}));setImmediate(()=>server.close(()=>process.exit(0)));return;}
+    if(diagnostics.isDegraded()&&!['status','tabs','pageIdentity','roleSnapshot','entryInspection','roleEntryInventory','roleEntryLanding','failureSnapshot','existingPage','inventory','observe','screenshot','assertLocation'].includes(method))throw Error('BROKER_DEGRADED_WRITES_BLOCKED');
+    const retrySafe=['tabs','pageIdentity','failureSnapshot','roleSnapshot','roleEntryInventory','roleEntryLanding','existingPage','inventory','observe','assertLocation','reaInspect','openPage','roleEnterApplication'].includes(method);
     data=await retryBrowserOperation(async()=>{let data;
     if(method==='status')data=status();
     else if(method==='initializeConfiguredChrome')data=await browser.initializeConfiguredChrome(args);
@@ -56,6 +60,10 @@ const server=http.createServer(async(req,res)=>{
     else if(method==='pageIdentity')data=await browser.pageIdentity(args.pageId);
     else if(method==='reaInspect')data=await browser.reaInspect(args);
     else if(method==='roleEnterApplication')data=await browser.enterApplication(args);
+    else if(method==='roleFirstEntry')data=await browser.firstEntry(args);
+    else if(method==='roleEntryInventory')data=await browser.entryInventory(args);
+    else if(method==='roleEntryLanding')data=await browser.entryLanding(args);
+    else if(method==='roleEntryClick')data=await browser.entryClick(args);
     else if(method==='roleSnapshot')data=await browser.roleSnapshot(args);
     else if(method==='screenshot')data=await browser.screenshot(args.pageId,{selector:args.selector});
     else if(method==='closePage')data=await browser.closePage(args.pageId);
@@ -77,6 +85,7 @@ const server=http.createServer(async(req,res)=>{
     return data;},{retrySafe,recover:error=>browser.recoverTransient(error,{...args,reopenRole:method==='openPage'||method==='roleEnterApplication'})});
     res.end(JSON.stringify({data:data??null}));
   }catch(error){diagnostics.record('operation_error',error,method);const details=safeControlErrorDetails(error.details)||(error.details?null:browserErrorDetails(error,{method,locator:args?.selector||args?.action?.selector||args?.entry?.entryLocator?.selector||args?.entry?.entryLocator?.text}));res.end(JSON.stringify({error:code(error),...(details?{details}:{})}));}
+  finally{activeOperations--;}
 });
 await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(socketPath,resolve);});await chmod(socketPath,0o600);
 console.log(JSON.stringify({status:'browser_host_ready',pid:process.pid,connectionAttempts:0,automaticRetries:0}));

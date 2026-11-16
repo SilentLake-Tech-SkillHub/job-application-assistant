@@ -24,7 +24,8 @@ export function isChoiceControl(field) {
  return ['radio','radio_group'].includes(field.type) || field.tag === 'select' || field.type === 'select' || field.renderer === 'ant_select' || field.renderer === 'phoenix_select' || field.renderer === 'phoenix_autocomplete' ||
   field.type === 'search' && field.contextProvider === '.ud-formily-item' ||
   field.type === 'combobox' && field.contextProvider === '.ant-form-item' ||
-  ['choice','school_text'].includes(field.type) && field.contextProvider === '.atsx-form-item';
+  ['choice','school_text'].includes(field.type) && field.contextProvider === '.atsx-form-item' ||
+  field.genericChoice === true;
 }
 export const isDateControl=field=>['ant_date','phoenix_date_picker'].includes(field.renderer)||['date','month'].includes(field.type);
 

@@ -1,12 +1,14 @@
 import hashlib,json,os,shlex,subprocess,sys,tempfile,unittest,time
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'hooks'))
+from skill_route import route_sha256, route_text
 def scope_state(ids):
  now=time.time()
  return {'session_ids':ids,'sessions':{sid:{'registeredAt':now,'expiresAt':now+12*3600} for sid in ids}}
 class WorkflowHookTest(unittest.TestCase):
  def setUp(self):
-  self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name);self.policy=self.root/'policy.md';self.policy.write_text('Detailed policy is a reference, not per-turn context.',encoding='utf-8');self.scope=self.root/'scope.json';self.scope.write_text(json.dumps(scope_state(['enabled'])));self.lock=self.root/'lock.json';self.lock.write_text(json.dumps({'version':'synthetic','sha256':hashlib.sha256(self.policy.read_bytes()).hexdigest(),'route_sha256':hashlib.sha256((ROOT/'hooks/route.md').read_bytes()).hexdigest()}));self.env={**os.environ,'RECRUITING_HOST_ROLE':'executor','RECRUITING_WORKSPACE_ROOT':str(self.root),'RECRUITING_WORKFLOW_POLICY':str(self.policy),'RECRUITING_WORKFLOW_SCOPE':str(self.scope),'RECRUITING_WORKFLOW_LOCK':str(self.lock),'RECRUITING_WORKFLOW_STATE':str(self.root/'state')}
+  self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name);self.policy=self.root/'policy.md';self.policy.write_text('Detailed policy is a reference, not per-turn context.',encoding='utf-8');self.scope=self.root/'scope.json';self.scope.write_text(json.dumps(scope_state(['enabled'])));self.lock=self.root/'lock.json';self.lock.write_text(json.dumps({'version':'synthetic','sha256':hashlib.sha256(self.policy.read_bytes()).hexdigest(),'route_sha256':route_sha256()}));self.env={**os.environ,'RECRUITING_HOST_ROLE':'executor','RECRUITING_WORKSPACE_ROOT':str(self.root),'RECRUITING_WORKFLOW_POLICY':str(self.policy),'RECRUITING_WORKFLOW_SCOPE':str(self.scope),'RECRUITING_WORKFLOW_LOCK':str(self.lock),'RECRUITING_WORKFLOW_STATE':str(self.root/'state')}
  def tearDown(self):self.tmp.cleanup()
  def invoke(self,**args):
   event={'session_id':'enabled','turn_id':'turn','cwd':str(self.root),'hook_event_name':'PreToolUse','tool_name':'mcp__recruiting_application_v2__batch_prepare',**args}
@@ -20,6 +22,15 @@ class WorkflowHookTest(unittest.TestCase):
   self.assertEqual(self.invoke(tool_name='exec_command',tool_input={'cmd':command+'; echo bypass'}).returncode,2)
  def test_short_route_injection_and_same_turn_mutation_receipt(self):
   r=self.invoke(hook_event_name='UserPromptSubmit');self.assertEqual(r.returncode,0,r.stderr);ctx=json.loads(r.stdout)['hookSpecificOutput']['additionalContext'];self.assertIn('company_batch_create',ctx);self.assertNotIn(self.policy.read_text(),ctx);self.assertLess(len(ctx.encode('utf-8')),1800);self.assertEqual(self.invoke().returncode,0)
+ def test_route_is_generated_from_skill_stage_table(self):
+  skill=(ROOT/'SKILL.md').read_text(encoding='utf-8');table=skill.split('<!-- 环节表:开始 -->')[1].split('<!-- 环节表:结束 -->')[0]
+  stages=[l.split('|')[1].strip() for l in table.splitlines() if l.startswith('| ') and not l.startswith('| 环节')]
+  lines=route_text().splitlines()[1:];self.assertEqual([l.split('. ',1)[1].split('：')[0] for l in lines],stages)
+  self.assertIn('role_submit',route_text());self.assertNotIn('role_verify',route_text())
+  ctx=json.loads(self.invoke(hook_event_name='UserPromptSubmit').stdout)['hookSpecificOutput']['additionalContext'];self.assertIn(route_text(),ctx)
+ def test_route_section_missing_is_rejected(self):
+  bad=self.root/'SKILL.md';bad.write_text('# no stage table\n',encoding='utf-8')
+  with self.assertRaisesRegex(ValueError,'WORKFLOW_ROUTE_SECTION_MISSING'):route_text(bad)
  def test_execution_boundary_and_maintenance_reads(self):
   self.assertEqual(self.invoke().returncode,0)
   self.assertEqual(self.invoke(tool_name='mcp__recruiting_application_v2__role_prepare_materials').returncode,0)

@@ -4,6 +4,7 @@
 import {createHash,randomUUID} from 'node:crypto';import {mkdir,readFile,writeFile,rename} from 'node:fs/promises';import path from 'node:path';
 import {TRANSIENT_BROWSER_ERRORS} from './browser-errors.mjs';
 import {keyOK} from './ids.mjs';
+import {fallbackRegistryFile,loadFallbackRegistry} from './gui-fallback.mjs';
 const sha=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const stable=v=>Array.isArray(v)?v.map(stable):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])])):v;
 // Construction/mapping explore with different arguments; elsewhere a repeated
@@ -47,7 +48,7 @@ async function evidenceArgsHash(tool,phase,args,env){
  }
  return sha({base,evidence});
 }
-const failedFields=result=>[result,...(Array.isArray(result?.results)?result.results:[])].flatMap(run=>[...(run?.deferredControls||[]),...(run?.checks||[]).filter(c=>FAILED_CHECK.has(c?.status))]).map(({id,label,source,reason})=>({id,label,source,reason}));
+const failedFields=result=>[result,...(Array.isArray(result?.results)?result.results:[])].flatMap(run=>[...(run?.deferredControls||[]),...(run?.checks||[]).filter(c=>FAILED_CHECK.has(c?.status)),...(Array.isArray(run?.failures)?run.failures:[])]).map(({id,label,source,reason})=>({id,label,source,reason}));
 export async function recordOutcome({tool,phase,args,result,env=process.env}){
  const dir=stopLossDir(env),scope=scopeOf(args);if(!dir||!scope)return result;
  const file=fileFor(dir,scope,tool),reasons=failureReasons(result);
@@ -57,7 +58,30 @@ export async function recordOutcome({tool,phase,args,result,env=process.env}){
  const count=old?.signature===signature?old.count+1:1,evidence=[result.failureEvidenceId,result.id,result.runId,...(Array.isArray(result.results)?result.results.map(r=>r?.id||r?.runId):[])].filter(x=>typeof x==='string');
  const entry={scope,tool,signature,count,reasons,source:source(env),argsHash:inputHash,evidenceIds:[...new Set([...(old?.signature===signature?old.evidenceIds||[]:[]),...evidence])].slice(-5),lastAt:new Date().toISOString()};
  await save(file,entry);
- return count>=ASK_USER_AFTER?askUser(result,entry):result;
+ if(count<ASK_USER_AFTER)return result;
+ // 2026-11-14 用户决定（P14 修改）：同一失败第二次先交 Agent 浏览器兜底（执行端在组件外登记表里），兜底后仍同样失败再问用户。
+ const offer=count===ASK_USER_AFTER?await fallbackOffer(tool,args,result,env):null;
+ return offer?offerFallback(result,entry,offer):askUser(result,entry);
+}
+// 进入申请页（C39 追加，2026-11-16 用户“按B。推进”）：首版入口同一失败第二次也交 Agent 浏览器兜底，由 Agent 点进申请表。
+const FALLBACK_CONTEXT={form_test_interactions:'construction',form_construct_build:'construction',role_prepare:'fill',role_prepare_fields:'fill',role_advance:'entry',role_enter_application:'entry'};
+// 写入、读回这类不是页面操作的问题不交兜底。
+const ENTRY_FALLBACK_REASON=/^APPLICATION_ENTRY_FIRST_(?!CONFIG_READBACK_FAILED$|CONFIG_EXISTS$)/;
+export async function fallbackOffer(tool,args,result,env=process.env){
+ const context=FALLBACK_CONTEXT[tool];if(!context||!args?.taskId)return null;
+ const reasons=failureReasons(result),fieldIds=[...new Set(failedFields(result).map(f=>f.id).filter(id=>typeof id==='string'&&id))].slice(0,30);
+ if(context==='entry'?!reasons.length||!reasons.every(r=>ENTRY_FALLBACK_REASON.test(r)):!fieldIds.length)return null;
+ let registry;try{registry=await loadFallbackRegistry(fallbackRegistryFile(env));}catch{return null;}
+ const entry=registry?.agents.find(a=>a.hostId===env.RECRUITING_HOST_ID);
+ return entry?{context,...(context==='entry'?{}:{fieldIds}),agent:entry.agent}:null;
+}
+export function offerFallback(result,entry,offer){
+ if(offer.context==='entry')return {...result,repeatedFailure:{scope:entry.scope,tool:entry.tool,count:entry.count,reasons:entry.reasons,evidenceIds:entry.evidenceIds,fields:[]},
+  continuation:{state:'agent_fallback',owner:'agent',requiresUser:false,shouldContinue:true,continueWithOtherCompanies:true,nextTools:['role_entry_fallback'],reason:'SAME_FAILURE_TWICE',fallback:offer,
+   instruction:'同一首版入口失败已出现两次：先按组件外登记表交 Agent 浏览器兜底——对同一任务调用 role_entry_fallback（mode=start），按返回要求只在这张岗位页用鼠标点进本岗位申请表，再用 mode=report 回报按钮文字和第几个。兜底不可用或之后仍失败，再把 repeatedFailure 交给用户。'}};
+ return {...result,repeatedFailure:{scope:entry.scope,tool:entry.tool,count:entry.count,reasons:entry.reasons,evidenceIds:entry.evidenceIds,fields:failedFields(result)},
+  continuation:{state:'agent_fallback',owner:'agent',requiresUser:false,shouldContinue:true,continueWithOtherCompanies:true,nextTools:['form_gui_fallback'],reason:'SAME_FAILURE_TWICE',fallback:offer,
+   instruction:'同一失败已出现两次：先按组件外登记表交 Agent 浏览器兜底——调用 form_gui_fallback（mode=start，context 与 fieldIds 见 fallback）。兜底不可用或之后仍同样失败，再把 repeatedFailure 交给用户。'}};
 }
 export function askUser(result,entry){
  return {...result,repeatedFailure:{scope:entry.scope,tool:entry.tool,count:entry.count,reasons:entry.reasons,evidenceIds:entry.evidenceIds,fields:failedFields(result)},

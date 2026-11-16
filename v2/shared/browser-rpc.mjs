@@ -9,13 +9,22 @@ export class BrokerBrowserAdapter {
   async request(method,args={}){
     const normalize=v=>typeof v==='string'&&v.startsWith('phoenixq:')?normalizePhoenixReference(v):Array.isArray(v)?v.map(normalize):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,normalize(x)])):v;
     args=normalize(args);
+    await this.assertCurrentHost(method);
     const data=JSON.stringify({method,args});
     const result=await retryBrowserOperation(()=>new Promise((resolve,reject)=>{
       const req=http.request({socketPath:this.socketPath,path:'/rpc',method:'POST',headers:{'content-type':'application/json','content-length':Buffer.byteLength(data)}},res=>{
         const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>{try{resolve(JSON.parse(Buffer.concat(chunks)));}catch{reject(Error('INVALID_BROWSER_HOST_RESPONSE'));}});
       });req.on('error',()=>reject(Error('BROWSER_HOST_NOT_AVAILABLE')));req.setTimeout(this.requestTimeoutMs,()=>req.destroy(Error('BROWSER_HOST_OPERATION_TIMEOUT')));req.end(data);
-    }),{retrySafe:['status','tabs','pageIdentity','failureSnapshot','entryInspection','roleSnapshot','inventory','observe','assertLocation','existingPage','openPage'].includes(method)});
+    }),{retrySafe:['status','tabs','pageIdentity','failureSnapshot','entryInspection','roleEntryInventory','roleEntryLanding','roleSnapshot','inventory','observe','assertLocation','existingPage','openPage'].includes(method)});
     if(result.error){const error=Error(result.error),details=safeControlErrorDetails(result.details);if(details)error.details=details;throw error;}return result.data;
+  }
+  // 请求前核对浏览器主控的代码指纹（C43）：主控还是旧代码就拒绝，下一步 component_runtime reload（reload 会在主控空闲时换新主控）。
+  // 只读状态不拦；短时缓存，不每次都问；主控不带指纹（测试桩、内置浏览器宿主桥）时不核对。
+  async assertCurrentHost(method,{expected=process.env.RECRUITING_WORKER_SOURCE_SHA256,now=Date.now}={}){
+    if(!expected||method==='status'||this.hostCheckedAt&&now()-this.hostCheckedAt<15000)return;
+    const s=await new Promise(resolve=>{const r=http.get({socketPath:this.socketPath,path:'/health'},res=>{const chunks=[];res.on('data',c=>chunks.push(c));res.on('end',()=>{try{resolve(JSON.parse(Buffer.concat(chunks)));}catch{resolve(null);}});});r.on('error',()=>resolve(null));r.setTimeout(1000,()=>{r.destroy();resolve(null);});});
+    if(s?.sourceFingerprint&&s.sourceFingerprint!==expected){this.hostCheckedAt=null;const e=Error('BROWSER_HOST_VERSION_MISMATCH');e.details={phase:'page_binding',nextTool:null,pageIds:[]};throw e;}
+    if(s)this.hostCheckedAt=now();
   }
   status(){return this.request('status');}
   tabs(){return this.request('tabs');}

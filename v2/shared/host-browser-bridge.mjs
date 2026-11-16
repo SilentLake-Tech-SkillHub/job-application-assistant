@@ -6,6 +6,7 @@ import {browserErrorCode,retryBrowserOperation} from './browser-errors.mjs';
 import {readRoleIdentity} from './role-identity.mjs';
 import {safeControlErrorDetails} from './control-error-details.mjs';
 import {executeTransition} from './entry-transition.mjs';
+import {observeFirstEntry,inventoryEntryPage,observeEntryLanding,clickEntryCandidate} from './first-entry.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import http from 'node:http';import {mkdir,chmod,lstat} from 'node:fs/promises';import path from 'node:path';
 import {READY_TIMEOUT_MS,matchEntryPath} from './entry-recipe.mjs';
@@ -33,7 +34,7 @@ export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,
  const get=async id=>{const t=(await tabs()).find(t=>t.id===id);if(!t)throw Error('ROLE_BROWSER_PAGE_LOST');const tab=await browser.tabs.get(id);tracked.set(id,tab);return tab;};
  const adapter=async(url,{pageId,readOnly=false,roleBinding}={})=>{if(pageId&&!readOnly&&(!roleBinding||roleBinding.pageId!==pageId))throw Error('VERIFIED_ROLE_PAGE_BINDING_REQUIRED');const matches=(await tabs()).filter(t=>pageId?t.id===pageId:t.url===url);if(matches.length!==1)throw Error(matches.length?'AMBIGUOUS_PAGE':'EXISTING_PAGE_NOT_FOUND');if(!samePage(matches[0].url,url))throw Error('EXPLICIT_PAGE_URL_MISMATCH');const tab=await get(matches[0].id),current=await tab.url(),document=await generation(tab);scope(current);if(!samePage(current,url))throw Error('EXPLICIT_PAGE_URL_MISMATCH');const adapted=new pageAdapter({url:()=>current,evaluate:(...a)=>tab.playwright.evaluate(...a),locator:(...a)=>locator(tab.playwright.locator(...a),{tab,selector:a[0]}),getByRole:(...a)=>locator(tab.playwright.getByRole(...a)),screenshot:o=>screenshotHostTab({tab,directory:path.join(path.dirname(socketPath),'screenshots'),options:o})},{listOpenPageUrls:async()=>(await tabs()).map(t=>t.url)});adapted.hostPageId=tab.id;adapted.documentGeneration=document.generation;return adapted;};
  const dispatch=async(method,args)=>{
-  if(method==='status')return {state:'connected',mode:mode==='iab'?'iab':'host_chrome',executor:{...executor},protocolVersion:4,pageTools:['newPage','reload','closePage'],connectionAttempts:1,automaticRetries:0,provider:'official_host_browser_sdk'};
+  if(method==='status')return {state:'connected',mode:mode==='iab'?'iab':'host_chrome',executor:{...executor},protocolVersion:4,pageTools:['newPage','reload','closePage','firstEntry','entryFallback','componentClick'],connectionAttempts:1,automaticRetries:0,provider:'official_host_browser_sdk'};
   if(method==='tabs')return tabs();
   if(method==='closePage'){const all=await tabs();if(!all.some(t=>t.id===args.pageId))throw Error('ROLE_BROWSER_PAGE_LOST');const tab=await browser.tabs.get(args.pageId);if(typeof tab.close!=='function')throw Error('HOST_TAB_CLOSE_UNSUPPORTED');if((await browser.tabs.list()).length<=1)throw Error('LAST_PAGE_NOT_CLOSABLE');await tab.close();tracked.delete(args.pageId);return {pageId:args.pageId,closed:true};}
   if(method==='failureSnapshot'){const all=await tabs();const item=all.find(t=>t.id===args.pageId);if(!item)return missingPageFailureState(args.pageId);const tab=await browser.tabs.get(item.id);return pageFailureState({url:()=>tab.url(),evaluate:fn=>tab.playwright.evaluate(fn)},args.pageId);}
@@ -52,6 +53,17 @@ export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,
    if(args.reuseOnly&&(!matches.length||matches[0].url!==args.pageUrl))throw Error('EXISTING_PAGE_REQUIRED_FOR_REBIND');
    const tab=matches.length?await get(matches[0].id):await browser.tabs.new(),reused=await tab.url()===args.pageUrl;if(!reused||args.reload&&args.pageId)await tab.goto(args.pageUrl);tracked.set(tab.id,tab);await tab.markHandoff();return {pageId:tab.id,pageUrl:await tab.url(),reused};
   }
+  // 首版入口配置（C39）：只读标题、点一次唯一的投递按钮并报告落地页（first-entry.mjs），不写配置。点击不可重试。
+  if(method==='roleFirstEntry'){scope(await (await get(args.pageId)).url());return observeFirstEntry(args,{
+   getPage:async id=>{const t=await get(id);return {url:()=>t.url(),locator:(...a)=>locator(t.playwright.locator(...a)),getByRole:(...a)=>locator(t.playwright.getByRole(...a)),getByText:(...a)=>locator(t.playwright.getByText(...a))};},
+   listPages:tabs,pause:ms=>new Promise(r=>setTimeout(r,ms)),preserve:async id=>{await (await get(id)).markHandoff();}
+  });}
+  // Agent 入口兜底（C39 追加）：兜底前只读盘点岗位页，兜底后只读落地页；都不点击。
+  const hostPage=async id=>{const t=await get(id);return {url:()=>t.url(),locator:(...a)=>locator(t.playwright.locator(...a)),getByRole:(...a)=>locator(t.playwright.getByRole(...a)),getByText:(...a)=>locator(t.playwright.getByText(...a))};};
+  if(method==='roleEntryInventory'){scope(await (await get(args.pageId)).url());return inventoryEntryPage(args,{getPage:hostPage});}
+  // 组件代点（C41）：按 Agent 选定的入口按钮点一次。点击不可重试。
+  if(method==='roleEntryClick'){scope(await (await get(args.pageId)).url());return clickEntryCandidate(args,{getPage:hostPage,listPages:tabs,pause:ms=>new Promise(r=>setTimeout(r,ms)),preserve:async id=>{await (await get(id)).markHandoff();}});}
+  if(method==='roleEntryLanding'){scope(await (await get(args.pageId)).url());return observeEntryLanding(args,{getPage:hostPage,preserve:async id=>{await (await get(id)).markHandoff();}});}
   if(method==='roleEnterApplication'){
    const tab=await get(args.pageId),before=scope(await tab.url());
    const entry=args.entry;
@@ -88,7 +100,7 @@ export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,
    return {pageId:args.pageId,pageUrl:after.href,roleTitle:args.expectedTitle,entryClicked:detail,submission:'not_performed'};
   }
   if(method==='roleSnapshot'){
-   const tab=await get(args.pageId);const result=await tab.playwright.evaluate(({roleSelector,accountSelector,loginRoot})=>{const read=s=>{if(!s)return null;const ns=document.querySelectorAll(s);return ns.length===1?ns[0].innerText?.trim()||null:null;};return {pageUrl:location.href,roleTitle:read(roleSelector),account:read(accountSelector),loginFormPresent:!!document.querySelector(loginRoot),readAt:new Date().toISOString()};},args);Object.assign(result,await tab.playwright.evaluate(loginStateDOM,args));delete result.account;if(args.roleIdentity)result.roleIdentity=readRoleIdentity(args.roleIdentity,result.pageUrl);return result;
+   const tab=await get(args.pageId);const result=await tab.playwright.evaluate(({roleSelector})=>{const read=s=>{if(!s)return null;const ns=document.querySelectorAll(s);return ns.length===1?ns[0].innerText?.trim()||null:null;};return {pageUrl:location.href,roleTitle:read(roleSelector),readAt:new Date().toISOString()};},{roleSelector:args.roleSelector});Object.assign(result,await tab.playwright.evaluate(loginStateDOM,{loginRoot:args.loginRoot}));if(args.roleIdentity)result.roleIdentity=readRoleIdentity(args.roleIdentity,result.pageUrl);return result;
   }
   if(!['existingPage','inventory','observe','act','ensureGroups','assertLocation','wait'].includes(method))throw Error('UNSUPPORTED_HOST_BROWSER_METHOD');
   if(args.pageId&&args.readOnly&&!['existingPage','inventory','observe','assertLocation','wait','repeatDiscovery'].includes(method))throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');
@@ -104,7 +116,7 @@ export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,
   return p.act(args.action,args.value,args.files);
  };
  const pending=[];
- const runDispatch=(method,args)=>retryBrowserOperation(()=>dispatch(method,args),{retrySafe:['tabs','pageIdentity','failureSnapshot','roleSnapshot','entryInspection','existingPage','inventory','observe','assertLocation','reaInspect','openPage','roleEnterApplication'].includes(method)});
+ const runDispatch=(method,args)=>retryBrowserOperation(()=>dispatch(method,args),{retrySafe:['tabs','pageIdentity','failureSnapshot','roleSnapshot','entryInspection','roleEntryInventory','roleEntryLanding','existingPage','inventory','observe','assertLocation','reaInspect','openPage','roleEnterApplication'].includes(method)});
  // Some hosts require browser calls to originate inside the currently active
  // tool invocation. Queue RPC work and let that invocation explicitly pump it;
  // an HTTP callback retaining a previous invocation is not a durable executor.

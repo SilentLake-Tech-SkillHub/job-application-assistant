@@ -59,6 +59,8 @@ export class PageAdapter {
   }
   async wait(selector){selector=await this.resolveSelector(selector);await this.page.locator(selector).filter({visible:true}).first().waitFor({state:'visible',timeout:10000});}
   async inventory(plan){
+   // 选择类控件结构分类（C33）：只读，返回每个控件的分类记录。
+   if(plan?.operation==='controlAnatomy')return this.page.evaluate(await currentReader('./control-anatomy.mjs','controlAnatomyDOM'),plan.items||[]);
    if(plan?.provider==='ant'){
     const reader=await currentAnt(),primary=await this.page.evaluate(reader),coveredSelectors=await this.page.evaluate(reader,{operation:'resolve',references:primary.map(c=>c.selector)});
     const controls=await this.page.evaluate(await currentNative());

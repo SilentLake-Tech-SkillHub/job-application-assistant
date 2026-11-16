@@ -13,14 +13,14 @@ class PublicAssetsTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         source = Path(__file__).resolve().parents[1]
-        for name in ('package.json', 'package-lock.json', 'catalog/entry-recipes.json', 'catalog/workflow-tools.json', 'catalog/role-materials.json', 'catalog/learned-targets.json', 'hooks/tool-arguments.json', 'test/fixtures/insta360.login.json'):
+        for name in ('package.json', 'package-lock.json', 'catalog/entry-recipes.json', 'catalog/first-entry.json', 'catalog/workflow-tools.json', 'catalog/role-materials.json', 'catalog/learned-targets.json', 'hooks/tool-arguments.json', 'test/fixtures/insta360.login.json'):
             dest = self.root / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source / name, dest)
     def tearDown(self):
         self.temp.cleanup()
     def test_valid_public_assets(self):
-        self.assertEqual(len(public_json_files(self.root)), 8)
+        self.assertEqual(len(public_json_files(self.root)), 9)
 
     def write_asset(self, name, value):
         (self.root / 'catalog' / name).write_text(json.dumps(value), encoding='utf-8')
@@ -147,6 +147,14 @@ class PublicAssetsTest(unittest.TestCase):
         d = json.loads(p.read_text(encoding='utf-8'))
         d['version'] = 'wrong'
         p.write_text(json.dumps(d), encoding='utf-8')
+        with self.assertRaises(AssertionError):
+            public_json_files(self.root)
+
+    def test_first_entry_catalog_refuses_domains(self):
+        p = self.root / 'catalog/first-entry.json'
+        d = json.loads(p.read_text(encoding='utf-8'))
+        d['entryLabels'].append('https://jobs.example.com')
+        p.write_text(json.dumps(d, ensure_ascii=False), encoding='utf-8')
         with self.assertRaises(AssertionError):
             public_json_files(self.root)
 

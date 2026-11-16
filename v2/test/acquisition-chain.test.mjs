@@ -167,3 +167,29 @@ test('a current form code resolves the latest paired assets without any old page
  const f=fixture();assert.equal((await assertCapturedAcquisition(f.store,{companyId:'example',formId:f.capture.formId})).capture.captureId,f.capture.captureId);
  await assert.rejects(assertCapturedAcquisition(f.store,{companyId:'example',pageUrl:f.capture.pageUrl}),/FORM_CODE_OR_CAPTURE_REQUIRED/);
 });
+
+// C31：REA 采集时读取唯一正式公司模板识别已登记的条件子控件；没有正式模板（新公司）时照常记录，不读取已删除的草稿键。
+test('REA recording keeps a declared conditional child out of the primary comparison by reading the formal company template',async()=>{
+ const {hash}=await import('../shared/engine.mjs');
+ const {captureContentId}=await import('../shared/form-acquisition.mjs');
+ const {recordVisualRows,primaryCandidates,reconcilePrimaryControls}=await import('../shared/form-visual-inventory.mjs');
+ const companyId='C00001',pageUrl='https://example.test/apply',page={pageId:'chrome:test',pageUrl,generation:'one',sessionId:'broker'};
+ const reads=[],assets=new Map(),store={get:async(group,id)=>{reads.push(id);if(!assets.has(id))throw Object.assign(Error('absent'),{code:'ENOENT'});return structuredClone(assets.get(id));},put:async(group,id,value)=>{assets.set(id,structuredClone(value));}};
+ const table=recordVisualRows({rows:[],current:{page,screenshotId:'snapshot'}},'snapshot',[{label:'Channel',kind:'field'}]);
+ const base=[{selector:'#channel',label:'Channel',type:'radio_group',required:true}],child={selector:'#code',label:'Code',type:'text',required:false};
+ const initial={visualPage:page,visualInventoryHash:table.current.inventoryHash,visualScreenshotId:table.current.screenshotId,contentHash:'rea-evidence',primaryCandidates:primaryCandidates({controls:base})};
+ const review=reconcilePrimaryControls(table,initial,{matches:[{visualId:table.rows[0].id,reaId:initial.primaryCandidates[0].id}]});
+ assets.set('form-visual-'+companyId,table);assets.set('form-coverage-'+companyId,{review,expansions:{}});assets.set('form-structure-'+companyId,initial);
+ const record=async template=>{
+  const controls=[...base,child],observedAt='2026-11-13T12:00:00.000Z',capture={formId:companyId,companyId,pageUrl,pageId:page.pageId,readOnly:true,provider:null,observedAt,controls,captureId:captureContentId(companyId)};
+  const rawEvidence={operation:'inspect_web_page',predicate_type:'rea.web-page-inspection',evidence_id:'rea-1',normalized_result:{scripts:{items:[]}}};
+  const body={schemaVersion:1,pageUrl,targetId:'target-1',documents:[{nodes:[{index:0,nodeName:'FORM'}]}],accessibility:[{nodeId:'1',role:'textbox'}]};
+  const structure={schemaVersion:1,provider:'rea',evidenceId:rawEvidence.evidence_id,evidenceHash:hash(rawEvidence),pageId:page.pageId,pageUrl,targetId:body.targetId,observedAt,accessibility:[],limitations:[],completeness:{truncated_sections:[],unavailable_sections:[]}};
+  assets.set('form-structure-'+companyId,initial);reads.length=0;
+  return recordReaInspection(store,{companyId,pageUrl,structure,capture,rawEvidence,nativeStructure:{...body,observedAt,structureHash:hash(body),executableSelectors:false},visual:table.current,template});
+ };
+ const formal={id:companyId,evidence:{sourceUrl:pageUrl},pages:[{fields:[{source:'channel',kind:'choice',control:{options:['Referral']},inventorySelectors:['#channel']},{when:{source:'channel',equals:'Referral'},inventorySelectors:['#code'],inventoryLabel:'Code',inventoryType:'text',required:false}]}]};
+ assert.equal((await record(formal)).asset.primaryContentHash,review.structureHash);
+ assert.ok(reads.every(id=>!/draft/.test(id)));
+ const fresh=await record(null);assert.equal(fresh.asset.primaryContentHash,undefined);assert.equal(fresh.id,'form-structure-'+companyId);
+});

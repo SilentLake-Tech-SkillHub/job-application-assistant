@@ -10,6 +10,7 @@ import uuid
 import shlex
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from conversation_scope import host_role, read_active_scope
+from skill_route import route_text
 
 ROOT = Path(os.environ['RECRUITING_WORKSPACE_ROOT']).resolve()
 POLICY = Path(os.environ['RECRUITING_WORKFLOW_POLICY'])
@@ -17,7 +18,6 @@ LOCK = Path(os.environ['RECRUITING_WORKFLOW_LOCK'])
 STATE = Path(os.environ['RECRUITING_WORKFLOW_STATE'])
 SCOPE = Path(os.environ['RECRUITING_WORKFLOW_SCOPE'])
 INJECT = {'UserPromptSubmit', 'SessionStart', 'SubagentStart'}
-ROUTE = Path(__file__).with_name('route.md')
 LEGACY_CONTINUATION_TOOLS = {'workflow_next', 'form_route', 'workflow_advance', 'role_prepare', 'prepare_plan', 'batch_prepare', 'role_verify', 'verify_current', 'capture_rea_structure', 'capture_controls', 'form_mapping_candidates', 'capture_choice_options', 'form_build_template', 'template_register', 'probe_conditions', 'template_finalize', 'profile_map_questions', 'material_import_prepare', 'material_import_run', 'roles_prepare_batch', 'roles_patch_text', 'workflow_handoff'}
 
 LIFECYCLE = json.loads((Path(__file__).resolve().parents[1] / 'catalog/workflow-tools.json').read_text(encoding='utf-8'))
@@ -276,7 +276,9 @@ def handle(event):
 
     sha = hashlib.sha256(POLICY.read_bytes()).hexdigest()
     lock = json.loads(LOCK.read_text(encoding='utf-8'))
-    route_sha = hashlib.sha256(ROUTE.read_bytes()).hexdigest()
+    # 注入内容由 SKILL.md 环节表生成（C38），锁文件 route_sha256 对生成结果取值。
+    route = route_text()
+    route_sha = hashlib.sha256(route.encode('utf-8')).hexdigest()
     if lock.get('route_sha256') and route_sha != lock['route_sha256']:
         raise ValueError('WORKFLOW_ROUTE_HASH_CHANGED')
     if sha != lock['sha256']:
@@ -298,7 +300,6 @@ def handle(event):
         if all(loaded.get(k) == v for k, v in current.items()):
             return {}
 
-    route = ROUTE.read_text(encoding='utf-8')
     context = ('本轮求职调用入口；后续用户明确修改及上级指令优先。\n'
                '版本：' + lock['version'] + '；SHA256：' + sha + '\n'
                '速度要求不放宽；Hook与监督开销均计入用户视角总耗时。\n\n' + route)

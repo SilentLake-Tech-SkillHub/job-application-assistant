@@ -103,11 +103,13 @@ test('batch browser preference survives a necessary queue replacement after conf
  const first=await batch.create({authorizationRef:'IAB preference',browserChannels:['iab']});await addRole(0);
  const second=await batch.create({authorizationRef:'new confirmed role'});assert.notEqual(second.queue.queueId,first.queue.queueId);assert.deepEqual(second.channelSelection.requestedChannels,['iab']);
 },2));
-test('company reorder retains the existing batch, leases, queue and task state',()=>fixture(async({batch,queues})=>{
+test('company order comes only from the confirmed 公司顺序; a caller-supplied order is not a parameter and changes nothing',()=>fixture(async({batch,queues})=>{
  const first=await batch.create({authorizationRef:'original'}),a=(await batch.take(first)).assignments[0],task=a.tasks[0];
+ assert.deepEqual(first.queue.tasks.map(t=>t.companyCode),['C00001','C00002']);
  const state={queueId:first.queue.queueId,taskId:task.taskId,pageId:'same-tab',status:'ready_for_user_review',verifyRunId:'v'};await queues.put(task.taskId,state);
- const second=await batch.create({authorizationRef:'reorder',companyOrder:['C00002','C00001']});
- assert.equal(second.batchId,first.batchId);assert.equal(second.queue.queueId,first.queue.queueId);assert.equal(second.queue.tasks[0].companyCode,'C00002');assert.deepEqual(await queues.read(task.taskId),state);assert.equal((await batch.take(second)).assignments.length,0);
+ const second=await batch.create({authorizationRef:'subset attempt',companyOrder:['C00002']});
+ assert.equal(second.batchId,first.batchId);assert.equal(second.queue.queueId,first.queue.queueId);assert.equal(second.queue.reordered,undefined);
+ assert.deepEqual(second.queue.tasks.map(t=>t.companyCode),['C00001','C00002']);assert.deepEqual(await queues.read(task.taskId),state);assert.equal((await batch.take(second)).assignments.length,0);
 },2));
 test('missing capability records or no recorded usable executor refuse before any queue is written',()=>fixture(async({batch,queues})=>{
  batch.browser={executionCapabilities:async()=>({channels:{chrome:{available:true}},capability:{status:'detection_required',channels:[]}})};

@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "description": "首版入口配置（C39）：站点还没有入口配置时，组件在已确认岗位页上找下列文字之一的唯一按钮或链接，点一次并观察落地页。只列通用文字，不写任何站点名；页面上这些文字的按钮多于一个或一个都没有时不点击。",
+  "entryLabels": ["投递", "立即投递", "投递简历", "立即投递简历", "我要投递", "马上投递", "申请", "立即申请", "申请职位", "申请岗位", "申请该职位", "Apply", "Apply Now", "Apply now"],
+  "formFieldSelector": "input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=image]):not([type=reset]), textarea, select, [contenteditable=\"true\"], [role=\"combobox\"], [role=\"textbox\"]"
+}

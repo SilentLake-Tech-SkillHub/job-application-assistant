@@ -19,7 +19,7 @@ async function replaceWorker(){
  finally{reloading=false;}
 }
 await replaceWorker();if(!worker)throw Error(lastError);
-const status=()=>({protocolVersion:3,managerFingerprint,sourceFingerprint:metadata.info.sourceFingerprint,mode,hostPid:process.pid,workerPid:worker.pid,version:metadata.info.version,active,paused,reloading,reloadRequested,lastError});
+const status=()=>({protocolVersion:3,managerFingerprint,sourceFingerprint:metadata.info.sourceFingerprint,mode,hostPid:process.pid,workerPid:worker.pid,version:metadata.info.version,browserHost:metadata.info.browserHost||null,active,paused,reloading,reloadRequested,lastError});
 const server=http.createServer(async(req,res)=>{
  res.setHeader('content-type','application/json');
  try{

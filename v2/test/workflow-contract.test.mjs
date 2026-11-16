@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {auditStoredContract,stageResult} from '../shared/workflow-contract.mjs';import {registerWorkflowTool} from './fixtures/mcp-registration.mjs';
+import {auditStoredContract,stageResult,workflowEnvelope} from '../shared/workflow-contract.mjs';import {registerWorkflowTool} from './fixtures/mcp-registration.mjs';
 import {registerTemplateContract} from '../shared/profile.mjs';
 const field=()=>({id:'school',label:'学校',inventoryLabel:'学校',inventoryType:'combobox',source:'school',kind:'choice',control:{type:'dropdown',valueType:'string',readbackType:'string',options:['One University']},actions:[{method:'dropdown',selector:'#school',options:['One University']}],read:{selector:'#committed-school',selectedSelector:'#committed-school',kind:'text'}});
 const template=()=>({id:'generic',version:1,evidence:{sourceUrl:'https://example.test/apply'},pages:[{pathPrefix:'/apply',fields:[field()]}]});
@@ -103,4 +103,24 @@ test('official company content update removes retired locators, preserves facts 
   form.mappings.newQuestion={selector:'#unmapped-current',factKey:'school',active:true,coverageRequired:true,status:'mapped'};
   assert.throws(()=>assertQuestionsMapped(p,companyId,t.evidence.sourceUrl,t),/NEW_QUESTIONS_REQUIRE_TEMPLATE_MAPPING/);
  }
+});
+
+// C31：alpha.62 更名后的公司模板更新错误要回到公司模板更新步骤，不能落入泛化的表单审计。
+test('company template update errors resume at the company template update, not the generic audit',()=>{
+ for(const error of ['CURRENT_COMPANY_UPDATE_REQUIRED','CURRENT_CONSTRUCTION_DRAFT_REQUIRED']){
+  for(const result of [workflowEnvelope({error}),stageResult('form_test_interactions',{error})]){
+   assert.deepEqual(result.continuation.nextTools,['form_build_template','template_register']);assert.equal(result.continuation.state,'construct');assert.equal(result.continuation.reason,error);
+   assert.ok(!result.continuation.nextTools.includes('form_template_audit'));
+  }
+ }
+ assert.deepEqual(workflowEnvelope({error:'SOME_OTHER_FAILURE'}).continuation.nextTools,['form_template_audit','workflow_next']);
+});
+
+// 需求文档 6.2（2026-11-08）：分身没运行或没连上时 Agent 发现后直接加载，不等用户；工具说明与路由一致（2026-11-14 修正）。
+test('a clone that is not running or not connected routes the Agent straight to initialize or restore',async()=>{
+ const notConnected=workflowEnvelope({error:'BROWSER_NOT_CONNECTED'}),restore=workflowEnvelope({error:'BROWSER_RESTORE_REQUIRED'});
+ assert.deepEqual(notConnected.continuation.nextTools,['browser_initialize_chrome']);assert.deepEqual(restore.continuation.nextTools,['browser_restore_chrome']);
+ for(const r of [notConnected,restore]){assert.equal(r.continuation.owner,'agent');assert.equal(r.continuation.requiresUser,false);}
+ const {readFile}=await import('node:fs/promises');const source=await readFile(new URL('../shared/application-service.mjs',import.meta.url),'utf8');
+ for(const tool of ['browser_initialize_chrome','browser_restore_chrome']){const line=source.split('\n').find(l=>l.includes(`registerOperation('${tool}'`));assert.match(line,/Agent发现后直接调用/);assert.doesNotMatch(line,/仅在用户明确要求|只有用户明确批准/);}
 });
