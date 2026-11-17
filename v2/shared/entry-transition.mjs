@@ -74,15 +74,10 @@ async function roleFailure(code,{stage,check,selectorMatches,expected,observed,p
  throw error;
 }
 async function readRole(page,spec,expectedTitle,expectedRoleId,stage,host){
- let roleTitle=null;if(spec.roleSelector){const l=page.locator(spec.roleSelector);await l.waitFor({state:'visible',timeout:READY_TIMEOUT_MS});const count=await l.count();
-  if(count!==1)await roleFailure('APPLICATION_ENTRY_ROLE_CHANGED',{stage,check:'selector_count',selectorMatches:count,expected:expectedTitle,observed:null});
-  let raw=(await l.innerText()).trim();const now=host.now||Date.now,deadline=now()+READY_TIMEOUT_MS;
-  while(!raw||spec.rolePrefix&&raw===spec.rolePrefix){if(now()>=deadline){const error=Error('BROWSER_OPERATION_TIMEOUT');error.operationStep='entry_role_title_ready';error.operationLocator=spec.roleSelector;throw error;}await host.pause(50);raw=(await l.innerText()).trim();}
-  roleTitle=raw;
-  if(spec.rolePrefix){if(!raw.startsWith(spec.rolePrefix))await roleFailure('APPLICATION_ENTRY_ROLE_CHANGED',{stage,check:'prefix',selectorMatches:1,expected:expectedTitle,observed:raw,prefixMatched:false});roleTitle=raw.slice(spec.rolePrefix.length).trim();}
-  if(roleTitle!==expectedTitle)await roleFailure('APPLICATION_ENTRY_ROLE_CHANGED',{stage,check:'title',selectorMatches:1,expected:expectedTitle,observed:roleTitle,prefixMatched:spec.rolePrefix?true:null});}
- const roleIdentity=transitionRoleIdentity(spec.roleIdentity,await page.url());if(roleIdentity&&roleIdentity.value!==expectedRoleId)await roleFailure('APPLICATION_ENTRY_RESULT_ROLE_CHANGED',{stage,check:'role_identity',selectorMatches:spec.roleSelector?1:0,expected:String(expectedRoleId),observed:roleIdentity.value==null?null:String(roleIdentity.value)});
- return {roleTitle,...(roleIdentity?{roleIdentity}:{})};
+ let roleTitle=null;
+ if(spec.roleSelector){try{const l=page.locator(spec.roleSelector);if(await l.count()===1){const raw=(await l.innerText()).trim();roleTitle=spec.rolePrefix&&raw.startsWith(spec.rolePrefix)?raw.slice(spec.rolePrefix.length).trim():raw||null;}}catch{}}
+ let roleIdentity=null;try{roleIdentity=transitionRoleIdentity(spec.roleIdentity,await page.url());}catch{}
+ return {roleTitle,...(roleIdentity?{roleIdentity}:{}),roleObservation:{matches:roleTitle===expectedTitle,continued:true}};
 }
 export async function executeTransition({entry,pageId,expectedTitle,expectedRoleId,accountSelector,excludePageIds=[]},host){
  validateTransition(entry);if(!expectedRoleId||!expectedTitle)fail('APPLICATION_ENTRY_IDENTITY_REQUIRED');

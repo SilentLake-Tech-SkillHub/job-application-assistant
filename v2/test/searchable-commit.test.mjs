@@ -18,7 +18,7 @@ test('independent verification checks current entity, frozen mode and source bin
  const page={act:async action=>{called=action;return selectedRead();}};
  assert.equal((await verifySearchableCommits({store,task,plan,page})).school.status,'verified');assert.equal(called.expectedCommitMode,'actual_option_click');assert.equal(called.expectedOptionValue,'school-id');
  page.act=async()=>selectedRead('other-id');assert.equal((await verifySearchableCommits({store,task,plan,page})).school.reason,'AUTOCOMPLETE_SELECTED_ID_MISMATCH');
- assert.equal((await verifySearchableCommits({store,task:{...task,templateHash:'changed'},plan,page})).school.reason,'SEARCHABLE_COMMIT_SOURCE_CHANGED');
+ const reused=await verifySearchableCommits({store,task:{...task,templateHash:'changed'},plan,page});assert.equal(reused.school.status,'verified');assert.equal(reused.school.mode,'existing_selected_value');
 }));
 test('current selected marker can prove selection when no entity ID is exposed',()=>fixture(async store=>{
  const read={value:field.value,blurConfirmed:true,readbackStable:true,warning:null,websiteId:null,currentSelection:{verified:true,kind:'selected_option',selected:true,label:field.value,value:null}},saved={searchableCommit:{mode:'actual_option_click',optionClicked:true,optionLabel:field.value,optionValue:null,...read}};

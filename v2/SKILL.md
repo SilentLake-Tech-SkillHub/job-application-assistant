@@ -2,7 +2,7 @@
 name: job-application-assistant-v2
 description: Coordinate company-configured login and application MCP tools, stage checks and user review for confirmed recruiting roles. Use the single maintained V2 runtime for preparation and testing.
 metadata:
-  version: "2.0.0-alpha.64"
+  version: "2.0.0-alpha.65"
 ---
 
 # 岗位代投助手 V2
@@ -13,7 +13,7 @@ metadata:
 
 ## 开始前：Hook
 
-在对话中开始调用本组件时，先确认本宿主已为本项目装好组件 Hook 和工作区 Hook；没有就按自身宿主的方式装上，具体做法由 Agent 自己解决。
+在对话中开始调用本组件时，先确认本宿主已为本项目装好组件 Hook 和工作区 Hook；组件返回hookStatus与缺失提示，没有回执时每次提示“本宿主 Hook 未生效”，调用继续，Agent先检查并安装。Kimi不支持Hook时按组件actionable及本规则接续；不把可调用门禁迁进组件（H2-B未实施）。
 
 - 范围：Hook 对本项目生效，跨项目不生效。宿主能写项目级配置的写项目级；只能写用户级配置的，Hook 脚本按会话工作目录判断，不在本项目就直接放行。
 - 组件 Hook：`hooks/workflow_hook.py`，事件 SessionStart、UserPromptSubmit、SubagentStart（注入调用顺序）和 PreToolUse、PostToolUse、Stop（阶段调用登记与接续检查）；所需环境变量见 [conversation hooks](docs/conversation-hooks.md)，可参照 Codex 的封装 `.codex/hooks/recruiting_workflow.py`。
@@ -21,6 +21,8 @@ metadata:
 - 修改 Hook 配置按工作区 `AGENTS.md`「组件软锁」执行。
 
 对话 ID 和回合 ID 只用于本轮提示和接续记录，不决定 Agent 身份或调用资格；新对话、分支沿用已登记的 Agent 或 Agent 组身份，另注册实例走宿主安装器，组成员各自保留编码。可选的对话预加载见 [conversation hooks](docs/conversation-hooks.md)。
+
+先读取 browser_preferences：设置空时询问用户，clone使用原分身，main只允许登记的主用Chrome插件；不涉及内置浏览器，不搬迁分身目录。用户换浏览器时以原话设置组件外文件。
 
 ## 环节表
 
@@ -30,7 +32,7 @@ metadata:
 | 环节 | 进入条件 | 调用 | 组件返回 | 交给用户 | 完成标准 | 异常去向 |
 |---|---|---|---|---|---|---|
 | 建批次 | 用户确认了岗位范围，`岗位交接/公司/<公司编码>.json` 已确认 | `company_batch_create` → `company_batch_take` | 各公司的通道分配（Chrome 分身／内置浏览器）、冻结的岗位顺序、`form_assets_status`（各站点缺登录配置、正式模板、投递链接的情况） | 本批公司数、各通道分到的公司、缺资产的站点 | 每家公司拿到通道分配 | 没有可用通道 `NO_USABLE_BROWSER_CHANNEL`；分身没运行或没连上，Agent 直接调 `browser_initialize_chrome`／`browser_restore_chrome` |
-| 进岗位与登录 | 拿到分配；按公司冻结顺序逐个岗位，岗位编码与分配一致 | `role_advance` | `ready_to_fill`；或 `needs_user_login`；写了首版登录配置时带 `loginConfigsCreated`，写了首版入口配置时带 `entryConfigsCreated` | `needs_user_login`：请用户在原分身登录；`loginConfigsCreated`／`entryConfigsCreated`：写了哪几家公司 | `ready_to_fill`（点入口后落在申请表） | 用户登录后再调 `role_advance`；错误带 `details.nextTool` 就调它；首版入口同一失败第二次返回 `agent_fallback` 时调 `role_entry_fallback`；页面卡住 `role_reload_page`；多余标签 `role_close_extra_pages`；链接打不开 `role_report_link_failure` |
+| 进岗位与登录 | 拿到分配；按公司冻结顺序逐个岗位，岗位编码与分配一致 | `role_advance` | `ready_to_fill`；或 `needs_user_login`；写了首版登录配置时带 `loginConfigsCreated`，写了首版入口配置时带 `entryConfigsCreated` | `needs_user_login`：请用户在原分身登录；`loginConfigsCreated`／`entryConfigsCreated`：写了哪几家公司 | `ready_to_fill`（点入口后落在申请表） | 用户登完无需回复；轮到该公司时重调 `role_advance` 检查登录，仍未登录则继续其他公司；错误带 `details.nextTool` 就调它；首版入口同一失败第二次返回 `agent_fallback` 时调 `role_entry_fallback`；页面卡住 `role_reload_page`；多余标签 `role_close_extra_pages`；链接打不开 `role_report_link_failure` |
 | 选路线 | `ready_to_fill` | `workflow_next`／`form_route` | 下一步：复用公司模板去填写，或去建库；有已核实官方表单定义的公司先 `capture_form_definition` | 无 | 拿到下一步 | 按返回的 `continuation` 处理 |
 | 建库 | 公司没有正式模板，或填写时观察到真实结构缺口 | `form_construct_acquire` → `form_construct_build` | 第一段先返回脱敏截图，带 `observation` 再调返回 REA 一级候选；第二段在组件内完成展开、复核、已知事实映射、正式模板与版本更新、交互测试和确认，只返回一次：`agentItems`（新问题映射、页面定义）、`userItems`（缺的答案）、`fallbackItems`，附记录引用；完成时带 `controlSources`（各控件由哪一层做出） | `userItems` 里缺的答案，一次集中问；完成时告诉用户哪些控件靠兜底 | 返回 `company_template_ready` | `agentItems` 由 Agent 处理后再调 `form_construct_build`；`fallbackItems` 走 `form_gui_fallback`；看细节用 `form_construction_records`（不重采） |
 | 填写与核验 | 公司模板可用 | `role_prepare` | 填写结果和独立核验结果（同一次调用；组件能自修的定位变化已在内部修复、回放测试并重填一次） | 无（进入审阅） | 独立核验通过 | 不再调 `role_verify`；修不了的按 `continuation` 处理；用户明确授权的同公司并行岗位用 `roles_prepare_batch`，已就绪的不同公司用 `workflow_advance` |
@@ -52,7 +54,7 @@ metadata:
 
 ## Agent 浏览器兜底
 
-进入申请页：首版入口同一失败第二次、结果点名 `role_entry_fallback` 时使用。`start` 模式核对登记表，在任务绑定的岗位页（不在就回岗位链接）只读盘点岗位标题和候选按钮；Agent 只在这张标签上先核对岗位名，再用鼠标点进本岗位申请表，不填写、不提交、不自己开新标签（站点自己开就停在那里），落到登录页就停。然后用 `report` 模式回报按钮完整文字 `label` 和同文字按钮从上往下第几个 `position`；组件核对落地页是本岗位申请表后写入首版入口配置（`entryConfigsCreated`），再调 `role_advance` 接续。登记表外、点了没反应、落地不是本岗位申请表时交用户。
+进入申请页：首版入口同一失败第二次、结果点名 `role_entry_fallback` 时使用。先截图，当前已是申请表则report.alreadyForm=true直接接续，不把页面导航回岗位页。`start` 模式核对登记表，在任务绑定的岗位页（不在就回岗位链接）只读盘点岗位标题和候选按钮；Agent 只在这张标签上先核对岗位名，再用鼠标点进本岗位申请表，不填写、不提交、不自己开新标签（站点自己开就停在那里），落到登录页就停。然后用 `report` 模式回报按钮完整文字 `label` 和同文字按钮从上往下第几个 `position`；组件核对落地页是本岗位申请表后写入首版入口配置（`entryConfigsCreated`），再调 `role_advance` 接续。登记表外、点了没反应、落地不是本岗位申请表时交用户。
 
 表单控件：只在结果点名 `form_gui_fallback` 时使用。`start` 模式检查组件外登记表（宿主 + 页面所在浏览器：装了 Agent 插件的 Chrome 分身，或内置浏览器），返回要做的字段、值和规则。只在任务绑定的那张申请页上用鼠标点击和键盘输入，不提交，不碰其他控件，不开新标签。然后用 `report` 模式回报每个字段的步骤（`click_field`、`click_text` 加准确文字、`type_value`、`type_text`、`press`）；组件把步骤写进正式公司模板的操作定义，回放、重测并接续原任务。“投递流程不用 Chrome AI 插件”只对这一处例外。
 
@@ -70,8 +72,8 @@ metadata:
 ### 浏览器与标签
 
 - 通道只在能力文件记录的执行端上运行：Chrome 是组件的 Chrome 分身（固定私有资料目录和本机调试端口，所有宿主共用，只由 `scripts/chrome-clone.mjs` 或 `browser_initialize_chrome` 启动）；内置浏览器只在三步检测全过时使用。批次取 browserChannels 偏好与已记录可用能力的交集；为空时用可用通道并报告原因。
-- 不用 Playwright、browser-use 或组件外的浏览器工具，不自己启动 Chrome，不连接、不使用日常 Chrome 及其插件；正常使用不调 REA。保持浏览器和页面开着，未保存的内容不动。
-- 每家公司按冻结的岗位顺序执行，第一次导航打开确认的岗位链接；登录绑定原岗位和原标签。
+- 选择clone时不使用组件外浏览器工具；选择main时由登记Agent用主用Chrome插件操作，不经组件CDP接管；不自行另开Chrome进程。正常复用不调REA。保持浏览器和页面开着，未保存的内容不动。
+- 每家公司按冻结的岗位顺序执行，第一次导航打开确认的岗位链接；登录绑定原任务和原标签；岗位名缺失或对不上只记录，不阻断后续建库、交互、恢复、填写和独立读回。
 - 一个岗位任务 = 一张绑定标签（任务记录里的 `pageId`），每一步只在这张标签上做，URL 只说明走到哪一步。任务中不自己用浏览器工具开页、选页或切页：`role_advance` 复用本岗位已有标签，没有才新开；有入口配方的站点总是岗位链接 → 同一任务内登录 → 入口驱动到表单，不直接打开存储的申请链接。像表单的多余标签要先经用户查看并给出原话才关。
 - 站点还没有入口配置时，`role_advance` 进入申请页那一步由组件在原岗位页读出与岗位名一致的标题（读不到就不点）、点一次唯一的投递按钮，落地页是本岗位申请表（有输入框，且地址里有岗位编号或页面上有岗位名）就写入首版入口配置并读回，同一任务接着进入；结果的 `entryConfigsCreated` 列出写了哪几家，要告诉用户。落到登录页照常交用户登录。其余失败（读不到标题、按钮没有或不止一个、点了没换页、落地不是本岗位申请表）第一次按原错误处理，同一失败第二次交 Agent 浏览器兜底（见下文）。
 - 已有入口配置的修改只通过 `scripts/site-entry.mjs`（预览 → 用户原话 → 写入），见 [role entry](docs/role-entry.md) 和 [declarative entry](docs/declarative-entry.md)。
@@ -129,3 +131,5 @@ metadata:
 - 维护流程（失败聚合、一次修一类、先用已存证据复现、门禁变更影响评估、新框架适配器准入、`scripts/readiness.mjs`）：[maintenance](docs/maintenance.md)。
 - 运行核心更新（`component_runtime`、`scripts/update-runtime.mjs`、CLI／MCP 版本一致）：[runtime architecture](docs/runtime-architecture.md)。
 - Hook 与执行身份：[conversation hooks](docs/conversation-hooks.md)。
+
+登录等待按公司汇总一条告知；不要求用户回复“已登录”。每轮先推进其他公司，再按pollAfterMs复查等待登录的原任务，不重复发验证码。有可执行事项不得收工。填写前先独立读回：匹配的内容跳过，只补空项和改不一致项；实际控件交互测试仍执行操作。岗位名和岗位编号的读回仅供观察，不成为准备阶段阻断条件。

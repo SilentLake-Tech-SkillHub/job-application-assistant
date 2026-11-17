@@ -2,8 +2,9 @@
 // and never form part of the upstream role/material confirmation fingerprint.
 export function resolveBatchChannels(report, requestedChannels){
  const recorded=report?.capability;
- if(recorded?.status!=='detected')throw Error('BROWSER_CAPABILITY_DETECTION_REQUIRED');
- const recordedChannels=recorded.applicationChannels||recorded.channels||[];
+ const mainPlugin=report?.channels?.chrome?.available===true&&report.channels.chrome.provider==='agent_plugin_main_chrome';
+ if(recorded?.status!=='detected'&&!mainPlugin)throw Error('BROWSER_CAPABILITY_DETECTION_REQUIRED');
+ const recordedChannels=[...(recorded?.status==='detected'?(recorded.applicationChannels||recorded.channels||[]):[]),...(mainPlugin?['chrome']:[])];
  const availableChannels=['chrome','iab'].filter(ch=>recordedChannels.includes(ch)&&report.channels?.[ch]?.available===true);
  if(!availableChannels.length){const error=Error('NO_USABLE_BROWSER_CHANNEL');error.details={phase:'browser_initialization',browserExecuted:false,nextStep:'inspect runtime_info and node scripts/chrome-clone.mjs status; restore the recorded executor before continuing'};throw error;}
  if(requestedChannels!==undefined&&(!Array.isArray(requestedChannels)||!requestedChannels.length||new Set(requestedChannels).size!==requestedChannels.length||requestedChannels.some(ch=>!['chrome','iab'].includes(ch))))throw Error('INVALID_BATCH_BROWSER_CHANNELS');

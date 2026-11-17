@@ -96,6 +96,19 @@ def component_cli_event(event):
         return event
 
 
+def main_chrome_tool_allowed(event):
+    tool = event.get('tool_name', '').lower().replace('-', '_')
+    if not any(name in tool for name in ('cua_repl', 'claude_in_chrome', 'webbridge')):
+        return False
+    try:
+        settings = json.loads((ROOT / '产品管理/浏览器设置.json').read_text())
+        registry = json.loads((ROOT / '产品管理/Agent浏览器兜底登记.json').read_text())
+        host = os.environ.get('RECRUITING_HOST_ID')
+        return settings.get('choice') == 'main' and any(a.get('hostId') == host and 'chrome_main_extension' in a.get('浏览器', []) for a in registry.get('agents', []))
+    except (OSError, ValueError):
+        return False
+
+
 def executor_boundary(event):
     """Enabled execution sessions may operate websites only through this MCP.
 
@@ -103,6 +116,8 @@ def executor_boundary(event):
     tools and file writes cannot become an alternative application engine.
     Maintenance conversations are deliberately outside this execution scope.
     """
+    if main_chrome_tool_allowed(event):
+        return None
     tool = event.get('tool_name', '')
     if recruiting_tool(tool):
         return
@@ -154,6 +169,20 @@ def write_atomic(file, value):
     os.replace(tmp, file)
 
 
+def record_hook_reference(session, receipt):
+    if not session or not receipt:
+        return
+    file = STATE / ('hook-session-' + hashlib.sha256(session.encode()).hexdigest()[:24] + '.json')
+    STATE.mkdir(parents=True, exist_ok=True)
+    value = {'receipt': receipt.name}
+    try:
+        if json.loads(file.read_text()) == value:
+            return
+    except (OSError, ValueError):
+        pass
+    write_atomic(file, value)
+
+
 def continuation_result(value):
     if isinstance(value, str):
         try:
@@ -173,6 +202,11 @@ def continuation_result(value):
                 found = continuation_result(block.get('text'))
                 if found:
                     return found
+    if 'agentWorkRemaining' in value:
+        actionable = value.get('actionable') or []
+        return {'state': 'prepare' if actionable else 'review', 'owner': 'agent' if actionable else 'user',
+                'shouldContinue': bool(actionable), 'requiresUser': not bool(actionable),
+                'nextTools': list(dict.fromkeys(item.get('nextTool', 'role_advance') for item in actionable)), 'pollAfterMs': value.get('pollAfterMs', 0)}
     candidates = [value.get('continuation')]
     candidates += [r.get('continuation') for r in value.get('results', []) if isinstance(r, dict)]
     continuations = [c for c in candidates if isinstance(c, dict)]
@@ -208,7 +242,8 @@ def handle_continuation(event):
         tool = event.get('tool_name', '')
         value = event.get('tool_response', event.get('tool_result', event.get('output')))
         declared = workflow_metadata(value)
-        if tool.split('__')[-1] not in CONTINUATION_TOOLS and not (declared and declared.get('tracked') is True and recruiting_tool(tool)):
+        batch_status = tool.split('__')[-1] == 'company_batch_status'
+        if not batch_status and tool.split('__')[-1] not in CONTINUATION_TOOLS and not (declared and declared.get('tracked') is True and recruiting_tool(tool)):
             return {}
         result = continuation_result(value)
         if not result:
@@ -219,7 +254,7 @@ def handle_continuation(event):
         if not isinstance(inputs, dict):
             inputs = {}
         scope = inputs.get('taskId') or inputs.get('companyId') or 'batch'
-        work = dict(old.get('workByScope') or {})
+        work = {} if batch_status else dict(old.get('workByScope') or {})
         work[scope] = route
         pending = [item for item in work.values() if item.get('owner') == 'agent' and item.get('shouldContinue')]
         if pending:
@@ -307,6 +342,7 @@ def handle(event):
         except (OSError, ValueError):
             loaded = {}
         if all(loaded.get(k) == v for k, v in current.items()):
+            record_hook_reference(session, receipt)
             return {}
 
     context = ('本轮求职调用入口；后续用户明确修改及上级指令优先。\n'
@@ -315,6 +351,7 @@ def handle(event):
     if receipt:
         STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
         write_atomic(receipt, {**current, 'event': name, 'at': time.time()})
+        record_hook_reference(session, receipt)
         record = {**current, 'event': name, 'instruction_bytes': len(route.encode('utf-8')),
                   'elapsed_ms': round((time.perf_counter() - started) * 1000, 3), 'at': time.time()}
         fd = os.open(STATE / 'injections.jsonl', os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)

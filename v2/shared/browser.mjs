@@ -264,7 +264,7 @@ export class BrowserAdapter {
       if(!expectedRoleId||entry.entryLabel!=='立即投递'||entry.editLabel!=='编辑')throw Error('RESUME_ENTRY_CONTRACT_REQUIRED');
       let target=page,clicked=false;
       if(before.pathname===entry.detailPath){
-        if(before.searchParams.get(entry.detailIdParameter)!==expectedRoleId||!(await page.getByText(expectedTitle,{exact:true}).count()))throw Error('APPLICATION_ENTRY_ROLE_CHANGED');
+        // Shared resume editors may omit the role title; task/tab binding remains authoritative.
         if(await page.getByText(entry.editLabel,{exact:true}).count()!==1||!await page.getByText(entry.editLabel,{exact:true}).isVisible()){
           const buttons=page.getByText(entry.entryLabel,{exact:true});
           if(await buttons.count()!==entry.entryCount)throw Error('APPLICATION_ENTRY_BUTTON_CHANGED');
@@ -283,18 +283,17 @@ export class BrowserAdapter {
     // 通用分支只执行 JSON 配方；没有已核实配方的站点直接阻断，绝不按按钮文字猜测点击。
     const {detail,form,expectedApplyPath}=matchEntryPath(entry,before.pathname);
     if(!detail&&!form)throw Error('APPLICATION_ENTRY_PATH_REQUIRED');
-    if(!expectedTitle||!roleSelector)throw Error('APPLICATION_ENTRY_IDENTITY_REQUIRED');
+
     if(detail){
-      const title=await page.title();if(!title.startsWith(expectedTitle+entry.detailTitleSeparator))throw Error('APPLICATION_ENTRY_ROLE_CHANGED');
+
       const button=page.getByRole(entry.entryButton.role,{name:entry.entryButton.name,exact:true});await button.waitFor({state:'visible',timeout:READY_TIMEOUT_MS});if(await button.count()!==1)throw Error('APPLICATION_ENTRY_BUTTON_CHANGED');
       // 该按钮只在已核实的岗位详情页存在并被点击；申请表页（form）永远不点击任何按钮。
       await button.click({timeout:10000});
       await page.waitForURL(url=>url.origin===before.origin&&url.pathname===expectedApplyPath,{timeout:READY_TIMEOUT_MS});
     }else if(before.pathname!==expectedApplyPath)throw Error('APPLICATION_ENTRY_PATH_REQUIRED');
-    try{await page.locator(roleSelector).waitFor({state:'visible',timeout:READY_TIMEOUT_MS});}catch{throw Error('PAGE_NOT_READY');}
-    if((await page.locator(roleSelector).innerText()).trim()!==expectedTitle)throw Error('APPLICATION_ENTRY_RESULT_ROLE_CHANGED');
+    let observedTitle=null;try{if(roleSelector&&await page.locator(roleSelector).count()===1)observedTitle=(await page.locator(roleSelector).innerText()).trim();}catch{}
 
-    return {pageId,pageUrl:page.url(),roleTitle:expectedTitle,entryClicked:detail,submission:'not_performed'};
+    return {pageId,pageUrl:page.url(),roleTitle:observedTitle,entryClicked:detail,submission:'not_performed'};
   }
   async existingPage(url,{pageId,readOnly=false,roleBinding}={}){
     if(pageId&&!readOnly&&(!roleBinding||!['navigation','verified_role'].includes(roleBinding.kind)||roleBinding.pageId!==pageId||!this.executor.verified))throw Error('VERIFIED_ROLE_PAGE_BINDING_REQUIRED');

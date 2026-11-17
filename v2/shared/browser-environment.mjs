@@ -8,7 +8,7 @@ export async function readChromeProcessInventory({run=execute}={}){try{const {st
 export function executorCapability(status,channel){
  const executor=status?.executor;
  const provider=channel==='iab'?'official_host_browser_sdk':null;
- const valid=channel==='iab'?status?.mode==='iab'&&executor?.provider===provider:status?.mode==='managed'&&executor?.provider==='managed_chrome'||status?.mode==='cdp'&&executor?.provider==='local_cdp_chrome'||status?.mode==='host_chrome'&&executor?.provider==='official_host_browser_sdk';
+ const valid=channel==='iab'?status?.mode==='iab'&&executor?.provider===provider:status?.mode==='managed'&&executor?.provider==='managed_chrome'||status?.mode==='cdp'&&executor?.provider==='local_cdp_chrome'||status?.mode==='host_chrome'&&executor?.provider==='official_host_browser_sdk'||status?.mode==='agent_plugin'&&executor?.provider==='agent_plugin_main_chrome'&&executor?.profileProof==='user_selected_registered_extension';
  const verified=valid&&executor?.verified===true&&typeof executor.sessionId==='string'&&!!executor.sessionId;
  return {available:!!verified,provider:executor?.provider||null,sessionId:verified?executor.sessionId:null,reason:verified?null:channel==='iab'?'IAB_HOST_BRIDGE_REQUIRED':'BROWSER_EXECUTOR_IDENTITY_REQUIRED'};
 }

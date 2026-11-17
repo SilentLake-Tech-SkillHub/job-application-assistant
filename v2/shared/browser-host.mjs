@@ -1,3 +1,5 @@
+import {MainChromePluginAdapter} from './main-chrome-plugin.mjs';
+import {browserPreferences} from './browser-preferences.mjs';
 import {genericSourceManifest} from './runtime-identity.mjs';
 import {installBrokerDiagnostics} from './broker-diagnostics.mjs';
 import {browserErrorCode,browserErrorDetails,retryBrowserOperation} from './browser-errors.mjs';
@@ -29,7 +31,8 @@ if(hostMode==='cdp'&&!process.env.RECRUITING_CDP_URL)throw Error('EXPLICIT_BROWS
 // initialize/restore stages, starts it as a normal Chrome via shared/chrome-clone.mjs.
 const cloneLauncher=hostMode==='cdp'?async({restoreLastSession}={})=>launchClone({config:cloneConfig(process.env),restoreLastSession}):null;
 if(hostMode==='cdp'&&process.env.RECRUITING_BROWSER_PROFILE_DIR){const config=cloneConfig(process.env);if(new URL(process.env.RECRUITING_CDP_URL).port!==String(config.port))throw Error('CHROME_CLONE_CONFIG_MISMATCH');}
-const browser=new BrowserAdapter(hostMode==='cdp'?(process.env.RECRUITING_CDP_URL):hostMode==='iab'?'managed-iab':'managed-chrome',{profileDir:process.env.RECRUITING_BROWSER_PROFILE_DIR,screenshotDir:path.join(path.dirname(socketPath),'screenshots'),cloneLauncher});
+const cloneBrowser=new BrowserAdapter(hostMode==='cdp'?(process.env.RECRUITING_CDP_URL):hostMode==='iab'?'managed-iab':'managed-chrome',{profileDir:process.env.RECRUITING_BROWSER_PROFILE_DIR,screenshotDir:path.join(path.dirname(socketPath),'screenshots'),cloneLauncher});
+let browser=cloneBrowser,mainBrowser=null,selectedBrowser='clone';
 // pageTools：本进程代码支持的标签操作。浏览器主控进程不随 MCP 重载，旧进程没有这些操作；工具调用前按它判断。
 const residentSource=await genericSourceManifest();
 // activeOperations：正在处理的请求数。业务核心 reload 时据此判断主控是否空闲，空闲才换新主控（C43）。
@@ -45,6 +48,14 @@ const server=http.createServer(async(req,res)=>{
   try{
     const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>8*1024*1024)throw Error('REQUEST_TOO_LARGE');chunks.push(chunk);}
     ({method,args={}}=JSON.parse(Buffer.concat(chunks)));let data;
+    if(process.env.RECRUITING_WORKSPACE_ROOT&&method!=='shutdown'){
+      const preference=await browserPreferences();
+      if(['initializeConfiguredChrome','restoreConfiguredChrome'].includes(method)&&preference.choice==='main'){
+        mainBrowser||=new MainChromePluginAdapter({screenshotDir:path.join(path.dirname(socketPath),'screenshots')});browser=mainBrowser;selectedBrowser='main';
+      }else if(['initializeConfiguredChrome','restoreConfiguredChrome'].includes(method)&&preference.choice==='clone'){browser=cloneBrowser;selectedBrowser='clone';}
+      else if(preference.choice&&preference.choice!==selectedBrowser&&method!=='status')throw Error('BROWSER_RESTORE_REQUIRED');
+    }
+
     // 代码更新后由业务核心 reload 让旧主控退出（C43）：只在没有其他请求时退出，只关本进程，不关 Chrome 分身和标签。
     if(method==='shutdown'){if(activeOperations>1)throw Error('BROWSER_HOST_BUSY');res.end(JSON.stringify({data:{stopping:true,pid:process.pid,sourceFingerprint:residentSource.sourceFingerprint}}));setImmediate(()=>server.close(()=>process.exit(0)));return;}
     if(diagnostics.isDegraded()&&!['status','tabs','pageIdentity','roleSnapshot','entryInspection','roleEntryInventory','roleEntryLanding','failureSnapshot','existingPage','inventory','observe','screenshot','assertLocation'].includes(method))throw Error('BROKER_DEGRADED_WRITES_BLOCKED');

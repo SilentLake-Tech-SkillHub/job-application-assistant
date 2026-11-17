@@ -507,6 +507,12 @@
       [
         "role_advance"
       ]
+    ],
+    "browser_preferences": [
+      "route",
+      [
+        "browser_initialize_chrome"
+      ]
     ]
   }
 }

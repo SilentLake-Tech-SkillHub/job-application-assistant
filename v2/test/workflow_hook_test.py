@@ -76,6 +76,12 @@ class WorkflowHookTest(unittest.TestCase):
   self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__workflow_next',tool_input={'taskId':'task-a'},tool_response={'continuation':{'state':'review','owner':'user','shouldContinue':False}})
   self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout),{})
 
+ def test_authoritative_batch_work_prevents_stop_and_clears_completed_task_routes(self):
+  self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__company_batch_status',tool_response={'agentWorkRemaining':True,'actionable':[{'taskId':'a','nextTool':'form_construct_build'}]})
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout)['decision'],'block')
+  self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__company_batch_status',tool_response={'agentWorkRemaining':False,'actionable':[]})
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout),{})
+
  def test_declared_new_stage_is_tracked_with_dsh_hyphenated_namespace(self):
   response={'workflowContract':{'revision':1,'tracked':True},'continuation':{'state':'construct','owner':'agent','shouldContinue':True}}
   self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting-application-v2__future_stage',tool_response={'content':[{'type':'text','text':json.dumps(response)}]})

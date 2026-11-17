@@ -94,12 +94,12 @@ export class PageAdapter {
     return [...native,...ant];
   }
   async ensureGroups(groups){
-    if(groups?.length)await this.assertSingleEditor();
     for(const group of groups||[]){
       const groupSelector=async()=>{const selector=await this.resolveSelector(group.selector);return group.visibleOnly?`:is(${selector}):visible`:selector;};
       let count=await this.page.locator(await groupSelector()).count();
       if(count>group.count)throw Error('EXCESS_REPEAT_ENTRIES_REQUIRE_REVIEW');
       while(count<group.count){
+        await this.assertSingleEditor();
         const addLabel=group.addLabel||'添加';
         let addSelector=await this.resolveSelector(group.addSelector);
         if(group.ownerSelector){

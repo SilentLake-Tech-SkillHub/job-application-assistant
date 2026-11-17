@@ -1,3 +1,4 @@
+import {browserPreferences} from './browser-preferences.mjs';
 import {configurePaths} from './runtime-paths.mjs';
 const runtimePaths=configurePaths();
 import {OperationService} from './operation-service.mjs';
@@ -87,7 +88,7 @@ import {CompanyDirectory,companyContext} from './company-directory.mjs';
 import {formAssetKeys,validateFormIdentities} from './form-identity.mjs';
 import {keyOK} from './ids.mjs';
 import {anatomyCandidate,anatomyControls,controlSources} from './control-anatomy.mjs';
-import {acquisitionPlan,detectedAcquisitionPlan,assertCollectionProvider,captureContentId,isChoiceControl,isDateControl,capturedChoiceOptions,compactConstructionResult} from './form-acquisition.mjs';
+import {acquisitionPlan,detectedAcquisitionPlan,assertCollectionProvider,captureContentId,isChoiceControl,isDateControl,capturedChoiceOptions,compactConstructionResult,stableControlCount} from './form-acquisition.mjs';
 import {scriptCoverage,searchCapturedScripts} from './page-structure.mjs';
 import {readProfileFile,contractRebuildRequired} from './rebuild-mark.mjs';
 import {auditStoredContract,contractAuditSummary,workflowEnvelope} from './workflow-contract.mjs';
@@ -444,10 +445,11 @@ registerOperation('form_inspect_repeats',{description:'只读检查当前岗位�
  const sections=await page.observe({operation:'repeatInspection',fields:[],groups}),discovered=await page.repeatDiscovery(groups.map(g=>g.title));
  return {companyId:t.companyId,taskId:t.taskId,pageUrl:state.returnUrl,sections,discovered,submission:'not_performed'};
 }));
+registerOperation('browser_preferences',{description:'读取或按用户原话设置组件外浏览器选择：clone分身、main主用Chrome插件；空值须询问，不涉及内置浏览器。',inputSchema:{action:z.enum(['status','initialize','set']).default('status'),choice:z.enum(['clone','main']).optional(),quote:z.string().optional()}},wrap(a=>browserPreferences(a),false));
 registerOperation('browser_tabs',{description:'读取显式连接的本地浏览器页面，不打开、重载或关闭页面。',annotations:{readOnlyHint:true}},wrap(()=>browser.tabs()));
 registerOperation('browser_status',{description:'读取当前连接生命周期和实际连接次数，不发起连接；失败或断开不自动重连。',annotations:{readOnlyHint:true}},wrap(()=>browser.status(),false));
-registerOperation('browser_initialize_chrome',{description:'投递专用Chrome分身没运行或没连上时，Agent发现后直接调用（需求文档6.2：用户或Agent发现没加载时加载），用户要求时同样调用；authorization.evidence填当前任务的授权原话。分身未运行时先以固定私有资料目录和本机调试端口启动（可见窗口、允许扩展），再连接并核对资料目录；拒绝日常Chrome。纯启动/只读检查不会自动开浏览器；已连接或分身已运行不重复启动，断连走原恢复入口，不关闭既有页面。作用域由宿主实际PreToolUse会话检查，维护宿主不能调用。',inputSchema:{authorization:z.object({initialize:z.literal(true),evidence:z.string().min(1)})}},wrap(args=>browser.request('initializeConfiguredChrome',args)));
-registerOperation('browser_restore_chrome',{description:'原投递专用Chrome分身断开、端口不在时，Agent发现后直接调用恢复（需求文档6.2），用户要求时同样调用；authorization.evidence填当前任务的授权原话。仅复用已配置且存在的私有资料目录及原本地CDP端口，端口不在时以恢复上次会话方式重新启动分身；不关闭其他浏览器，不换通道，不自动重试。恢复后必须重新核对原岗位、登录态和页面内容。',inputSchema:{authorization:z.object({restore:z.literal(true),evidence:z.string().min(1)})}},wrap(args=>browser.request('restoreConfiguredChrome',args)));
+registerOperation('browser_initialize_chrome',{description:'投递专用Chrome分身没运行或没连上时，Agent发现后直接调用（需求文档6.2：用户或Agent发现没加载时加载），用户要求时同样调用；authorization.evidence填当前任务的授权原话。分身未运行时先以固定私有资料目录和本机调试端口启动（可见窗口、允许扩展），再连接并核对资料目录；拒绝日常Chrome。纯启动/只读检查不会自动开浏览器；已连接或分身已运行不重复启动，断连走原恢复入口，不关闭既有页面。作用域由宿主实际PreToolUse会话检查，维护宿主不能调用。',inputSchema:{authorization:z.object({initialize:z.literal(true),evidence:z.string().min(1)})}},wrap(async args=>{const choice=await browserPreferences();return choice.choice==='clone'||choice.choice==='main'&&choice.allowed?browser.request('initializeConfiguredChrome',args):choice;}));
+registerOperation('browser_restore_chrome',{description:'原投递专用Chrome分身断开、端口不在时，Agent发现后直接调用恢复（需求文档6.2），用户要求时同样调用；authorization.evidence填当前任务的授权原话。仅复用已配置且存在的私有资料目录及原本地CDP端口，端口不在时以恢复上次会话方式重新启动分身；不关闭其他浏览器，不换通道，不自动重试。恢复后必须重新核对原岗位、登录态和页面内容。',inputSchema:{authorization:z.object({restore:z.literal(true),evidence:z.string().min(1)})}},wrap(async args=>{const choice=await browserPreferences();return choice.choice==='clone'||choice.choice==='main'&&choice.allowed?browser.request('restoreConfiguredChrome',args):choice;}));
 registerOperation('browser_open',{description:'在共用的 MCP Chrome 中打开已建库公司的表单页；必须匹配该公司的 origin 和模板路径。不会填写或提交。',inputSchema:{companyId:z.string(),pageUrl:z.string().url()}},wrap(async({companyId,pageUrl})=>{
   const c=companyContext(catalog.companies.find(c=>c.id===companyId),{pageUrl});if(!c?.templateId)throw Error('COMPANY_NOT_COVERED');
   const t=await store.get('templates',c.templateId),u=new URL(pageUrl);
@@ -488,6 +490,7 @@ async function readBoundRea({pageId,pageUrl,authorization}){
  const result=await browser.request('reaInspect',{pageId,pageUrl,authorization});
  if(result.binding?.pageId!==pageId.slice(channel.length+1)||result.binding.beforeUrl!==pageUrl)throw Error('REA_TARGET_MISMATCH');
  const structure=normalizeReaStructure(result.evidence,{...result.binding,pageId},{nativeStructure:result.nativeStructure});
+ if(result.bridgeLimitations)structure.limitations=[...structure.limitations,...result.bridgeLimitations];
  return {result,structure};
 }
 async function captureVisualScreenshots(scope,binding){
@@ -580,7 +583,7 @@ async function captureCompanyControls({companyId,pageUrl,pageId,compact,provider
   const p=await browser.existingPage(pageUrl,pageId?{pageId,readOnly:true}:undefined);
   if(!visualPage&&pageId){const table=await optionalRun(formAssetKeys(companyId).visual);if(table?.current?.inventoryHash&&table.current.page.pageId===pageId&&table.current.page.pageUrl===pageUrl){const observed=await acquisitionPage({companyId,pageId,pageUrl});if(sameVisualPage(table.current.page,observed))visualPage=observed;}}
   const collectionPlan=await detectedAcquisitionPlan(p,plan,provider);
-  const controls=await liveControls(p,collectionPlan), observedAt=new Date().toISOString();
+  let controls;await stableControlCount(async()=>{controls=await liveControls(p,collectionPlan);return controls.length;});const observedAt=new Date().toISOString();
   // 选择类控件按“通用标注 → 控件库”分类（C33）；分类另存，不进采集内容哈希，已建公司的采集判断不受影响。
   const anatomyItems=controls.filter(anatomyCandidate).map(c=>({selector:c.selector,container:c.questionSelector||c.selector,action:c.actionSelector||c.selector}));
   const anatomy=anatomyItems.length?await p.inventory({operation:'controlAnatomy',items:anatomyItems}):[];
@@ -934,7 +937,7 @@ async function internalCall(tool,args){
  let parsed;try{parsed=op.schema.parse(args);}catch{return {error:'INTERNAL_ARGUMENTS_INVALID'};}
  return op.handler(parsed);
 }
-async function agentFallbackSurface(pageId){return fallbackSurface({registry:await loadFallbackRegistry(fallbackRegistryFile()),hostId:process.env.RECRUITING_HOST_ID||null,pageId});}
+async function agentFallbackSurface(pageId){const preference=await browserPreferences();return {...fallbackSurface({registry:await loadFallbackRegistry(fallbackRegistryFile()),hostId:process.env.RECRUITING_HOST_ID||null,pageId:preference.choice==='main'?pageId.replace(/^chrome:/,'main:'):pageId}),pageId};}
 function constructionDeps(companyId,pageId){
  const keys=formAssetKeys(companyId);
  return {call:internalCall,cycle:()=>internalCall('form_cycle_status',{companyId}),
@@ -975,8 +978,9 @@ registerOperation('form_construct_acquire',{description:'建库第一段（采�
   return {companyId:t.companyId,status:'visual_screenshot_ready',screenshotId:shot.screenshotId,screenshots:shot.screenshots,nextTools:['form_construct_acquire'],instruction:'独立查看截图，按页面显示登记一级控件（展开入口记一行，不录入个人值或子控件），带 observation 再调用一次 form_construct_acquire。',submission:'not_performed'};
  }
  const visual=await internalCall('form_capture_visual',{...scope,observation:a.observation});if(visual.error)return visual;
- const rea=await internalCall('capture_rea_structure',{...scope,...(a.provider?{provider:a.provider}:{}),authorization:a.authorization});if(rea.error)return rea;
- return {companyId:t.companyId,status:'primary_pairs_required',structureId:rea.structureId,captureId:rea.captureId,controls:rea.controls,
+ let rea,retried=false;for(let attempt=0;attempt<2;attempt++){rea=await internalCall('capture_rea_structure',{...scope,...(a.provider?{provider:a.provider}:{}),authorization:a.authorization});if(rea.error)return rea;if((rea.primaryCandidates||[]).length>=(visual.rows||[]).length/2)break;retried=true;}
+ rea.acquisitionRetried=retried;
+ return {companyId:t.companyId,status:'primary_pairs_required',acquisitionRetried:rea.acquisitionRetried,coverageCounts:{visual:(visual.rows||[]).length,candidates:(rea.primaryCandidates||[]).length},structureId:rea.structureId,captureId:rea.captureId,controls:rea.controls,
   visualRows:(visual.rows||[]).map(({id,label,section,kind,occurrence})=>({id,label,section:section||null,kind,occurrence:occurrence??null})),
   primaryCandidates:(rea.primaryCandidates||[]).map(({id,kind,label,section,controlType,childSelectors,selectors})=>({id,kind,label,section:section||null,controlType:controlType||null,...(kind==='expander'?{childIds:(rea.primaryCandidates||[]).filter(child=>child.kind==='field'&&child.selectors?.some(s=>childSelectors?.includes(s))).map(child=>child.id)}:{})})),
   records:{visual:'visual',structure:'structure',capture:'capture'},nextTools:['form_construct_build'],

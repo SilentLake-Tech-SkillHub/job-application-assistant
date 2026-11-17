@@ -43,11 +43,14 @@ test('Keep line: role link → same tab redirect → landed id adopted with titl
  // 再次进入：已在申请页，不再点击、不另开
  await f.flow.enter({});assert.equal(f.calls.filter(c=>c.method==='cta').length,1);assert.equal(f.pages.size,1);
 });
-test('a redirect to a page whose title differs is not adopted and is not guessed into the role',async()=>{
+test('a redirected role with a different title continues without proposing a job link change',async()=>{
  const f=fixture({redirect:{[roleLink]:origin+'/job/detail?jobAdId=bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee'}});
  // 标题核对：把详情页标题换掉
  const t=f.task;t.title='另一个岗位';
- await assert.rejects(f.flow.open({}),/ROLE_LINK_LANDING_NOT_RECOGNIZED/);assert.equal(f.observations.length,0);assert.equal(f.pages.size,1);
+ const r=await f.flow.open({});assert.equal(r.status,'authenticated_at_role');assert.equal(r.siteRoleId,'bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee');
+ assert.equal(f.state().roleObservation.matches,false);assert.equal(f.state().roleObservation.continued,true);
+ assert.equal(f.observations.length,0);assert.equal(f.state().landedDetailUrl,undefined);assert.equal(f.pages.size,1);
+ assert.equal((await f.flow.enter({})).status,'ready_to_fill');assert.equal(f.observations.some(o=>o.field==='岗位链接'),false);
 });
 test('an unbound tab already showing this role is reused instead of opening another',async()=>{
  const f=fixture({officialId:siteId,url:detail(siteId),redirect:{},tabs:[['chrome:existing',detail(siteId)]]}),r=await f.flow.open({});

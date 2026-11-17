@@ -20,8 +20,8 @@ test('Formily DOM selects the native reader even when ATS name suggested atsx',a
 test('URL identity templates generalize to other jobs and reject patterns without a capture',()=>{
  const spec=inferredRoleIdentity('https://example.test/campus/resume/12345/apply','12345');
  assert.equal(readRoleIdentity(spec,'https://example.test/campus/resume/67890/apply').value,'67890');
- assert.throws(()=>readRoleIdentity({...spec,pattern:'^/campus/resume/12345/apply$'},'https://example.test/campus/resume/12345/apply'),/CAPTURE_GROUP_REQUIRED/);
- assert.throws(()=>assertRoleSnapshot({roleTitle:'Job'},{pageUrl:'https://example.test/apply',roleTitle:'Name'},'https://example.test/apply'),e=>e.message==='ROLE_IDENTITY_MISMATCH'&&e.details.checks.role===false);
+ assert.equal(readRoleIdentity({...spec,pattern:'^/campus/resume/12345/apply$'},'https://example.test/campus/resume/12345/apply').value,null);
+ assert.equal(assertRoleSnapshot({roleTitle:'Job'},{pageUrl:'https://example.test/apply',roleTitle:'Name'},'https://example.test/apply').roleObservation.continued,true);
 });
 test('large record views return a field slice and script references without copying scripts',()=>{
  const value={controls:[{id:'a',section:'Education'},{id:'b',section:'Work'}],rawEvidence:{script:'x'.repeat(100000)},scriptInventory:['x'.repeat(100000)]};

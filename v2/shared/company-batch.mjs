@@ -177,18 +177,20 @@ export class CompanyBatch{
    }
    return {...company,roleCount,protectedRoles};
   });
-  const actionable=[],waitingCompanies=[];
+  const actionable=[],waitingCompanies=[],loginRechecks=[];
   for(const company of companies){
    if(['protected','closed_preparation','ready_for_user_review'].includes(company.status))continue;
-   if(company.status==='waiting_for_user'){waitingCompanies.push(company.companyId);continue;}
    for(const task of b.companies.find(c=>c.companyId===company.companyId)?.tasks||[]){
     if(live.get(task.taskId)?.protectedReason)continue;
     let state;try{state=await this.queues.read(task.taskId);}catch(error){if(error.code!=='ENOENT')throw error;}
     if(state?.status==='ready_for_user_review')continue;
-    if(state?.status==='needs_login'||state?.loginWait){waitingCompanies.push(company.companyId);break;}
-    actionable.push({companyId:company.companyId,roleId:task.roleId,taskId:task.taskId,queueId:b.queueId,queueHash:b.queueHash,nextTool:state?.status==='ready_to_fill'?'workflow_next':'role_advance'});break;
+    const ref={companyId:company.companyId,roleId:task.roleId,taskId:task.taskId,queueId:b.queueId,queueHash:b.queueHash};
+    if(state?.status==='needs_login'||state?.loginWait){waitingCompanies.push(company.companyId);loginRechecks.push({...ref,nextTool:'role_advance',waitingForLogin:true,pollAfterMs:30000});break;}
+    if(company.status==='waiting_for_user'&&!/login|登录/i.test(company.reason||'')){waitingCompanies.push(company.companyId);break;}
+    actionable.push({...ref,nextTool:state?.status==='ready_to_fill'?'workflow_next':'role_advance'});break;
    }
   }
-  return {batchId:b.id,revision:b.revision,companiesPerChannel:b.companiesPerChannel,channels:b.channels,channelSelection:b.channelSelection,companies,actionable,waitingCompanies,agentWorkRemaining:actionable.length>0,submission:'not_performed'};
+  actionable.push(...loginRechecks);
+  return {batchId:b.id,revision:b.revision,companiesPerChannel:b.companiesPerChannel,channels:b.channels,channelSelection:b.channelSelection,companies,actionable,waitingCompanies,loginRechecks,pollAfterMs:actionable.length&&actionable.every(t=>t.waitingForLogin)?30000:0,agentWorkRemaining:actionable.length>0,submission:'not_performed'};
  }
 }

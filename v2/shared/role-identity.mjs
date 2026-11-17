@@ -5,9 +5,7 @@ export function readRoleIdentity(spec,url){
  if(!spec)return null;const u=new URL(url),source=spec.source||'query',fragment=u.hash.slice(1),split=fragment.indexOf('?');let value=null;
  if(source==='query'||source==='hashQuery'){const q=source==='query'?u.searchParams:new URLSearchParams(split<0?'':fragment.slice(split+1));value=q.getAll(spec.parameter).length===1?q.get(spec.parameter):null;}
  else if(source==='path'||source==='hashPath'){
-  if(typeof spec.pattern!=='string'||!spec.pattern.startsWith('^')||!spec.pattern.endsWith('$')||spec.pattern.length>500)throw Error('ROLE_IDENTITY_PATTERN_REQUIRED');
-  if(!spec.pattern.includes('(?<'+spec.parameter+'>'))throw Error('ROLE_IDENTITY_CAPTURE_GROUP_REQUIRED');
-  value=new RegExp(spec.pattern).exec(source==='path'?u.pathname:split<0?fragment:fragment.slice(0,split))?.groups?.[spec.parameter]||null;
+  if(typeof spec.pattern==='string'&&spec.pattern.startsWith('^')&&spec.pattern.endsWith('$')&&spec.pattern.length<=500){try{value=new RegExp(spec.pattern).exec(source==='path'?u.pathname:split<0?fragment:fragment.slice(0,split))?.groups?.[spec.parameter]||null;}catch{value=null;}}
  }else throw Error('ROLE_IDENTITY_SOURCE_REQUIRED');
  return {parameter:spec.parameter,value,source};
 }
@@ -28,9 +26,9 @@ export function inferredRoleIdentity(url,officialId){
 
 export function assertRoleSnapshot(plan,observed,expectedUrl){
  const checks={location:samePage(observed.pageUrl,expectedUrl),role:matchesRole(plan,observed),login:observed.loginFormPresent!==true&&observed.form!==true};
- const code=!checks.location?'ROLE_PAGE_LOCATION_MISMATCH':!checks.login?'LOGIN_SESSION_REQUIRED':!checks.role?'ROLE_IDENTITY_MISMATCH':null;
+ const code=!checks.location?'ROLE_PAGE_LOCATION_MISMATCH':!checks.login?'LOGIN_SESSION_REQUIRED':null;
  if(code){const error=Error(code);error.details={phase:'role_verification',checks,expectedRole:plan.roleTitle||null,observedRole:observed.roleTitle||null,expectedRoleId:plan.roleIdentity?.value||null,observedRoleId:observed.roleIdentity?.value||null,nextTool:!checks.login?'role_advance':!checks.location?'role_advance':'form_construct_build'};throw error;}
- return true;
+ return {checks,roleObservation:{matches:checks.role,continued:true}};
 }
 export function matchesRole(plan,observed){
  if(plan.rolePrefix!==undefined){

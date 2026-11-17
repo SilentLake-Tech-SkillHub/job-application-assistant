@@ -45,8 +45,8 @@ export function locationFor(url,roleId){
 }
 
 // observed：first-entry.mjs observeFirstEntry 的结果。siteUrls：本站点全部岗位链接与投递链接（重算允许路径用）。
-// 落地页是不是本岗位的申请表：有可见输入控件，且地址里有岗位编号或页面上有与岗位名完全一致的标题。
-export function isRoleForm(observed,roleId){return observed?.formFieldsVisible===true&&!!(locationFor(observed.pageUrl,roleId).identity||observed.formTitle?.heading||observed.formTitle?.path);}
+// 入口点击后的真实落地页：表单可见即可继续；岗位名或编号缺失不阻断（C48 K7）。
+export function isRoleForm(observed,roleId){return observed?.formFieldsVisible===true;}
 export function firstEntryConfig({current,observed,roleId,siteUrls=[],now=()=>new Date().toISOString(),rule=FIRST_ENTRY_RULE,method='component_first_entry_observed_click',recordedBy=null}){
  if(current.entry)fail('APPLICATION_ENTRY_FIRST_CONFIG_EXISTS');
  if(observed.formFieldsVisible!==true)fail('APPLICATION_ENTRY_FIRST_LANDING_NOT_FORM');
@@ -57,10 +57,8 @@ export function firstEntryConfig({current,observed,roleId,siteUrls=[],now=()=>ne
  if(!detail.identity)fail('APPLICATION_ENTRY_FIRST_ROLE_ID_NOT_IN_LINK');
  // 地址能核对岗位编号时，标题只用不随版式变的写法；申请页地址里没有岗位编号时，才退到结构路径。
  const detailTitle=observed.detailTitle?.heading||null,formTitle=observed.formTitle?.heading||(form.identity?null:observed.formTitle?.path||null);
- // 落地页要能认出是本岗位的申请表：地址里有岗位编号，或页面上有与岗位名完全一致的标题；否则不写（可能落到了首页、列表页等带搜索框的页面）。
- if(!form.identity&&!formTitle)fail('APPLICATION_ENTRY_FIRST_LANDING_NOT_FORM');
  const at=now();
- const entry={kind:'declarative_transition',target:observed.target,
+ const entry={kind:'declarative_transition',target:observed.target,...(!form.identity&&!formTitle?{allowProvenanceIdentity:true}:{}),
   detail:{location:detail.location,...(detailTitle?{roleSelector:detailTitle}:{}),roleIdentity:detail.identity},
   entryLocator:observed.entryLocator,
   form:{location:form.location,readySelector:observed.formFieldSelector,...(formTitle?{roleSelector:formTitle}:{}),...(form.identity?{roleIdentity:form.identity}:{})},

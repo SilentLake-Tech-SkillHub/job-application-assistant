@@ -12,7 +12,7 @@ import {saveSearchableCommit,searchableWitnessScope} from './searchable-commit.m
 
 const code=error=>/^[A-Z_]+(?::[a-z0-9_-]+)?$/.test(error?.message)?error.message:'SELECTED_FIELD_OPERATION_FAILED';
 const assertObservation=(observation,task,plan)=>{
- if(observation?.source!=='live_dom'||!samePage(observation.pageUrl,task.pageUrl)||!matchesRole(plan,observation))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
+ if(observation?.source!=='live_dom'||!samePage(observation.pageUrl,task.pageUrl))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
  const age=Date.now()-Date.parse(observation.readAt);
  if(!Number.isFinite(age)||age < -5000||age>60000)throw Error('STALE_OR_INVALID_OBSERVATION');
 };

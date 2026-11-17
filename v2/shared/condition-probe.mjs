@@ -4,7 +4,7 @@ import {choiceActionWithReadback} from './choice-actions.mjs';
 // Internal maintenance only. Traverse captured branch choices through real UI
 // controls, persist every discovery, then restore and read back the initial form.
 const signature=f=>JSON.stringify({selector:f.selector,label:f.label,type:f.type,required:!!f.required});
-const state=o=>({pageUrl:o.pageUrl,roleTitle:o.roleTitle,roleIdentity:o.roleIdentity,groups:o.groups,sections:o.sections,
+const state=o=>({pageUrl:o.pageUrl,groups:o.groups,sections:o.sections,
   fields:Object.fromEntries(Object.entries(o.fields||{}).map(([id,f])=>[id,{present:f.present,value:f.value??null,selected:f.selected??null,uploadState:f.uploadState??null,userOnly:!!f.userOnly}]))});
 const mapped=(f,plan)=>plan.fields.some(p=>(p.inventorySelectors||[p.read.selector]).includes(f.selector)&&p.inventoryLabel===f.label&&p.inventoryType===f.type&&!!p.required===!!f.required);
 
@@ -22,11 +22,11 @@ export async function probeConditions({page,plan,pageUrl,origin,onInventory,chec
  const baselineInventory=await inventory();await onInventory(baselineInventory);
  if(baselineInventory.some(f=>!mapped(f,plan)))throw Error('BASELINE_HAS_UNMAPPED_QUESTIONS');
  const baseline=await page.observe(plan);
- if(baseline.pageUrl!==pageUrl||!matchesRole(plan,baseline))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
+ if(baseline.pageUrl!==pageUrl)throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
  if(!parents.length){
   const finalInventory=await inventory();await onInventory(finalInventory);const restored=await page.observe(plan);
   const same=JSON.stringify(finalInventory.map(signature).sort())===JSON.stringify(baselineInventory.map(signature).sort())&&JSON.stringify(state(restored))===JSON.stringify(state(baseline));
-  const branch={source:'__baseline__',value:null,status:same?'verified':'needs_attention',inventory:finalInventory,newQuestions:finalInventory.filter(f=>!mapped(f,plan)).length,selected:true,conditionFieldsMatched:true,roleMatched:restored.pageUrl===pageUrl&&matchesRole(plan,restored)};
+  const branch={source:'__baseline__',value:null,status:same?'verified':'needs_attention',inventory:finalInventory,newQuestions:finalInventory.filter(f=>!mapped(f,plan)).length,selected:true,conditionFieldsMatched:true,roleMatched:restored.pageUrl===pageUrl};
   return {status:same&&branch.roleMatched&&!branch.newQuestions?'verified':'needs_attention',branches:[branch],restoration:same?'verified':'failed',baseline,restored,scope:'declared_conditions_none_readonly_baseline'};
  }
 
@@ -62,7 +62,7 @@ export async function probeConditions({page,plan,pageUrl,origin,onInventory,chec
    const references=controls.map(control=>control.selector),alternatives=expected.flatMap(field=>field.inventorySelectors||[field.read.selector]).filter(selector=>!references.includes(selector));
    if(alternatives.length)try{const proof=await page.act({method:'wait',operation:'compare_control_aliases',selector:plan.readySelector,alternatives,references},null,{});selectorEquivalences=(proof?.pairs||[]).map(pair=>({selector:alternatives[pair.alternativeIndex],reference:references[pair.referenceIndex]})).filter(pair=>pair.selector&&pair.reference);}catch{}
    const branch={source:parent.source,value,inventory:controls,selected:observation.fields?.[parent.id]?.selected===true&&observation.fields?.[parent.id]?.value===value,
-    expectedFieldIds:expected.map(f=>f.id),selectorEquivalences,newQuestions:unknown.length,conditionFieldsMatched:matched,roleMatched:observation.pageUrl===pageUrl&&matchesRole(plan,observation)};
+    expectedFieldIds:expected.map(f=>f.id),selectorEquivalences,newQuestions:unknown.length,conditionFieldsMatched:matched,roleMatched:observation.pageUrl===pageUrl};
    branch.status=branch.selected&&branch.roleMatched&&matched&&!unknown.length?'verified':'needs_attention';
    branches.push(branch);await checkpoint({branches,restoration:'pending'});
   }

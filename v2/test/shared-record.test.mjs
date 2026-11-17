@@ -11,6 +11,6 @@ test('different role tabs sharing one observed resume cannot become parallel wri
 test('even one scheduled writer cannot write while a stale autosaving editor of that record is open',async()=>{
  const own={url:()=> 'https://example.test/editor?resumeId=one&pid=a'},stale={url:()=> 'https://example.test/editor?resumeId=one&pid=b',isClosed:()=>false};own.context=()=>({pages:()=>[own,stale]});const p=new PageAdapter(own);
  await assert.rejects(p.act({method:'fill',selector:'#name'},'example',{}),/SHARED_RESUME_HAS_OTHER_OPEN_EDITORS/);
- await assert.rejects(p.ensureGroups([{count:2}]),/SHARED_RESUME_HAS_OTHER_OPEN_EDITORS/);
+ own.locator=()=>({count:async()=>1});await assert.rejects(p.ensureGroups([{selector:'.record',count:2}]),/SHARED_RESUME_HAS_OTHER_OPEN_EDITORS/);
  stale.url=()=> 'https://example.test/editor?resumeId=other';await assert.doesNotReject(p.assertSingleEditor());
 });

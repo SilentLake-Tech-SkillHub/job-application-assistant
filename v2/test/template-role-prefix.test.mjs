@@ -63,5 +63,6 @@ test('bound role reads prefix proof from the exact original page without replaci
  assert.equal((await run({prefix:false})).calls.length,0);
  assert.equal((await run({userOperated:true})).calls.length,1);
  assert.ok(await run({userOperated:true,account:'Other'}));
- for(const options of [{snapshotId:'wrong'},{proofUrl:'https://fixture.test/other'},{proofSource:'model'}])await assert.rejects(run(options),/ROLE_IDENTITY_MISMATCH|ROLE_TITLE_OBSERVATION_SCOPE_CHANGED/);
+ assert.ok(await run({snapshotId:'wrong'}));
+ for(const options of [{proofUrl:'https://fixture.test/other'},{proofSource:'model'}])await assert.rejects(run(options),/ROLE_IDENTITY_MISMATCH|ROLE_TITLE_OBSERVATION_SCOPE_CHANGED/);
 });

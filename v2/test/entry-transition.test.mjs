@@ -20,7 +20,7 @@ test('a form title containing only its prefix is loading, not a different role',
  const page=f.pages.get('original'),original=page.locator;let reads=0,clock=0;
  page.locator=function(selector){const l=original.call(this,selector);if(selector==='.title')l.innerText=async()=>++reads===1?'You are applying:':'You are applying: 岗位';return l;};
  f.host.now=()=>clock;f.host.pause=async ms=>{clock+=ms;};
- assert.equal((await executeTransition(f.args,f.host)).roleTitle,'岗位');assert.equal(f.clicks.length,0);
+ assert.equal((await executeTransition(f.args,f.host)).roleTitle,'');assert.equal(f.clicks.length,0);assert.equal(reads,1);
 });
 test('navigation deadline reports a transient timeout with the exact step instead of deterministic form absence',async()=>{
  const f=fixture();const page=f.pages.get('original'),original=page.locator;let clock=0;
@@ -33,8 +33,8 @@ test('shared driver discovers a unique new page',async()=>{const f=fixture({newT
 test('existing verified form is reused with no repeated CTA click',async()=>{const f=fixture({existingForms:1}),r=await executeTransition(f.args,f.host);assert.equal(r.pageId,'prior0');assert.equal(r.entryClicked,false);assert.equal(f.clicks.length,0);});
 test('form page never clicks its submit/entry control',async()=>{const f=fixture({onForm:true});const r=await executeTransition(f.args,f.host);assert.equal(r.entryClicked,false);assert.equal(f.clicks.length,0);});
 test('ambiguous form editors stop before click',async()=>{const f=fixture({existingForms:2});await assert.rejects(executeTransition(f.args,f.host),/AMBIGUOUS_ROLE_FORM/);assert.equal(f.clicks.length,0);});
-test('changed title or duplicate CTA prevents navigation',async()=>{for(const [settings,code]of[[{title:'other'},'APPLICATION_ENTRY_ROLE_CHANGED'],[{ctaCount:2},'APPLICATION_ENTRY_BUTTON_CHANGED']]){const f=fixture(settings);await assert.rejects(executeTransition(f.args,f.host),new RegExp(code));assert.equal(f.clicks.length,0);}});
-test('form identity is read from its actual URL and cannot be expected-value injected',async()=>{const f=fixture({onForm:true});f.e.form.location={pathnamePattern:'^/resume$'};f.pages.get('original').current='https://example.test/resume?job=wrong';await assert.rejects(executeTransition(f.args,f.host),/APPLICATION_ENTRY_RESULT_ROLE_CHANGED/);});
+test('changed title continues while duplicate CTA still prevents navigation',async()=>{const changed=fixture({title:'other'});await executeTransition(changed.args,changed.host);assert.equal(changed.clicks.length,1);const duplicate=fixture({ctaCount:2});await assert.rejects(executeTransition(duplicate.args,duplicate.host),/APPLICATION_ENTRY_BUTTON_CHANGED/);assert.equal(duplicate.clicks.length,0);});
+test('form identity is read from its actual URL and cannot be expected-value injected',async()=>{const f=fixture({onForm:true});f.e.form.location={pathnamePattern:'^/resume$'};f.pages.get('original').current='https://example.test/resume?job=wrong';assert.equal((await executeTransition(f.args,f.host)).roleIdentity.value,'wrong');});
 test('cross-origin observed evidence is refused',()=>{const e=contract();e.evidence.formUrl='https://another.test/resume?job=100';assert.throws(()=>validateTransition(e),/ENTRY_NAVIGATION_EVIDENCE_REQUIRED/);});
 
 test('Chrome and IAB executors use the same declarative driver and readback',async()=>{
@@ -44,7 +44,7 @@ test('Chrome and IAB executors use the same declarative driver and readback',asy
  const iab=fixture(),dir=await mkdtemp(path.join(os.tmpdir(),'entry-shared-'));const tabs={list:iab.host.listPages,get:async id=>{const p=await iab.host.getPage(id);return {id,url:()=>p.url(),markHandoff:async()=>{},playwright:{locator:s=>p.locator(s)}};}};
  try{await withHostBrowserBridge({browser:{tabs},socketPath:path.join(dir,'bridge.sock'),allowedOrigins:['https://example.test']},async({socketPath})=>{const rpc=new BrokerBrowserAdapter(socketPath),r=await rpc.request('roleEnterApplication',iab.args);assert.deepEqual({url:r.pageUrl,role:r.roleIdentity.value,clicked:r.entryClicked},{url:cr.pageUrl,role:cr.roleIdentity.value,clicked:cr.entryClicked});await rpc.request('roleEnterApplication',iab.args);assert.equal(iab.clicks.length,1);});}finally{await rm(dir,{recursive:true,force:true});}
 });
-test('fixed rendered title prefix is removed only after matching actual text',async()=>{const f=fixture({onForm:true,title:'You are applying: 岗位'});f.e.form.roleSelector='.title';f.e.form.rolePrefix='You are applying:';assert.equal((await executeTransition(f.args,f.host)).roleTitle,'岗位');f.e.form.rolePrefix='A different prefix:';await assert.rejects(executeTransition(f.args,f.host),/APPLICATION_ENTRY_ROLE_CHANGED/);});
+test('fixed rendered title prefix is removed only after matching actual text',async()=>{const f=fixture({onForm:true,title:'You are applying: 岗位'});f.e.form.roleSelector='.title';f.e.form.rolePrefix='You are applying:';assert.equal((await executeTransition(f.args,f.host)).roleTitle,'岗位');f.e.form.rolePrefix='A different prefix:';assert.equal((await executeTransition(f.args,f.host)).roleTitle,'You are applying: 岗位');});
 test('exact rendered text is a valid shared CTA locator',async()=>{const f=fixture();f.e.entryLocator={text:'申请职位',label:'申请职位'};f.pages.get('original').getByText=(text,o)=>{assert.equal(text,'申请职位');assert.equal(o.exact,true);return f.pages.get('original').locator('.apply');};await executeTransition(f.args,f.host);assert.deepEqual(f.clicks,['.apply']);});
 test('role flow verifies the bound tab already on its form in place, without navigating back to detail or opening pages',async()=>{
  const {RoleFlow}=await import('../shared/role-flow.mjs'),entry=contract(),form='https://example.test/resume?job=100',task={taskId:'t',companyId:'sample',roleId:'J000100',officialId:'100',title:'岗位',url:'https://example.test/detail?job=100'},company={entry,origin:'https://example.test',loginMethod:'user_operated',account:{selector:'.account',source:'account',mask:'exact',pageUrl:'https://example.test/account'}};const calls=[];
@@ -58,17 +58,6 @@ test('entry performs no account comparison or proof-page read',async()=>{const f
 test('retired proof-page metadata is not consumed during entry',async()=>{const f=fixture();f.args.sessionAccountPageUrl='https://other.test/proof';await executeTransition(f.args,f.host);assert.equal(f.clicks.length,1);});
 test('absent current account uses unique same origin declared proof',async()=>{const f=fixture();const original=f.pages.get('original'),old=original.locator;original.locator=function(selector){const l=old.call(this,selector);if(selector==='.account')l.count=async()=>0;return l;};f.pages.set('proof',{id:'proof',current:'https://example.test/proof',locator:()=>({filter(){return this;},count:async()=>1,innerText:async()=>'person'})});f.args.sessionAccountPageUrl='https://example.test/proof';await executeTransition(f.args,f.host);});
 
-test('entry role failures say which check failed with hashes only, never the raw title',async()=>{
- const {safeControlErrorDetails}=await import('../shared/control-error-details.mjs');
- const {executeTransition}=await import('../shared/entry-transition.mjs');
- const entry={kind:'declarative_transition',target:'same',detail:{location:{pathnamePattern:'^/job/detail$',query:{jobAdId:'A1'}},roleSelector:'.title'},entryLocator:{text:'立即投递',label:'立即投递'},form:{location:{pathnamePattern:'^/form$',query:{jobAdId:'A1'}},readySelector:'.ready',roleSelector:'.form-title',rolePrefix:'你正在投递职位:'},evidence:{detailUrl:'https://example.test/job/detail?jobAdId=A1',formUrl:'https://example.test/form?jobAdId=A1',capturedAt:'2026-10-26',method:'synthetic'}};
- const loc=(texts)=>({filter(){return this;},first(){return this;},async waitFor(){},async count(){return texts.length;},async innerText(){return texts[0];},async click(){}});
- const run=async formTexts=>{const page={url:async()=>'https://example.test/form?jobAdId=A1',locator:s=>s==='.acct'?loc(['me']):s==='.ready'?loc(['x']):loc(formTexts)};
-  try{await executeTransition({entry,pageId:'p',expectedTitle:'AI 产品经理(J1)',expectedRoleId:'A1',expectedAccount:'me',accountSelector:'.acct'},{getPage:async()=>page,listPages:async()=>[{id:'p',url:'https://example.test/form?jobAdId=A1'}],pause:async()=>{}});return null;}catch(e){return e;}};
- let e=await run(['你正在投递职位: AI 产品经理(J1)','你正在投递职位: AI 产品经理(J1)']);
- assert.equal(e.message,'APPLICATION_ENTRY_ROLE_CHANGED');let d=safeControlErrorDetails(e.details);assert.equal(d.check,'selector_count');assert.equal(d.selectorMatches,2);assert.equal(d.stage,'form');
- e=await run(['你正在投递职位: AI 产品经理（J1）']);d=safeControlErrorDetails(e.details);assert.equal(d.check,'title');assert.equal(d.normalizedMatch,true);assert.equal(d.valueMatches,false);
- assert.equal(JSON.stringify(d).includes('产品经理'),false);
- e=await run(['投递职位：AI 产品经理(J1)']);d=safeControlErrorDetails(e.details);assert.equal(d.check,'prefix');assert.equal(d.prefixMatched,false);
- assert.equal(await run(['你正在投递职位: AI 产品经理(J1)']),null);
+test('entry title observations can be absent or different without blocking shared editors',async()=>{
+ for(const title of ['Other','']){const f=fixture({onForm:true,title});f.e.form.roleSelector='.title';const r=await executeTransition(f.args,f.host);assert.equal(r.roleObservation.continued,true);assert.equal(f.clicks.length,0);}
 });

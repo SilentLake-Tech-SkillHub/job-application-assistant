@@ -24,7 +24,7 @@ test('batch closeout reports the first executable role per company alongside ind
  await addRole(0);const b=await batch.create({authorizationRef:'prepare'});
  await queues.put(b.queue.tasks[0].taskId,{status:'needs_login'});
  const r=await batch.status(b);assert.equal(r.agentWorkRemaining,true);assert.ok(r.waitingCompanies.includes('C00001'));
- assert.equal(r.actionable.filter(x=>x.companyId==='C00001').length,0);assert.equal(r.actionable.filter(x=>x.companyId==='C00002').length,1);
+ assert.equal(r.actionable.filter(x=>x.companyId==='C00001'&&x.waitingForLogin).length,1);assert.equal(r.loginRechecks.length,1);assert.equal(r.actionable.filter(x=>x.companyId==='C00002').length,1);
 },2));
 test('an existing batch drops submitted roles from dispatch and keeps other roles and their task IDs',()=>fixture(async({batch,queues,addRole,submitRole})=>{
  const next=await addRole(0);
