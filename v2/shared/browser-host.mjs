@@ -1,5 +1,6 @@
 import {MainChromePluginAdapter} from './main-chrome-plugin.mjs';
 import {browserPreferences} from './browser-preferences.mjs';
+import {configurePaths} from './runtime-paths.mjs';
 import {genericSourceManifest} from './runtime-identity.mjs';
 import {installBrokerDiagnostics} from './broker-diagnostics.mjs';
 import {browserErrorCode,browserErrorDetails,retryBrowserOperation} from './browser-errors.mjs';
@@ -13,6 +14,9 @@ import path from 'node:path';
 import {BrowserAdapter} from './browser.mjs';
 import {cloneConfig,launchClone} from './chrome-clone.mjs';
 import {inspectVerification} from './verification.mjs';
+// Installed hosts may configure only the handoff directory. Resolve the same
+// workspace as the business core before reading external browser preferences.
+if(process.env.RECRUITING_WORKSPACE_ROOT||process.env.RECRUITING_HANDOFF_DIR)configurePaths();
 const socketPath=process.argv[2];
 if(!socketPath||!path.isAbsolute(socketPath)||Buffer.byteLength(socketPath)>100)throw Error('SHORT_ABSOLUTE_SOCKET_PATH_REQUIRED');
 await mkdir(path.dirname(socketPath),{recursive:true,mode:0o700});

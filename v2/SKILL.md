@@ -2,7 +2,7 @@
 name: job-application-assistant-v2
 description: Coordinate company-configured login and application MCP tools, stage checks and user review for confirmed recruiting roles. Use the single maintained V2 runtime for preparation and testing.
 metadata:
-  version: "2.0.0-alpha.65"
+  version: "2.0.0-alpha.66"
 ---
 
 # 岗位代投助手 V2
@@ -54,11 +54,11 @@ metadata:
 
 ## Agent 浏览器兜底
 
-进入申请页：首版入口同一失败第二次、结果点名 `role_entry_fallback` 时使用。先截图，当前已是申请表则report.alreadyForm=true直接接续，不把页面导航回岗位页。`start` 模式核对登记表，在任务绑定的岗位页（不在就回岗位链接）只读盘点岗位标题和候选按钮；Agent 只在这张标签上先核对岗位名，再用鼠标点进本岗位申请表，不填写、不提交、不自己开新标签（站点自己开就停在那里），落到登录页就停。然后用 `report` 模式回报按钮完整文字 `label` 和同文字按钮从上往下第几个 `position`；组件核对落地页是本岗位申请表后写入首版入口配置（`entryConfigsCreated`），再调 `role_advance` 接续。登记表外、点了没反应、落地不是本岗位申请表时交用户。
+进入申请页：首版入口同一失败第二次、结果点名 `role_entry_fallback` 时使用。先截图，当前已是申请表则report.alreadyForm=true直接接续，不把页面导航回岗位页。`start` 模式核对登记表，在任务绑定的岗位页（不在就回岗位链接）只读盘点岗位标题和候选按钮；Agent 只在这张标签上记录岗位名观察（缺失或不一致不阻断），再用鼠标点进申请表，不填写、不提交、不自己开新标签（站点自己开就停在那里），落到登录页就停。然后用 `report` 模式回报按钮完整文字 `label` 和同文字按钮从上往下第几个 `position`；组件核对落地页是本岗位申请表后写入首版入口配置（`entryConfigsCreated`），再调 `role_advance` 接续。登记表外、点了没反应、落地不是本岗位申请表时交用户。
 
 表单控件：只在结果点名 `form_gui_fallback` 时使用。`start` 模式检查组件外登记表（宿主 + 页面所在浏览器：装了 Agent 插件的 Chrome 分身，或内置浏览器），返回要做的字段、值和规则。只在任务绑定的那张申请页上用鼠标点击和键盘输入，不提交，不碰其他控件，不开新标签。然后用 `report` 模式回报每个字段的步骤（`click_field`、`click_text` 加准确文字、`type_value`、`type_text`、`press`）；组件把步骤写进正式公司模板的操作定义，回放、重测并接续原任务。“投递流程不用 Chrome AI 插件”只对这一处例外。
 
-组件代点（第三种方式，登记表里登记了 `component_playwright` 时可用）：Agent 自己的浏览器操作不了这张页面时（例如分身里的插件没连上、宿主不给点击），只看页面（`role_screenshot`）决定怎么点，不自己操作，把操作交组件用自己连着分身的浏览器通道执行——入口用 `role_entry_fallback`（`mode=component`，回报同样的 `label`、`position`，组件核对同文字按钮个数不变后点一次，再同样核对落地页）；表单控件用 `form_gui_fallback`（`mode=component`，回报同样的步骤，组件写进操作定义后回放测试、独立读回）。只能点盘点出的入口候选按钮或模板里登记的控件，不提交。页面没有本岗位内容时不选按钮，改用 `role_report_link_failure`。这不是“Agent 用组件外的 Playwright”：Agent 不另起浏览器工具。
+组件代点（第三种方式，登记表里登记了 `component_playwright` 时可用）：Agent 自己的浏览器操作不了这张页面时（例如分身里的插件没连上、宿主不给点击），只看页面（`role_screenshot`）决定怎么点，不自己操作，把操作交组件用自己连着分身的浏览器通道执行——入口用 `role_entry_fallback`（`mode=component`，回报同样的 `label`、`position`，组件核对同文字按钮个数不变后点一次，再同样核对落地页）；表单控件用 `form_gui_fallback`（`mode=component`，回报同样的步骤，组件写进操作定义后回放测试、独立读回）。只能点盘点出的入口候选按钮或模板里登记的控件，不提交。页面只有列表或报错且没有申请入口时不选按钮，按实际证据用 `role_report_link_failure` 报告；岗位名缺失或不一致本身不阻断。这不是“Agent 用组件外的 Playwright”：Agent 不另起浏览器工具。
 
 登记表是组件外数据：每行 `hostId` 必须等于该执行端安装时的 `RECRUITING_HOST_ID`（`scripts/install-host.mjs --host <id>`），且只对有适配器 `host/adapters/<id>.mjs` 的执行端有效。新接入一个 Agent：按该 id 安装并在登记表加一行；和已有适配器不是同一个产品的，先补适配器。改登记表不改组件。见 [host integration](docs/host-integration.md#agent-浏览器兜底登记与执行端标识)。
 
@@ -71,11 +71,11 @@ metadata:
 
 ### 浏览器与标签
 
-- 通道只在能力文件记录的执行端上运行：Chrome 是组件的 Chrome 分身（固定私有资料目录和本机调试端口，所有宿主共用，只由 `scripts/chrome-clone.mjs` 或 `browser_initialize_chrome` 启动）；内置浏览器只在三步检测全过时使用。批次取 browserChannels 偏好与已记录可用能力的交集；为空时用可用通道并报告原因。
+- Chrome按组件外浏览器设置选择：clone沿用组件分身（固定资料目录和调试端口），main由登记Agent通过主用Chrome插件操作。内置浏览器的原能力规则保留；主用Chrome不涉及内置浏览器、不替用户改回分身。批次取本轮偏好与实际可用通道的交集。
 - 选择clone时不使用组件外浏览器工具；选择main时由登记Agent用主用Chrome插件操作，不经组件CDP接管；不自行另开Chrome进程。正常复用不调REA。保持浏览器和页面开着，未保存的内容不动。
 - 每家公司按冻结的岗位顺序执行，第一次导航打开确认的岗位链接；登录绑定原任务和原标签；岗位名缺失或对不上只记录，不阻断后续建库、交互、恢复、填写和独立读回。
 - 一个岗位任务 = 一张绑定标签（任务记录里的 `pageId`），每一步只在这张标签上做，URL 只说明走到哪一步。任务中不自己用浏览器工具开页、选页或切页：`role_advance` 复用本岗位已有标签，没有才新开；有入口配方的站点总是岗位链接 → 同一任务内登录 → 入口驱动到表单，不直接打开存储的申请链接。像表单的多余标签要先经用户查看并给出原话才关。
-- 站点还没有入口配置时，`role_advance` 进入申请页那一步由组件在原岗位页读出与岗位名一致的标题（读不到就不点）、点一次唯一的投递按钮，落地页是本岗位申请表（有输入框，且地址里有岗位编号或页面上有岗位名）就写入首版入口配置并读回，同一任务接着进入；结果的 `entryConfigsCreated` 列出写了哪几家，要告诉用户。落到登录页照常交用户登录。其余失败（读不到标题、按钮没有或不止一个、点了没换页、落地不是本岗位申请表）第一次按原错误处理，同一失败第二次交 Agent 浏览器兜底（见下文）。
+- 站点还没有入口配置时，组件尝试首版入口采集，真实点击落地可见申请表后写入并读回，`entryConfigsCreated`列出写入公司。读不到标题第一次先其他公司再复查，第二次进入登记的截图兜底；当前已是申请表时原地接续，有模板填写、无模板建库。岗位名或编号缺失、不一致只记录，不阻断。登录只挂起该公司；按钮缺失或不唯一、没有导航、非表单等仍按具体错误与证据处理。
 - 已有入口配置的修改只通过 `scripts/site-entry.mjs`（预览 → 用户原话 → 写入），见 [role entry](docs/role-entry.md) 和 [declarative entry](docs/declarative-entry.md)。
 
 ### 登录
@@ -116,7 +116,7 @@ metadata:
 
 - 本组件从不修改主表状态。`application_closeout` 按官方证据校验固定事件，覆盖写入 `岗位交接/投递回传.json` 中每个岗位的最新结果。只有官网回执或投递记录确认才算 `submission_confirmed`；准备、审阅和点击提交都不算。该岗位不是本组件按本批队列里公司正式模板填写并通过独立核验（`role_prepare`／`role_verify`）的，`submission_confirmed` 也被拒绝，手工填写的表单不能登记为已提交；先为该公司建库。
 - 本组件不改交接区的链接。岗位的投递链接为空时，`role_enter_application` 把核实过的申请页作为观察记录写进 `岗位交接/投递回传.json`；岗位链接或投递链接打不开时，`role_report_link_failure` 带证据记录失败观察（仍能打开的跳转不算变化）。搜索端用 `apply-observations` 预览观察记录，用户确认后才写主表，下次导入读刷新后的公司文件。`form_assets_status`（`company_batch_create` 也会返回）按站点编码列出缺的登录配置、正式模板和投递链接。
-- 不确定或受阻的结果在用户处理前不重试。搜索端通过反向评审把结果整理成“当前状态是X，更新状态是Y”，用户确认后才写主表。本组件不读写 Excel，模型不能自定业务标签。
+- 不确定或受阻的结果在用户处理前不重试。搜索端通过反向评审把结果整理成“当前状态是X，更新状态是Y”，按正式结果自动写主表并告知，不等待用户确认。本组件不读写 Excel，模型不能自定业务标签。
 
 ### 运行方式
 
@@ -131,5 +131,7 @@ metadata:
 - 维护流程（失败聚合、一次修一类、先用已存证据复现、门禁变更影响评估、新框架适配器准入、`scripts/readiness.mjs`）：[maintenance](docs/maintenance.md)。
 - 运行核心更新（`component_runtime`、`scripts/update-runtime.mjs`、CLI／MCP 版本一致）：[runtime architecture](docs/runtime-architecture.md)。
 - Hook 与执行身份：[conversation hooks](docs/conversation-hooks.md)。
+
+MCP宿主未向常驻接口提供会话标识时，每次调用的可选conversationId传本对话真实ID（从宿主环境读取），只用于关联本对话Hook回执；不借用其他对话ID，无法取得则省略并按H2提示，不阻断。
 
 登录等待按公司汇总一条告知；不要求用户回复“已登录”。每轮先推进其他公司，再按pollAfterMs复查等待登录的原任务，不重复发验证码。有可执行事项不得收工。填写前先独立读回：匹配的内容跳过，只补空项和改不一致项；实际控件交互测试仍执行操作。岗位名和岗位编号的读回仅供观察，不成为准备阶段阻断条件。

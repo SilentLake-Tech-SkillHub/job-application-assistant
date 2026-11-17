@@ -1,8 +1,20 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {PluginTransport,MainChromePluginAdapter,pluginInspectionEndpoint,injectedSource} from '../shared/main-chrome-plugin.mjs';
 import vm from 'node:vm';
+import {spawn} from 'node:child_process';import http from 'node:http';
+import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';
 import {executorCapability} from '../shared/browser-environment.mjs';
 import {resolveBatchChannels} from '../shared/channel-policy.mjs';
+test('a broker started with the configured handoff directory reads main Chrome selection before any operation',async()=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'c48-broker-')),socket=path.join(root,'host.sock');
+ await mkdir(path.join(root,'产品管理'));await writeFile(path.join(root,'产品管理','浏览器设置.json'),JSON.stringify({schemaVersion:1,choice:'main'}));
+ const child=spawn(process.execPath,['shared/browser-host.mjs',socket],{env:{PATH:process.env.PATH,HOME:process.env.HOME,RECRUITING_BROWSER_MODE:'cdp',RECRUITING_CDP_URL:'http://127.0.0.1:9',RECRUITING_HANDOFF_DIR:path.join(root,'岗位交接')},stdio:['ignore','pipe','pipe']});
+ const rpc=(url,body)=>new Promise((resolve,reject)=>{const r=http.request({socketPath:socket,path:url,method:body?'POST':'GET',headers:{'content-type':'application/json'}},s=>{const chunks=[];s.on('data',c=>chunks.push(c));s.on('end',()=>resolve(JSON.parse(Buffer.concat(chunks))));});r.on('error',reject);r.end(body?JSON.stringify(body):undefined);});
+ try{
+  let ready=false;for(let i=0;i<100;i++){try{await rpc('/health');ready=true;break;}catch{await new Promise(r=>setTimeout(r,30));}}
+  assert.equal(ready,true);const r=await rpc('/rpc',{method:'wait',args:{ms:1}});assert.equal(r.error,'BROWSER_RESTORE_REQUIRED');
+ }finally{child.kill('SIGTERM');await new Promise(resolve=>child.exitCode!==null?resolve():child.once('exit',resolve));await rm(root,{recursive:true,force:true});}
+});
 test('the pinned selector engine loads as valid browser code without starting Chromium',()=>{
  const source=injectedSource();assert.ok(source.includes('module.exports'));assert.doesNotThrow(()=>new vm.Script(source));
 });
@@ -18,6 +30,13 @@ test('main Chrome initialization uses the connected extension and never launches
  assert.equal(executorCapability(r,'chrome').available,true);assert.equal(executorCapability(r,'iab').available,false);
  assert.deepEqual(resolveBatchChannels({channels:{chrome:executorCapability(r,'chrome')},capability:{status:'not_configured'}}).channels,['chrome']);
  assert.deepEqual((await browser.tabs()).map(t=>[t.id,t.pluginTabId]),[['main-17',17]]);assert.deepEqual(calls,['list_browser_tabs','list_browser_tabs']);
+});
+test('reusing a user tab attaches it as borrowed through the plugin before reading or editing',async()=>{
+ const calls=[],transport={status:async()=>({extension_connected:true}),call:async(action,args)=>{calls.push([action,args]);return action==='list_browser_tabs'?{tabs:[{tabId:17,url:'https://example.test/form',title:'Form'}]}:{success:true,borrowed:true};}};
+ const browser=new MainChromePluginAdapter({transport});await browser.initializeConfiguredChrome();
+ assert.equal((await browser.openPage('https://example.test/form')).reused,true);
+ await browser.trackedPage('main-17');assert.deepEqual(calls.filter(([a])=>a==='attach_tab'),[['attach_tab',{tabId:17}]]);
+ assert.equal(calls.some(([a])=>a==='navigate'),false);
 });
 test('REA inspection facade forwards actual CDP command responses for the bound tab',async()=>{
  const calls=[],bridge=await pluginInspectionEndpoint({cdp:async(method,params)=>{calls.push({method,params});return {root:{nodeId:42}};}}),socket=new WebSocket(bridge.endpoint);

@@ -78,7 +78,7 @@ class PluginPage{
  getByRole(role,{name,exact=false}={}){return this.locator('internal:role='+role+(name!==undefined?'[name='+textSelector(name,exact)+']':''));}
  getByLabel(text,{exact=false}={}){return this.locator('internal:label='+textSelector(text,exact));}
  getByPlaceholder(text,{exact=false}={}){return this.locator('internal:attr=[placeholder='+textSelector(text,exact)+']');}
- async goto(url){const r=await this.transport.call('navigate',{url,...(this.tabId==null?{newTab:true}:{}),group_title:'投递生产'},this.tabId);this.tabId=r.tabId;this.currentUrl=r.url||url;return null;}
+ async goto(url){const r=await this.transport.call('navigate',{url,...(this.tabId==null?{newTab:true}:{}),group_title:'投递生产'},this.tabId);this.tabId=r.tabId;this.currentUrl=r.url||url;this.attached=true;return null;}
  async reload(){await this.evaluate(()=>location.reload());}async waitForLoadState(){}
  async bringToFront(){await this.transport.call('attach_tab',{tabId:this.tabId});}
  async waitForFunction(fn,arg,{timeout=15000}={}){const end=Date.now()+timeout;do{if(await this.evaluate(fn,arg))return;await new Promise(r=>setTimeout(r,50));}while(Date.now()<end);throw Error('BROWSER_OPERATION_TIMEOUT');}
@@ -123,12 +123,14 @@ export class MainChromePluginAdapter extends BrowserAdapter{
  async restoreConfiguredChrome(){return {...await this.initializeConfiguredChrome(),restored:true};}
  async recoverTransient(){await this.connect();}
  async trackPage(page){const id='main-'+page.tabId;this.pages.set(id,page);this.pageIds.set(id,page);return id;}
- async trackedPage(id){await this.connect();const page=this.pageIds.get(id);if(!page||page.isClosed())throw Error('ROLE_BROWSER_PAGE_LOST');return page;}
+ async attachPage(page){if(!page.attached){await this.transport.call('attach_tab',{tabId:page.tabId});page.attached=true;}return page;}
+ async trackedPage(id){await this.connect();const page=this.pageIds.get(id);if(!page||page.isClosed())throw Error('ROLE_BROWSER_PAGE_LOST');return this.attachPage(page);}
  async tabs(){await this.connect();return [...this.pages].filter(([,p])=>!p.closed).map(([id,p])=>({id,url:p.url(),title:p.titleText,pluginTabId:p.tabId}));}
  async openPage(url,{pageId,newPage=false,reuseOnly=false,reload=false,readySelectors=[]}={}){
   await this.connect();const matches=pageId?[await this.trackedPage(pageId)]:newPage?[]:[...this.pages.values()].filter(p=>!p.closed&&p.url()===url);
   if(matches.length>1)throw Error('AMBIGUOUS_PAGE');if(reuseOnly&&!matches.length)throw Error('EXISTING_PAGE_REQUIRED_FOR_REBIND');
   const page=matches[0]||new PluginPage(this,{tabId:null,url:'about:blank'}),reused=page.url()===url;
+  if(page.tabId!=null)await this.attachPage(page);
   if(!reused)await page.goto(url);else if(reload)await page.reload();
   if(readySelectors.length)await page.waitForFunction(selectors=>selectors.some(s=>[...document.querySelectorAll(s)].some(n=>n.getClientRects().length)),readySelectors);
   return {pageId:await this.trackPage(page),pageUrl:page.url(),reused};
