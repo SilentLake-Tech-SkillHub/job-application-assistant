@@ -1,6 +1,7 @@
 import {readFile,writeFile,mkdir,rename,unlink,readdir} from 'node:fs/promises';
 import {createHash,randomUUID} from 'node:crypto';
 import path from 'node:path';
+import {bindTaskRecordScope} from './task-records.mjs';
 import {acquireLease,leasePath,defaultLeaseRoot} from './leases.mjs';
 import {assertHandoffUnchanged,readHandoffCompanies,readRoleOutcomes,roleView,combinedSha} from './company-directory.mjs';
 export const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
@@ -50,13 +51,15 @@ export class RoleQueue{
     tasks.push({taskId:stableTaskId(input.batchId,roleId),companyId,siteId:r.siteId,companyCode:c.companyId,roleId,order:tasks.length+1,companyOrder:c.order,roleOrder:r.order});
    }
   }
+  const roleLimit=args.roleLimit??args.batchPolicy?.roleLimit;
+  if(roleLimit!==undefined){if(!Number.isInteger(roleLimit)||roleLimit<1||roleLimit>100)throw Error('INVALID_ROLE_BATCH_CAPACITY');tasks=tasks.slice(0,roleLimit);}
   const upstreamMode=args.parallelRoles?'parallel_roles':'sequential';
   const parallelAuth=args.authorizationRef||args.batchPolicy?.authorizationRef;
   if(upstreamMode==='parallel_roles'&&!parallelAuth)throw Error('PARALLEL_ROLE_AUTHORIZATION_REQUIRED');
   if(args.batchPolicy&&(!args.batchPolicy.authorizationRef||args.batchPolicy.mode!=='parallel_companies'))throw Error('COMPANY_BATCH_POLICY_REQUIRED');
   const executionMode=args.batchPolicy?'parallel_companies':upstreamMode;
   const parallelRoles=upstreamMode==='parallel_roles'||Boolean(args.batchPolicy?.parallelRoles);
-  const inputHash=digest(input),shape=q=>digest({executionMode:q.executionMode,parallelRoles:q.parallelRoles,companiesPerChannel:q.batchPolicy?.companiesPerChannel||null,tasks:q.tasks.map(t=>[t.taskId,t.companyId]).sort((a,b)=>a[0].localeCompare(b[0]))});
+  const inputHash=digest(input),shape=q=>digest({executionMode:q.executionMode,parallelRoles:q.parallelRoles,companiesPerChannel:q.batchPolicy?.companiesPerChannel||null,roleLimit:q.batchPolicy?.roleLimit||null,tasks:q.tasks.map(t=>[t.taskId,t.companyId]).sort((a,b)=>a[0].localeCompare(b[0]))});
   // 按创建时间从旧到新处理：同一岗位在多个旧队列里都有绑定时，最新的那条生效。
   const previous=(await this.queues()).filter(q=>q.batchId===input.batchId).sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt)));
   // 同一批次、确认内容和执行方式都没变：返回原队列，不新建（重复导入不产生新任务、新标签）。
@@ -153,5 +156,5 @@ export class RoleQueue{
   delete q.queueHash;q.queueHash=digest(q);await this.put(q.id,q);return {...await this.public(q),refreshedCompanies:refreshed};
  }
  async get({queueId,queueHash}){const q=await this.read(queueId),{queueHash:h,...payload}=q;if(h!==queueHash||digest(payload)!==h)throw Error('ROLE_QUEUE_HASH_MISMATCH');return q;}
- async task(args){const q=await this.get(args),index=q.tasks.findIndex(t=>t.taskId===args.taskId);if(index<0)throw Error('ROLE_NOT_IN_CONFIRMED_QUEUE');const target=await this.hydrate(q,q.tasks[index]);const predecessors=q.tasks.slice(0,index).filter(t=>q.executionMode==='parallel_companies'?t.companyId===target.companyId&&!q.parallelRoles:q.executionMode!=='parallel_roles'||t.companyId!==target.companyId);for(const t of predecessors){let state;try{state=await this.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}if(state?.status==='ready_for_user_review')continue;const prior=await this.hydrate(q,t,{showProtected:true}).catch(error=>{if(error.message!=='ROLE_INPUT_CHANGED')throw error;return null;});if(!prior?.protectedReason||prior.protectedReason==='outcome_requires_resolution')throw Error('CONFIRMED_ROLE_ORDER_BLOCKED');}return {q,t:target};}
+ async task(args){const q=await this.get(args),index=q.tasks.findIndex(t=>t.taskId===args.taskId);if(index<0)throw Error('ROLE_NOT_IN_CONFIRMED_QUEUE');const target=await this.hydrate(q,q.tasks[index]);const predecessors=q.tasks.slice(0,index).filter(t=>q.executionMode==='parallel_companies'?t.companyId===target.companyId&&!q.parallelRoles:q.executionMode!=='parallel_roles'||t.companyId!==target.companyId);for(const t of predecessors){let state;try{state=await this.read(t.taskId);}catch(e){if(e.code!=='ENOENT')throw e;}if(state?.status==='ready_for_user_review')continue;const prior=await this.hydrate(q,t,{showProtected:true}).catch(error=>{if(error.message!=='ROLE_INPUT_CHANGED')throw error;return null;});if(!prior?.protectedReason||prior.protectedReason==='outcome_requires_resolution')throw Error('CONFIRMED_ROLE_ORDER_BLOCKED');}bindTaskRecordScope(target.taskId,{companyId:target.companyId,roleId:target.roleId});return {q,t:target};}
 }

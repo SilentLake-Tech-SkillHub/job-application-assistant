@@ -68,6 +68,14 @@ class WorkflowHookTest(unittest.TestCase):
   self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__workflow_handoff',tool_response={'continuation':{'state':'technical_block','owner':'supervisor','requiresUser':False,'shouldContinue':False,'handoffVerified':True}})
   self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout),{})
 
+
+ def test_waiting_company_does_not_clear_another_tasks_agent_work(self):
+  self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__workflow_next',tool_input={'taskId':'task-a'},tool_response={'continuation':{'state':'construct','owner':'agent','shouldContinue':True,'nextTools':['form_construct_build']}})
+  self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_login_v2__role_advance',tool_input={'taskId':'task-b'},tool_response={'continuation':{'state':'user_input','owner':'user','shouldContinue':False}})
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout)['decision'],'block')
+  self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__workflow_next',tool_input={'taskId':'task-a'},tool_response={'continuation':{'state':'review','owner':'user','shouldContinue':False}})
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout),{})
+
  def test_declared_new_stage_is_tracked_with_dsh_hyphenated_namespace(self):
   response={'workflowContract':{'revision':1,'tracked':True},'continuation':{'state':'construct','owner':'agent','shouldContinue':True}}
   self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting-application-v2__future_stage',tool_response={'content':[{'type':'text','text':json.dumps(response)}]})

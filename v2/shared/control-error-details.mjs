@@ -60,6 +60,17 @@ function firstEntryDetails(value){
 }
 export function safeControlErrorDetails(value){
  try{
+ if(value&&typeof value==='object'&&Object.getOwnPropertyDescriptor(value,'phase')?.value==='role_verification'){
+  const descriptors=Object.getOwnPropertyDescriptors(value);if(Reflect.ownKeys(value).some(k=>!Object.hasOwn(descriptors[k],'value')))return null;
+  value=Object.fromEntries(Reflect.ownKeys(value).map(k=>[k,descriptors[k].value]));
+  const allowed=['phase','checks','expectedRole','observedRole','expectedRoleId','observedRoleId','nextTool','suggestedRoleIdentity'];
+  if(Reflect.ownKeys(value).some(k=>!allowed.includes(k))||!['role_advance','form_construct_build'].includes(value.nextTool))return null;
+  if(!value.checks||Object.keys(value.checks).some(k=>!['location','role','login'].includes(k))||Object.values(value.checks).some(v=>typeof v!=='boolean'))return null;
+  if(['expectedRole','observedRole','expectedRoleId','observedRoleId'].some(k=>value[k]!==null&&(typeof value[k]!=='string'||value[k].length>2000)))return null;
+  const out={phase:value.phase,checks:{...value.checks},expectedRole:value.expectedRole,observedRole:value.observedRole,expectedRoleId:value.expectedRoleId,observedRoleId:value.observedRoleId,nextTool:value.nextTool};
+  if(value.suggestedRoleIdentity){const r=value.suggestedRoleIdentity;if(Object.keys(r).some(k=>!['source','parameter','pattern','value'].includes(k))||Object.values(r).some(v=>typeof v!=='string'||v.length>500))return null;out.suggestedRoleIdentity={...r};}
+  return out;
+ }
  if(value&&typeof value==='object'&&Object.getPrototypeOf(value)===Object.prototype&&Object.getOwnPropertyDescriptor(value,'phase')?.value==='browser_operation'){
   const keys=['phase','operation','step','locator','locatorHash','nextAction','requiresUserConfirmation'];
   const descriptors=Object.getOwnPropertyDescriptors(value);

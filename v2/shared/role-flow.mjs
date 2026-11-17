@@ -1,7 +1,7 @@
 import {sessionFromSnapshot} from './login-state.mjs';
 import {samePage} from './page-scope.mjs';
 import {transitionLocationMatches,transitionRoleIdFromLocation,canonicalLocationUrl} from './entry-transition.mjs';
-import {matchesRole,readRoleIdentity,bindRoleTitleProof,rolePageContract} from './role-identity.mjs';
+import {matchesRole,readRoleIdentity,bindRoleTitleProof,rolePageContract,assertRoleSnapshot} from './role-identity.mjs';
 import {resolveEntry,matchEntryPath} from './entry-recipe.mjs';
 import {assertScope} from '../login/contracts.mjs';
 import {FALLBACK_ENTRY_RULE,isRoleForm} from './entry-config-supplement.mjs';
@@ -181,7 +181,7 @@ export class RoleFlow{
    }
    await this.browser.request('wait',{pageUrl:state.returnUrl,selector:x.plan.readySelector});
    const restored=await this.snapshot(x,state.pageId);
-   if(!samePage(restored.pageUrl,state.returnUrl)||!matchesRole(x.plan,restored)||restored.loginFormPresent)throw Error('LOGIN_RETURN_ROLE_VERIFICATION_FAILED');
+   assertRoleSnapshot(x.plan,restored,state.returnUrl);
    if(state.browserBinding&&(state.browserBinding.pageId!==state.pageId||state.browserBinding.pageUrl&&!samePage(state.browserBinding.pageUrl,state.returnUrl)))invalidateRolePageProofs(state);
    state.status='ready_to_fill';state.restoredAt=restored.readAt;state.authenticated=true;await this.queues.put(x.t.taskId,state);
    return {status:state.status,taskId:state.taskId,pageId:state.pageId,companyId:x.t.companyId,roleId:x.t.roleId,roleTitle:restored.roleTitle,pageUrl:restored.pageUrl,authenticated:true,originalRoleRestored:true,submission:'not_performed'};

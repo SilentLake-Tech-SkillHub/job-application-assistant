@@ -8,7 +8,7 @@ import {keyOK} from './ids.mjs';
 const context=new AsyncLocalStorage();
 export const withTaskRecords=(scope,fn)=>context.run(scope,fn);
 export const taskRecordScope=()=>context.getStore()||{};
-export function bindTaskRecordScope(taskId){const scope=context.getStore();if(!scope||!taskId)return;if(scope.taskId&&scope.taskId!==taskId)throw Error('TASK_RECORD_SCOPE_MISMATCH');scope.taskId=taskId;}
+export function bindTaskRecordScope(taskId,identity={}){const scope=context.getStore();if(!scope||!taskId)return;if(Object.keys(identity).length&&scope.taskId!==taskId)return;if(scope.taskId&&scope.taskId!==taskId)throw Error('TASK_RECORD_SCOPE_MISMATCH');Object.assign(scope,{taskId,...identity});}
 const durableAsset=/^(?:sealed-probe-|condition-probe-|capture-|form-structure-|form-visual-|form-coverage-|choices-|acquisition-|form-update-|definition-|probe-|submission-proof-|submission-evidence-|production-J)/;
 const read=async(file,fallback)=>{try{return JSON.parse(await readFile(file,'utf8'));}catch(e){if(e.code==='ENOENT')return fallback;throw e;}};
 async function write(file,value){await mkdir(path.dirname(file),{recursive:true,mode:0o700});const tmp=file+'.'+randomUUID()+'.tmp';await writeFile(tmp,JSON.stringify(value,null,2),{mode:0o600});await rename(tmp,file);}
@@ -28,10 +28,11 @@ export class TaskRecords{
   // A company batch is shared across its tasks even when a company tool updates it.
   if(group==='runs'&&value.id===id&&typeof value.batchHash==='string'&&typeof value.queueId==='string'&&Array.isArray(value.companies))return false;
   const scope=context.getStore()||{},companyId=value.companyId||scope.companyId;
+  value={...value,...(!value.companyId&&companyId?{companyId}:{}),...(!value.roleId&&scope.roleId?{roleId:scope.roleId}:{})};
   const taskId=value.taskId||scope.taskId||(group==='runs'&&/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(id)&&companyId?'company-'+companyId+'-'+(value.roleId||scope.roleId||'shared'):null);
   if(!taskId||!['runs','plans'].includes(group)||id.startsWith('batch-prepare-')||durableAsset.test(id)||value.operation==='internal_condition_probe')return false;
   if(!keyOK(taskId))throw Error('INVALID_TASK_RECORD_KEY');
-  const operation=group==='plans'&&Number.isInteger(value.compilerVersion)?'execution_plan':value.operation||scope.tool||group;
+  const operation=group==='plans'&&Number.isInteger(value.compilerVersion)?'execution_plan':value.operation==='mcp_error'?'mcp_error:'+(value.tool||scope.tool||'operation'):value.operation||scope.tool||group;
   const identity=value.fieldId||value.selector||value.projectId||value.binding?.fieldId||(operation==='live_observation'?value.observation?.pageUrl:'')||'';
   const slot=JSON.stringify([group,operation,identity]);
   const release=await acquireLease(leasePath(defaultLeaseRoot(),'task-records:'+path.resolve(this.root)),{waitMs:30000,busyCode:'TASK_RECORD_BUSY'});

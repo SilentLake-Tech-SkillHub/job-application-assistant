@@ -46,7 +46,7 @@ test('queue, task, original URL, title and return binding changes are rejected b
 test('prepared review remains protected and role title is checked independently of account',async()=>{
  const f=fixture({prior:{...fixture().state(),status:'ready_for_user_review'}});await assert.rejects(f.flow.open({}),/ROLE_ALREADY_PREPARED_FOR_REVIEW/);assert.equal(f.calls.length,0);
  const account=fixture({wrongAccount:true});assert.equal((await account.flow.open({})).status,'ready_to_fill');
- const title=fixture({wrongTitle:true});await assert.rejects(title.flow.open({}),/LOGIN_RETURN_ROLE_VERIFICATION_FAILED/);assert.equal(title.writes.length,0);
+ const title=fixture({wrongTitle:true});await assert.rejects(title.flow.open({}),/ROLE_IDENTITY_MISMATCH/);assert.equal(title.writes.length,0);
 });
 test('a genuinely new task still opens the frozen original role first',async()=>{
  const f=fixture({prior:null});await f.flow.open({});const opened=f.calls.find(c=>c.method==='openPage');assert.equal(opened.pageUrl,detail);assert.equal(opened.pageId,undefined);assert.equal(f.state().originalRoleUrl,detail);

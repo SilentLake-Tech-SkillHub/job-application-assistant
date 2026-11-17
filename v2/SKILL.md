@@ -2,7 +2,7 @@
 name: job-application-assistant-v2
 description: Coordinate company-configured login and application MCP tools, stage checks and user review for confirmed recruiting roles. Use the single maintained V2 runtime for preparation and testing.
 metadata:
-  version: "2.0.0-alpha.63"
+  version: "2.0.0-alpha.64"
 ---
 
 # 岗位代投助手 V2
@@ -41,7 +41,7 @@ metadata:
 ## 接续与异常（所有环节）
 
 - 按 `continuation.owner/state` 接续：建库、映射、可恢复的技术缺口归 Agent，不交用户。Hook 不安排模型回合，由 Agent 读结果调下一个允许的工具；有允许的下一步就继续，不在每次部分填写后结束回合；不盲目重试没变化的失败。
-- 一家公司等用户时，其他公司照常推进；按公司记录用户等待和阻塞。派发本身不是执行证据。
+- 一家公司等用户时，其他公司照常推进；按公司记录用户等待和阻塞。派发本身不是执行证据。恢复已授权的原任务后直接接续，不再询问是否继续；结束前调用 company_batch_status 核对 actionable、waitingCompanies 和 agentWorkRemaining；还有 actionable 就按返回的原任务继续，不能用最后一家等待覆盖其它公司的可执行工作。
 - 登录 MCP 每次变更都执行确定性守卫，守卫失败即停止依赖它的动作。
 - 同一真实失败在同一任务或公司出现两次：本宿主在组件外登记表 `产品管理/Agent浏览器兜底登记.json` 里、且页面所在浏览器也登记时，返回 `continuation.state: agent_fallback`，按下文“Agent 浏览器兜底”调 `form_gui_fallback`；表外宿主、表外浏览器，或兜底后同一失败再出现，返回 `ask_user` 和 `repeatedFailure`：把字段和证据交给用户，其他公司继续。不锁任何东西；刷新、恢复或丢页不计次。
 - 分身没运行或没连上：Agent 直接调 `browser_initialize_chrome`（`authorization.evidence` 填当前任务授权原话）；断开、原端口不在：`browser_restore_chrome`。
@@ -90,6 +90,8 @@ metadata:
 - 记录规则：每家公司建库时，每个控件按统一格式记进这家公司的正式模板——类型、展开类型（不展开／弹出列表／输入后出候选／多级逐级展开）、操作方式；选择类控件记四块：字段外框、选择框（或点开它的按钮）、弹出的候选菜单、选中后显示的结果；多级控件按答案逐级展开，并记下到末级的路径。
 - 分类顺序：先按网页通用标注（ARIA）；标注不够时按识别出的招聘系统控件库（飞书、atsx／Ant、北森 phoenix）；两层都认不出，或交互测试同一原因失败两次，走下文“Agent 浏览器兜底”，手点的步骤写进这家公司的模板。只按控件种类和控件库写组件代码，不按公司写代码。
 - 实测通过才算记完。建库结果的 `controlSources` 列出由通用标注、控件库、兜底各做出几个控件，以及靠兜底的控件名。
+
+建库每次返回向用户说明当前阶段、该阶段本轮调用次数和实际缺口；阶段变化时简要汇报。新公司页面定义第一次提交后由组件保存接续，不反复重写。记录查询先用摘要，细节按 fieldId／section 和 offset／limit 读取；原始脚本用 form_script_search，不读整份结构。用户要求岗位数量时，company_batch_create 显式传 roleLimit，并读回 queue.tasks.length；companiesPerChannel 是通道公司容量，不是岗位数量。
 
 ### 公司模板与资料
 

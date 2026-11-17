@@ -215,9 +215,18 @@ def handle_continuation(event):
             return {}
         # Store only fixed routing metadata, never form values or website text.
         route = {k: result.get(k) for k in ['state', 'owner', 'requiresUser', 'shouldContinue', 'nextTools', 'reason', 'handoffVerified']}
+        inputs = event.get('tool_input') or event.get('arguments') or {}
+        if not isinstance(inputs, dict):
+            inputs = {}
+        scope = inputs.get('taskId') or inputs.get('companyId') or 'batch'
+        work = dict(old.get('workByScope') or {})
+        work[scope] = route
+        pending = [item for item in work.values() if item.get('owner') == 'agent' and item.get('shouldContinue')]
+        if pending:
+            route = {**pending[0], 'requiresUser': False}
         fingerprint = hashlib.sha256(json.dumps(route, sort_keys=True).encode()).hexdigest()
         STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
-        write_atomic(file, {**route, 'fingerprint': fingerprint,
+        write_atomic(file, {**route, 'workByScope': work, 'fingerprint': fingerprint,
                             'reminded': False, 'stopAttempts': 0,
                             'receiptRevision': old.get('receiptRevision', 0) + 1,
                             'lastTool': tool.split('__')[-1]})

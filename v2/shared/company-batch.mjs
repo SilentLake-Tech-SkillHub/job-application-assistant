@@ -13,7 +13,7 @@ export class CompanyBatch{
   const release=await acquireLease(leasePath(this.leaseRoot,'company-dispatch:'+this.store.root),{waitMs:30000,busyCode:'COMPANY_BATCH_BUSY'});
   try{return await this.createUnlocked(args);}finally{await release();}
  }
- async createUnlocked({rolesFile,companyPlan,authorizationRef,companiesPerChannel=10,parallelRoles=false,browserChannels}){
+ async createUnlocked({rolesFile,companyPlan,authorizationRef,companiesPerChannel=10,roleLimit,parallelRoles=false,browserChannels}){
   if(!authorizationRef?.trim())throw Error('BATCH_AUTHORIZATION_REQUIRED');
   if(!Number.isInteger(companiesPerChannel)||companiesPerChannel<1||companiesPerChannel>10)throw Error('INVALID_COMPANY_CHANNEL_CAPACITY');
   const {input}=await this.queues.inputAdapter({rolesFile,companyPlan});
@@ -22,7 +22,7 @@ export class CompanyBatch{
   const requested=browserChannels||(storedPolicy?.batchId===input.batchId?storedPolicy.browserChannels||undefined:undefined);
   const initialization=await this.browser?.executionCapabilities?.(),channelSelection=resolveBatchChannels(initialization,requested),channels=channelSelection.channels;
   await this.store.put('runs','batch-browser-policy',{batchId:input.batchId,browserChannels:channelSelection.requestedChannels,authorizationRef:browserChannels?authorizationRef:storedPolicy?.authorizationRef||authorizationRef});
-  const queue=await this.queues.import({rolesFile,companyPlan,batchPolicy:{mode:'parallel_companies',authorizationRef,companiesPerChannel,parallelRoles:!!parallelRoles}}),companies=[];
+  const queue=await this.queues.import({rolesFile,companyPlan,batchPolicy:{mode:'parallel_companies',authorizationRef,companiesPerChannel,...(roleLimit!==undefined?{roleLimit}:{}),parallelRoles:!!parallelRoles}}),companies=[];
   // Reordering or changing browser preferences never recreates task records.
   if(queue.reused&&index[queue.queueId]){try{const existing=await this.store.get('runs',index[queue.queueId]);if(!existing.closedAt){
    if(existing.queueHash!==queue.queueHash){
@@ -177,6 +177,18 @@ export class CompanyBatch{
    }
    return {...company,roleCount,protectedRoles};
   });
-  return {batchId:b.id,revision:b.revision,companiesPerChannel:b.companiesPerChannel,channels:b.channels,channelSelection:b.channelSelection,companies,submission:'not_performed'};
+  const actionable=[],waitingCompanies=[];
+  for(const company of companies){
+   if(['protected','closed_preparation','ready_for_user_review'].includes(company.status))continue;
+   if(company.status==='waiting_for_user'){waitingCompanies.push(company.companyId);continue;}
+   for(const task of b.companies.find(c=>c.companyId===company.companyId)?.tasks||[]){
+    if(live.get(task.taskId)?.protectedReason)continue;
+    let state;try{state=await this.queues.read(task.taskId);}catch(error){if(error.code!=='ENOENT')throw error;}
+    if(state?.status==='ready_for_user_review')continue;
+    if(state?.status==='needs_login'||state?.loginWait){waitingCompanies.push(company.companyId);break;}
+    actionable.push({companyId:company.companyId,roleId:task.roleId,taskId:task.taskId,queueId:b.queueId,queueHash:b.queueHash,nextTool:state?.status==='ready_to_fill'?'workflow_next':'role_advance'});break;
+   }
+  }
+  return {batchId:b.id,revision:b.revision,companiesPerChannel:b.companiesPerChannel,channels:b.channels,channelSelection:b.channelSelection,companies,actionable,waitingCompanies,agentWorkRemaining:actionable.length>0,submission:'not_performed'};
  }
 }

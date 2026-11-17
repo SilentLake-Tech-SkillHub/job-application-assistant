@@ -36,12 +36,14 @@ const compact=r=>({status:r?.status??null,error:r?.error??null});
 // deps：call(tool,args) 调用已登记工具本身（不经 Agent）；cycle()、pendingExpansions()、captureSelectors()、profile()、template()、update() 只读；
 // fallbackSurface() 按组件外登记表判断当前执行端与页面浏览器能否兜底。
 export async function runConstructionBuild({deps,task,authorization,primary=null,evidence=null,page=null,maxSteps=MAX_CONSTRUCTION_STEPS}){
+ if(page&&deps.savePage)await deps.savePage(page);
+ page||=(await deps.update?.())?.pageDefinition||null;
  const {companyId,captureId,pageUrl,queue}=task,steps=[],agentItems=[],userItems=[],fallbackItems=[];
- let primaryUsed=false,retests=0;
- const call=async(tool,args)=>{const r=await deps.call(tool,args);steps.push({tool,...compact(r)});return r;};
+ let primaryUsed=false,retests=0,lastFailure=null;
+ const call=async(tool,args)=>{const r=await deps.call(tool,args);if(r.error)lastFailure=r;steps.push({tool,...compact(r)});return r;};
  const done=(status,extra={})=>({status,companyId,steps:steps.length,lastSteps:steps.slice(-8),agentItems,userItems,fallbackItems,
   records:{capture:'capture-'+companyId,structure:'form-structure-'+companyId,visual:'form-visual-'+companyId,coverage:'form-coverage-'+companyId,update:'form-update-'+companyId,template:companyId},
-  ...extra,submission:'not_performed'});
+  ...(extra.error&&lastFailure?{failureEvidenceId:lastFailure.failureEvidenceId,details:lastFailure.details}:{}),...extra,progress:{stage:extra.stage||status,internalSteps:steps.length,completed:status==='company_template_ready'},submission:'not_performed'});
  const testAuth={prepare:true,evidence:authorization.evidence,uploads:authorization.uploads===true,sensitiveFields:authorization.sensitiveFields===true};
  for(let i=0;i<maxSteps;i++){
   const cycle=await deps.cycle();
@@ -54,7 +56,11 @@ export async function runConstructionBuild({deps,task,authorization,primary=null
     primaryUsed=true;
     const r=await call('form_review_completeness',{companyId,captureId,reviewedSelectors:await deps.captureSelectors(),primary,findings:[],evidence});
     if(r.error)return done('blocked',{stage:cycle.stage,error:r.error});
-    if(r.status==='needs_backfill')return done('needs_acquisition',{stage:cycle.stage,reason:'PRIMARY_REVIEW_GAPS',nextTools:['form_construct_acquire']});
+    if(r.status==='needs_backfill'){
+     const gaps=r.primary?.findings||r.findings||[];
+     agentItems.push(...gaps.map(gap=>({kind:'primary_gap',...gap})));
+     return done('needs_acquisition',{stage:cycle.stage,reason:'PRIMARY_REVIEW_GAPS',gaps,nextTools:['form_construct_acquire']});
+    }
     continue;
    }
    case 'section_expansion':{
@@ -82,7 +88,7 @@ export async function runConstructionBuild({deps,task,authorization,primary=null
     if(!b.readyToRegister){
      const pending=(b.pending||[]).map(p=>({kind:p.kind==='answer'?'user_answer':'template_gap',id:p.id||null,label:p.label||null,source:p.source||null,reason:p.reason||p.kind||null}));
      agentItems.push(...agent,...pending.filter(p=>p.kind!=='user_answer'));userItems.push(...pending.filter(p=>p.kind==='user_answer'));
-     return done(agentItems.length?'needs_agent':'needs_user',{stage:cycle.stage,blockers:(b.blockers||[]).length,nextTools:agentItems.length?['profile_map_questions','form_construct_build']:['profile_record_answers','form_construct_build']});
+     return done(agentItems.length?'needs_agent':'needs_user',{stage:cycle.stage,blockers:b.blockers||[],blockerCount:(b.blockers||[]).length,nextTools:agentItems.length?['profile_map_questions','form_construct_build']:['profile_record_answers','form_construct_build']});
     }
     const reg=await call('template_register',{companyId,templateId:b.templateId,templateHash:b.templateHash});
     if(reg.error)return done('blocked',{stage:cycle.stage,error:reg.error});

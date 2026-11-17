@@ -53,7 +53,7 @@ export async function recordOutcome({tool,phase,args,result,env=process.env}){
  const dir=stopLossDir(env),scope=scopeOf(args);if(!dir||!scope)return result;
  const file=fileFor(dir,scope,tool),reasons=failureReasons(result);
  if(!reasons.length){if(await load(file))await save(file,{scope,tool,count:0,clearedAt:new Date().toISOString()});return result;}
- if(reasons.every(reason=>TRANSIENT_BROWSER_ERRORS.has(reason)||['BROWSER_OPERATION_FAILED','BROKER_RUNTIME_ERROR'].includes(reason)||NOT_A_FILL_FAILURE.test(reason)))return result;
+ if(reasons.every(reason=>TRANSIENT_BROWSER_ERRORS.has(reason)||['BROWSER_OPERATION_FAILED','BROKER_RUNTIME_ERROR','COMPANY_FORM_ASSET_MISSING','NO_COMPANY_FORM_ASSET','ROLE_IDENTITY_MISMATCH','ROLE_PAGE_LOCATION_MISMATCH','ROLE_OR_LOGIN_STATE_CHANGED_BEFORE_FILL','LOGIN_RETURN_ROLE_VERIFICATION_FAILED'].includes(reason)||NOT_A_FILL_FAILURE.test(reason)))return result;
  const inputHash=await evidenceArgsHash(tool,phase,args,env),signature=sha({tool,reasons,args:inputHash,source:source(env)}),old=await load(file);
  const count=old?.signature===signature?old.count+1:1,evidence=[result.failureEvidenceId,result.id,result.runId,...(Array.isArray(result.results)?result.results.map(r=>r?.id||r?.runId):[])].filter(x=>typeof x==='string');
  const entry={scope,tool,signature,count,reasons,source:source(env),argsHash:inputHash,evidenceIds:[...new Set([...(old?.signature===signature?old.evidenceIds||[]:[]),...evidence])].slice(-5),lastAt:new Date().toISOString()};

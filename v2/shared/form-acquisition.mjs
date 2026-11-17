@@ -5,7 +5,10 @@ export function acquisitionPlan(plan, provider) {
 }
 
 export async function detectedAcquisitionPlan(page,plan,provider){
- const observed=await page.observe({fields:[],groups:[{id:'ant',selector:'form.ant-form .ant-form-item'},{id:'feishu',selector:'.atsx-form-item[data-cy]'},{id:'phoenix',selector:'.form-item--phoenix'}]});
+ const observed=await page.observe({fields:[],groups:[{id:'ant',selector:'form.ant-form .ant-form-item'},{id:'feishu',selector:'.atsx-form-item[data-cy]'},{id:'phoenix',selector:'.form-item--phoenix'},{id:'formily',selector:'.ud-formily-item'}]});
+ // Formily and atsx can be hosted by the same ATS. Select the DOM reader by
+ // observed controls; the atsx reader cannot read Formily questions.
+ if(observed.groups?.formily>0&&!observed.groups?.feishu&&(!provider||provider==='feishu'))return acquisitionPlan(plan,'phoenix');
  const found=['ant','feishu','phoenix'].filter(key=>observed.groups?.[key]>0);
  if(!provider&&found.length>1)throw Error('FORM_PROVIDER_AMBIGUOUS');
  if(provider&&found.length&&!found.includes(provider))throw Error('FORM_PROVIDER_EVIDENCE_MISMATCH');

@@ -28,6 +28,8 @@ export function contractAuditSummary(audit){const {fields,ready,...summary}=audi
 // also consumed by the host Hook; nextTools alone is not a lifecycle contract.
 export function workflowEnvelope(data){
  if(!data||typeof data!=='object')return data;
+ if(['ROLE_OR_LOGIN_STATE_CHANGED_BEFORE_FILL','LOGIN_RETURN_ROLE_VERIFICATION_FAILED','ROLE_IDENTITY_MISMATCH','ROLE_PAGE_LOCATION_MISMATCH'].includes(data.error))return {...data,completion:{complete:false,status:'role_recovery_required',scope:'preparation'},continuation:{state:'login',owner:'agent',requiresUser:false,shouldContinue:true,continueWithOtherCompanies:true,nextTools:[data.details?.nextTool||'role_advance'],reason:data.error,retry:'only_after_evidence_or_inputs_change'}};
+ if(data.error==='ROLE_IDENTITY_CAPTURE_GROUP_REQUIRED')return {...data,continuation:{state:'construct',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['form_construct_build'],reason:data.error}};
  const acquisitionNext={CURRENT_VISUAL_INVENTORY_REQUIRED:['form_capture_visual'],VISUAL_FORM_PAGE_CHANGED:['form_capture_visual'],CURRENT_VISUAL_REA_PAIR_REQUIRED:['capture_rea_structure','form_review_completeness'],PRIMARY_CONTROL_REVIEW_REQUIRED:['form_cycle_status'],FORM_SECTION_EXPANSION_REQUIRED:['form_expand_sections'],SECTION_EXPANSION_REOBSERVATION_REQUIRED:['form_capture_visual','capture_rea_structure'],CURRENT_COMPANY_UPDATE_REQUIRED:['form_build_template','template_register'],CURRENT_CONSTRUCTION_DRAFT_REQUIRED:['form_build_template','template_register']}[data.error];
  if(acquisitionNext)return {...data,continuation:{state:'construct',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:acquisitionNext,reason:data.error}};
  if(['PREPARED_PLAN_NOT_FOUND','PREPARED_PLAN_HASH_MISMATCH'].includes(data.error)){
@@ -95,17 +97,20 @@ export function stageResult(tool,data){
 // before the handler runs, so no browser, profile or queue state is touched.
 export async function executeWorkflowOperation(tool,args,handler,{env=process.env,context}={}){
  if(!inspections.has(tool)&&!stages[tool])throw Error('WORKFLOW_STAGE_DECLARATION_REQUIRED:'+tool);
- const startedAt=Date.now();let result;
+ const startedAt=Date.now();let result,thrown;
+ try{
  if(hostRole(env)==='maintainer'&&!inspections.has(tool))result={...stageResult(tool,maintainerRefusal(tool)),isError:true};
  else {
   result=await handler(args,context);
   if(!inspections.has(tool))result=await recordOutcome({tool,phase:stages[tool][0],args,result:stageResult(tool,result),env});
  }
- await recordCall({tool,args,startedAt,bytes:Buffer.byteLength(JSON.stringify(result)),isError:result?.isError===true,env});
  return result;
+ }catch(error){thrown=error;throw error;}
+ finally{await recordCall({tool,args,startedAt,bytes:Buffer.byteLength(JSON.stringify(result??{error:thrown?.message||'OPERATION_FAILED'})),isError:!!thrown||result?.isError===true,env});}
 }
 
 export function technicalHandoffReasons(source){
+ if(source.operation==='mcp_error'&&['ROLE_OR_LOGIN_STATE_CHANGED_BEFORE_FILL','LOGIN_RETURN_ROLE_VERIFICATION_FAILED','ROLE_IDENTITY_MISMATCH','ROLE_PAGE_LOCATION_MISMATCH'].includes(source.error))return [source.error];
  const drivers=new Set(['PRIVACY_FILL_KERNEL_REQUIRED','ROLE_BROWSER_PAGE_LOST','ROLE_EXISTING_PAGE_NOT_FOUND','EXISTING_PAGE_NOT_FOUND','ANT_DATE_NAVIGATION_UNSTABLE','APPLICATION_ENTRY_ROLE_CHANGED','APPLICATION_ENTRY_RESULT_ROLE_CHANGED','APPLICATION_ENTRY_PATH_REQUIRED','APPLICATION_ENTRY_BUTTON_CHANGED','ROLE_FORM_NOT_OPEN','ROLE_EXISTING_PAGE_NOT_UNIQUE','CONTROL_DRIVER_REQUIRED','DATE_DRIVER_CONTRACT_REQUIRED','UPLOAD_SITE_READBACK_REQUIRED','SEARCHABLE_TEXT_COMMIT_CONTRACT_REQUIRED','MULTISELECT_DRIVER_CONTRACT_REQUIRED','SUBMISSION_BUTTON_NOT_UNIQUE_OR_ENABLED','SUBMISSION_PREVIEW_DRIVER_REQUIRED','SUBMISSION_PREVIEW_TRANSITION_NOT_OBSERVED','SUBMISSION_PREVIEW_BUTTON_NOT_UNIQUE','SUBMISSION_AGREEMENT_TARGET_REQUIRED','SUBMISSION_AGREEMENT_NOT_COMMITTED']);
  // Bad arguments, missing mappings and unfinished construction are ordinary
  // Agent work. A stored error alone does not make them supervisor blockers.
