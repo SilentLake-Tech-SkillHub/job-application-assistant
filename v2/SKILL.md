@@ -2,7 +2,7 @@
 name: job-application-assistant-v2
 description: Coordinate company-configured login and application MCP tools, stage checks and user review for confirmed recruiting roles. Use the single maintained V2 runtime for preparation and testing.
 metadata:
-  version: "2.0.0-alpha.67"
+  version: "2.0.0-alpha.68"
 ---
 
 # 岗位代投助手 V2
@@ -23,6 +23,8 @@ metadata:
 对话 ID 和回合 ID 只用于本轮提示和接续记录，不决定 Agent 身份或调用资格；新对话、分支沿用已登记的 Agent 或 Agent 组身份，另注册实例走宿主安装器，组成员各自保留编码。可选的对话预加载见 [conversation hooks](docs/conversation-hooks.md)。
 
 先读取 browser_preferences：设置空时询问用户，clone使用原分身，main只允许登记的主用Chrome插件；不涉及内置浏览器，不搬迁分身目录。用户换浏览器时以原话设置组件外文件。
+
+主用Chrome按当前Agent登记的具体插件连接：Codex用ChatGPT、Claude用Claude、Kimi用Kimi；新增Agent如有插件能力，注册时一并登记。browser_preferences返回extension；host_sdk由当前宿主自己的扩展工具上下文加载正式桥接，再调用初始化和原任务，不使用其它宿主的插件。安装、桥接与泵送方法见 [宿主对应扩展](docs/host-extensions.md)。
 
 ## 环节表
 

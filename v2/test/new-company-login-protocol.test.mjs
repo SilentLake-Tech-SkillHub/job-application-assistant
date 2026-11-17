@@ -1,6 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,writeFile,rm,mkdir,readFile} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {fileURLToPath} from 'node:url';import {Client} from '@modelcontextprotocol/sdk/client/index.js';import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {companyDoc,site,role,confirm,saveCompany,saveLogin} from './fixtures/handoff.mjs';
-test('new company entry reaches its browser without requiring an application template first',{timeout:10000},async()=>{
+test('new company entry reaches its browser without requiring an application template first',{timeout:20000},async()=>{
+ const businessStartedAt=Date.now();
  const root=path.dirname(path.dirname(fileURLToPath(import.meta.url))),d=await mkdtemp(path.join(os.tmpdir(),'new-company-mcp-')),profile=path.join(d,'profile.json'),c=new Client({name:'new-company-regression',version:'1'});
  await writeFile(profile,JSON.stringify({schemaVersion:1,facts:{'contact.phone.cn':{status:'known',value:'13800001234',sourceIds:['synthetic']}},sources:{synthetic:{}},entities:{}}));
  // 交接区：公司宽表（用户已确认）；第 2 步前登录配置仍按域名放在公司文件夹（组件包内不携带公司目录）
@@ -16,5 +17,6 @@ test('new company entry reaches its browser without requiring an application tem
   await mkdir(path.join(d,'application','runs'),{recursive:true});await writeFile(path.join(d,'application','runs','browser-channel-bindings.json'),JSON.stringify({'https://arashivision.jobs.feishu.cn':{channel:'chrome',batchId:'test-confirmed-batch',companyId:'S0007'}}));
   const q=JSON.parse(queue.content[0].text);assert.deepEqual(q.tasks.map(t=>[t.companyId,t.companyCode,t.roleId]),[['C00003','C00003','J000009']]);const r=await c.callTool({name:'role_open',arguments:{queueId:q.queueId,queueHash:q.queueHash,taskId:q.tasks[0].taskId}},undefined,{timeout:3000});
   assert.equal(JSON.parse(r.content[0].text).error,'BROWSER_HOST_NOT_AVAILABLE');
+  assert.ok(Date.now()-businessStartedAt<10000,'startup and original role entry must remain within the existing 10s budget; process teardown has its own test allowance');
  }finally{await c.callTool({name:"component_runtime",arguments:{action:"stop"}}).catch(()=>{});await c.close();await rm(d,{recursive:true,force:true});}
 });

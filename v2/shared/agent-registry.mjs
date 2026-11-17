@@ -4,9 +4,12 @@ import path from 'node:path';
 import {acquireLease,defaultLeaseRoot,leasePath} from './leases.mjs';
 
 const identifier=/^[a-z][a-z0-9-]{1,63}$/;
-export async function registerAgent({workspace,host,instance,mode='independent',group=null}){
+export async function registerAgent({workspace,host,instance,mode='independent',group=null,extension}){
  if(!path.isAbsolute(workspace||'')||!identifier.test(host||'')||!identifier.test(instance||''))throw Error('AGENT_STABLE_IDENTITY_REQUIRED');
  if(!['independent','multi_agent'].includes(mode)||(mode==='multi_agent'?!identifier.test(group||''):group!==null))throw Error('AGENT_REGISTRATION_MODE_INVALID');
+ const [{loadAdapter},{registerHostExtension,validateExtension}]=await Promise.all([import('../host/adapters/registry.mjs'),import('./host-extension.mjs')]);
+ const adapter=await loadAdapter(host),plugin=extension||adapter.mainChromeExtension;if(plugin)validateExtension(plugin);
+ const registerPlugin=async()=>{if(plugin)await registerHostExtension({workspace,hostId:host,agent:adapter.displayName,extension:plugin});};
  const file=path.join(workspace,'.runtime','agents.json');
  const release=await acquireLease(leasePath(defaultLeaseRoot(),'agent-registry:'+file),{waitMs:30000,busyCode:'AGENT_REGISTRY_BUSY'});
  let temp;
@@ -19,6 +22,7 @@ export async function registerAgent({workspace,host,instance,mode='independent',
   const existing=Object.values(doc.agents).find(agent=>agent.host===host&&agent.instance===instance&&agent.group===group);
   if(existing){
    if(existing.mode!==mode)throw Error('AGENT_REGISTRATION_MODE_CONFLICT');
+   await registerPlugin();
    return existing;
   }
   if(doc.next>9999)throw Error('AGENT_CODE_RANGE_EXHAUSTED');
@@ -31,6 +35,7 @@ export async function registerAgent({workspace,host,instance,mode='independent',
   temp=file+'.'+randomUUID()+'.tmp';
   await writeFile(temp,JSON.stringify(doc,null,2)+'\n',{mode:0o600,flag:'wx'});
   await rename(temp,file);
+  await registerPlugin();
   return agent;
  }finally{
   try{if(temp)await unlink(temp).catch(error=>{if(error.code!=='ENOENT')throw error;});}

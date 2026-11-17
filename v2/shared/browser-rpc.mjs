@@ -14,7 +14,7 @@ export class BrokerBrowserAdapter {
     const normalize=v=>typeof v==='string'&&v.startsWith('phoenixq:')?normalizePhoenixReference(v):Array.isArray(v)?v.map(normalize):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,normalize(x)])):v;
     args=normalize(args);
     await this.assertCurrentHost(method);
-    const data=JSON.stringify({method,args});
+    const data=JSON.stringify({method,args,hostId:process.env.RECRUITING_HOST_ID||null});
     const result=await retryBrowserOperation(()=>new Promise((resolve,reject)=>{
       const req=http.request({socketPath:this.socketPath,path:'/rpc',method:'POST',headers:{'content-type':'application/json','content-length':Buffer.byteLength(data)}},res=>{
         const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>{try{resolve(JSON.parse(Buffer.concat(chunks)));}catch{reject(Error('INVALID_BROWSER_HOST_RESPONSE'));}});

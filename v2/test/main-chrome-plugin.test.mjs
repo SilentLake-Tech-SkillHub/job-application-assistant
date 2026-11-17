@@ -5,23 +5,26 @@ import {spawn,execFile} from 'node:child_process';import {promisify} from 'node:
 import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';
 import {executorCapability} from '../shared/browser-environment.mjs';
 import {resolveBatchChannels} from '../shared/channel-policy.mjs';
+import {registerHostExtension} from '../shared/host-extension.mjs';
 test('the actual bootstrap launch chain passes workspace selection to its dormant broker',async()=>{
  const root=await mkdtemp('/tmp/c48-launch-'),socket=path.join(root,'host.sock');
  await mkdir(path.join(root,'产品管理'));await writeFile(path.join(root,'产品管理','浏览器设置.json'),JSON.stringify({schemaVersion:1,choice:'main'}));
+ await registerHostExtension({workspace:root,hostId:'codex',extension:{id:'chatgpt',name:'ChatGPT',transport:'host_sdk'}});
  const rpc=body=>new Promise((resolve,reject)=>{const req=http.request({socketPath:socket,path:'/rpc',method:'POST'},res=>{const chunks=[];res.on('data',x=>chunks.push(x));res.on('end',()=>resolve(JSON.parse(Buffer.concat(chunks))));});req.on('error',reject);req.end(JSON.stringify(body));});
  try{
   await promisify(execFile)(process.execPath,['--input-type=module','-e',"import {bootstrapRuntime} from './shared/bootstrap.mjs';await bootstrapRuntime({workspace:process.argv[1]});",root],{timeout:15000,env:{PATH:process.env.PATH,HOME:process.env.HOME,RECRUITING_BROWSER_MODE:'cdp',RECRUITING_CDP_URL:'http://127.0.0.1:9',RECRUITING_BROWSER_SOCKET:socket}});
-  assert.equal((await rpc({method:'wait',args:{ms:1}})).error,'BROWSER_RESTORE_REQUIRED');
+  assert.equal((await rpc({method:'wait',args:{ms:1},hostId:'codex'})).error,'HOST_EXTENSION_BRIDGE_REQUIRED');
  }finally{await rpc({method:'shutdown'}).catch(()=>{});await rm(root,{recursive:true,force:true});}
 });
 test('a broker started with the configured handoff directory reads main Chrome selection before any operation',async()=>{
  const root=await mkdtemp(path.join(os.tmpdir(),'c48-broker-')),socket=path.join(root,'host.sock');
  await mkdir(path.join(root,'产品管理'));await writeFile(path.join(root,'产品管理','浏览器设置.json'),JSON.stringify({schemaVersion:1,choice:'main'}));
+ await registerHostExtension({workspace:root,hostId:'codex',extension:{id:'chatgpt',name:'ChatGPT',transport:'host_sdk'}});
  const child=spawn(process.execPath,['shared/browser-host.mjs',socket],{env:{PATH:process.env.PATH,HOME:process.env.HOME,RECRUITING_BROWSER_MODE:'cdp',RECRUITING_CDP_URL:'http://127.0.0.1:9',RECRUITING_HANDOFF_DIR:path.join(root,'岗位交接')},stdio:['ignore','pipe','pipe']});
  const rpc=(url,body)=>new Promise((resolve,reject)=>{const r=http.request({socketPath:socket,path:url,method:body?'POST':'GET',headers:{'content-type':'application/json'}},s=>{const chunks=[];s.on('data',c=>chunks.push(c));s.on('end',()=>resolve(JSON.parse(Buffer.concat(chunks))));});r.on('error',reject);r.end(body?JSON.stringify(body):undefined);});
  try{
   let ready=false;for(let i=0;i<100;i++){try{await rpc('/health');ready=true;break;}catch{await new Promise(r=>setTimeout(r,30));}}
-  assert.equal(ready,true);const r=await rpc('/rpc',{method:'wait',args:{ms:1}});assert.equal(r.error,'BROWSER_RESTORE_REQUIRED');
+  assert.equal(ready,true);const r=await rpc('/rpc',{method:'wait',args:{ms:1},hostId:'codex'});assert.equal(r.error,'HOST_EXTENSION_BRIDGE_REQUIRED');
  }finally{child.kill('SIGTERM');await new Promise(resolve=>child.exitCode!==null?resolve():child.once('exit',resolve));await rm(root,{recursive:true,force:true});}
 });
 test('the pinned selector engine loads as valid browser code without starting Chromium',()=>{

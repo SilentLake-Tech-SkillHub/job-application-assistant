@@ -111,10 +111,10 @@ export async function pluginInspectionEndpoint(page){
  return {endpoint:'ws://127.0.0.1:'+server.address().port+'/'+token,close:async()=>{for(const c of sockets.clients)c.terminate();await new Promise(r=>sockets.close(r));await new Promise(r=>server.close(r));}};
 }
 export class MainChromePluginAdapter extends BrowserAdapter{
- constructor({transport=new PluginTransport(),screenshotDir}={}){super('agent-plugin-main-chrome',{screenshotDir});this.transport=transport;this.pages=new Map();this.state='new';this.executor={verified:false};}
+ constructor({transport,extension,screenshotDir}={}){super('agent-plugin-main-chrome',{screenshotDir});if(!transport)throw Error('HOST_EXTENSION_TRANSPORT_REQUIRED');this.transport=transport;this.extension=extension;this.pages=new Map();this.state='new';this.executor={verified:false};}
  async connect(){
   const status=await this.transport.status();if(!status.extension_connected){this.state='disconnected';this.executor.verified=false;throw Error('MAIN_CHROME_PLUGIN_NOT_CONNECTED');}
-  if(!this.executor.verified)this.executor={provider:'agent_plugin_main_chrome',verified:true,sessionId:randomUUID(),profileProof:'user_selected_registered_extension'};
+  if(!this.executor.verified)this.executor={provider:'agent_plugin_main_chrome',verified:true,sessionId:randomUUID(),profileProof:'user_selected_registered_extension',...(this.extension?{hostId:this.extension.hostId,extensionId:this.extension.id,extensionName:this.extension.name,browserType:'extension'}:{})};
   const result=await this.transport.call('list_browser_tabs');const current=new Set();for(const tab of result.tabs||[]){const key='main-'+tab.tabId;current.add(key);const p=this.pages.get(key)||new PluginPage(this,tab);p.currentUrl=tab.url;p.closed=false;this.pages.set(key,p);this.pageIds.set(key,p);}for(const[key,p]of this.pages)if(!current.has(key))p.closed=true;
   this.state='connected';this.connection={contexts:()=>[{pages:()=>[...this.pages.values()].filter(p=>!p.closed),newPage:async()=>new PluginPage(this,{tabId:null,url:'about:blank'})}],isConnected:()=>true};return this.connection;
  }

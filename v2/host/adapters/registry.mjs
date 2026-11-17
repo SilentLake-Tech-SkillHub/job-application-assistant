@@ -9,10 +9,11 @@
 //   browsers: {iab:{declared:boolean, exposure:'code'|'agent_only'|'unverified', evidence:string}}
 //             Only the host's built-in browser. The Chrome channel is the component's own dedicated
 //             Chrome clone (shared/chrome-clone.mjs), identical on every host; extensions in the user's
-//             daily Chrome are never part of the flow, so adapters do not describe them.
+//             mainChromeExtension separately declares the host's own extension capability; deployed ownership stays in the external registry.
+//   mainChromeExtension?: {id,name,transport:'host_sdk'|'webbridge'} — plugin capability registered during installation.
 //   vision: {sampling:'supported'|'unsupported'|'unverified', evidence}
 //   connect?: async (hostContext) => ({agent:{browsers:{list,get}}, fileUpload, screenshot})  only when some exposure is 'code'
-export const HOST_IDS=['codex','claude-code','antigravity','kimi-code','zcode','dsh'];
+export const HOST_IDS=['codex','claude-code','antigravity','kimi-code','kimi-work','zcode','dsh'];
 export async function loadAdapter(id){
  if(!/^[a-z][a-z0-9-]{1,31}$/.test(id||''))throw Error('UNKNOWN_HOST_ADAPTER');
  if(!HOST_IDS.includes(id))return {

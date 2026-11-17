@@ -1,5 +1,8 @@
-import {MainChromePluginAdapter} from './main-chrome-plugin.mjs';
+import {MainChromePluginAdapter,PluginTransport} from './main-chrome-plugin.mjs';
 import {browserPreferences} from './browser-preferences.mjs';
+import {loadFallbackRegistry,fallbackRegistryFile} from './gui-fallback.mjs';
+import {resolveHostExtension,extensionSocketPath,assertExtensionExecutor} from './host-extension.mjs';
+import {loadAdapter} from '../host/adapters/registry.mjs';
 import {configurePaths} from './runtime-paths.mjs';
 import {genericSourceManifest} from './runtime-identity.mjs';
 import {installBrokerDiagnostics} from './broker-diagnostics.mjs';
@@ -37,6 +40,12 @@ const cloneLauncher=hostMode==='cdp'?async({restoreLastSession}={})=>launchClone
 if(hostMode==='cdp'&&process.env.RECRUITING_BROWSER_PROFILE_DIR){const config=cloneConfig(process.env);if(new URL(process.env.RECRUITING_CDP_URL).port!==String(config.port))throw Error('CHROME_CLONE_CONFIG_MISMATCH');}
 const cloneBrowser=new BrowserAdapter(hostMode==='cdp'?(process.env.RECRUITING_CDP_URL):hostMode==='iab'?'managed-iab':'managed-chrome',{profileDir:process.env.RECRUITING_BROWSER_PROFILE_DIR,screenshotDir:path.join(path.dirname(socketPath),'screenshots'),cloneLauncher});
 let browser=cloneBrowser,mainBrowser=null,selectedBrowser='clone';
+let mainExtensionKey=null;
+const nativeExtensionCall=(extension,method,args)=>new Promise((resolve,reject)=>{
+ const request=http.request({socketPath:extensionSocketPath(socketPath,extension.hostId),path:'/rpc',method:'POST',headers:{'content-type':'application/json'}},response=>{
+  const chunks=[];response.on('data',c=>chunks.push(c));response.on('end',()=>{try{const result=JSON.parse(Buffer.concat(chunks));if(result.error)reject(Error(result.error));else resolve(result.data);}catch(e){reject(e);}});
+ });request.on('error',()=>reject(Error('HOST_EXTENSION_BRIDGE_REQUIRED')));request.setTimeout(105000,()=>request.destroy(Error('HOST_EXTENSION_OPERATION_TIMEOUT')));request.end(JSON.stringify({method,args}));
+});
 // pageTools：本进程代码支持的标签操作。浏览器主控进程不随 MCP 重载，旧进程没有这些操作；工具调用前按它判断。
 const residentSource=await genericSourceManifest();
 // activeOperations：正在处理的请求数。业务核心 reload 时据此判断主控是否空闲，空闲才换新主控（C43）。
@@ -48,14 +57,25 @@ const server=http.createServer(async(req,res)=>{
   res.setHeader('content-type','application/json');
   if(req.url==='/health'){res.end(JSON.stringify(status()));return;}
   if(req.method!=='POST'||req.url!=='/rpc'){res.writeHead(404).end('{}');return;}
-  let method,args;activeOperations++;
+  let method,args,hostId;activeOperations++;
   try{
     const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>8*1024*1024)throw Error('REQUEST_TOO_LARGE');chunks.push(chunk);}
-    ({method,args={}}=JSON.parse(Buffer.concat(chunks)));let data;
+    ({method,args={},hostId}=JSON.parse(Buffer.concat(chunks)));let data;
     if(process.env.RECRUITING_WORKSPACE_ROOT&&method!=='shutdown'){
       const preference=await browserPreferences();
-      if(['initializeConfiguredChrome','restoreConfiguredChrome'].includes(method)&&preference.choice==='main'){
-        mainBrowser||=new MainChromePluginAdapter({screenshotDir:path.join(path.dirname(socketPath),'screenshots')});browser=mainBrowser;selectedBrowser='main';
+      if(preference.choice==='main'){
+        const extension=resolveHostExtension({registry:await loadFallbackRegistry(fallbackRegistryFile()),hostId,capability:(await loadAdapter(hostId)).mainChromeExtension});
+        if(extension.transport==='host_sdk'){
+          let nativeStatus;try{nativeStatus=assertExtensionExecutor(await nativeExtensionCall(extension,'status',{}),extension);}catch(error){
+            if(method==='status'&&error.message==='HOST_EXTENSION_BRIDGE_REQUIRED'){res.end(JSON.stringify({data:{state:'host_extension_required',mode:'agent_plugin',expectedExtension:extension,reason:error.message,nextTool:'registerMainChromeExtension'}}));return;}
+            throw error;
+          }
+          data=method==='status'?nativeStatus:await nativeExtensionCall(extension,method,args);res.end(JSON.stringify({data}));return;
+        }
+        if(['initializeConfiguredChrome','restoreConfiguredChrome'].includes(method)){
+          const key=JSON.stringify(extension);if(mainExtensionKey!==key){mainBrowser=new MainChromePluginAdapter({transport:new PluginTransport({...(extension.endpoint?{endpoint:extension.endpoint}:{})}),extension,screenshotDir:path.join(path.dirname(socketPath),'screenshots')});mainExtensionKey=key;}
+          browser=mainBrowser;selectedBrowser='main';
+        }else if(mainExtensionKey!==JSON.stringify(extension)&&method!=='status')throw Error('BROWSER_RESTORE_REQUIRED');
       }else if(['initializeConfiguredChrome','restoreConfiguredChrome'].includes(method)&&preference.choice==='clone'){browser=cloneBrowser;selectedBrowser='clone';}
       else if(preference.choice&&preference.choice!==selectedBrowser&&method!=='status')throw Error('BROWSER_RESTORE_REQUIRED');
     }

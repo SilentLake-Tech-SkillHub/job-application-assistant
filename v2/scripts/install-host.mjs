@@ -17,6 +17,7 @@ import path from 'node:path';
 import {loadAdapter} from '../host/adapters/registry.mjs';
 import {acquireLease,defaultLeaseRoot,leasePath} from '../shared/leases.mjs';
 import {registerAgent} from '../shared/agent-registry.mjs';
+import {registerHostExtension,validateExtension} from '../shared/host-extension.mjs';
 import {DEFAULT_CDP_PORT} from '../shared/chrome-clone.mjs';
 export const SERVER_NAMES={login:'recruiting-login-v2',application:'recruiting-application-v2'};
 // Keys that no code reads any more, or that would override the capability file. Removed on install.
@@ -255,8 +256,10 @@ function mergeDshPatch(patch,entries,workspace){
  if(added.length)doc.add({insert:added});
  return doc.toString();
 }
-export async function installHost({host,workspace,role,node=process.execPath,component=path.resolve(fileURLToPath(new URL('..',import.meta.url))),write=false,expectSha=null,home=homedir(),uid,scope,configFile,agent}){
+export async function installHost({host,workspace,role,node=process.execPath,component=path.resolve(fileURLToPath(new URL('..',import.meta.url))),write=false,expectSha=null,home=homedir(),uid,scope,configFile,agent,extension}){
  const adapter=await loadAdapter(host),cfg=adapter.mcpConfig;
+ const hostExtension=extension||adapter.mainChromeExtension;if(hostExtension)validateExtension(hostExtension);
+ const extensionRegistration=async()=>hostExtension?registerHostExtension({workspace,hostId:host,agent:adapter.displayName,extension:hostExtension}):null;
  if(scope&&!['project','user'].includes(scope)||scope==='project'&&!cfg.project||scope==='user'&&!cfg.user)throw Error('HOST_CONFIG_SCOPE_UNAVAILABLE');
  const project=scope?scope==='project':!!cfg.project;
  const target=configFile?path.resolve(configFile):project?path.join(workspace,cfg.project):path.join(home,cfg.user.replace(/^~\//,''));
@@ -298,9 +301,9 @@ export async function installHost({host,workspace,role,node=process.execPath,com
   }
  }
  const result={host,target,format:cfg.format,inWorkspace,currentSha,changed:next!==current,env,roleSource,shellEnvironment,shellEnvironmentManaged:!!cfg.shellRolePath};
- if(!write)return {...result,written:false,preview:next};
+ if(!write)return {...result,written:false,preview:next,extension:hostExtension||null};
  if(!inWorkspace&&expectSha!==currentSha)throw Error('USER_CONFIG_CHANGED_OR_SHA_REQUIRED');
- if(next===current)return {...result,written:false};
+ if(next===current)return {...result,written:false,extensionRegistration:await extensionRegistration()};
  const release=await acquireLease(leasePath(defaultLeaseRoot(),'host-config:'+path.resolve(target)),{waitMs:30000,busyCode:'HOST_CONFIG_BUSY'});
  let temp;
  try{
@@ -314,15 +317,16 @@ export async function installHost({host,workspace,role,node=process.execPath,com
   try{if(temp)await unlink(temp).catch(error=>{if(error.code!=='ENOENT')throw error;});}
   finally{await release();}
  }
- return {...result,written:true,newSha:sha(next)};
+ return {...result,written:true,newSha:sha(next),extensionRegistration:await extensionRegistration()};
 }
 if(import.meta.url===pathToFileURL(process.argv[1]||'').href){
  const args=process.argv.slice(2),flag=n=>{const i=args.indexOf('--'+n);return i>=0?args[i+1]:undefined;};
  try{
   const workspace=flag('workspace'),host=flag('host'),instance=flag('instance'),configFile=flag('config-file'),write=args.includes('--write');
   if(instance&&write&&instance!=='default'&&!configFile)throw Error('AGENT_INSTANCE_CONFIG_FILE_REQUIRED');
-  const agent=instance&&write?await registerAgent({workspace,host,instance,mode:flag('mode')||'independent',group:flag('group')||null}):undefined;
-  const r=await installHost({agent,configFile,host:flag('host'),workspace:flag('workspace'),role:flag('role'),...(flag('node')?{node:flag('node')}:{}),write:args.includes('--write'),expectSha:flag('expect-sha')||null,...(flag('scope')?{scope:flag('scope')}:{})});
+  const extension=flag('extension-id')?{id:flag('extension-id'),name:flag('extension-name')||flag('extension-id'),transport:flag('extension-transport')||'host_sdk'}:undefined;
+  const agent=instance&&write?await registerAgent({workspace,host,instance,mode:flag('mode')||'independent',group:flag('group')||null,extension}):undefined;
+  const r=await installHost({agent,extension,configFile,host:flag('host'),workspace:flag('workspace'),role:flag('role'),...(flag('node')?{node:flag('node')}:{}),write:args.includes('--write'),expectSha:flag('expect-sha')||null,...(flag('scope')?{scope:flag('scope')}:{})});
   const {preview,...rest}=r;console.log(JSON.stringify(rest,null,1));if(preview)console.log('\n--- preview ---\n'+preview);
  }catch(error){console.error(error.message);process.exitCode=1;}
 }
