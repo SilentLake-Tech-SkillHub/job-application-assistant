@@ -1,10 +1,19 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {PluginTransport,MainChromePluginAdapter,pluginInspectionEndpoint,injectedSource} from '../shared/main-chrome-plugin.mjs';
 import vm from 'node:vm';
-import {spawn} from 'node:child_process';import http from 'node:http';
+import {spawn,execFile} from 'node:child_process';import {promisify} from 'node:util';import http from 'node:http';
 import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';
 import {executorCapability} from '../shared/browser-environment.mjs';
 import {resolveBatchChannels} from '../shared/channel-policy.mjs';
+test('the actual bootstrap launch chain passes workspace selection to its dormant broker',async()=>{
+ const root=await mkdtemp('/tmp/c48-launch-'),socket=path.join(root,'host.sock');
+ await mkdir(path.join(root,'产品管理'));await writeFile(path.join(root,'产品管理','浏览器设置.json'),JSON.stringify({schemaVersion:1,choice:'main'}));
+ const rpc=body=>new Promise((resolve,reject)=>{const req=http.request({socketPath:socket,path:'/rpc',method:'POST'},res=>{const chunks=[];res.on('data',x=>chunks.push(x));res.on('end',()=>resolve(JSON.parse(Buffer.concat(chunks))));});req.on('error',reject);req.end(JSON.stringify(body));});
+ try{
+  await promisify(execFile)(process.execPath,['--input-type=module','-e',"import {bootstrapRuntime} from './shared/bootstrap.mjs';await bootstrapRuntime({workspace:process.argv[1]});",root],{timeout:15000,env:{PATH:process.env.PATH,HOME:process.env.HOME,RECRUITING_BROWSER_MODE:'cdp',RECRUITING_CDP_URL:'http://127.0.0.1:9',RECRUITING_BROWSER_SOCKET:socket}});
+  assert.equal((await rpc({method:'wait',args:{ms:1}})).error,'BROWSER_RESTORE_REQUIRED');
+ }finally{await rpc({method:'shutdown'}).catch(()=>{});await rm(root,{recursive:true,force:true});}
+});
 test('a broker started with the configured handoff directory reads main Chrome selection before any operation',async()=>{
  const root=await mkdtemp(path.join(os.tmpdir(),'c48-broker-')),socket=path.join(root,'host.sock');
  await mkdir(path.join(root,'产品管理'));await writeFile(path.join(root,'产品管理','浏览器设置.json'),JSON.stringify({schemaVersion:1,choice:'main'}));
