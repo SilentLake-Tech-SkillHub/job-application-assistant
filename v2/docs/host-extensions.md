@@ -43,6 +43,8 @@ const bridge = await registerMainChromeExtension({
 3. 调用正式MCP的`browser_initialize_chrome`及原任务。在另一条异步调用中，通过当前宿主工具持续调用`pumpHostBrowser(bridge,{maxJobs:100,waitMs:1000})`执行排队的浏览器请求，直至该MCP调用返回。SDK要求动作出现在当前工具调用中时，不能只留一个上轮回调而不泵送。
 工具严格串行的宿主中，不要同时等待MCP长调用与泵送。可用本组件固定CLI异步发起相同操作（沿用安装配置和同一CoreClient核心），返回运行会话后在宿主工具中泵送，最后读回CLI结果，再从当前MCP核对版本、核心PID和连接状态；不启动另一套业务核心或浏览器。
 
+正式的阶段级调用：在同一宿主工具上下文中使用 `runHostBrowserCliStage(bridge, {workspace, mode, operation, input, env})`。它将输入送入实际固定 CLI 的 stdin，等待阶段队列并消费实际浏览器请求，整段返回业务回执和 `browserStage`。该返回包含墙钟、等待、请求数和空唤醒，浏览器仍由当前扩展访问。CLI 从实际宿主环境中的会话和 Hook 登记的当前回合定位续跑收据；不可借用其他对话的上下文。
+
 4. 源码更新后重新加载桥接模块。确认无请求执行时关闭旧桥的server，仅释放本地socket，保留浏览器与标签；用当前模块重新登记。用户页先经正式SDK借用，组件不关闭借用页；本任务新标签只在确认的官方域名上使用，并按宿主规则标记接续。
 
 `browser_preferences`返回对应插件登记。`HOST_EXTENSION_BRIDGE_REQUIRED`表示加载**这个宿主的**桥接；`HOST_EXTENSION_NOT_REGISTERED`表示用注册入口补登记。身份不一致时重连原宿主对应插件，不能用另一插件回报成功。

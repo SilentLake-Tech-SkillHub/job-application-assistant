@@ -8,11 +8,11 @@ export const primaryStructureHash=structure=>structure?.primaryContentHash||stru
 
 // A later child inspection does not undo the independent primary comparison.
 // Carry it only when every change belongs to a proved expansion on this page.
-export function retainReviewedPrimary(asset,previous,table,coverage,{template}={}){
+export function retainReviewedPrimary(asset,previous,table,coverage,{template,verifiedLocalSelectors=[]}={}){
  const current=table?.current,review=coverage?.review;
  if(review?.status!=='passed'||!sameVisualPage(current?.page,asset.visualPage)||review.visualHash!==current.inventoryHash||review.screenshotId!==current.screenshotId)return asset;
  const proved=new Map(Object.entries(coverage.expansions||{}).filter(([,proof])=>proof.status==='verified'&&proof.screenshotId===review.screenshotId&&proof.structureHash===review.structureHash));
- const children=new Set([...proved.values()].flatMap(proof=>proof.selectors||[]));
+ const children=new Set([...verifiedLocalSelectors,...[...proved.values()].flatMap(proof=>proof.selectors||[])]);
  const reviewed=new Set([...(review.matches||[]).map(pair=>pair.reaId),...(review.secondary||[]).map(pair=>pair.reaId)]);
  if(template?.pages&&template.id===asset.companyId&&template.evidence?.sourceUrl===asset.pageUrl){
   const fields=template.pages.flatMap(page=>page.fields);
