@@ -33,7 +33,7 @@ const bridge = await registerMainChromeExtension({
   browserId,              // 上一步真实扩展清单中的id
   allowedOrigins,         // 当前确认岗位/站点的官方域名
   env,                    // 本宿主安装配置，保留实际hostId/Agent编码/角色
-  fileUpload, reaInspect, // 可选宿主能力；未提供文件上传时使用官方filechooser接口
+  fileUpload, reaPackageRoot, // 可选：REA 6.7.0 已安装包路径；上传默认使用官方 filechooser
   deferBrowserCalls: true
 });
 ```
@@ -49,6 +49,6 @@ const bridge = await registerMainChromeExtension({
 
 ## 采集、填写和验收
 
-浏览器桥继续执行同一页面适配器、正式公司模板、操作定义与独立读回。REA能力通过真实宿主的`reaInspect`回调提供；没有提供时明确返回能力缺口，不伪造结构，也不启用另一个浏览器。文件上传走宿主实际文件选择器；各宿主的真实能力分别验收。
+浏览器桥继续执行同一页面适配器、正式公司模板、操作定义与独立读回。原生扩展可传入已安装的 `reaPackageRoot`（或宿主环境 `RECRUITING_REA_PACKAGE_ROOT`）接入 REA 6.7.0。扩展读取绑定页的原始结构，由组件进程归一化。该通道报告 DOM、可访问性和资源清单覆盖，脚本正文及活动事件未采集。其他宿主也可提供正式 `reaInspect` 回调。文件上传走宿主实际文件选择器；各宿主的真实能力分别验收。
 
 读回应包含实际宿主、插件、扩展浏览器身份及任务页面；不能仅凭`agent_plugin_main_chrome`字符串或离线夹具算实际连接。修复回归覆盖宿主分别路由、跨插件拒绝、未来Agent注册、完整启动链及已存在浏览器保留。真实网页及其它宿主未运行的验收单独保留待办。

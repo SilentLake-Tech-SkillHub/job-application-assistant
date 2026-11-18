@@ -47,7 +47,8 @@ import {captureLockedChoice} from './locked-control.mjs';
 import {stableTaskId} from './role-queue.mjs';
 import {confirmedMaterialContext} from './role-material-context.mjs';
 import {normalizeControlPolicy,humanActionReason} from './field-policy.mjs';
-import {technicalHandoffReasons} from './workflow-contract.mjs';
+import {technicalHandoffReasons,technicalRepairHandoff} from './workflow-contract.mjs';
+import {currentHostCapabilities} from './sampling-bridge.mjs';
 import {assertStoredExecutionContract} from './profile.mjs';
 import {rankChoices,resolveObservedChoice,mergeObservedChoices,assertStoredChoiceResolutions} from './choice-resolution.mjs';
 import {assertStoredChoiceGoals} from './choice-goal-contract.mjs';
@@ -79,6 +80,7 @@ import {assertSubmissionPrepared,formAssetStatus} from './form-assets.mjs';
 import {restageAutocomplete,autocompleteRestagePlan} from './autocomplete-restage.mjs';
 import {selectApplicationProjects,assertSelectedProjects} from './project-selection.mjs';
 import {removeRoleProject} from './project-role-removal.mjs';
+import {normalizeHostReaPage} from './host-rea.mjs';
 import {normalizeReaStructure,bindStructureControls} from './rea-structure.mjs';
 import {mappingCandidates,buildFormTemplate} from './form-construction.mjs';
 import {templateConstructionIssues,classifyPending} from './field-policy.mjs';
@@ -185,7 +187,7 @@ registerOperation('workflow_handoff',{description:'把组件已记录的真实�
  const source=await store.get('runs',a.evidenceId);if(a.companyId&&source.companyId&&source.companyId!==a.companyId)throw Error('HANDOFF_SCOPE_MISMATCH');
  const reasons=technicalHandoffReasons(source);
  if(!reasons.length)throw Error('VERIFIED_TECHNICAL_BLOCK_REQUIRED');
- const id='workflow-handoff-'+(a.companyId||source.companyId||'runtime'),result={id,companyId:a.companyId||source.companyId||null,evidenceId:a.evidenceId,reasons:[...new Set(reasons)],status:'blocked_for_supervisor',completion:{complete:false,status:'blocked_for_supervisor'},continuation:{state:'technical_block',owner:'supervisor',requiresUser:false,shouldContinue:false,handoffVerified:true,nextTools:[]},submission:'not_performed'};
+ const id='workflow-handoff-'+(a.companyId||source.companyId||'runtime'),result=technicalRepairHandoff({id,companyId:a.companyId||source.companyId||null,evidenceId:a.evidenceId,reasons,conversationId:currentHostCapabilities().conversationId||null});
  await store.put('runs',id,result);return result;
 },false));
 registerOperation('application_closeout',{description:'固定事件收尾：校验官网证据后把本岗位最新结果覆盖写入 岗位交接/投递回传.json（每岗位一条，不留历史和备份）；同事件幂等。记录“已投递”前，本岗位必须在本批队列中由 MCP 按已封存的公司表单模板填写并核验通过，手工填写的岗位拒绝记录。不改主表状态：由搜索端反向评审、用户确认后才写入。不提交网站。',inputSchema:{outcome:outcomeSchema}},wrap(async args=>{await refreshBindings();return closeApplication({...args,catalog:catalog.companies,assertPrepared:outcome=>assertSubmissionPrepared({queues,store,catalog:catalog.companies,outcome})});},false));
@@ -487,7 +489,8 @@ async function acquisitionPage({companyId,pageId,pageUrl}){
 }
 async function readBoundRea({pageId,pageUrl,authorization}){
  const channel=pageId.split(':',1)[0];
- const result=await browser.request('reaInspect',{pageId,pageUrl,authorization});
+ let result=await browser.request('reaInspect',{pageId,pageUrl,authorization});
+ if(result.hostObservation)result=await normalizeHostReaPage(result);
  if(result.binding?.pageId!==pageId.slice(channel.length+1)||result.binding.beforeUrl!==pageUrl)throw Error('REA_TARGET_MISMATCH');
  const structure=normalizeReaStructure(result.evidence,{...result.binding,pageId},{nativeStructure:result.nativeStructure});
  if(result.bridgeLimitations)structure.limitations=[...structure.limitations,...result.bridgeLimitations];
@@ -621,7 +624,9 @@ registerOperation('form_review_completeness',{description:'同页视觉表与REA
   const previous=coverage?.review,unchanged=previous?.structureHash===primary.structureHash&&hash(previous.matches)===hash(primary.matches)&&hash(previous.secondary)===hash(primary.secondary);
   const expansions=unchanged?coverage.expansions||{}:{};
   for(const id of primary.expansionIds){
-   if(structure.primaryCandidates.find(row=>row.id===id)?.childSelectors?.length)expansions[id]??={status:'verified',proof:'children_already_rendered',screenshotId:primary.screenshotId,structureHash:primary.structureHash};
+   if(expansions[id]?.status!=='verified'&&structure.primaryCandidates.find(row=>row.id===id)?.childSelectors?.length){
+    expansions[id]={status:'verified',proof:'children_already_rendered',screenshotId:primary.screenshotId,structureHash:primary.structureHash};
+   }
   }
   await store.put('runs',keys.coverage,{companyId:a.companyId,review:primary,expansions});
   const pending=requiredExpansionIds(primary,expansions);

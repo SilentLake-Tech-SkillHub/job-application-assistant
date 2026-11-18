@@ -21,7 +21,9 @@ python3 hooks/conversation_scope.py disable --scope-file <private-scope.json>
 
 配置文件里写有插件名不等于运行成功。先用宿主的 `pluginInventory.list` 核对目标 Hook 插件 `enabled=true` 且 `fiberPhase=active`；仅 enabled 而 phase 为空时检查正式插件管理接口的实际加载错误。插件包必须能从该 profile 解析；开发安装可用已存在、已核实本机入口的 file URL，不能用另一个宿主或新浏览器代替修复。通过宿主插件管理接口重载目标插件后，读回状态。
 
-随后在原对话和新对话调用实际业务入口，验证 PreToolUse、PostToolUse 和 continuation 文件。错误响应可能由宿主包装为 `Error: {JSON}`，仍必须保留技术待办。每个阶段的 pending 在 SDK 校验之前登记；参数失败不能使 Stop 静默放行。只有组件已核实的用户等待、完整审阅或技术交接允许结束。代码维护/纯查询无需伪造投递回执。
+随后在原对话和新对话调用实际业务入口，分别验证 PreToolUse、PostToolUse 和 Stop。每项先从宿主正式清单读回 enabled/trustStatus；未获宿主信任的定义需用户审阅，Agent不写信任库。verifiedEvents只列真实事件，调用前pending不冒充调用后或结束回执，stopGuardVerified单独返回。
+
+错误响应可能由宿主包装为 `Error: {JSON}`，仍须保留技术待办。每个阶段pending在SDK校验前登记；参数失败不能让Stop放行。技术交接仍是待修和接续工作：实际进入已授权维护流程、修复重载后从原任务恢复，其他公司继续；不得只落盘交接后结束。重复Stop不放行，Stop自动续跑的新turn按同会话引用继承未完待办；实际整批结果收口后才解除。真实用户等待和完整审阅沿已确认流程处理。代码维护/纯查询无需伪造投递回执。
 
 真实日志没有 Hook 事件时，应先确认插件实际加载；不能仅根据会话恢复时间推断是 resumed-agent 接线故障。宿主重载和 MCP 子进程重载分别核实，保持原浏览器、原页面及未保存内容。
 

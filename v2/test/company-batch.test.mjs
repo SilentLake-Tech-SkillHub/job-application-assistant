@@ -4,6 +4,7 @@ import {withTaskRecords} from '../shared/task-records.mjs';
 import {createHash} from 'node:crypto';
 import {CompanyDirectory} from '../shared/company-directory.mjs';import {handoffInput} from '../shared/queue-config.mjs';
 import {companyDoc,site,role,confirm,saveCompany,handoffWorkspace} from './fixtures/handoff.mjs';
+import {technicalRepairHandoff} from '../shared/workflow-contract.mjs';
 const pad=(n,w)=>String(n).padStart(w,'0');
 // 交接区里 n 家公司，各一个站点、一个岗位；addRole(i) 给第 i 家补第二个岗位（志愿顺序 2）后按用户确认重新保存。
 async function fixture(fn,n=24){const root=await mkdtemp(path.join(os.tmpdir(),'company-batch-'));
@@ -76,6 +77,14 @@ test('an explanation alone cannot turn technical work into a user wait or compan
  await assert.rejects(batch.record({...b,...a,status:'waiting_for_user',reason:'driver missing'}),/USER_WAIT_EVIDENCE_REQUIRED/);
  await assert.rejects(batch.record({...b,...a,status:'blocked',reason:'driver missing'}),/VERIFIED_BLOCK_HANDOFF_REQUIRED/);
 }));
+test('the last company technical handoff keeps whole-batch repair work actionable',()=>fixture(async({batch,store})=>{
+ const b=await batch.create({authorizationRef:'prepare original roles'}),a=(await batch.take(b)).assignments[0];
+ const handoff=technicalRepairHandoff({id:'verified-handoff',companyId:a.companyId,evidenceId:'observed-driver-error',reasons:['REA_HOST_CAPABILITY_REQUIRED']});
+ await store.put('runs',handoff.id,handoff);
+ const r=await batch.record({...b,...a,status:'blocked',runIds:[handoff.id],reason:'actual REA adapter gap'});
+ assert.equal(r.continuation.owner,'agent');assert.equal(r.continuation.shouldContinue,true);assert.equal(r.batchPreparationComplete,false);assert.equal(r.remainingAgentWork,1);
+ assert.equal((await batch.status(b)).agentWorkRemaining,true);
+},1));
 
 test('company completion requires an independent receipt for the exact role materials',()=>fixture(async({batch,queues,store})=>{
  const b=await batch.create({authorizationRef:'synthetic'}),a=(await batch.take(b)).assignments[0],task=a.tasks[0];

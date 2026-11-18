@@ -6,7 +6,7 @@ export function browserErrorCode(error){
  if(/closed|has been disposed|target.*gone/i.test(text))return 'BROWSER_PAGE_CLOSED';
  if(/navigation.*interrupt|execution context was destroyed|navigation.*abort/i.test(text))return 'BROWSER_NAVIGATION_INTERRUPTED';
  if(/disconnect|ECONNRESET|ECONNREFUSED|socket hang up|connection.*closed|connect.*fail/i.test(text))return 'BROWSER_CONNECTION_LOST';
- if(error?.name==='TimeoutError'||/timed?\s*out|timeout/i.test(text))return 'BROWSER_OPERATION_TIMEOUT';
+ if(error?.name==='TimeoutError'||/timed?\s*out|timeout|deadline exceeded/i.test(text))return 'BROWSER_OPERATION_TIMEOUT';
  if(/element.*not found|no.*element|selector.*not found/i.test(text))return 'BROWSER_ELEMENT_NOT_FOUND';
  return 'BROWSER_OPERATION_FAILED';
 }

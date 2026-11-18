@@ -2,7 +2,7 @@
 name: job-application-assistant-v2
 description: Coordinate company-configured login and application MCP tools, stage checks and user review for confirmed recruiting roles. Use the single maintained V2 runtime for preparation and testing.
 metadata:
-  version: "2.0.0-alpha.68"
+  version: "2.0.0-alpha.69"
 ---
 
 # 岗位代投助手 V2
@@ -52,7 +52,7 @@ metadata:
 - 接口或核心版本对不上被拒：重连该 MCP，或用 `component_runtime` 完成更新，不经已知过期的连接继续；用 `runtime_info` 读回（见 [runtime architecture](docs/runtime-architecture.md)）。
 - 代码更新后只需 `component_runtime reload`（C43）：业务核心换到当前代码，浏览器主控空闲且代码不同就随之换新，Chrome 分身和标签不关；返回 `browserHost.updated` 为 true 时先调 `browser_initialize_chrome` 连上分身。工具报 `BROWSER_HOST_VERSION_MISMATCH` 或 `BROWSER_HOST_RESTART_REQUIRED` 时同样直接 reload，不要手动结束主控进程。
 - `HOST_ROLE_MAINTAINER_READ_ONLY`：本宿主配置为维护角色，不执行投递（见 [host integration](docs/host-integration.md)）。
-- 确属通用代码缺陷：`workflow_handoff` 带实际准备或核验运行编号交维护。
+- 确属通用代码缺陷：`workflow_handoff` 带实际准备或核验运行编号登记待修，继续实际接入已授权维护流程，修复重载后从原任务恢复，其他公司继续。交接落盘仍是Agent协调待办，不能据此结束整轮，不要求用户重复回复“继续”。
 
 ## Agent 浏览器兜底
 

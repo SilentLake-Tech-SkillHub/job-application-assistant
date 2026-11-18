@@ -86,7 +86,12 @@ export async function executeTransition({entry,pageId,expectedTitle,expectedRole
  let target=original,targetId=pageId,clicked=false;const excluded=new Set((excludePageIds||[]).map(String));
  const inDetail=transitionLocationMatches(entry.detail.location,before.href,expectedRoleId),inForm=transitionLocationMatches(entry.form.location,before.href,expectedRoleId);
  if(inDetail&&inForm)fail('ENTRY_DETAIL_FORM_AMBIGUOUS');if(!inDetail&&!inForm)fail('APPLICATION_ENTRY_PATH_REQUIRED');
- const candidates=async()=>{const pages=await host.listPages();return pages.filter(p=>{let u;try{u=new URL(p.url);}catch{return false;}return u.origin===origin&&transitionLocationMatches(entry.form.location,u.href,expectedRoleId)&&(entry.target==='same'?p.id===pageId:entry.target==='new'?p.id!==pageId:true)&&(p.id===pageId||!excluded.has(p.id));});};
+ const candidates=async()=>{
+  const pages=entry.target==='same'?[]:await host.listPages();
+  const live=pages.filter(p=>p.id!==pageId);
+  if(entry.target!=='new')live.unshift({id:pageId,url:await original.url()});
+  return live.filter(p=>{let u;try{u=new URL(p.url);}catch{return false;}return u.origin===origin&&transitionLocationMatches(entry.form.location,u.href,expectedRoleId)&&(p.id===pageId||!excluded.has(p.id));});
+ };
  if(inDetail){
   await readRole(original,entry.detail,expectedTitle,expectedRoleId,'detail',host);
   for(const a of entry.preActions||[]){
@@ -100,13 +105,15 @@ export async function executeTransition({entry,pageId,expectedTitle,expectedRole
   // that uniquely evidenced page instead of triggering a second application.
   // 点击前就已存在的其他标签（excludePageIds，由任务在第一次点击前登记）一律不算本次进入的申请页。
   let matches=await candidates();if(matches.length>1)fail('AMBIGUOUS_ROLE_FORM');
-  if(!matches.length){const c=entry.entryLocator,all=c.selector?original.locator(c.selector):c.text?original.getByText(c.text,{exact:true}):original.getByRole(c.role,{name:c.name,exact:true}),l=c.count?all.nth(c.index):all;try{await l.waitFor({state:'visible',timeout:READY_TIMEOUT_MS});}catch(error){error.operationStep='entry_locator_visible';error.operationLocator=c.selector||c.text||c.name;if(await all.count()===0){error.originalMessage=error.message;error.message='BROWSER_ELEMENT_NOT_FOUND';}throw error;}if(await all.count()!==(c.count||1)||(await l.innerText()).trim()!==c.label)fail('APPLICATION_ENTRY_BUTTON_CHANGED');try{await l.click({timeout:10000});}catch(error){error.operationStep='entry_click';error.operationLocator=c.selector||c.text||c.name;throw error;}clicked=true;
+  if(!matches.length){const c=entry.entryLocator,all=c.selector?original.locator(c.selector):c.text?original.getByText(c.text,{exact:true}):original.getByRole(c.role,{name:c.name,exact:true}),l=c.count?all.nth(c.index):all;try{await l.waitFor({state:'visible',timeout:READY_TIMEOUT_MS});}catch(error){error.operationStep='entry_locator_visible';error.operationLocator=c.selector||c.text||c.name;const count=await all.count().catch(()=>null);if(count===0){error.originalMessage=error.message;error.message='BROWSER_ELEMENT_NOT_FOUND';}throw error;}if(await all.count()!==(c.count||1)||(await l.innerText()).trim()!==c.label)fail('APPLICATION_ENTRY_BUTTON_CHANGED');try{await l.click({timeout:10000});}catch(error){error.operationStep='entry_click';error.operationLocator=c.selector||c.text||c.name;throw error;}clicked=true;
    const now=host.now||Date.now,deadline=now()+READY_TIMEOUT_MS;do{matches=await candidates();if(matches.length)break;await host.pause(50);}while(now()<deadline);
   }
   if(!matches.length){const error=Error('BROWSER_OPERATION_TIMEOUT');error.operationStep='entry_form_navigation';error.operationLocator=entry.form.readySelector;throw error;}if(matches.length!==1)fail('AMBIGUOUS_ROLE_FORM');targetId=matches[0].id;target=await host.getPage(targetId);
  }
  const after=new URL(await target.url());if(after.origin!==origin||!transitionLocationMatches(entry.form.location,after.href,expectedRoleId))fail('APPLICATION_ENTRY_RESULT_ROLE_CHANGED');
- await target.locator(entry.form.readySelector).filter({visible:true}).first().waitFor({state:'visible',timeout:READY_TIMEOUT_MS});const actual=await readRole(target,entry.form,expectedTitle,expectedRoleId,'form',host);await host.preserve?.(pageId);await host.preserve?.(targetId);
+ try{await target.locator(entry.form.readySelector).filter({visible:true}).first().waitFor({state:'visible',timeout:READY_TIMEOUT_MS});}
+ catch(error){error.operationStep='entry_form_ready';error.operationLocator=entry.form.readySelector;throw error;}
+ const actual=await readRole(target,entry.form,expectedTitle,expectedRoleId,'form',host);await host.preserve?.(pageId);await host.preserve?.(targetId);
  // The detail page actually observed (after any site redirect) is returned; when it
  // differs from the confirmed role link, a link change is proposed to the search side.
  return {pageId:targetId,pageUrl:after.href,...actual,...(inDetail?{detailUrl:before.href}:{}),entryClicked:clicked,submission:'not_performed'};

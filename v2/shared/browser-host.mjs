@@ -43,7 +43,16 @@ let browser=cloneBrowser,mainBrowser=null,selectedBrowser='clone';
 let mainExtensionKey=null;
 const nativeExtensionCall=(extension,method,args)=>new Promise((resolve,reject)=>{
  const request=http.request({socketPath:extensionSocketPath(socketPath,extension.hostId),path:'/rpc',method:'POST',headers:{'content-type':'application/json'}},response=>{
-  const chunks=[];response.on('data',c=>chunks.push(c));response.on('end',()=>{try{const result=JSON.parse(Buffer.concat(chunks));if(result.error)reject(Error(result.error));else resolve(result.data);}catch(e){reject(e);}});
+  const chunks=[];response.on('data',c=>chunks.push(c));response.on('end',()=>{
+   try{
+    const result=JSON.parse(Buffer.concat(chunks));
+    if(result.error){
+     const error=Error(result.error),details=safeControlErrorDetails(result.details);
+     if(details)error.details=details;
+     reject(error);
+    }else resolve(result.data);
+   }catch(error){reject(error);}
+  });
  });request.on('error',()=>reject(Error('HOST_EXTENSION_BRIDGE_REQUIRED')));request.setTimeout(105000,()=>request.destroy(Error('HOST_EXTENSION_OPERATION_TIMEOUT')));request.end(JSON.stringify({method,args}));
 });
 // pageTools：本进程代码支持的标签操作。浏览器主控进程不随 MCP 重载，旧进程没有这些操作；工具调用前按它判断。
@@ -83,7 +92,7 @@ const server=http.createServer(async(req,res)=>{
     // 代码更新后由业务核心 reload 让旧主控退出（C43）：只在没有其他请求时退出，只关本进程，不关 Chrome 分身和标签。
     if(method==='shutdown'){if(activeOperations>1)throw Error('BROWSER_HOST_BUSY');res.end(JSON.stringify({data:{stopping:true,pid:process.pid,sourceFingerprint:residentSource.sourceFingerprint}}));setImmediate(()=>server.close(()=>process.exit(0)));return;}
     if(diagnostics.isDegraded()&&!['status','tabs','pageIdentity','roleSnapshot','entryInspection','roleEntryInventory','roleEntryLanding','failureSnapshot','existingPage','inventory','observe','screenshot','assertLocation'].includes(method))throw Error('BROKER_DEGRADED_WRITES_BLOCKED');
-    const retrySafe=['tabs','pageIdentity','failureSnapshot','roleSnapshot','roleEntryInventory','roleEntryLanding','existingPage','inventory','observe','assertLocation','reaInspect','openPage','roleEnterApplication'].includes(method);
+    const retrySafe=['tabs','pageIdentity','failureSnapshot','roleSnapshot','roleEntryInventory','roleEntryLanding','existingPage','inventory','observe','assertLocation','reaInspect','openPage'].includes(method);
     data=await retryBrowserOperation(async()=>{let data;
     if(method==='status')data=status();
     else if(method==='initializeConfiguredChrome')data=await browser.initializeConfiguredChrome(args);

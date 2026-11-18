@@ -52,5 +52,14 @@ test('browser choice starts empty and main Chrome is limited to the registered h
 });
 test('hook readiness uses a receipt from this conversation and only warns if it is absent',async()=>{
  const root=await mkdtemp(path.join(os.tmpdir(),'hook-receipt-')),env={CODEX_THREAD_ID:'this',RECRUITING_WORKFLOW_STATE:root};
- try{assert.equal((await hookReceiptStatus(env)).active,false);await writeFile(path.join(root,'hook-session-'+createHash('sha256').update('this').digest('hex').slice(0,24)+'.json'),JSON.stringify({receipt:'receipt.json'}));await writeFile(path.join(root,'receipt.json'),JSON.stringify({session_id:'other',sha256:'s',route_sha256:'r'}));assert.equal((await hookReceiptStatus(env)).active,false);await writeFile(path.join(root,'receipt.json'),JSON.stringify({session_id:'this',sha256:'s',route_sha256:'r'}));assert.equal((await hookReceiptStatus(env)).active,true);assert.equal((await withHostCapabilities({conversationId:'this'},()=>hookReceiptStatus({...env,CODEX_THREAD_ID:'old-core'}))).active,true);}finally{await rm(root,{recursive:true,force:true});}
+ try{
+  assert.equal((await hookReceiptStatus(env)).active,false);
+  await writeFile(path.join(root,'hook-session-'+createHash('sha256').update('this').digest('hex').slice(0,24)+'.json'),JSON.stringify({receipt:'receipt.json'}));
+  await writeFile(path.join(root,'receipt.json'),JSON.stringify({session_id:'other',sha256:'s',route_sha256:'r'}));assert.equal((await hookReceiptStatus(env)).active,false);
+  await writeFile(path.join(root,'receipt.json'),JSON.stringify({session_id:'this',turn_id:'turn',event:'PreToolUse',sha256:'s',route_sha256:'r'}));
+  const pre=await hookReceiptStatus(env);assert.equal(pre.active,true);assert.deepEqual(pre.verifiedEvents,['PreToolUse']);assert.equal(pre.stopGuardVerified,false);
+  await writeFile(path.join(root,'continuation-'+createHash('sha256').update('this\0turn').digest('hex')+'.json'),JSON.stringify({observedEvents:['PostToolUse','Stop']}));
+  assert.equal((await hookReceiptStatus(env)).stopGuardVerified,true);
+  assert.equal((await withHostCapabilities({conversationId:'this'},()=>hookReceiptStatus({...env,CODEX_THREAD_ID:'old-core'}))).active,true);
+ }finally{await rm(root,{recursive:true,force:true});}
 });

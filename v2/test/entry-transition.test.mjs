@@ -15,6 +15,14 @@ test('navigation contract requires observed destination, bound role evidence and
 test('hash routes and duplicate query keys are checked independently of pathname',()=>{const l={pathnamePattern:'^/$',hashPathPattern:'^/details$',hashQuery:{id:'$roleId',type:'present'}};assert.equal(transitionLocationMatches(l,'https://example.test/#/details?id=100&type=present','100'),true);assert.equal(transitionLocationMatches(l,'https://example.test/#/details?id=101&type=present','100'),false);assert.equal(transitionLocationMatches(l,'https://example.test/#/details?id=100&id=100&type=present','100'),false);});
 test('role identity reads actual query, hash query and path values',()=>{assert.equal(transitionRoleIdentity({source:'query',parameter:'job'},'https://example.test/resume?job=wrong').value,'wrong');assert.equal(transitionRoleIdentity({source:'hashQuery',parameter:'job'},'https://example.test/#/resume?job=100').value,'100');assert.equal(transitionRoleIdentity({source:'pathname',parameter:'job',pattern:'^/resume/(?<job>[0-9]+)$'},'https://example.test/resume/100').value,'100');});
 test('shared driver follows the observed same-page result and returns actual ID',async()=>{const f=fixture(),r=await executeTransition(f.args,f.host);assert.equal(r.pageId,'original');assert.equal(r.pageUrl,'https://example.test/resume?job=100');assert.equal(r.roleIdentity.value,'100');assert.equal(r.roleTitle,null);assert.deepEqual(f.clicks,['.apply']);});
+test('same-tab transition reads the bound tab directly even when the host inventory lags',async()=>{
+ const f=fixture();f.e.target='same';
+ f.host.listPages=async()=>[{id:'original',url:f.e.evidence.detailUrl}];
+ let now=0;f.host.now=()=>now;f.host.pause=async ms=>{now+=ms;};
+ const result=await executeTransition(f.args,f.host);
+ assert.equal(result.pageUrl,f.e.evidence.formUrl);
+ assert.deepEqual(f.clicks,['.apply']);
+});
 test('a form title containing only its prefix is loading, not a different role',async()=>{
  const f=fixture({onForm:true});f.e.form.roleSelector='.title';f.e.form.rolePrefix='You are applying:';
  const page=f.pages.get('original'),original=page.locator;let reads=0,clock=0;

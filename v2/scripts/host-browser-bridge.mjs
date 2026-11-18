@@ -7,8 +7,9 @@ import {loadAdapter} from '../host/adapters/registry.mjs';
 import {loadFallbackRegistry,fallbackRegistryFile} from '../shared/gui-fallback.mjs';
 import {resolveHostExtension,extensionSocketPath} from '../shared/host-extension.mjs';
 import {configurePaths} from '../shared/runtime-paths.mjs';
+import {collectHostReaPage} from '../shared/host-rea.mjs';
 // Called INSIDE the actual host's extension tool runtime, never another host's daemon.
-export async function registerMainChromeExtension({agent,browserId,allowedOrigins,fileUpload,reaInspect,deferBrowserCalls=true,env=process.env}){
+export async function registerMainChromeExtension({agent,browserId,allowedOrigins,fileUpload,reaInspect,reaPackageRoot,deferBrowserCalls=true,env=process.env}){
  env={...env};configurePaths({env});
  if(!agent?.browsers?.list||!agent?.browsers?.get||!browserId)throw Error('TRUSTED_HOST_BROWSER_RUNTIME_REQUIRED');
  const extension=resolveHostExtension({registry:await loadFallbackRegistry(fallbackRegistryFile(env)),hostId:env.RECRUITING_HOST_ID,capability:(await loadAdapter(env.RECRUITING_HOST_ID)).mainChromeExtension});
@@ -20,7 +21,9 @@ export async function registerMainChromeExtension({agent,browserId,allowedOrigin
   if(typeof tab.playwright?.waitForEvent!=='function')throw Error('HOST_FILE_CHOOSER_ADAPTER_REQUIRED');
   const chooser=tab.playwright.waitForEvent('filechooser');await tab.playwright.locator(selector).click();await (await chooser).setFiles(paths);
  });
- const bridge=await startHostBrowserBridge({browser,inventory,mode:'chrome',extension,hostEnvironment:env,socketPath:extensionSocketPath(env.RECRUITING_BROWSER_SOCKET,env.RECRUITING_HOST_ID),allowedOrigins,fileUpload:upload,reaInspect,deferBrowserCalls});
+ const packageRoot=reaPackageRoot||env.RECRUITING_REA_PACKAGE_ROOT;
+ const capture=reaInspect||(packageRoot?async args=>{const hostObservation=await collectHostReaPage(args);return {hostObservation,reaPackageRoot:packageRoot,binding:hostObservation.binding};}:undefined);
+ const bridge=await startHostBrowserBridge({browser,inventory,mode:'chrome',extension,hostEnvironment:env,socketPath:extensionSocketPath(env.RECRUITING_BROWSER_SOCKET,env.RECRUITING_HOST_ID),allowedOrigins,fileUpload:upload,reaInspect:capture,deferBrowserCalls});
  return {...bridge,extension};
 }
 export async function registerHostBrowser({agent,browserId,channel='iab',socketPath,allowedOrigins,fileUpload,reaInspect,deferBrowserCalls=true}){

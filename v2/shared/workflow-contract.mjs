@@ -25,6 +25,14 @@ export function auditStoredContract(template,profile=null){
 }
 export function contractAuditSummary(audit){const {fields,ready,...summary}=audit;return {...summary,contractComplete:ready,executionVerified:false,missing:fields.filter(f=>f.issues.length).map(({id,issues})=>({id,issues}))};}
 
+export function technicalRepairHandoff({id,companyId,evidenceId,reasons,conversationId=null}){
+ return {id,companyId,evidenceId,reasons:[...new Set(reasons)],status:'repair_required',
+  repair:{status:'pending_dispatch',owner:'supervisor',sourceConversationId:conversationId,resumeAfterRepair:true},
+  completion:{complete:false,status:'repair_required'},
+  continuation:{state:'repair',owner:'agent',repairOwner:'supervisor',requiresUser:false,shouldContinue:true,handoffVerified:true,nextTools:['run_status'],
+   instruction:'先以返回的id调用run_status核对交接证据，再实际接入已授权的维护流程；继续其它可执行公司，修复并重载后恢复原任务。交接落盘仍是待修工作，不能据此结束整轮，也不能原样重试同一失败。'},submission:'not_performed'};
+}
+
 // Every construction response carries a machine-readable continuation. This is
 // also consumed by the host Hook; nextTools alone is not a lifecycle contract.
 export function workflowEnvelope(data){

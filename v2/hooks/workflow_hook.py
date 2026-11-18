@@ -210,7 +210,21 @@ def continuation_result(value):
     candidates = [value.get('continuation')]
     candidates += [r.get('continuation') for r in value.get('results', []) if isinstance(r, dict)]
     continuations = [c for c in candidates if isinstance(c, dict)]
-    return next((c for c in continuations if c.get('owner') == 'agent'), continuations[0] if continuations else None)
+    result = next((c for c in continuations if c.get('owner') == 'agent'), continuations[0] if continuations else None)
+    if result and result.get('owner') == 'supervisor' and result.get('handoffVerified') and not result.get('requiresUser'):
+        return {**result, 'state': 'repair', 'owner': 'agent', 'repairOwner': 'supervisor',
+                'shouldContinue': True, 'nextTools': ['run_status']}
+    return result
+
+
+def continuation_reference(session):
+    return STATE / ('continuation-session-' + hashlib.sha256(session.encode()).hexdigest()[:24] + '.json')
+
+
+def save_continuation(file, value, session, turn):
+    STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
+    write_atomic(file, {**value, 'session_id': session, 'turn_id': turn})
+    write_atomic(continuation_reference(session), {'receipt': file.name})
 
 
 def workflow_metadata(value):
@@ -238,11 +252,29 @@ def handle_continuation(event):
         old = json.loads(file.read_text(encoding='utf-8'))
     except (FileNotFoundError, ValueError):
         old = {}
+    # A Stop continuation is a fresh Codex turn. Preserve its pending work
+    # instead of treating the new turn's empty receipt as permission to finish.
+    if not old and event.get('stop_hook_active'):
+        try:
+            name = json.loads(continuation_reference(session).read_text())['receipt']
+            if Path(name).name == name:
+                prior = json.loads((STATE / name).read_text())
+                if prior.get('session_id') == session:
+                    old = prior
+        except (OSError, ValueError, KeyError):
+            pass
     if event['hook_event_name'] == 'PostToolUse':
         tool = event.get('tool_name', '')
         value = event.get('tool_response', event.get('tool_result', event.get('output')))
         declared = workflow_metadata(value)
         batch_status = tool.split('__')[-1] == 'company_batch_status'
+        if batch_status and not old and not continuation_reference(session).exists():
+            try:
+                active = session in read_active_scope(SCOPE).get('session_ids', [])
+            except (OSError, ValueError):
+                active = False
+            if not active:
+                return {}
         if not batch_status and tool.split('__')[-1] not in CONTINUATION_TOOLS and not (declared and declared.get('tracked') is True and recruiting_tool(tool)):
             return {}
         result = continuation_result(value)
@@ -260,25 +292,20 @@ def handle_continuation(event):
         if pending:
             route = {**pending[0], 'requiresUser': False}
         fingerprint = hashlib.sha256(json.dumps(route, sort_keys=True).encode()).hexdigest()
-        STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
-        write_atomic(file, {**route, 'workByScope': work, 'fingerprint': fingerprint,
+        observed = list(dict.fromkeys([*(old.get('observedEvents') or []),
+                        'PreToolUse' if event.get('stage_attempt') else 'PostToolUse']))
+        save_continuation(file, {**route, 'workByScope': work, 'fingerprint': fingerprint,
                             'reminded': False, 'stopAttempts': 0,
+                            'observedEvents': observed,
                             'receiptRevision': old.get('receiptRevision', 0) + 1,
-                            'lastTool': tool.split('__')[-1]})
+                            'lastTool': tool.split('__')[-1]}, session, turn)
         return {}
     if old.get('owner') == 'agent' and old.get('shouldContinue'):
         attempts = old.get('stopAttempts', 0) + 1
-        if attempts >= 2:
-            # Two Stop attempts without any new tracked tool result are an
-            # observed host/agent stall, not a missing user answer or success.
-            write_atomic(file, {**old, 'state': 'technical_block', 'owner': 'supervisor',
-                               'requiresUser': False, 'shouldContinue': False,
-                               'handoffVerified': True, 'reason': 'AGENT_NO_PROGRESS_LOOP',
-                               'complete': False, 'stopAttempts': attempts,
-                               'pendingNextTools': old.get('nextTools', []), 'nextTools': []})
-            return {'systemMessage': '检测到连续两次结束尝试之间没有新的MCP结果，已登记 AGENT_NO_PROGRESS_LOOP，complete=false，交监督者修复；停止重复生成等待说明，不把责任转给用户。'}
-        write_atomic(file, {**old, 'reminded': True, 'stopAttempts': attempts})
-        return {'decision': 'block', 'reason': '当前 MCP 仍有 Agent 待处理的建库、映射或修复步骤，不能结束或报告完成。请执行已返回的 nextTools；没有证据/输入变化不得盲重试。真实技术阻塞请用 workflow_handoff 提供MCP错误或驱动缺口证据交给监督者，complete仍为false；只有已核实的用户等待、完整核验审阅或技术交接才允许停下，不能要求用户重复回复“继续”。'}
+        observed = list(dict.fromkeys([*(old.get('observedEvents') or []), 'Stop']))
+        save_continuation(file, {**old, 'reminded': True, 'stopAttempts': attempts,
+                                'observedEvents': observed}, session, turn)
+        return {'decision': 'block', 'reason': '当前整批仍有 Agent 待处理的建库、映射、技术修复或原任务恢复，继续执行，不能结束或报告完成。先处理已返回的nextTools；遇到技术缺口实际接入已授权维护流程，修复重载后从原任务恢复，其他公司继续。workflow_handoff只登记待修证据，不授予收工权限。没有证据或输入变化不得盲重试，也不能要求用户重复回复“继续”。'}
     return {}
 
 
@@ -334,6 +361,7 @@ def handle(event):
         pending = {'state': 'tool_pending', 'owner': 'agent', 'requiresUser': False,
                    'shouldContinue': True, 'nextTools': [operation], 'reason': 'STAGE_RESULT_REQUIRED'}
         handle_continuation({**event, 'hook_event_name': 'PostToolUse',
+                             'stage_attempt': True,
                              'tool_response': {'continuation': pending}})
     current = {'session_id': session, 'turn_id': turn, 'sha256': sha, 'route_sha256': route_sha}
     if receipt and name not in INJECT:

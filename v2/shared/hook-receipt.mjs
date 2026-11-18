@@ -10,7 +10,11 @@ export async function hookReceiptStatus(env=process.env){
    const ref=JSON.parse(await readFile(path.join(root,index),'utf8'));
    if(typeof ref.receipt!=='string'||path.basename(ref.receipt)!==ref.receipt)continue;
    const r=JSON.parse(await readFile(path.join(root,ref.receipt),'utf8'));
-   if(r.session_id===session&&r.sha256&&r.route_sha256)return {active:true,sessionId:session};
+   if(r.session_id===session&&r.sha256&&r.route_sha256){
+    let events=[];try{const state=JSON.parse(await readFile(path.join(root,'continuation-'+createHash('sha256').update(session+'\0'+r.turn_id).digest('hex')+'.json'),'utf8'));events=state.observedEvents||[];}catch{}
+    const verifiedEvents=[...new Set([r.event,...events].filter(Boolean))];
+    return {active:true,sessionId:session,verifiedEvents,stopGuardVerified:verifiedEvents.includes('Stop')};
+   }
   }catch{}
  }
  return {active:false,sessionId:session||null,message:'本宿主 Hook 未生效：请 Agent 先检查并安装本项目 Hook；当前调用继续执行。'};
