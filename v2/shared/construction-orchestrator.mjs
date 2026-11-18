@@ -157,7 +157,9 @@ export async function runConstructionBuild({deps,task,authorization,primary=null
      if(collected?.changed)continue;
      const pending=(b.pending||[]).map(p=>({kind:p.kind==='answer'?'user_answer':'template_gap',id:p.id||null,label:p.label||null,source:p.source||null,reason:p.reason||p.kind||null}));
      agentItems.push(...agent,...pending.filter(p=>p.kind!=='user_answer'));userItems.push(...pending.filter(p=>p.kind==='user_answer'));
-     return done(agentItems.length?'needs_agent':'needs_user',{stage:cycle.stage,blockers:b.blockers||[],blockerCount:(b.blockers||[]).length,nextTools:agentItems.length?['profile_map_questions','form_construct_build']:['profile_record_answers','form_construct_build']});
+     const nextGoals=(b.nextGoals||[]).map(({fieldId,selector,factKey,choicesId,nextTool,reason,candidates})=>({fieldId,selector,factKey,choicesId,nextTool,reason,...(candidates?{candidates:candidates.slice(0,5)}:{})}));
+     const suggested=agentItems.length?[...nextGoals.filter(goal=>!attemptedChoices.has(goal.nextTool+'\0'+goal.selector)).map(goal=>goal.nextTool),'profile_map_questions']:['profile_record_answers'];
+     return done(agentItems.length?'needs_agent':'needs_user',{stage:cycle.stage,blockers:b.blockers||[],blockerCount:(b.blockers||[]).length,nextGoals,nextTools:[...new Set([...suggested,'form_construct_build'])]});
     }
     const reg=await call('template_register',{companyId,templateId:b.templateId,templateHash:b.templateHash});
     if(reg.error)return done('blocked',{stage:cycle.stage,error:reg.error});

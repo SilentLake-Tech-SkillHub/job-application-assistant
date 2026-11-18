@@ -777,7 +777,7 @@ registerOperation('form_cycle_status',{description:'读取公司当前建库循�
  else if(review?.status!=='passed'||review.screenshotId!==current.screenshotId||review.structureHash!==primaryStructureHash(structure))next={stage:'primary_review',nextTools:['form_review_completeness']};
  else if(requiredExpansionIds(review,coverage.expansions).length)next={stage:'section_expansion',nextTools:['form_expand_sections']};
  else if(!update&&(await templateState(official)).route==='reuse')next={stage:'ready',nextTools:['role_prepare']};
- else next=constructionNext({capture,template:update?.registered&&capture&&update.construction?.captureHash===constructionCaptureHash(capture)?official:null,interaction:update?.construction?.interaction});
+ else next=constructionNext({capture,template:update?.registered&&capture&&update.construction?.captureHash===constructionCaptureHash(capture)?official:null,interaction:update?.construction?.interaction,progress:update});
  return {companyId:a.companyId,...next,templateId:a.companyId,templateHash:official?hash(official):null,continuation:{state:next.stage==='backfill'?'repair':'construct',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:next.nextTools},submission:'not_performed'};
 }));
 registerOperation('form_patch_controls',{description:'按当前采集回补公司共享控件的动作、读回或重复栏目；覆盖更新同公司唯一正式模板，所有岗位共用；随后完整性检查和真实交互测试，不修改组件代码。',inputSchema:{...queueTask,captureId:z.string(),templateHash:z.string(),patches:z.array(z.object({fieldId:z.string(),actions:z.array(z.record(z.string(),z.unknown())).optional(),read:z.record(z.string(),z.unknown()).optional()})).default([]),repeatSections:z.array(z.string()).default([])}},wrap(async a=>{
@@ -797,6 +797,7 @@ registerOperation('form_test_interactions',{description:'在原岗位页面测�
  const keys=formAssetKeys(t.companyId),capture=await store.get('runs',keys.capture);await assertConstructionCoverage(capture);assertCompleteness(capture);
  const progress=await store.get('runs',keys.update);
  if(progress.construction?.captureHash!==constructionCaptureHash(capture))throw Error('CURRENT_COMPANY_UPDATE_REQUIRED');
+ if(progress.readyToRegister===false)throw Object.assign(Error('COMPANY_TEMPLATE_UPDATE_INCOMPLETE'),{details:{blockerCount:progress.blockers?.length||0,nextTools:['form_construct_build']}});
  const contentFindings=await constructionRecordFindings(template,await loadProfile(profileFile));
  if(contentFindings.length)return {companyId:t.companyId,status:'needs_record_content_mapping',recordContentFindings:contentFindings,nextTools:['capture_repeat_slots','profile_map_questions','form_build_template'],continuation:{state:'construct',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['capture_repeat_slots','profile_map_questions','form_build_template']},submission:'not_performed'};
  const task={companyId:t.companyId,roleId:t.roleId,taskId:t.taskId,pageUrl:state.returnUrl,pageId:state.pageId,browserBinding:state.browserBinding,templateHash:a.templateHash,roleQueueArgs:a,constructionTest:a.templateHash,...await resolveInputs(await loadProfile(profileFile),template,{},t.companyId,{roleId:t.roleId,pageUrl:state.returnUrl,confirmedOfficialId:state.siteRoleId||t.officialId})};

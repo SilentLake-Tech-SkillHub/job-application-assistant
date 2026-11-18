@@ -14,6 +14,13 @@ test('record exclusions count only for explicitly unselected repeat records, nev
 });
 test('agent completeness must cover every actual field and becomes stale on a new field',()=>{const {capture}=fixture();assert.throws(()=>reviewCompleteness(capture,{reviewedSelectors:[],evidence:'reviewed'}),/COMPLETE_AGENT/);capture.completenessReview=reviewCompleteness(capture,{reviewedSelectors:['#name'],evidence:'Compared the complete form with captured controls'});assertCompleteness(capture);capture.controls.push({selector:'#other',label:'Other'});assert.throws(()=>assertCompleteness(capture),/AGENT_COMPLETENESS/);});
 test('declarative support and condition probes cannot replace actual interaction results',()=>{const {template}=fixture();for(const run of [{operation:'internal_condition_probe',status:'verified'},{operation:'form_interaction_test',companyId:template.id,templateHash:digest(template),status:'verified',browserExecuted:false,testedFieldIds:['name']}])assert.throws(()=>assertInteractionEvidence(template,run),/VERIFIED_CONTROL/);});
+test('persisted template with pending choices stays in construction even when the version matches',()=>{
+ const {capture,template}=fixture();
+ capture.completenessReview=reviewCompleteness(capture,{reviewedSelectors:['#name'],evidence:'reviewed complete form'});
+ const progress={registered:true,readyToRegister:false,blockers:[{reason:'CHOICE_GOAL_OPTION_CAPTURE_REQUIRED'}]};
+ assert.equal(constructionNext({capture,template,progress}).stage,'build');
+ assert.equal(constructionNext({capture,template,progress:{...progress,readyToRegister:true}}).stage,'interaction_test');
+});
 test('failed interaction goes back to data patch; patch invalidates old proof; retest permits confirmation',()=>{
  const {capture,template}=fixture();capture.completenessReview=reviewCompleteness(capture,{reviewedSelectors:['#name'],evidence:'reviewed complete form'});
  const failed={operation:'form_interaction_test',companyId:template.id,templateHash:digest(template),status:'needs_attention',browserExecuted:true,failures:['name']};assert.equal(constructionNext({capture,template,interaction:failed}).stage,'backfill');
