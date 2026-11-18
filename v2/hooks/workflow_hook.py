@@ -84,6 +84,11 @@ def component_cli_event(event):
             if Path(tail[i+1]).resolve() != ROOT:
                 return event
             del tail[i:i+2]
+        if '--stage-dir' in tail:
+            i = tail.index('--stage-dir')
+            if not Path(tail[i+1]).is_absolute() or not Path(tail[i+1]).name.startswith('recruiting-host-stage-'):
+                return event
+            del tail[i:i+2]
         if len(tail) not in {2, 3} or tail[0] not in {'login', 'application'}:
             return event
         mode, operation = tail[:2]
@@ -376,10 +381,19 @@ def handle(event):
     session, turn = event.get('session_id'), event.get('turn_id')
     receipt = STATE / (key(session, turn) + '.json') if session and turn else None
 
-    if name == 'UserPromptSubmit' and session and turn:
+    tracks_work = operation in LIFECYCLE['stages'] or operation == 'company_batch_status'
+    anchors_cli = name == 'UserPromptSubmit' or (name in {'PreToolUse', 'PostToolUse'} and recruiting_tool(tool) and tracks_work)
+    if anchors_cli and session and turn:
         STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
         mark = hashlib.sha256(session.encode()).hexdigest()[:24]
-        write_atomic(STATE / ('host-turn-' + mark + '.json'), {'session_id': session, 'turn_id': turn})
+        anchor = STATE / ('host-turn-' + mark + '.json')
+        current = {'session_id': session, 'turn_id': turn}
+        try:
+            previous = json.loads(anchor.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            previous = None
+        if previous != current:
+            write_atomic(anchor, current)
 
     if name == 'Stop':
         return handle_continuation(event)

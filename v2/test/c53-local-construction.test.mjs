@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {unresolvedRepeatSections} from '../shared/repeat-groups.mjs';
 import assert from 'node:assert/strict';
 import {retainReviewedPrimary,currentPrimaryContinuation} from '../shared/form-visual-inventory.mjs';
 import {pageFromTemplate,runConstructionBuild} from '../shared/construction-orchestrator.mjs';
@@ -40,4 +41,13 @@ test('stage 2 consumes safely suggested option capture once and seals without go
  assert.equal(r.status,'company_template_ready');
  assert.equal(calls.filter(x=>x==='capture_choice_options').length,1);
  assert.equal(r.stageMetrics.operationCounts.form_test_interactions,1);
+});
+test('unmapped or duplicated repeat source rows cannot trigger additional blank records',()=>{
+ const field=(section,index,source)=>({source,inventorySelectors:[`#formily-item-${section}_list [class^="apply-form-array-card__"]:nth-child(${index}) input`]});
+ const sections=unresolvedRepeatSections({fields:[
+  field('works',1,'portfolio.first.link'),field('works',2,'unmapped.company.field'),
+  field('projects',1,'projects.first.title'),field('projects',2,'projects.first.title'),
+  field('education',1,'education.first.school'),field('education',1,'unmapped.company.helper')
+ ]});
+ assert.deepEqual([...sections],['works','projects']);
 });

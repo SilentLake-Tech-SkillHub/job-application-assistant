@@ -71,8 +71,9 @@ export async function runConstructionBuild({deps,task,authorization,primary=null
   for(const plan of await deps.repeatPlans()){
    if(attemptedRepeats.has(plan.groupSelector))continue;
    attemptedRepeats.add(plan.groupSelector);
-   const result=await call('capture_repeat_slots',{...plan,companyId,pageUrl,authorization:{prepare:true,evidence:authorization.evidence}});
+   const result=await call('capture_repeat_slots',{...plan,companyId,pageUrl,reusePrimaryOnly:true,authorization:{prepare:true,evidence:authorization.evidence}});
    if(result.error)return {error:result.error};
+   if(result.status==='repeat_slots_waiting_current_primary')return {reobserve:true,reason:result.reason,nextTools:['form_construct_acquire']};
    if(result.added&&result.status!=='repeat_slots_observed')return {reobserve:true,reason:result.reason||'REPEAT_SLOT_CAPTURE_REOBSERVATION_REQUIRED'};
    if(result.added&&result.status==='repeat_slots_observed'){changed=true;localRepairs++;}
   }
@@ -150,7 +151,7 @@ export async function runConstructionBuild({deps,task,authorization,primary=null
     if(b.error)return done('blocked',{stage:cycle.stage,error:b.error});
     const local=await prepareRepeats();
     if(local?.error)return done('blocked',{stage:cycle.stage,error:local.error});
-    if(local?.reobserve)return done('needs_acquisition',{stage:cycle.stage,reason:local.reason,nextTools:['capture_rea_structure','form_construct_build']});
+    if(local?.reobserve)return done('needs_acquisition',{stage:cycle.stage,reason:local.reason,nextTools:local.nextTools||['capture_rea_structure','form_construct_build']});
     if(local?.changed)continue;
     if(!b.readyToRegister){
      const collected=await fillChoiceEvidence(b.nextGoals);
@@ -166,7 +167,7 @@ export async function runConstructionBuild({deps,task,authorization,primary=null
    case 'interaction_test':{
     const local=await prepareRepeats();
     if(local?.error)return done('blocked',{stage:cycle.stage,error:local.error});
-    if(local?.reobserve)return done('needs_acquisition',{stage:cycle.stage,reason:local.reason,nextTools:['capture_rea_structure','form_construct_build']});
+    if(local?.reobserve)return done('needs_acquisition',{stage:cycle.stage,reason:local.reason,nextTools:local.nextTools||['capture_rea_structure','form_construct_build']});
     if(local?.changed)continue;
     const r=await call('form_test_interactions',{...queue,templateHash:cycle.templateHash,authorization:testAuth});
     if(r.error)return done('blocked',{stage:cycle.stage,error:r.error});

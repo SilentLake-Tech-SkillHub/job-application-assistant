@@ -124,6 +124,13 @@ function recordsByPage(page,parents){
  }
  return [...sections].map(([section,records])=>({section,records:[...records].sort(([a],[b])=>a-b).map(([occurrence,fields])=>({occurrence,fields,owner:recordOwner(fields,parents)}))}));
 }
+// Unmapped existing slots may already be the expected rows. They must be
+// mapped before construction can safely add more from the master profile.
+export function unresolvedRepeatSections(page,parents={}){
+ return new Set(recordsByPage(page||{},parents)
+  .filter(({records})=>records.some(record=>!record.owner)||new Set(records.map(record=>record.owner.record)).size!==records.length)
+  .map(({section})=>section));
+}
 // The form to fill for this profile. No plan means no profile in reach: the
 // template is returned untouched, as it is when nothing changed.
 export function withProfileRecords(template,plan){

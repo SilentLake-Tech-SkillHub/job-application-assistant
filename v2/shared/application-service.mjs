@@ -5,7 +5,7 @@ import {OperationService} from './operation-service.mjs';
 import {resolveStoredCompanyRole,loadCompanyTemplate,companyRoleContext} from './company-template-store.mjs';
 import {toCompanyRoleTemplate} from './company-role-template.mjs';
 import {reviewCompleteness,assertCompleteness,constructionCaptureHash,patchCapturedControls,constructionNext,assertInteractionEvidence} from './construction-cycle.mjs';
-import {recordVisualRows,reconcilePrimaryControls,requiredExpansionIds,sameVisualPage,currentPrimaryContinuation,primaryStructureHash} from './form-visual-inventory.mjs';
+import {recordVisualRows,reconcilePrimaryControls,requiredExpansionIds,sameVisualPage,currentPrimaryContinuation,primaryStructureHash,visualTableForRecoveredDocument,visualScrollPositions} from './form-visual-inventory.mjs';
 import {testControlInteractions} from './control-interaction-test.mjs';
 import {conditionalControlBackfill} from './conditional-control-backfill.mjs';
 import {recordContentFindings} from './record-placement.mjs';
@@ -13,7 +13,7 @@ import {assertMappingCapture} from './mapping-capture.mjs';
 import {sessionFromSnapshot} from './login-state.mjs';
 import {rolePageContract,assertRoleSnapshot,inferredRoleIdentity} from './role-identity.mjs';
 import {constructionRecordView} from './construction-record-view.mjs';
-import {recordPlanOf,withProfileRecords,groupFromDiscovery,groupSection,scopeOf} from './repeat-groups.mjs';
+import {recordPlanOf,withProfileRecords,groupFromDiscovery,groupSection,scopeOf,unresolvedRepeatSections} from './repeat-groups.mjs';
 import {withTaskRecords,taskRecordScope,TaskRecords} from './task-records.mjs';
 import {evaluateBusinessAuthorization,businessAuthorizationSwitch} from './business-authorization.mjs';
 import {updateCompanyTemplate,constructionTemplate,promoteSealedTemplate} from './template-lifecycle.mjs';
@@ -276,7 +276,7 @@ registerOperation('workflow_next',{description:'确定性调用路由：先判�
  return {...route,...plan,continuation,nextTools:continuation.nextTools,submission:'not_performed'};
 }));
 registerOperation('form_route',{description:'先做本地IF判断：公司已有覆盖当前页面的可用表单则复用并转资料预检；没有、未完成或路径不匹配才进入增量建库。不打开网页、不重新采集已有表单、不填写。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),roleId:z.string().optional()},annotations:{readOnlyHint:true}},wrap(a=>engine.formRoute(a)));
-registerOperation('capture_repeat_slots',{description:'按已观察的重复栏目准备最终总条数。已有同页证据时随即核实新增字段和原一级配对，从受影响栏目接续。不填写、不上传或提交。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),groupSelector:z.string(),addSelector:z.string(),addLabel:z.string().optional(),count:z.number().int().min(1).max(20),authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1)})}},wrap(a=>engine.withCompanyLease(a.companyId,()=>prepareRepeatSlots(a)),false));
+registerOperation('capture_repeat_slots',{description:'按已观察的重复栏目准备最终总条数。已有同页证据时随即核实新增字段和原一级配对，从受影响栏目接续。不填写、不上传或提交。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),groupSelector:z.string(),addSelector:z.string(),addLabel:z.string().optional(),count:z.number().int().min(1).max(20),reusePrimaryOnly:z.boolean().optional(),authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1)})}},wrap(a=>engine.withCompanyLease(a.companyId,()=>prepareRepeatSlots(a)),false));
 registerOperation('capture_choice_options',{description:'内部建库：读取已采集单选/原生select的真实选项，对已采集的UD、Ant及ATS下拉逐个展开读取并恢复，不更改原选择；保存私有选项资产。selectors限定本次需补采的已捕获控件，不改变完整问题登记。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),captureId:z.string(),selectors:z.array(z.string()).min(1).optional(),searchQueries:z.record(z.string(), z.string()).optional()}},wrap(args=>engine.withCompanyLease(args.companyId,async()=>{
  const capture=await store.get('runs',args.captureId);if(capture.companyId!==args.companyId||!samePage(capture.pageUrl,args.pageUrl))throw Error('CHOICE_CAPTURE_SCOPE_MISMATCH');
  if(capture.visualPage)await assertConstructionCoverage(capture);
@@ -518,9 +518,7 @@ async function captureVisualScreenshots(scope,binding){
  const snapshot=()=>browser.request('screenshot',{pageId:scope.pageId});
  const {surface}=await page.observe({acquisitionScroll:{}});
  if(!surface){const screenshot=await snapshot();if(screenshot?.scope!=='full_page')throw Error('FORM_VISUAL_SCREENSHOT_COVERAGE_REQUIRED');return [screenshot];}
- const last=surface.extent-surface.height,step=Math.max(1,Math.floor(surface.height*0.75));
- const positions=[...new Set([...Array.from({length:Math.ceil(last/step)},(_,i)=>i*step),last])];
- if(positions.length>30)throw Error('FORM_VISUAL_SCREENSHOT_COVERAGE_REQUIRED');
+ const positions=visualScrollPositions(surface);
  const screenshots=[];
  const move=top=>page.observe({acquisitionScroll:{selector:surface.selector,top}});
  try{
@@ -554,10 +552,20 @@ registerOperation('form_capture_visual',{description:'建库第一步。在已�
   const before=await optionalRun(keys.capture),formal=await optionalTemplate(a.companyId);
   if(before?.roleId&&(await templateState(formal)).route!=='reuse'){
    const live=await captureCompanyControls({...a,provider:before.provider||undefined,visualPage:page});
-   if(live.roleId===before.roleId&&captureContentHash(live)===captureContentHash(before)){
-    table={...table,current:{...table.current,page}};
-    reboundStructure={...structure,pageId:page.pageId,visualPage:page,primaryContentHash:coverage.review.structureHash};
-    await store.put('runs',id,table);await store.put('runs',keys.structure,reboundStructure);
+   if(live.roleId===before.roleId){
+    const recovered=visualTableForRecoveredDocument(table,page);
+    if(recovered){
+     const {result,structure:liveStructure}=await readBoundRea({...a,authorization:{acquire:true,evidence:'原申请页同一文档，重新取得当前控件和 REA 核实原一级对照'}});
+     const inspection=await recordReaInspection(store,{companyId:a.companyId,pageUrl:a.pageUrl,structure:liveStructure,capture:live,rawEvidence:result.evidence,nativeStructure:result.nativeStructure||null,visual:recovered.current,template:formal,recoveredVisualTable:recovered});
+     if(inspection.asset){
+      table=recovered;reboundStructure=inspection.asset;
+      await store.put('runs',id,table);
+     }
+    }else if(captureContentHash(live)===structure.controlCaptureHash){
+     table={...table,current:{...table.current,page}};
+     reboundStructure={...structure,pageId:page.pageId,visualPage:page,primaryContentHash:coverage.review.structureHash};
+     await store.put('runs',id,table);await store.put('runs',keys.structure,reboundStructure);
+    }
    }
   }
  }
@@ -650,6 +658,7 @@ async function prepareRepeatSlots(a){
   if(taskId)bound={pageId:scope.pageId,roleBinding:await browser.bindRolePage({taskId,...scope})};
   else proof=null;
  }
+ if(a.reusePrimaryOnly&&!proof)return {status:'repeat_slots_waiting_current_primary',reason:'REPEAT_SLOT_CURRENT_PRIMARY_REQUIRED',added:0,submission:'not_performed'};
  const p=await browser.existingPage(a.pageUrl,bound);
  const total=async()=>(await p.observe({fields:[],groups:[{id:'records',selector:a.groupSelector}]})).groups?.records;
  const before=await total();
@@ -1011,10 +1020,13 @@ async function repeatPlansForConstruction(companyId){
  const capture=await optionalRun(formAssetKeys(companyId).capture),formal=await optionalTemplate(companyId);
  if(!capture?.repeatGroups?.length||!formal)return [];
  const template=await engine.routeTemplate(formal,{companyId,roleId:capture.roleId,pageUrl:capture.pageUrl});
- const page=withProfileRecords(template,recordPlanOf(await loadProfile(profileFile))).pages.find(p=>matchesPageIdentity(p,capture.pageUrl));
+ const plan=recordPlanOf(await loadProfile(profileFile));
+ const original=template.pages.find(p=>matchesPageIdentity(p,capture.pageUrl));
+ const unresolved=unresolvedRepeatSections(original,{...template.evidence?.recordParents,...plan.parents});
+ const page=withProfileRecords(template,plan).pages.find(p=>matchesPageIdentity(p,capture.pageUrl));
  if(!page)return [];
  const observed=capture.repeatGroups.map(groupFromDiscovery);
- return (page.groups||[]).filter(g=>g.count>0&&g.count<=20&&observed.some(o=>o.selector===g.selector&&o.addSelector===g.addSelector))
+ return (page.groups||[]).filter(g=>g.count>0&&g.count<=20&&!unresolved.has(groupSection(g))&&observed.some(o=>o.selector===g.selector&&o.addSelector===g.addSelector))
   .map(g=>({groupSelector:g.selector,addSelector:g.addSelector,addLabel:g.addLabel,count:g.count}));
 }
 function constructionDeps(companyId,pageId){

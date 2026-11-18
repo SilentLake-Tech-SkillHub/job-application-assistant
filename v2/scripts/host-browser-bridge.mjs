@@ -10,6 +10,7 @@ import {loadFallbackRegistry,fallbackRegistryFile} from '../shared/gui-fallback.
 import {resolveHostExtension,extensionSocketPath} from '../shared/host-extension.mjs';
 import {configurePaths} from '../shared/runtime-paths.mjs';
 import {collectHostReaPage} from '../shared/host-rea.mjs';
+import {createCliStageDirectory,waitForCliStageReceipt} from '../shared/host-stage-receipt.mjs';
 // Called INSIDE the actual host's extension tool runtime, never another host's daemon.
 export async function registerMainChromeExtension({agent,browserId,allowedOrigins,fileUpload,reaInspect,reaPackageRoot,deferBrowserCalls=true,env=process.env}){
  env={...env};configurePaths({env});
@@ -105,9 +106,16 @@ export async function runHostBrowserStage(bridge,run,{signal}={}){
 }
 
 
-// Start the installed CLI directly, on stdin, without a shell wrapper, from
-// the same host SDK invocation that services this stage's browser callbacks.
-export async function runHostBrowserCliStage(bridge,{workspace,mode='application',operation,input={},env=process.env,signal}){
+// Sandboxed SDK hosts can service the stage while their official shell runs
+// the fixed CLI. No subprocess or process globals are needed in the SDK.
+export async function createHostBrowserCliStage(input={}){
+ const stage=await createCliStageDirectory(input);
+ return {...stage,run:(bridge,{signal}={})=>runHostBrowserStage(bridge,({signal:stop})=>waitForCliStageReceipt(stage.directory,stop),{signal})};
+}
+
+// Hosts that expose Node subprocesses may start the fixed CLI in the SDK.
+export async function runHostBrowserCliStage(bridge,{workspace,mode='application',operation,input={},env,signal}){
+ if(typeof process==='undefined')throw Error('HOST_BROWSER_CLI_SEPARATE_SHELL_REQUIRED');
  if(typeof workspace!=='string'||!workspace.startsWith('/')||!['application','login'].includes(mode)||!/^[a-z][a-z0-9_]+$/.test(operation))throw Error('FIXED_WORKFLOW_CLI_REQUIRED');
  const cli=fileURLToPath(new URL('./cli.mjs',import.meta.url));
  return runHostBrowserStage(bridge,({signal:cancel})=>new Promise((resolve,reject)=>{

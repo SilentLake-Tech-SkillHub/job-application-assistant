@@ -14,7 +14,13 @@ class WorkflowHookTest(unittest.TestCase):
   event={'session_id':'enabled','turn_id':'turn','cwd':str(self.root),'hook_event_name':'PreToolUse','tool_name':'mcp__recruiting_application_v2__batch_prepare',**args}
   return subprocess.run([sys.executable,str(ROOT/'hooks/workflow_hook.py')],input=json.dumps(event),text=True,encoding="utf-8",capture_output=True,env=self.env)
  def test_wrapped_cli_result_is_read_by_stop_even_without_a_post_tool_hook(self):
-  self.invoke(hook_event_name='UserPromptSubmit')
+  cli=shlex.quote(str(ROOT/'scripts/cli.mjs'))
+  stage=self.root/'recruiting-host-stage-test'
+  stage.mkdir()
+  input_file=stage/'input.json'
+  input_file.write_text('{}')
+  command='node '+cli+' --workspace '+shlex.quote(str(self.root))+' --stage-dir '+shlex.quote(str(stage))+' application company_batch_status '+shlex.quote(str(input_file))
+  self.assertEqual(self.invoke(tool_name='exec_command',tool_input={'cmd':command}).returncode,0)
   module=(ROOT/'shared'/'cli-workflow-receipt.mjs').as_uri()
   code=f"""import {{loadCliWorkflowTarget,recordCliWorkflow}} from {json.dumps(module)};
 const target=await loadCliWorkflowTarget({{workspace:process.env.RECRUITING_WORKSPACE_ROOT}});
