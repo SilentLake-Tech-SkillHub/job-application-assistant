@@ -1,10 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {recordVisualRows,primaryCandidates,reconcilePrimaryControls,requiredExpansionIds,currentPrimaryContinuation,retainReviewedPrimary} from '../shared/form-visual-inventory.mjs';
+import {recordVisualRows,primaryCandidates,reconcilePrimaryControls,requiredExpansionIds,currentPrimaryContinuation,retainReviewedPrimary,visualScrollPositions,visualTableForRecoveredDocument} from '../shared/form-visual-inventory.mjs';
 
 const page={pageId:'chrome:test',pageUrl:'https://example.test/apply',generation:'one',sessionId:'broker'};
 const visual=(rows,previous=[],screenshotId='snapshot')=>recordVisualRows({rows:previous,current:{page,screenshotId}},screenshotId,rows);
 const structure=(table,controls,entrances=[])=>({visualPage:page,visualInventoryHash:table.current.inventoryHash,visualScreenshotId:table.current.screenshotId,contentHash:'rea-evidence',primaryCandidates:primaryCandidates({controls,entrances})});
+test('a taller scroll surface uses overlapping windows without leaving uncaptured gaps',()=>{
+ const positions=visualScrollPositions({extent:17137,height:726});
+ assert.ok(positions.length<=30);
+ assert.equal(positions[0],0);
+ assert.equal(positions.at(-1),17137-726);
+ assert.ok(positions.slice(1).every((pos,i)=>pos-positions[i]<=Math.floor(726*.9)));
+ assert.throws(()=>visualScrollPositions({extent:50000,height:726}),{message:'FORM_VISUAL_SCREENSHOT_COVERAGE_REQUIRED'});
+});
+test('only the same recovered document can pair a new bridge session with its prior visual table',()=>{
+ const table=visual([{label:'Name',kind:'field'}]);
+ const rebound=visualTableForRecoveredDocument(table,{...page,sessionId:'restarted'});
+ assert.equal(rebound.current.inventoryHash,table.current.inventoryHash);
+ assert.equal(rebound.current.page.sessionId,'restarted');
+ assert.equal(visualTableForRecoveredDocument(table,page,rebound.current.page).current.page.sessionId,page.sessionId);
+ assert.equal(visualTableForRecoveredDocument(table,page,page),null);
+ assert.equal(visualTableForRecoveredDocument(table,{...rebound.current.page,generation:'navigated'}),null);
+ assert.equal(visualTableForRecoveredDocument(table,{...rebound.current.page,pageId:'chrome:other'}),null);
+});
 test('a secondary locator changing after repeat expansion does not restart the primary comparison',()=>{
  const table=visual([{label:'Works',kind:'expander'}]),old=[{selector:'#file',label:'File',type:'file'}],initial=structure(table,old,[{title:'Works',selector:'#add',childSelectors:['#file']}]);
  const parent=initial.primaryCandidates.find(row=>row.kind==='expander'),child=initial.primaryCandidates.find(row=>row.kind==='field');

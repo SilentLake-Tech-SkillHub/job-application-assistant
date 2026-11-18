@@ -27,6 +27,13 @@ test('a real exact Chinese school candidate resolves without a search',()=>{
 test('missing assets never borrow control.options',()=>{
  const r=evaluateChoiceGoals(fixture());assert.equal(r.blockers[0].reason,'CHOICE_GOAL_OPTION_CAPTURE_REQUIRED');assert.equal(r.nextGoals[0].nextTool,'form_search_choices');
 });
+test('an array or boolean source requests observed choices without an impossible text search',()=>{
+ for(const [value,type] of [[['Alpha','Beta'],'multiselect'],[false,'radio']]){
+  const result=evaluateChoiceGoals(fixture(value,type));
+  assert.equal(result.nextGoals[0].nextTool,'capture_choice_options');
+  assert.equal(result.blockers[0].reason,'CHOICE_GOAL_OPTION_CAPTURE_REQUIRED');
+ }
+});
 test('wrong query empty evidence cannot authorize custom text',()=>{
  const args=fixture('Example University','searchable_text'),fact=args.profile.facts[factKey],sourceHash=createHash('sha256').update(JSON.stringify(fact)).digest('hex');
  args.choices=[{selector,captureId:args.capture.captureId,status:'captured_empty_search',restored:true,options:[],customValueEvidence:'No match; typed value will be used',goal:{factKey,sourceHash,captureId:args.capture.captureId,selector,decision:'observed_no_results',attempts:[{query:'Wrong University',queryApplied:true,status:'captured_empty_search',options:[],emptyEvidence:['No results']}]}}];

@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {controlDefinitionHash,formScope} from './control-choice-store.mjs';
-import {rankChoices,resolveObservedChoice,assertPopupChoiceContract,optionHash} from './choice-resolution.mjs';
+import {factChoiceAliases,rankChoices,resolveObservedChoice,assertPopupChoiceContract,optionHash} from './choice-resolution.mjs';
 
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
@@ -55,7 +55,8 @@ export function evaluateChoiceGoals({capture,profile,fields=[],choices=[]}){
    if(sameQuestion&&sameEvidence)matches=[first];
   }
   const base={fieldId:field.id,factKey,sourceHash,captureId:capture?.captureId||null,inventorySelectors:[...selectors],selector:captured[0]||null,executionVerified:false};
-  const block=(reason,nextTool='form_search_choices',extra={})=>{
+  const nextAcquisition=factChoiceAliases(profile,factKey).length?'form_search_choices':'capture_choice_options';
+  const block=(reason,nextTool=nextAcquisition,extra={})=>{
    goals.push({...base,status:'blocked',decision:'unresolved',reason,...extra});
    blockers.push({id:field.id,fieldId:field.id,label:field.label,factKey,selector:base.selector,reason});
    nextGoals.push({...base,nextTool,tool:nextTool,reason});
@@ -90,7 +91,7 @@ export function evaluateChoiceGoals({capture,profile,fields=[],choices=[]}){
    succeed(resolution.method==='known_alias'?'resolved_known_alias':'resolved_semantic_review',{resolution,evidence:{status:choice.status,optionsHash:resolution.optionsHash}});
   }catch(error){
    const reason=/^[A-Z_]+$/.test(error.message)?error.message:'CHOICE_GOAL_RESOLUTION_FAILED';
-   block(reason,/STALE|DISABLED|NOT_UNIQUE/.test(reason)?'capture_choice_options':reason.includes('MULTISELECT')?'form_search_choices':'form_resolve_choices');
+   block(reason,/STALE|DISABLED|NOT_UNIQUE/.test(reason)?'capture_choice_options':reason.includes('MULTISELECT')?nextAcquisition:'form_resolve_choices');
   }
  }
  return {goals,blockers,choices:output,nextGoals};

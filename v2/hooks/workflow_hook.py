@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import time
 import uuid
@@ -59,7 +60,7 @@ def source_read_allowed(value):
             target.suffix in {'.md', '.py', '.mjs', '.json'} and package in target.parents)
 
 
-def component_cli_event(event):
+def component_cli_event(event, *, anchor_only=False):
     """Normalize the installed fixed CLI into the same workflow Hook path."""
     kind = event.get('tool_name', '').split('__')[-1].lower()
     if kind not in {'bash', 'exec_command', 'execute', 'shell'}:
@@ -72,6 +73,16 @@ def component_cli_event(event):
         return event
     try:
         parts = shlex.split(command)
+        if anchor_only:
+            prefix = {}
+            while parts and re.fullmatch(r'(?:RECRUITING_[A-Z0-9_]+|CODEX_THREAD_ID|CODEX_SESSION_ID|CLAUDE_SESSION_ID|DSH_SESSION_ID)=.*', parts[0]):
+                variable, value = parts.pop(0).split('=', 1)
+                if variable in prefix:
+                    return event
+                prefix[variable] = value
+            ids = {prefix[name] for name in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'CLAUDE_SESSION_ID', 'DSH_SESSION_ID') if name in prefix}
+            if not prefix or '--stage-dir' not in parts or ids and ids != {event.get('session_id')}:
+                return event
         cli = Path(__file__).resolve().parents[1] / 'scripts/cli.mjs'
         updater = cli.with_name('update-runtime.mjs')
         if len(parts) in {2, 3} and Path(parts[0]).name == 'node' and Path(parts[1]).resolve() == updater and (len(parts) == 2 or parts[2] == '--preview'):
@@ -82,6 +93,11 @@ def component_cli_event(event):
         if '--workspace' in tail:
             i = tail.index('--workspace')
             if Path(tail[i+1]).resolve() != ROOT:
+                return event
+            del tail[i:i+2]
+        if '--stage-dir' in tail:
+            i = tail.index('--stage-dir')
+            if not Path(tail[i+1]).is_absolute() or not Path(tail[i+1]).name.startswith('recruiting-host-stage-'):
                 return event
             del tail[i:i+2]
         if len(tail) not in {2, 3} or tail[0] not in {'login', 'application'}:
@@ -243,6 +259,56 @@ def workflow_metadata(value):
     return None
 
 
+def cli_work_for_turn(session, turn):
+    folder = STATE / ('cli-continuation-' + key(session, turn))
+    records = []
+    try:
+        files = list(folder.iterdir())
+    except OSError:
+        return records
+    for file in files:
+        if len(file.name) != 64 or any(c not in '0123456789abcdef' for c in file.name):
+            continue
+        try:
+            item = json.loads(file.read_text())
+            route = item.get('route') or {}
+            if (item.get('session_id') == session and item.get('turn_id') == turn
+                    and isinstance(item.get('scope'), str) and isinstance(item.get('atMs'), int)
+                    and route.get('owner') in ('agent', 'user', 'supervisor', 'maintainer')
+                    and isinstance(route.get('shouldContinue'), bool)):
+                records.append(item)
+        except (OSError, ValueError, AttributeError):
+            pass
+    return records
+
+
+def merge_cli_continuation(old, receipts):
+    if not receipts:
+        return old
+    work = dict(old.get('workByScope') or {})
+    dates = dict(old.get('workAtMsByScope') or {})
+    batch_at = old.get('batchAtMs', 0)
+    for item in sorted(receipts, key=lambda record: record['atMs']):
+        stamp, scope = item['atMs'], item['scope']
+        if item['batch']:
+            if stamp < batch_at:
+                continue
+            work = {k: v for k, v in work.items() if dates.get(k, 0) > stamp}
+            dates = {k: dates[k] for k in work}
+            batch_at = stamp
+        if stamp < batch_at or stamp < dates.get(scope, 0):
+            continue
+        route = continuation_result({'continuation': item['route']})
+        work[scope], dates[scope] = route, stamp
+    if not work:
+        return old
+    pending = [r for r in work.values() if r.get('owner') == 'agent' and r.get('shouldContinue')]
+    route = pending[0] if pending else max(work.items(), key=lambda pair: dates.get(pair[0], 0))[1]
+    return {**old, **route, 'workByScope': work, 'workAtMsByScope': dates,
+            'batchAtMs': batch_at,
+            'observedEvents': list(dict.fromkeys([*(old.get('observedEvents') or []), 'ComponentCLI']))}
+
+
 def handle_continuation(event):
     session, turn = event.get('session_id'), event.get('turn_id')
     if not session or not turn:
@@ -288,6 +354,9 @@ def handle_continuation(event):
         scope = inputs.get('taskId') or inputs.get('companyId') or 'batch'
         work = {} if batch_status else dict(old.get('workByScope') or {})
         work[scope] = route
+        at_ms = time.time_ns() // 1_000_000
+        dates = {} if batch_status else dict(old.get('workAtMsByScope') or {})
+        dates[scope] = at_ms
         pending = [item for item in work.values() if item.get('owner') == 'agent' and item.get('shouldContinue')]
         if pending:
             route = {**pending[0], 'requiresUser': False}
@@ -296,10 +365,12 @@ def handle_continuation(event):
                         'PreToolUse' if event.get('stage_attempt') else 'PostToolUse']))
         save_continuation(file, {**route, 'workByScope': work, 'fingerprint': fingerprint,
                             'reminded': False, 'stopAttempts': 0,
-                            'observedEvents': observed,
+                            'observedEvents': observed, 'workAtMsByScope': dates,
+                            'batchAtMs': at_ms if batch_status else old.get('batchAtMs', 0),
                             'receiptRevision': old.get('receiptRevision', 0) + 1,
                             'lastTool': tool.split('__')[-1]}, session, turn)
         return {}
+    old = merge_cli_continuation(old, cli_work_for_turn(session, turn))
     if old.get('owner') == 'agent' and old.get('shouldContinue'):
         attempts = old.get('stopAttempts', 0) + 1
         observed = list(dict.fromkeys([*(old.get('observedEvents') or []), 'Stop']))
@@ -314,12 +385,29 @@ def handle(event):
     cwd = Path(event.get('cwd') or ROOT).resolve()
     if (cwd != ROOT and ROOT not in cwd.parents) or host_role() == 'maintainer':
         return {}
+    literal_cli = component_cli_event(event, anchor_only=True)
     event = component_cli_event(event)
     name = event.get('hook_event_name')
     tool = event.get('tool_name', '')
     operation = tool.split('__')[-1]
     session, turn = event.get('session_id'), event.get('turn_id')
     receipt = STATE / (key(session, turn) + '.json') if session and turn else None
+
+    anchor_tool = literal_cli.get('tool_name', '') if literal_cli.get('component_cli') else tool
+    anchor_operation = anchor_tool.split('__')[-1]
+    tracks_work = anchor_operation in LIFECYCLE['stages'] or anchor_operation == 'company_batch_status'
+    anchors_cli = name == 'UserPromptSubmit' or (name in {'PreToolUse', 'PostToolUse'} and recruiting_tool(anchor_tool) and tracks_work)
+    if anchors_cli and session and turn:
+        STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
+        mark = hashlib.sha256(session.encode()).hexdigest()[:24]
+        anchor = STATE / ('host-turn-' + mark + '.json')
+        current = {'session_id': session, 'turn_id': turn}
+        try:
+            previous = json.loads(anchor.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            previous = None
+        if previous != current:
+            write_atomic(anchor, current)
 
     if name == 'Stop':
         return handle_continuation(event)

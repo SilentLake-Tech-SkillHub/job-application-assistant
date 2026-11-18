@@ -137,7 +137,8 @@ export function buildFormTemplate({capture,profile,mappings=[],choices=[],page,t
   }
   return f;
  });
- fields=inheritFields(fields,previous,page.pathPrefix||'/',{preserveObservedBlockers:!!capture.visualPage,mappings});
+ const observedRepeatSections=capture.visualPage&&reaStructure?(capture.repeatGroups||[]).filter(group=>group.addSelector).map(group=>group.sectionKey||group.title):[];
+ fields=inheritFields(fields,previous,page.pathPrefix||'/',{preserveObservedBlockers:!!capture.visualPage,mappings,observedRepeatSections});
  for(const field of fields)if(field.kind==='date'){const ongoing=field.source.replace(/\.(?:end|endDate|dateEnd|endMonth)$/u,'.ongoing');if(ongoing!==field.source&&profile.facts?.[ongoing]?.status==='known'&&typeof profile.facts[ongoing].value==='boolean')field.ongoingSource=ongoing;}
  const choiceGoals=evaluateChoiceGoals({capture,profile,fields,choices});
  fields=fields.map(f=>{

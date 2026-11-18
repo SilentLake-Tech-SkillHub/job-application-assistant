@@ -3,16 +3,37 @@ import {createHash} from 'node:crypto';
 const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const normalize=value=>String(value||'').normalize('NFKC').trim().replace(/^[*\s]+|[*\s]+$/gu,'').replace(/\s+/gu,' ');
 const rowKey=row=>digest([normalize(row.section),normalize(row.label),row.kind,row.occurrence??0]).slice(0,24);
-export const sameVisualPage=(a,b)=>!!a&&!!b&&['pageId','pageUrl','generation','sessionId'].every(key=>a[key]&&a[key]===b[key]);
+export const sameVisualDocument=(a,b)=>!!a&&!!b&&['pageId','pageUrl','generation'].every(key=>a[key]&&a[key]===b[key]);
+export const sameVisualPage=(a,b)=>sameVisualDocument(a,b)&&!!a.sessionId&&a.sessionId===b.sessionId;
 export const primaryStructureHash=structure=>structure?.primaryContentHash||structure?.contentHash;
+
+export function visualTableForRecoveredDocument(table,page,capturePage){
+ const current=table?.current;
+ if(!current?.inventoryHash||!sameVisualDocument(current.page,page))return null;
+ if(sameVisualPage(current.page,page)&&sameVisualPage(capturePage,page))return null;
+ return {...table,current:{...current,page}};
+}
+
+export function visualScrollPositions({extent,height},limit=30){
+ const last=Math.max(0,extent-height);
+ const positions=ratio=>{
+  const step=Math.max(1,Math.floor(height*ratio));
+  const count=Math.ceil(last/step)+1;
+  return {step,count};
+ };
+ let {step,count}=positions(0.75);
+ if(count>limit)({step,count}=positions(0.9));
+ if(count>limit)throw Object.assign(Error('FORM_VISUAL_SCREENSHOT_COVERAGE_REQUIRED'),{details:{requiredWindows:count,limit,viewport:height,extent}});
+ return Array.from({length:count},(_,index)=>Math.min(last,index*step));
+}
 
 // A later child inspection does not undo the independent primary comparison.
 // Carry it only when every change belongs to a proved expansion on this page.
-export function retainReviewedPrimary(asset,previous,table,coverage,{template}={}){
+export function retainReviewedPrimary(asset,previous,table,coverage,{template,verifiedLocalSelectors=[]}={}){
  const current=table?.current,review=coverage?.review;
  if(review?.status!=='passed'||!sameVisualPage(current?.page,asset.visualPage)||review.visualHash!==current.inventoryHash||review.screenshotId!==current.screenshotId)return asset;
  const proved=new Map(Object.entries(coverage.expansions||{}).filter(([,proof])=>proof.status==='verified'&&proof.screenshotId===review.screenshotId&&proof.structureHash===review.structureHash));
- const children=new Set([...proved.values()].flatMap(proof=>proof.selectors||[]));
+ const children=new Set([...verifiedLocalSelectors,...[...proved.values()].flatMap(proof=>proof.selectors||[])]);
  const reviewed=new Set([...(review.matches||[]).map(pair=>pair.reaId),...(review.secondary||[]).map(pair=>pair.reaId)]);
  if(template?.pages&&template.id===asset.companyId&&template.evidence?.sourceUrl===asset.pageUrl){
   const fields=template.pages.flatMap(page=>page.fields);

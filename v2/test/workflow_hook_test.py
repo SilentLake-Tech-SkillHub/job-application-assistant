@@ -13,6 +13,33 @@ class WorkflowHookTest(unittest.TestCase):
  def invoke(self,**args):
   event={'session_id':'enabled','turn_id':'turn','cwd':str(self.root),'hook_event_name':'PreToolUse','tool_name':'mcp__recruiting_application_v2__batch_prepare',**args}
   return subprocess.run([sys.executable,str(ROOT/'hooks/workflow_hook.py')],input=json.dumps(event),text=True,encoding="utf-8",capture_output=True,env=self.env)
+ def test_wrapped_cli_result_is_read_by_stop_even_without_a_post_tool_hook(self):
+  cli=shlex.quote(str(ROOT/'scripts/cli.mjs'))
+  stage=self.root/'recruiting-host-stage-test'
+  stage.mkdir()
+  input_file=stage/'input.json'
+  input_file.write_text('{}')
+  command='node '+cli+' --workspace '+shlex.quote(str(self.root))+' --stage-dir '+shlex.quote(str(stage))+' application company_batch_status '+shlex.quote(str(input_file))
+  self.assertEqual(self.invoke(tool_name='exec_command',tool_input={'cmd':'CODEX_THREAD_ID=other '+command}).returncode,2)
+  self.assertFalse(list((self.root/'state').glob('host-turn-*.json')))
+  # Anchor records come from the real event and do not authorize a shell tool.
+  self.assertEqual(self.invoke(tool_name='exec_command',tool_input={'cmd':'RECRUITING_HOST_ID=codex CODEX_THREAD_ID=enabled '+command}).returncode,2)
+  module=(ROOT/'shared'/'cli-workflow-receipt.mjs').as_uri()
+  code=f"""import {{loadCliWorkflowTarget,recordCliWorkflow}} from {json.dumps(module)};
+const target=await loadCliWorkflowTarget({{workspace:process.env.RECRUITING_WORKSPACE_ROOT}});
+const written=await recordCliWorkflow({{target,operation:'company_batch_status',result:JSON.parse(process.argv[1])}});
+if(!written)process.exit(4);
+"""
+  def write(work):
+   body={'agentWorkRemaining':work,'actionable':[{'nextTool':'form_construct_build'}] if work else []}
+   status=subprocess.run(['node','--input-type=module','-e',code,json.dumps(body)],env={**self.env,'CODEX_THREAD_ID':'enabled'},capture_output=True,text=True)
+   self.assertEqual(status.returncode,0,status.stderr)
+  write(True)
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout)['decision'],'block')
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop',turn_id='next-turn').stdout),{})
+  write(False)
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout),{})
+
  def test_fixed_cli_bootstraps_first_business_call(self):
   cli=shlex.quote(str(ROOT/'scripts/cli.mjs'))
   command='node '+cli+' --workspace '+shlex.quote(str(self.root))+' application role_prepare'

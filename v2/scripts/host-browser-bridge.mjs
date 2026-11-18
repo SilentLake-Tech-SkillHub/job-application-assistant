@@ -1,6 +1,8 @@
 // Import this in the live, trusted host browser SDK tool context. It cannot
 // discover a browser by a guessed mode, create a replacement browser or transfer
 // login state. The supplied agent must be the actual initialized host runtime.
+import {spawn} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {startHostBrowserBridge} from '../shared/host-browser-bridge.mjs';
 import {capabilityFile,capabilityHostId,hostCapability,channelsOf,detectBrowserCapability} from '../shared/browser-capability.mjs';
 import {loadAdapter} from '../host/adapters/registry.mjs';
@@ -8,6 +10,7 @@ import {loadFallbackRegistry,fallbackRegistryFile} from '../shared/gui-fallback.
 import {resolveHostExtension,extensionSocketPath} from '../shared/host-extension.mjs';
 import {configurePaths} from '../shared/runtime-paths.mjs';
 import {collectHostReaPage} from '../shared/host-rea.mjs';
+import {createCliStageDirectory,waitForCliStageReceipt} from '../shared/host-stage-receipt.mjs';
 // Called INSIDE the actual host's extension tool runtime, never another host's daemon.
 export async function registerMainChromeExtension({agent,browserId,allowedOrigins,fileUpload,reaInspect,reaPackageRoot,deferBrowserCalls=true,env=process.env}){
  env={...env};configurePaths({env});
@@ -69,4 +72,63 @@ export async function pumpHostBrowser(bridge,{maxJobs=20,waitMs=0}={}){
  if(!bridge||typeof bridge.pump!=='function'||!Number.isInteger(maxJobs)||maxJobs<1||maxJobs>100)throw Error('HOST_BROWSER_PUMP_REQUIRED');
  if(!Number.isInteger(waitMs)||waitMs<0||waitMs>5000)throw Error('HOST_BROWSER_PUMP_WAIT_INVALID');
  let completed=0;const end=Date.now()+waitMs;while(completed<maxJobs){if(await bridge.pump())completed++;else if(Date.now()<end)await new Promise(r=>setTimeout(r,25));else break;}return {completed,pending:bridge.pendingCount(),executor:bridge.executor};
+}
+
+const runningStages=new WeakSet();
+// Use inside the actual host SDK tool, with one fixed component invocation.
+export async function runHostBrowserStage(bridge,run,{signal}={}){
+ if(typeof bridge?.waitForRequest!=='function'||typeof bridge.pump!=='function'||typeof run!=='function')throw Error('HOST_BROWSER_STAGE_REQUIRED');
+ if(runningStages.has(bridge))throw Error('HOST_BROWSER_STAGE_BUSY');
+ signal?.throwIfAborted();
+ const stop=new AbortController(),start=performance.now();
+ let finished=false,completed=0,waitMs=0,emptyWakeups=0;
+ const cancel=()=>stop.abort(signal.reason);
+ signal?.addEventListener('abort',cancel,{once:true});
+ runningStages.add(bridge);
+ const execution=Promise.resolve().then(()=>run({signal:stop.signal})).finally(()=>{finished=true;stop.abort();});
+ execution.catch(()=>{});
+ try{
+  while(!finished){
+   const waiting=performance.now();
+   const available=await bridge.waitForRequest(stop.signal);
+   waitMs+=performance.now()-waiting;
+   if(finished||signal?.aborted)break;
+   if(!available)throw Error('HOST_BROWSER_STAGE_BRIDGE_CLOSED');
+   if(await bridge.pump())completed++;else emptyWakeups++;
+  }
+  signal?.throwIfAborted();
+  return {result:await execution,browserStage:{wallMs:Math.round(performance.now()-start),waitMs:Math.round(waitMs),requests:completed,emptyWakeups}};
+ }finally{
+  stop.abort();
+  signal?.removeEventListener('abort',cancel);
+  runningStages.delete(bridge);
+ }
+}
+
+
+// Sandboxed SDK hosts can service the stage while their official shell runs
+// the fixed CLI. No subprocess or process globals are needed in the SDK.
+export async function createHostBrowserCliStage(input={}){
+ const stage=await createCliStageDirectory(input);
+ return {...stage,run:(bridge,{signal}={})=>runHostBrowserStage(bridge,({signal:stop})=>waitForCliStageReceipt(stage.directory,stop),{signal})};
+}
+
+// Hosts that expose Node subprocesses may start the fixed CLI in the SDK.
+export async function runHostBrowserCliStage(bridge,{workspace,mode='application',operation,input={},env,signal}){
+ if(typeof process==='undefined')throw Error('HOST_BROWSER_CLI_SEPARATE_SHELL_REQUIRED');
+ if(typeof workspace!=='string'||!workspace.startsWith('/')||!['application','login'].includes(mode)||!/^[a-z][a-z0-9_]+$/.test(operation))throw Error('FIXED_WORKFLOW_CLI_REQUIRED');
+ const cli=fileURLToPath(new URL('./cli.mjs',import.meta.url));
+ return runHostBrowserStage(bridge,({signal:cancel})=>new Promise((resolve,reject)=>{
+  const child=spawn(process.execPath,[cli,'--workspace',workspace,mode,operation,'-'],{cwd:workspace,env:{...process.env,...env},signal:cancel,stdio:['pipe','pipe','pipe']});
+  let stdout='',stderr='';
+  child.once('error',reject);
+  child.stdout.setEncoding('utf8').on('data',chunk=>{stdout+=chunk;});
+  child.stderr.setEncoding('utf8').on('data',chunk=>{stderr+=chunk;});
+  child.stdin.once('error',reject);
+  child.once('close',code=>{
+   try{resolve({exitCode:code,receipt:JSON.parse(stdout.trim()||stderr.trim())});}
+   catch{reject(Error('FIXED_WORKFLOW_CLI_RESULT_REQUIRED'));}
+  });
+  child.stdin.end(JSON.stringify(input));
+ }),{signal});
 }

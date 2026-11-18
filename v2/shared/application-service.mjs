@@ -5,7 +5,7 @@ import {OperationService} from './operation-service.mjs';
 import {resolveStoredCompanyRole,loadCompanyTemplate,companyRoleContext} from './company-template-store.mjs';
 import {toCompanyRoleTemplate} from './company-role-template.mjs';
 import {reviewCompleteness,assertCompleteness,constructionCaptureHash,patchCapturedControls,constructionNext,assertInteractionEvidence} from './construction-cycle.mjs';
-import {recordVisualRows,reconcilePrimaryControls,requiredExpansionIds,sameVisualPage,currentPrimaryContinuation,primaryStructureHash} from './form-visual-inventory.mjs';
+import {recordVisualRows,reconcilePrimaryControls,requiredExpansionIds,sameVisualPage,currentPrimaryContinuation,primaryStructureHash,visualTableForRecoveredDocument,visualScrollPositions} from './form-visual-inventory.mjs';
 import {testControlInteractions} from './control-interaction-test.mjs';
 import {conditionalControlBackfill} from './conditional-control-backfill.mjs';
 import {recordContentFindings} from './record-placement.mjs';
@@ -13,7 +13,7 @@ import {assertMappingCapture} from './mapping-capture.mjs';
 import {sessionFromSnapshot} from './login-state.mjs';
 import {rolePageContract,assertRoleSnapshot,inferredRoleIdentity} from './role-identity.mjs';
 import {constructionRecordView} from './construction-record-view.mjs';
-import {recordPlanOf,withProfileRecords,groupFromDiscovery,groupSection,scopeOf} from './repeat-groups.mjs';
+import {recordPlanOf,withProfileRecords,groupFromDiscovery,groupSection,scopeOf,unresolvedRepeatSections} from './repeat-groups.mjs';
 import {withTaskRecords,taskRecordScope,TaskRecords} from './task-records.mjs';
 import {evaluateBusinessAuthorization,businessAuthorizationSwitch} from './business-authorization.mjs';
 import {updateCompanyTemplate,constructionTemplate,promoteSealedTemplate} from './template-lifecycle.mjs';
@@ -276,7 +276,7 @@ registerOperation('workflow_next',{description:'确定性调用路由：先判�
  return {...route,...plan,continuation,nextTools:continuation.nextTools,submission:'not_performed'};
 }));
 registerOperation('form_route',{description:'先做本地IF判断：公司已有覆盖当前页面的可用表单则复用并转资料预检；没有、未完成或路径不匹配才进入增量建库。不打开网页、不重新采集已有表单、不填写。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),roleId:z.string().optional()},annotations:{readOnlyHint:true}},wrap(a=>engine.formRoute(a)));
-registerOperation('capture_repeat_slots',{description:'内部建库：按已观察的重复栏目容器和添加按钮准备目标总条数的空白条目（count不是新增条数），不填写个人数据、不上传或提交；随后须重新采集全部字段。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),groupSelector:z.string().describe('只匹配该栏目每一条记录，不匹配其他栏目；可使用已观察标题绑定的phoenixq repeatRecords'),addSelector:z.string(),addLabel:z.string().optional(),count:z.number().int().min(1).max(20).describe('本栏目期望的最终总条数，不是新增条数'),authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1)})}},wrap(a=>engine.withCompanyLease(a.companyId,async()=>{const p=await browser.existingPage(a.pageUrl),before=await p.observe({fields:[],groups:[{id:'records',selector:a.groupSelector}]});const currentEntries=before.groups?.records;if(currentEntries>a.count){const error=Error('EXCESS_REPEAT_ENTRIES_REQUIRE_REVIEW');error.details={currentEntries,expectedEntries:a.count,countMeaning:'target_total_records',reason:'observed_selector_matches_more_records_than_target'};throw error;}await p.ensureGroups([{id:'construction-slots',selector:a.groupSelector,addSelector:a.addSelector,addLabel:a.addLabel,count:a.count}]);return {status:'slots_created_require_recapture',count:a.count,submission:'not_performed'};})),false);
+registerOperation('capture_repeat_slots',{description:'按已观察的重复栏目准备最终总条数。已有同页证据时随即核实新增字段和原一级配对，从受影响栏目接续。不填写、不上传或提交。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),groupSelector:z.string(),addSelector:z.string(),addLabel:z.string().optional(),count:z.number().int().min(1).max(20),reusePrimaryOnly:z.boolean().optional(),authorization:z.object({prepare:z.literal(true),evidence:z.string().min(1)})}},wrap(a=>engine.withCompanyLease(a.companyId,()=>prepareRepeatSlots(a)),false));
 registerOperation('capture_choice_options',{description:'内部建库：读取已采集单选/原生select的真实选项，对已采集的UD、Ant及ATS下拉逐个展开读取并恢复，不更改原选择；保存私有选项资产。selectors限定本次需补采的已捕获控件，不改变完整问题登记。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),captureId:z.string(),selectors:z.array(z.string()).min(1).optional(),searchQueries:z.record(z.string(), z.string()).optional()}},wrap(args=>engine.withCompanyLease(args.companyId,async()=>{
  const capture=await store.get('runs',args.captureId);if(capture.companyId!==args.companyId||!samePage(capture.pageUrl,args.pageUrl))throw Error('CHOICE_CAPTURE_SCOPE_MISMATCH');
  if(capture.visualPage)await assertConstructionCoverage(capture);
@@ -518,9 +518,7 @@ async function captureVisualScreenshots(scope,binding){
  const snapshot=()=>browser.request('screenshot',{pageId:scope.pageId});
  const {surface}=await page.observe({acquisitionScroll:{}});
  if(!surface){const screenshot=await snapshot();if(screenshot?.scope!=='full_page')throw Error('FORM_VISUAL_SCREENSHOT_COVERAGE_REQUIRED');return [screenshot];}
- const last=surface.extent-surface.height,step=Math.max(1,Math.floor(surface.height*0.75));
- const positions=[...new Set([...Array.from({length:Math.ceil(last/step)},(_,i)=>i*step),last])];
- if(positions.length>30)throw Error('FORM_VISUAL_SCREENSHOT_COVERAGE_REQUIRED');
+ const positions=visualScrollPositions(surface);
  const screenshots=[];
  const move=top=>page.observe({acquisitionScroll:{selector:surface.selector,top}});
  try{
@@ -548,20 +546,35 @@ registerOperation('form_capture_visual',{description:'建库第一步。在已�
   return {id,status:'visual_inventory_recorded',rows:next.rows.filter(row=>next.current.rowIds.includes(row.id)),nextTools:['capture_rea_structure']};
  }
  const keys=formAssetKeys(a.companyId);
- const [coverage,structure]=await Promise.all([optionalRun(keys.coverage),optionalRun(keys.structure)]);
+ const [coverage,structure,before]=await Promise.all([optionalRun(keys.coverage),optionalRun(keys.structure),optionalRun(keys.capture)]);
  let reboundStructure=structure;
- if(structure?.visualPage&&table?.current?.surveyRevision===2&&coverage?.review?.status==='passed'&&table.current.page?.pageUrl===page.pageUrl&&!sameVisualPage(table.current.page,page)){
-  const before=await optionalRun(keys.capture),formal=await optionalTemplate(a.companyId);
+ let capturePage=before?.visualPage;
+ const captureMatchesStructure=before&&captureContentHash(before)===structure?.controlCaptureHash;
+ let captureVerified=captureMatchesStructure;
+ if(structure?.visualPage&&table?.current?.surveyRevision===2&&coverage?.review?.status==='passed'&&table.current.page?.pageUrl===page.pageUrl&&
+  (!sameVisualPage(table.current.page,page)||!sameVisualPage(capturePage,page)||!captureMatchesStructure)){
+  const formal=await optionalTemplate(a.companyId);
   if(before?.roleId&&(await templateState(formal)).route!=='reuse'){
    const live=await captureCompanyControls({...a,provider:before.provider||undefined,visualPage:page});
-   if(live.roleId===before.roleId&&captureContentHash(live)===captureContentHash(before)){
-    table={...table,current:{...table.current,page}};
-    reboundStructure={...structure,pageId:page.pageId,visualPage:page,primaryContentHash:coverage.review.structureHash};
-    await store.put('runs',id,table);await store.put('runs',keys.structure,reboundStructure);
+   if(live.roleId===before.roleId){
+    const recovered=visualTableForRecoveredDocument(table,page,captureMatchesStructure?capturePage:null);
+    if(recovered){
+     const {result,structure:liveStructure}=await readBoundRea({...a,authorization:{acquire:true,evidence:'原申请页同一文档，重新取得当前控件和 REA 核实原一级对照'}});
+     const inspection=await recordReaInspection(store,{companyId:a.companyId,pageUrl:a.pageUrl,structure:liveStructure,capture:live,rawEvidence:result.evidence,nativeStructure:result.nativeStructure||null,visual:recovered.current,template:formal,recoveredVisualTable:recovered});
+     if(inspection.asset){
+      table=recovered;reboundStructure=inspection.asset;capturePage=live.visualPage;captureVerified=true;
+      await store.put('runs',id,table);
+     }else capturePage=null;
+    }else if(captureContentHash(live)===structure.controlCaptureHash){
+     table={...table,current:{...table.current,page}};
+     reboundStructure={...structure,pageId:page.pageId,visualPage:page,primaryContentHash:coverage.review.structureHash};
+     await store.put('runs',id,table);await store.put('runs',keys.structure,reboundStructure);
+     capturePage=live.visualPage;captureVerified=true;
+    }else capturePage=null;
    }
   }
  }
- const continuing=currentPrimaryContinuation(table,coverage,reboundStructure,page);
+ const continuing=captureVerified&&sameVisualPage(capturePage,page)&&currentPrimaryContinuation(table,coverage,reboundStructure,page);
  if(continuing)return {id,...continuing,secondaryScreenshotTool:'role_screenshot'};
  const screenshots=await captureVisualScreenshots(a,page);
  if(!sameVisualPage(page,await acquisitionPage(a)))throw Error('VISUAL_FORM_PAGE_CHANGED');
@@ -630,6 +643,49 @@ async function captureCompanyControls({companyId,pageUrl,pageId,compact,provider
   const summarize=rows=>rows.map(({selectors,...row})=>row);
   return {...result,controls:undefined,controlAnatomy:undefined,structure:{...structure,added:summarize(structure.added),removed:summarize(structure.removed)}};
 }
+// Re-observe one verified repeated group after addition. The site REA reader
+// supplies a read-only snapshot of the same view; acceptance is scoped to newly
+// observed children and the original, unchanged primary comparison.
+async function prepareRepeatSlots(a){
+ const keys=formAssetKeys(a.companyId),previous=await optionalRun(keys.capture);
+ const observed=previous?.pageUrl===a.pageUrl&&previous.visualPage&&
+  (previous.repeatGroups||[]).map(groupFromDiscovery).some(g=>g.selector===a.groupSelector&&g.addSelector===a.addSelector);
+ const scope=observed?{companyId:a.companyId,pageId:previous.pageId,pageUrl:a.pageUrl}:null;
+ let proof=null;
+ if(scope&&sameVisualPage(previous.visualPage,await acquisitionPage(scope))){
+  try{proof=await assertConstructionCoverage(previous);}catch(error){
+   if(!['PRIMARY_CONTROL_REVIEW_REQUIRED','FORM_SECTION_EXPANSION_REQUIRED','CURRENT_VISUAL_REA_PAIR_REQUIRED'].includes(error.message))throw error;
+  }
+ }
+ let bound={};
+ if(proof){
+  const taskId=(await queues.boundPages()).get(scope.pageId);
+  if(taskId)bound={pageId:scope.pageId,roleBinding:await browser.bindRolePage({taskId,...scope})};
+  else proof=null;
+ }
+ if(a.reusePrimaryOnly&&!proof)return {status:'repeat_slots_waiting_current_primary',reason:'REPEAT_SLOT_CURRENT_PRIMARY_REQUIRED',added:0,submission:'not_performed'};
+ const p=await browser.existingPage(a.pageUrl,bound);
+ const total=async()=>(await p.observe({fields:[],groups:[{id:'records',selector:a.groupSelector}]})).groups?.records;
+ const before=await total();
+ if(!Number.isInteger(before))throw Error('REPEAT_RECORD_COUNT_NOT_OBSERVED');
+ if(before>a.count)throw Object.assign(Error('EXCESS_REPEAT_ENTRIES_REQUIRE_REVIEW'),{details:{currentEntries:before,expectedEntries:a.count,countMeaning:'target_total_records',reason:'observed_selector_matches_more_records_than_target'}});
+ if(before===a.count)return {status:'repeat_slots_already_observed',count:before,added:0,nextTools:['form_construct_build'],submission:'not_performed'};
+ await p.ensureGroups([{id:'construction-slots',selector:a.groupSelector,addSelector:a.addSelector,addLabel:a.addLabel,count:a.count}]);
+ if(await total()!==a.count)throw Error('REPEAT_RECORD_COUNT_NOT_OBSERVED');
+ const outcome={status:'slots_created_require_recapture',count:a.count,added:a.count-before,submission:'not_performed'};
+ if(!proof||!sameVisualPage(previous.visualPage,await acquisitionPage(scope)))return outcome;
+ const {result,structure}=await readBoundRea({...scope,authorization:{acquire:true,evidence:a.authorization.evidence}});
+ const current=await captureCompanyControls({...scope,visualPage:proof.current.page,provider:previous.provider||undefined});
+ const prior=new Set(previous.controls.map(control=>control.selector));
+ const additions=current.controls.filter(control=>!prior.has(control.selector));
+ const checks=additions.map((c,index)=>({id:String(index),selector:a.groupSelector,containsSelector:c.diagnosticSelector||c.selector}));
+ const read=checks.length?(await p.observe({fields:[],groups:checks})).groups:{};
+ const verifiedLocalSelectors=additions.filter((c,index)=>read?.[String(index)]===1).map(c=>c.selector);
+ const {asset}=await recordReaInspection(store,{companyId:a.companyId,pageUrl:a.pageUrl,structure,capture:current,rawEvidence:result.evidence,nativeStructure:result.nativeStructure||null,visual:proof.current,template:await optionalTemplate(a.companyId),verifiedLocalSelectors});
+ if(primaryStructureHash(asset)!==proof.primary.structureHash||verifiedLocalSelectors.length!==additions.length||before<a.count&&!verifiedLocalSelectors.length)return outcome;
+ return {...outcome,status:'repeat_slots_observed',captureId:current.captureId,newControls:verifiedLocalSelectors.length,primaryComparison:'reuse_passed_primary_review',nextTools:['form_construct_build']};
+}
+
 registerOperation('capture_controls',{description:'建库阶段批量读取控件，强制登记新问题并保存完整私有快照；compact=true 仅返回结构差异和证据ID。可用带通道前缀的pageId定向只读采集重复URL中的原页面，必须与当前完整URL匹配，不能用于填写。结构匹配不代表执行通过。不读取验证码或Cookie。',inputSchema:{companyId:z.string(),pageUrl:z.string().url(),pageId:z.string().regex(/^(iab|chrome):.+$/).optional(),provider:z.enum(['feishu','ant','phoenix']).optional(),compact:z.boolean().optional()}},wrap(args=>engine.withCompanyLease(args.companyId,()=>captureCompanyControls(args))));
 registerOperation('form_review_completeness',{description:'同页视觉表与REA一级清单逐项对照。primary提交视觉与REA对应及有归属证据的二级字段；展开回补后只需更新当前全部控件复核。保留缺口，未完成不得建库。',inputSchema:{companyId:z.string(),captureId:z.string(),reviewedSelectors:z.array(z.string()),primary:primaryPairs.optional(),findings:z.array(z.object({selector:z.string().optional(),description:z.string().min(1)})).default([]),evidence:z.string().min(1)}},wrap(a=>engine.withCompanyLease(a.companyId,async()=>{
  const capture=await store.get('runs',a.captureId);if(capture.companyId!==a.companyId)throw Error('CAPTURE_COMPANY_MISMATCH');
@@ -721,7 +777,7 @@ registerOperation('form_cycle_status',{description:'读取公司当前建库循�
  else if(review?.status!=='passed'||review.screenshotId!==current.screenshotId||review.structureHash!==primaryStructureHash(structure))next={stage:'primary_review',nextTools:['form_review_completeness']};
  else if(requiredExpansionIds(review,coverage.expansions).length)next={stage:'section_expansion',nextTools:['form_expand_sections']};
  else if(!update&&(await templateState(official)).route==='reuse')next={stage:'ready',nextTools:['role_prepare']};
- else next=constructionNext({capture,template:update?.registered&&capture&&update.construction?.captureHash===constructionCaptureHash(capture)?official:null,interaction:update?.construction?.interaction});
+ else next=constructionNext({capture,template:update?.registered&&capture&&update.construction?.captureHash===constructionCaptureHash(capture)?official:null,interaction:update?.construction?.interaction,progress:update});
  return {companyId:a.companyId,...next,templateId:a.companyId,templateHash:official?hash(official):null,continuation:{state:next.stage==='backfill'?'repair':'construct',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:next.nextTools},submission:'not_performed'};
 }));
 registerOperation('form_patch_controls',{description:'按当前采集回补公司共享控件的动作、读回或重复栏目；覆盖更新同公司唯一正式模板，所有岗位共用；随后完整性检查和真实交互测试，不修改组件代码。',inputSchema:{...queueTask,captureId:z.string(),templateHash:z.string(),patches:z.array(z.object({fieldId:z.string(),actions:z.array(z.record(z.string(),z.unknown())).optional(),read:z.record(z.string(),z.unknown()).optional()})).default([]),repeatSections:z.array(z.string()).default([])}},wrap(async a=>{
@@ -741,6 +797,7 @@ registerOperation('form_test_interactions',{description:'在原岗位页面测�
  const keys=formAssetKeys(t.companyId),capture=await store.get('runs',keys.capture);await assertConstructionCoverage(capture);assertCompleteness(capture);
  const progress=await store.get('runs',keys.update);
  if(progress.construction?.captureHash!==constructionCaptureHash(capture))throw Error('CURRENT_COMPANY_UPDATE_REQUIRED');
+ if(progress.readyToRegister===false)throw Object.assign(Error('COMPANY_TEMPLATE_UPDATE_INCOMPLETE'),{details:{blockerCount:progress.blockers?.length||0,nextTools:['form_construct_build']}});
  const contentFindings=await constructionRecordFindings(template,await loadProfile(profileFile));
  if(contentFindings.length)return {companyId:t.companyId,status:'needs_record_content_mapping',recordContentFindings:contentFindings,nextTools:['capture_repeat_slots','profile_map_questions','form_build_template'],continuation:{state:'construct',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['capture_repeat_slots','profile_map_questions','form_build_template']},submission:'not_performed'};
  const task={companyId:t.companyId,roleId:t.roleId,taskId:t.taskId,pageUrl:state.returnUrl,pageId:state.pageId,browserBinding:state.browserBinding,templateHash:a.templateHash,roleQueueArgs:a,constructionTest:a.templateHash,...await resolveInputs(await loadProfile(profileFile),template,{},t.companyId,{roleId:t.roleId,pageUrl:state.returnUrl,confirmedOfficialId:state.siteRoleId||t.officialId})};
@@ -954,15 +1011,33 @@ registerOperation('verify_current',{description:'代码直接读取当前页面�
 
 
 // ---- C33／C34：组件内部连续编排。内部步骤直接调用已登记工具本身，不经 Agent 往返；只在需要 Agent、用户或兜底时集中返回。----
+export function invalidInternalArguments(tool,issues){
+ return {error:'INTERNAL_ARGUMENTS_INVALID',details:{phase:'internal_component_arguments',tool,
+  fields:issues.slice(0,15).map(issue=>({path:issue.path.map(String),code:issue.code}))},
+  nextTools:['run_status','workflow_handoff']};
+}
 async function internalCall(tool,args){
  const op=service.operations.get(tool);if(!op)return {error:'UNKNOWN_INTERNAL_OPERATION'};
- let parsed;try{parsed=op.schema.parse(args);}catch{return {error:'INTERNAL_ARGUMENTS_INVALID'};}
- return op.handler(parsed);
+ const parsed=op.schema.safeParse(args);if(!parsed.success)return invalidInternalArguments(tool,parsed.error.issues);
+ return op.handler(parsed.data);
 }
 async function agentFallbackSurface(pageId){const preference=await browserPreferences();return {...fallbackSurface({registry:await loadFallbackRegistry(fallbackRegistryFile()),hostId:process.env.RECRUITING_HOST_ID||null,pageId:preference.choice==='main'?pageId.replace(/^chrome:/,'main:'):pageId}),pageId};}
+async function repeatPlansForConstruction(companyId){
+ const capture=await optionalRun(formAssetKeys(companyId).capture),formal=await optionalTemplate(companyId);
+ if(!capture?.repeatGroups?.length||!formal)return [];
+ const template=await engine.routeTemplate(formal,{companyId,roleId:capture.roleId,pageUrl:capture.pageUrl});
+ const plan=recordPlanOf(await loadProfile(profileFile));
+ const original=template.pages.find(p=>matchesPageIdentity(p,capture.pageUrl));
+ const unresolved=unresolvedRepeatSections(original,{...template.evidence?.recordParents,...plan.parents});
+ const page=withProfileRecords(template,plan).pages.find(p=>matchesPageIdentity(p,capture.pageUrl));
+ if(!page)return [];
+ const observed=capture.repeatGroups.map(groupFromDiscovery);
+ return (page.groups||[]).filter(g=>g.count>0&&g.count<=20&&!unresolved.has(groupSection(g))&&observed.some(o=>o.selector===g.selector&&o.addSelector===g.addSelector))
+  .map(g=>({groupSelector:g.selector,addSelector:g.addSelector,addLabel:g.addLabel,count:g.count}));
+}
 function constructionDeps(companyId,pageId){
  const keys=formAssetKeys(companyId);
- return {call:internalCall,cycle:()=>internalCall('form_cycle_status',{companyId}),
+ return {call:internalCall,cycle:()=>internalCall('form_cycle_status',{companyId}),repeatPlans:()=>repeatPlansForConstruction(companyId),
   pendingExpansions:async()=>{const coverage=await optionalRun(keys.coverage);return coverage?.review?requiredExpansionIds(coverage.review,coverage.expansions):[];},
   captureSelectors:async()=>[...new Set(((await optionalRun(keys.capture))?.controls||[]).map(c=>c.selector))],
   profile:()=>loadProfile(profileFile),template:()=>optionalTemplate(companyId),update:()=>optionalRun(keys.update),savePage:page=>store.update('runs',keys.update,old=>({...old,companyId,pageDefinition:page,registered:false})),fallbackSurface:()=>agentFallbackSurface(pageId)};
@@ -985,24 +1060,25 @@ async function runBuildForTask(a,{primary=null,evidence=null,page=null}={}){
  }
  const updateKey=formAssetKeys(t.companyId).update,prior=await optionalRun(updateKey),attempt=(prior?.buildAttempt||0)+1;
  await store.update('runs',updateKey,old=>({...old,companyId:t.companyId,buildAttempt:attempt}));
- const task={companyId:t.companyId,captureId:formAssetKeys(t.companyId).capture,pageUrl:state.returnUrl,queue:{queueId:a.queueId,queueHash:a.queueHash,taskId:a.taskId}};
+ const task={companyId:t.companyId,captureId:formAssetKeys(t.companyId).capture,pageUrl:state.returnUrl,officialId:state.siteRoleId||t.officialId,queue:{queueId:a.queueId,queueHash:a.queueHash,taskId:a.taskId}};
  const result=await runConstructionBuild({deps:constructionDeps(t.companyId,state.pageId),task,authorization:a.authorization,primary,evidence,page});
  return constructionResult({...result,progress:{...result.progress,attempt}});
 }
 const visualObservation=z.object({screenshotId:z.string().uuid(),rows:z.array(z.object({label:z.string().trim().min(1).max(120),section:z.string().trim().max(120).optional(),kind:z.enum(['field','expander']),occurrence:z.number().int().nonnegative().optional()})).min(1).max(500)});
 const constructAuthorization=z.object({prepare:z.literal(true),evidence:z.string().trim().min(1),uploads:z.boolean().default(false),sensitiveFields:z.boolean().default(false)});
 registerOperation('form_construct_acquire',{description:'建库第一段（采集）。不带 observation：在绑定申请页取脱敏整页截图返回，Agent 独立看截图列一级控件（只填名称、栏目、同名序号和类型，展开入口记一行）。带 observation：组件登记视觉一级清单，随即在同页做 REA 与实时控件采集，一次返回 REA 一级候选供 Agent 对照，之后调用 form_construct_build。不填写、不提交。',inputSchema:{...queueTask,observation:visualObservation.optional(),provider:z.enum(['ant','feishu','phoenix']).optional(),authorization:z.object({acquire:z.literal(true),evidence:z.string().trim().min(1)})}},wrap(async a=>{
+ const at=performance.now(),measure=extra=>({wallMs:Math.round(performance.now()-at),...extra});
  const {q,t}=await queues.task(a),state=assertBoundRoleState(q,t,await queues.read(t.taskId));
  const scope={companyId:t.companyId,pageUrl:state.returnUrl,pageId:state.pageId};
  if(!a.observation){
   const shot=await internalCall('form_capture_visual',scope);if(shot.error)return shot;
-  if(shot.status==='primary_already_verified')return {companyId:t.companyId,status:'primary_already_verified',pending:shot.pending,nextTools:['form_construct_build'],submission:'not_performed'};
-  return {companyId:t.companyId,status:'visual_screenshot_ready',screenshotId:shot.screenshotId,screenshots:shot.screenshots,nextTools:['form_construct_acquire'],instruction:'独立查看截图，按页面显示登记一级控件（展开入口记一行，不录入个人值或子控件），带 observation 再调用一次 form_construct_acquire。',submission:'not_performed'};
+  if(shot.status==='primary_already_verified')return {companyId:t.companyId,status:'primary_already_verified',stageMetrics:measure({primaryReused:true}),pending:shot.pending,nextTools:['form_construct_build'],submission:'not_performed'};
+  return {companyId:t.companyId,status:'visual_screenshot_ready',stageMetrics:measure({screen:true}),screenshotId:shot.screenshotId,screenshots:shot.screenshots,nextTools:['form_construct_acquire'],instruction:'独立查看截图，按页面显示登记一级控件（展开入口记一行，不录入个人值或子控件），带 observation 再调用一次 form_construct_acquire。',submission:'not_performed'};
  }
  const visual=await internalCall('form_capture_visual',{...scope,observation:a.observation});if(visual.error)return visual;
  let rea,retried=false;for(let attempt=0;attempt<2;attempt++){rea=await internalCall('capture_rea_structure',{...scope,...(a.provider?{provider:a.provider}:{}),authorization:a.authorization});if(rea.error)return rea;if((rea.primaryCandidates||[]).length>=(visual.rows||[]).length/2)break;retried=true;}
  rea.acquisitionRetried=retried;
- return {companyId:t.companyId,status:'primary_pairs_required',acquisitionRetried:rea.acquisitionRetried,coverageCounts:{visual:(visual.rows||[]).length,candidates:(rea.primaryCandidates||[]).length},structureId:rea.structureId,captureId:rea.captureId,controls:rea.controls,
+ return {companyId:t.companyId,status:'primary_pairs_required',stageMetrics:measure({captureAttempts:retried?2:1}),acquisitionRetried:rea.acquisitionRetried,coverageCounts:{visual:(visual.rows||[]).length,candidates:(rea.primaryCandidates||[]).length},structureId:rea.structureId,captureId:rea.captureId,controls:rea.controls,
   visualRows:(visual.rows||[]).map(({id,label,section,kind,occurrence})=>({id,label,section:section||null,kind,occurrence:occurrence??null})),
   primaryCandidates:(rea.primaryCandidates||[]).map(({id,kind,label,section,controlType,childSelectors,selectors})=>({id,kind,label,section:section||null,controlType:controlType||null,...(kind==='expander'?{childIds:(rea.primaryCandidates||[]).filter(child=>child.kind==='field'&&child.selectors?.some(s=>childSelectors?.includes(s))).map(child=>child.id)}:{})})),
   records:{visual:'visual',structure:'structure',capture:'capture'},nextTools:['form_construct_build'],

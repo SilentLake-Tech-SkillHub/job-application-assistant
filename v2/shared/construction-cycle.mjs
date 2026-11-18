@@ -46,10 +46,10 @@ export function patchCapturedControls(template,capture,{patches=[],repeatSection
  next.version++;delete next.construction;
  return next;
 }
-export function constructionNext({capture,template,interaction}){
+export function constructionNext({capture,template,interaction,progress}){
  if(!capture?.controls?.length)return {stage:'parse',nextTools:['capture_controls']};
  try{assertCompleteness(capture);}catch{return {stage:'agent_completeness',nextTools:['form_review_completeness']};}
- if(!template)return {stage:'build',nextTools:['form_mapping_candidates','form_build_template']};
+ if(!template||progress?.readyToRegister===false)return {stage:'build',nextTools:['form_mapping_candidates','form_build_template']};
  if(interaction&&interaction.templateHash===hash(template)&&interaction.status!=='verified')return {stage:'backfill',nextTools:['form_patch_controls','capture_controls']};
  try{assertInteractionEvidence(template,interaction);}catch{return {stage:'interaction_test',nextTools:['form_test_interactions']};}
  return {stage:'confirm',nextTools:['template_finalize']};

@@ -7,6 +7,7 @@ import {readRoleIdentity} from './role-identity.mjs';
 import {safeControlErrorDetails} from './control-error-details.mjs';
 import {executeTransition} from './entry-transition.mjs';
 import {observeFirstEntry,inventoryEntryPage,observeEntryLanding,clickEntryCandidate} from './first-entry.mjs';
+import {EventEmitter} from 'node:events';
 import {createHash,randomUUID} from 'node:crypto';
 import http from 'node:http';import {mkdir,chmod,lstat} from 'node:fs/promises';import path from 'node:path';
 import {READY_TIMEOUT_MS,matchEntryPath} from './entry-recipe.mjs';
@@ -181,7 +182,7 @@ export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,
   if(args.action?.method==='upload'&&typeof fileUpload!=='function')throw Error('HOST_FILE_CHOOSER_ADAPTER_REQUIRED');
   return p.act(args.action,args.value,args.files);
  };
- const pending=[];
+ const pending=[], requests=new EventEmitter();
  const repeatableReads=new Set(['pageIdentity','failureSnapshot','roleSnapshot','entryInspection','roleEntryInventory','existingPage','inventory','observe','assertLocation','repeatDiscovery','reaInspect','screenshot','wait']);
  const runDispatch=async(method,args)=>{
   let recovery=null;
@@ -213,10 +214,35 @@ export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,
  // Some hosts require browser calls to originate inside the currently active
  // tool invocation. Queue RPC work and let that invocation explicitly pump it;
  // an HTTP callback retaining a previous invocation is not a durable executor.
- const execute=(method,args)=>deferBrowserCalls&&method!=='status'?new Promise((resolve,reject)=>pending.push({method,args,resolve,reject})):runDispatch(method,args);
- const pump=async()=>{const job=pending.shift();if(!job)return false;try{job.resolve(await runDispatch(job.method,job.args));}catch(e){job.reject(e);}return true;};
- const server=http.createServer(async(req,res)=>{res.setHeader('content-type','application/json');if(req.url==='/health'){res.end(JSON.stringify({mode:extension?'agent_plugin':mode==='iab'?'iab':'host_chrome',executor:{...executor},protocolVersion:4,state:'connected'}));return;}if(req.method!=='POST'||req.url!=='/rpc'){res.writeHead(404).end('{}');return;}let method;try{const chunks=[];let size=0;for await(const c of req){size+=c.length;if(size>8*1024*1024)throw Error('REQUEST_TOO_LARGE');chunks.push(c);}const {method:operation,args={}}=JSON.parse(Buffer.concat(chunks));method=operation;res.end(JSON.stringify({data:await execute(method,args)??null}));}catch(e){onError(e);const details=safeControlErrorDetails(e.details||(e.operationStep?browserErrorDetails(e,{method}):null));res.end(JSON.stringify({error:browserErrorCode(e),...(details?{details}:{})}));}});
- await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(socketPath,resolve);});await chmod(socketPath,0o600);return {socketPath,server,mode,executor:{...executor},pump,pendingCount:()=>pending.length};
+ const execute=(method,args,signal)=>deferBrowserCalls&&method!=='status'?new Promise((resolve,reject)=>{
+  if(signal.aborted)return reject(signal.reason);
+  const job={method,args,resolve,reject,detach:()=>signal.removeEventListener('abort',cancel)};
+  const cancel=()=>{const index=pending.indexOf(job);if(index!==-1){pending.splice(index,1);reject(signal.reason);}};
+  signal.addEventListener('abort',cancel,{once:true});
+  pending.push(job);
+  requests.emit('request');
+ }):runDispatch(method,args);
+ const pump=async()=>{
+  const job=pending.shift();
+  if(!job)return false;
+  job.detach();
+  try{job.resolve(await runDispatch(job.method,job.args));}catch(error){job.reject(error);}
+  return true;
+ };
+ const waitForRequest=signal=>new Promise(resolve=>{
+  if(pending.length||signal?.aborted||!server.listening)return resolve(pending.length>0&&!signal?.aborted);
+  const finish=()=>{
+   requests.off('request',finish);
+   server.off('close',finish);
+   signal?.removeEventListener('abort',finish);
+   resolve(pending.length>0&&!signal?.aborted);
+  };
+  requests.once('request',finish);
+  server.once('close',finish);
+  signal?.addEventListener('abort',finish,{once:true});
+ });
+ const server=http.createServer(async(req,res)=>{res.setHeader('content-type','application/json');if(req.url==='/health'){res.end(JSON.stringify({mode:extension?'agent_plugin':mode==='iab'?'iab':'host_chrome',executor:{...executor},protocolVersion:4,state:'connected'}));return;}if(req.method!=='POST'||req.url!=='/rpc'){res.writeHead(404).end('{}');return;}const lifetime=new AbortController();res.once('close',()=>lifetime.abort(Error('HOST_BROWSER_REQUEST_CLOSED')));let method;try{const chunks=[];let size=0;for await(const c of req){size+=c.length;if(size>8*1024*1024)throw Error('REQUEST_TOO_LARGE');chunks.push(c);}const {method:operation,args={}}=JSON.parse(Buffer.concat(chunks));method=operation;res.end(JSON.stringify({data:await execute(method,args,lifetime.signal)??null}));}catch(e){onError(e);const details=safeControlErrorDetails(e.details||(e.operationStep?browserErrorDetails(e,{method}):null));if(!res.destroyed)res.end(JSON.stringify({error:browserErrorCode(e),...(details?{details}:{})}));}});
+ await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(socketPath,resolve);});await chmod(socketPath,0o600);return {socketPath,server,mode,executor:{...executor},pump,waitForRequest,pendingCount:()=>pending.length};
 }
 export async function withHostBrowserBridge(options,run){
  const bridge=await startHostBrowserBridge(options);
