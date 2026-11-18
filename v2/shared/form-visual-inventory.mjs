@@ -49,7 +49,7 @@ export function primaryCandidates(capture){
  const fields=new Map();
  for(const control of capture.controls){
   const dateRangeKey=['Begin','End'].includes(control.part)?control.selector.replace(/Input(?:Begin|End)(?=")/u,'Input'):null;
-  const key=control.type==='radio'&&control.questionSelector?control.questionSelector:dateRangeKey||control.selector;
+  const key=control.type==='radio'&&control.questionSelector?control.questionSelector:control.visualGroupSelector||dateRangeKey||control.selector;
   const existing=fields.get(key);
   if(existing){existing.selectors.push(control.selector);existing.reaNodeIds.push(...(control.reaCandidates||[]));continue;}
   const section=control.section||null;

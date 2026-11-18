@@ -56,20 +56,24 @@ export function controlDOM(spec){
    try{nodes=[...document.querySelectorAll(control.diagnosticSelector||control.selector)];}catch{}
    return {...control,node:nodes.length===1?nodes[0]:null};
   });
+  const actionText=n=>(n.innerText||'').replace(/\p{Co}/gu,'').trim();
+  const addLabel=/^(?:[+＋]\s*)?(?:添加|新增|展开|Add|Expand)(?:\s*[^\n]{1,20})?$/iu;
   const targets=[...document.querySelectorAll('button,[role="button"],a,span,div')].filter(n=>{
    if(!visible(n)||n.closest('nav,footer,[role="navigation"],dialog,[role="dialog"]')||n.matches('button[type="submit"],a[href]:not([href^="#"])'))return false;
-   const label=(n.innerText||'').trim();
-   if(!/^(?:[+＋]\s*)?(?:添加|新增|展开|Add|Expand)(?:\s*[^\n]{1,20})?$/iu.test(label))return false;
-   return ![...n.children].some(child=>visible(child)&&(child.innerText||'').trim()===label);
+   const label=actionText(n);
+   if(!addLabel.test(label))return false;
+   return ![...n.children].some(child=>visible(child)&&actionText(child)===label);
   });
   const knownHeaders='.createFormSection-title,.applyFormModuleWrapper-title,h2,h3,h4,legend,[role="heading"]';
   const entries=new Map();
   for(const textNode of targets){
    const button=textNode.closest('button,[role="button"],a,.createFormSection-addBtn,.formOperate-addBtn')||textNode;
-   const label=(button.innerText||'').trim();
-   if(!/^(?:[+＋]\s*)?(?:添加|新增|展开|Add|Expand)(?:\s*[^\n]{1,20})?$/iu.test(label))continue;
-   let root=button.parentElement,heading;
-   for(let i=0;root&&i<12&&!root.matches('body,form,main');i++,root=root.parentElement){
+   const label=actionText(button);
+   if(!addLabel.test(label))continue;
+   const formBlock=button.closest('[class^="apply-block-"]');
+   const blockHeadings=formBlock?[...formBlock.querySelectorAll(':scope > [class^="blockTitle-"] [class^="text-"]')].filter(n=>visible(n)&&!n.contains(button)&&!button.contains(n)):[];
+   let root=blockHeadings.length===1?formBlock:button.parentElement,heading=blockHeadings.length===1?blockHeadings[0]:null;
+   for(let i=0;!heading&&root&&i<12&&!root.matches('body,form,main');i++,root=root.parentElement){
     const headings=[...root.querySelectorAll(knownHeaders)].filter(n=>visible(n)&&!n.contains(button)&&!button.contains(n));
     if(headings.length===1){heading=headings[0];break;}
     if(headings.length>1)break;
@@ -81,10 +85,10 @@ export function controlDOM(spec){
    // A header and its button often share a small wrapper. Observe the full
    // section when the next wrapper still owns just this one heading.
    const parent=root.parentElement;
-   if(parent&&!parent.matches('body,form,main')&&[...parent.querySelectorAll(knownHeaders)].filter(visible).length===1)root=parent;
+   if(root!==formBlock&&parent&&!parent.matches('body,form,main')&&[...parent.querySelectorAll(knownHeaders)].filter(visible).length===1)root=parent;
    const selector=diagnosticSelector(button),scopeSelector=diagnosticSelector(root);
    const children=fieldNodes.filter(field=>field.node&&root.contains(field.node));
-   entries.set(selector,{title,selector,scopeSelector,headingSelector:diagnosticSelector(heading),triggerLabel:label,expansionType:/^(?:[+＋]\s*)?(?:展开|expand)/iu.test(label)?'disclosure':'add',childSelectors:children.map(field=>field.selector),childControlIds:children.map(field=>field.id)});
+   entries.set(selector,{title,selector,scopeSelector,headingSelector:diagnosticSelector(heading),triggerLabel:button.innerText.trim(),expansionType:/^(?:[+＋]\s*)?(?:展开|expand)/iu.test(label)?'disclosure':'add',childSelectors:children.map(field=>field.selector),childControlIds:children.map(field=>field.id)});
   }
   return {pageUrl:location.href,entrances:[...entries.values()],controlPaths:fieldNodes.filter(field=>field.node).map(field=>({id:field.id,selector:diagnosticSelector(field.node)}))};
  }
@@ -526,9 +530,11 @@ export function controlDOM(spec){
   });
   const navigationScope=n=>{const nav=n.closest('nav,header,[role="navigation"],[role="search"],.print-nav');return nav&&!n.closest('.form-item--phoenix,.ant-form-item,.ud-formily-item,.atsx-form-item')?{reason:'outside_application_form',kind:'navigation',containerSelector:diagnosticSelector(nav),controlSelector:diagnosticSelector(n)}:null;};
   const dateAuxiliaries=new Set(phoenixRoots().filter(r=>r.querySelector('[id$="field_date_time_picker"]')).map(phoenixInlineOngoing).filter(Boolean).map(a=>a.node));
+  const atsxCombobox='.atsx-select-selection[role="combobox"]';
+  const ownedSearch=n=>n.matches?.('input.atsx-select-search__field')&&visible(n.closest(atsxCombobox));
   const controls=[...document.querySelectorAll('input,textarea,select,[role="combobox"],[role="checkbox"],[role="radio"]')]
     // Styled checkbox/radio inputs can have zero layout rectangles while their labels remain visible.
-    .filter(n=> !dateAuxiliaries.has(n)&&!n.closest('.form-item--phoenix')&&(visible(n)||n.type==='file'||(['checkbox','radio'].includes(n.type)&&visible(n.closest('label,.ud__radio,.ud__radio__wrapper,[role="radio"]')))) && n.type!=='hidden'&&!(n.tagName!=='INPUT'&&n.getAttribute('role')==='radio'&&n.querySelector('input[type="radio"]')));
+    .filter(n=> !dateAuxiliaries.has(n)&&!ownedSearch(n)&&!n.closest('.form-item--phoenix')&&(visible(n)||n.type==='file'||(['checkbox','radio'].includes(n.type)&&visible(n.closest('label,.ud__radio,.ud__radio__wrapper,[role="radio"]')))) && n.type!=='hidden'&&!(n.tagName!=='INPUT'&&n.getAttribute('role')==='radio'&&n.querySelector('input[type="radio"]')));
   // Some custom selectors and read-only answers contain no native/ARIA input.
   // Register their labeled question container so they cannot disappear from coverage.
   const containers=[...document.querySelectorAll('.atsx-form-item,[data-form-question],.ud-formily-item')]
@@ -539,13 +545,24 @@ export function controlDOM(spec){
     .map((f,i)=>{
       const n=[...controls,...containers][i];
       if(n.type==='file'){const entry=uploadRoots().find(x=>x.input===n);if(entry)return {...f,observationSelector:f.selector,selector:uploadRef(entry),actionSelector:uploadRef(entry),label:entry.label,section:entry.label,locatorStrategy:'semantic_question',contextProvider:entry.contextProvider,uploadLayout:entry.layout||null,uploadContainerSelector:uploadRef(entry,'container'),filenameSelector:uploadRef(entry,'filenames'),uploadedSelector:uploadRef(entry,'uploaded'),uploadedItems:uploadItems(entry)};}
-      const root=n.closest('.ud-formily-item');if(!root)return f;
+      const root=n.closest('.ud-formily-item');
+      if(!root){
+       const block=n.closest('[class^="apply-block-"]'),field=n.closest('[class^="apply-field-"]');
+       const title=block?.querySelector(':scope > [class^="blockTitle-"] [class^="text-"]');
+       const caption=field?.querySelector(':scope > [class^="title-"]');
+       if(!title||!caption||!visible(title)||!visible(caption))return f;
+       const label=caption.innerText.trim().replace(/[＊*\s]+$/gu,''),compound=['checkbox','radio'].includes(f.type)?false:field.querySelectorAll('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"])').length>1;
+       return {...f,label:f.type==='checkbox'&&f.label?f.label:label,section:title.innerText.trim(),required:f.required||/[＊*]/u.test(caption.innerText),
+        labelSelector:diagnosticSelector(caption),...(compound?{visualGroupSelector:diagnosticSelector(field)}:{})};
+      }
       const label=root.querySelector(':scope > .ud-formily-item-label')?.innerText?.trim();
+      const ownCheckbox=f.type==='checkbox'&&f.label&&root.querySelector(atsxCombobox)&&f.label!==label?.replace(/[＊*\s]+$/gu,'');
+      if(ownCheckbox)return {...f,label:f.label.replace(/[＊*\s]+$/gu,''),questionSelector:selector(n.labels?.[0]||n)};
       const group=n.closest('[id^="formily-item-"][id$="_list"]'),row=n.closest('.register-form-group-wrapper');
       const radio=f.type==='radio'?radioRecords(root):[];
       const complete=radio.length&&radio.every(item=>item.label&&item.targetSelector)&&new Set(radio.map(item=>item.label)).size===radio.length;
       const radioOptions=radio.length?{options:complete?radio.map(item=>item.label):[],optionRecords:complete?radio.map(({label,disabled})=>({label,disabled})):[]}:{};
-      const extra={};
+      const extra=n.matches?.(atsxCombobox)?{genericChoice:true}:{};
       if(n.tagName==='INPUT'&&n.closest('.throne-biz-date-range-picker-input'))extra.semanticType=!n.value||/^\d{4}-\d{2}$|^至今$/u.test(n.value)?'month_picker':'unsupported_date_range';
       if(f.type==='custom_question'&&root.querySelector('.ud-formily-item-control-content-component'))extra.readSelector=selector(root)+' .ud-formily-item-control-content-component';
       if(f.type==='file'&&root.querySelector('.uploadFile')&&root.querySelectorAll('input[type="file"]').length===1){
