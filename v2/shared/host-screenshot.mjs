@@ -10,8 +10,15 @@ export function screenshotGeometryDOM({selectors,selector,generation}){
  const single=s=>{const nodes=[...document.querySelectorAll(s)].filter(n=>n.getClientRects().length&&getComputedStyle(n).visibility!=='hidden');if(nodes.length!==1)throw Error('HOST_SCREENSHOT_TARGET_NOT_UNIQUE');return box(nodes[0]);};
  return {pageUrl:location.href,generation:generation??(typeof performance!=='undefined'?String(performance.timeOrigin):null),width:Math.max(innerWidth,document.documentElement.scrollWidth,document.body.scrollWidth),height:Math.max(innerHeight,document.documentElement.scrollHeight,document.body.scrollHeight),masks:selectors.map(single),clip:selector?single(selector):null};
 }
-export async function readHostDocumentIdentity(tab,{extension=false}={}){
- const result=await tab.playwright.evaluate(()=>({url:location.href,generation:typeof performance!=='undefined'&&typeof performance.timeOrigin==='number'?String(performance.timeOrigin):null}));
+export async function readHostDocumentIdentity(tab,{extension=false,probeForm=false}={}){
+ const result=await tab.playwright.evaluate(({probeForm})=>{
+  const identity={url:location.href,generation:typeof performance!=='undefined'&&typeof performance.timeOrigin==='number'?String(performance.timeOrigin):null};
+  if(probeForm){
+   const controls=document.querySelectorAll('input:not([type=hidden]):not([type=password]):not([type=submit]), textarea, select, [contenteditable=true], [role=combobox], [role=checkbox], [role=radio]');
+   identity.formControls=Array.from(controls).filter(control=>control.getClientRects().length&&getComputedStyle(control).visibility!=='hidden').length;
+  }
+  return identity;
+ },{probeForm});
  if(!result.generation&&extension){const capability=await tab.capabilities?.get('cdp');if(typeof capability?.send!=='function')throw Error('HOST_DOCUMENT_IDENTITY_CAPABILITY_REQUIRED');const tree=await capability.send('Page.getFrameTree');result.generation=tree?.frameTree?.frame?.loaderId||null;}
  if(!result.generation||result.generation==='undefined')throw Error('BROWSER_DOCUMENT_IDENTITY_REQUIRED');return result;
 }

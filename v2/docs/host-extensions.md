@@ -47,6 +47,8 @@ const bridge = await registerMainChromeExtension({
 
 `browser_preferences`返回对应插件登记。`HOST_EXTENSION_BRIDGE_REQUIRED`表示加载**这个宿主的**桥接；`HOST_EXTENSION_NOT_REGISTERED`表示用注册入口补登记。身份不一致时重连原宿主对应插件，不能用另一插件回报成功。
 
+原生扩展返回 `Debugger unattached` 时，桥使用实际扩展实例重新取得原标签，读取完整 URL、文档代际和当前可见表单控件。原标签恢复后自动接续只读步骤。动作已发起才断开时，先读回现状并从任务恢复，避免重复点击或填写。需要指定任务复核时，使用 `browser_restore_chrome` 的 `role` 参数传原队列引用。桥在线但原表单未读回时返回 `original_tab_not_verified`，保留 Agent 接续待办。
+
 ## 采集、填写和验收
 
 浏览器桥继续执行同一页面适配器、正式公司模板、操作定义与独立读回。原生扩展可传入已安装的 `reaPackageRoot`（或宿主环境 `RECRUITING_REA_PACKAGE_ROOT`）接入 REA 6.7.0。扩展读取绑定页的原始结构，由组件进程归一化。该通道报告 DOM、可访问性和资源清单覆盖，脚本正文及活动事件未采集。其他宿主也可提供正式 `reaInspect` 回调。文件上传走宿主实际文件选择器；各宿主的真实能力分别验收。

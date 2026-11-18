@@ -133,7 +133,7 @@ async function boundRole(args,{construction=false,templateHash}={}){
   if(!plan||plan.roleTitle!==t.title)throw Error('CONFIRMED_ROLE_TITLE_TEMPLATE_MISMATCH');
   const login=await directory.loginConfig(t.companyId,t);
   // A tab lost to a browser restart is found again by role_resume, which reads the account before anything is written.
-  const snapshot=await browser.request('roleSnapshot',{pageId:state.pageId,roleSelector:plan.roleSelector,loginRoot:login.fields?.root,roleIdentity:plan.roleIdentity}).catch(error=>{if(error.message==='ROLE_BROWSER_PAGE_LOST')error.details={nextTool:'role_resume',pageIds:[state.pageId]};throw error;});
+  const snapshot=await browser.request('roleSnapshot',{pageId:state.pageId,roleSelector:plan.roleSelector,loginRoot:login.fields?.root,roleIdentity:plan.roleIdentity,...(state.browserBinding?.pageId===state.pageId?{roleBinding:state.browserBinding}:{})}).catch(error=>{if(error.message==='ROLE_BROWSER_PAGE_LOST')error.details={nextTool:'role_resume',pageIds:[state.pageId]};throw error;});
   if(plan.rolePrefix!==undefined){
     if(!samePage(snapshot.pageUrl,state.returnUrl))throw Error('ROLE_OR_ACCOUNT_CHANGED_BEFORE_FILL');
     await bindRoleTitleProof(browser,plan,state.pageId,snapshot);
@@ -451,7 +451,24 @@ registerOperation('browser_preferences',{description:'读取或按用户原话�
 registerOperation('browser_tabs',{description:'读取显式连接的本地浏览器页面，不打开、重载或关闭页面。',annotations:{readOnlyHint:true}},wrap(()=>browser.tabs()));
 registerOperation('browser_status',{description:'读取当前连接生命周期和实际连接次数，不发起连接；失败或断开不自动重连。',annotations:{readOnlyHint:true}},wrap(()=>browser.status(),false));
 registerOperation('browser_initialize_chrome',{description:'连接不可用时Agent发现后直接调用。按组件外浏览器设置初始化：clone沿用原投递分身，main经当前登记Agent的主用Chrome插件连接；设置为空先请用户选择。保留现有窗口、资料目录与未保存页面，不启动第二个Chrome。authorization.evidence填当前任务授权原话。',inputSchema:{authorization:z.object({initialize:z.literal(true),evidence:z.string().min(1)})}},wrap(async args=>{const choice=await browserPreferences();return choice.choice==='clone'||choice.choice==='main'&&choice.allowed?browser.request('initializeConfiguredChrome',args):choice;}));
-registerOperation('browser_restore_chrome',{description:'断连时Agent发现后直接调用。按已选浏览器恢复连接：clone复用原分身与资料目录，main恢复已登记主用Chrome插件；不关闭既有页面，不替用户换浏览器。恢复后核对实际页面、登录与填写内容；岗位名或编号缺失/不一致只记录，继续下一步。',inputSchema:{authorization:z.object({restore:z.literal(true),evidence:z.string().min(1)})}},wrap(async args=>{const choice=await browserPreferences();return choice.choice==='clone'||choice.choice==='main'&&choice.allowed?browser.request('restoreConfiguredChrome',args):choice;}));
+registerOperation('browser_restore_chrome',{description:'断连时Agent发现后直接调用。main按原登记插件恢复，role指定原队列任务，从已绑定原标签读回同一份表单后才返回restored=true。只有桥状态或原页未验证时按continuation核对原任务。clone复用原分身与资料目录。',inputSchema:{authorization:z.object({restore:z.literal(true),evidence:z.string().min(1)}),role:z.object(queueTask).optional()}},wrap(async({authorization,role})=>{
+ const choice=await browserPreferences();
+ if(choice.choice==='clone')return browser.request('restoreConfiguredChrome',{authorization});
+ if(choice.choice!=='main'||!choice.allowed)return choice;
+ const params={authorization};
+ if(role){
+  const {t,q}=await queues.task(role);
+  const state=await queues.read(t.taskId);
+  assertBoundRoleState(q,t,state);
+  if(!state.pageId)throw Error('ROLE_BOUND_PAGE_REQUIRED');
+  params.pageId=state.pageId;
+  params.expectedPageUrl=state.returnUrl;
+  if(state.browserBinding?.pageId===state.pageId)params.roleBinding=state.browserBinding;
+ }
+ const result=await browser.request('restoreConfiguredChrome',params);
+ if(result.recoveryStatus==='original_tab_not_verified')return {...result,status:'original_tab_not_verified',continuation:{state:'environment',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['role_resume','workflow_next'],instruction:'扩展桥已连接，但原表单未通过实际读回。继续原岗位的页面核对，并推进其他公司。'}};
+ return result;
+}));
 registerOperation('browser_open',{description:'在共用的 MCP Chrome 中打开已建库公司的表单页；必须匹配该公司的 origin 和模板路径。不会填写或提交。',inputSchema:{companyId:z.string(),pageUrl:z.string().url()}},wrap(async({companyId,pageUrl})=>{
   const c=companyContext(catalog.companies.find(c=>c.id===companyId),{pageUrl});if(!c?.templateId)throw Error('COMPANY_NOT_COVERED');
   const t=await store.get('templates',c.templateId),u=new URL(pageUrl);

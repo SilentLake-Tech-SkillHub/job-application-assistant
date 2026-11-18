@@ -15,7 +15,7 @@ import {screenshotHostTab,readHostDocumentIdentity} from './host-screenshot.mjs'
 import {runtimeAgent} from './agent-registry.mjs';
 // Runs INSIDE the trusted host SDK session, with an explicitly provided browser
 // object. It never launches a browser, attaches CDP, or discovers credentials.
-export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,mode='iab',inventory,hostEnvironment=process.env,extension,onError=()=>{},deferBrowserCalls=false,fileUpload,reaInspect,pageAdapter=PageAdapter}){
+export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,mode='iab',inventory,hostEnvironment=process.env,extension,refreshExtension,onError=()=>{},deferBrowserCalls=false,fileUpload,reaInspect,pageAdapter=PageAdapter}){
  if(!['iab','chrome'].includes(mode)||typeof inventory!=='function'||!socketPath?.startsWith('/')||Buffer.byteLength(socketPath)>100||!allowedOrigins?.length)throw Error('INVALID_HOST_BRIDGE_CONFIGURATION');
  const browsers=await inventory(),entry=browsers.find(item=>item.id===browser?.browserId),expected=mode==='iab'?'iab':null;
  if(!entry||mode==='iab'&&entry.type!==expected||mode==='chrome'&&!['extension','cdp'].includes(entry.type))throw Error('HOST_BROWSER_PROVIDER_NOT_VERIFIED');
@@ -31,16 +31,82 @@ export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,
  const tabs=async()=>{const out=[];for(const t of await allTabs()){try{scope(t.url);out.push(t);}catch{}}return out;};
  const tracked=new Map();
  const borrowed=new Set();
+ const descriptors=new Map(),documents=new Map(),recovering=new Map(),unavailable=new Set();
  const options=o=>{if(!o||extension)return o;const {timeout,...rest}=o;return timeout===undefined?rest:{...rest,timeoutMs:timeout};};
  const locator=(l,context={})=>({count:()=>l.count(),first:()=>locator(l.first(),context),nth:i=>locator(l.nth(i),context),last:()=>locator(l.last(),context),evaluate:(...a)=>l.evaluate(...a),innerText:()=>typeof l.innerText==='function'?l.innerText():l.evaluate(n=>n.innerText||''),textContent:()=>typeof l.textContent==='function'?l.textContent():l.evaluate(n=>n.textContent),getAttribute:name=>typeof l.getAttribute==='function'?l.getAttribute(name):l.evaluate((n,key)=>n.getAttribute(key),name),inputValue:()=>typeof l.inputValue==='function'?l.inputValue():l.evaluate(n=>n.value),isVisible:()=>typeof l.isVisible==='function'?l.isVisible():l.evaluate(n=>!!n.getClientRects().length&&getComputedStyle(n).visibility!=='hidden'),isChecked:()=>typeof l.isChecked==='function'?l.isChecked():l.evaluate(n=>n.checked===true||n.getAttribute('aria-checked')==='true'),allTextContents:()=>typeof l.allTextContents==='function'?l.allTextContents():l.evaluateAll(nodes=>nodes.map(n=>n.textContent||'')),waitFor:o=>l.waitFor(options(o)),click:o=>l.click(options(o)),fill:(v,o)=>l.fill(v,options(o)),pressSequentially:(v,o)=>{if(typeof l.pressSequentially==='function')return l.pressSequentially(v,options(o));if(typeof l.type==='function')return l.type(v,options(o));throw Error('HOST_KEYBOARD_TYPING_CAPABILITY_REQUIRED');},press:(v,o)=>l.press(v,options(o)),scrollIntoViewIfNeeded:o=>{if(typeof l.scrollIntoViewIfNeeded!=='function')throw Error('HOST_SCROLL_CAPABILITY_REQUIRED');return l.scrollIntoViewIfNeeded(options(o));},setChecked:(v,o)=>l.setChecked(v,options(o)),check:o=>l.check(options(o)),selectOption:(v,o)=>l.selectOption(v,options(o)),filter:o=>locator(l.filter(o),context),getByRole:(...a)=>locator(l.getByRole(...a),context),getByText:(...a)=>locator(l.getByText(...a),context),locator:(...a)=>locator(l.locator(...a),{...context,selector:context.selector+' '+a[0]}),screenshot:async o=>{if(!context.tab||!context.selector)throw Error('HOST_SCREENSHOT_TARGET_REQUIRED');return screenshotHostTab({tab:context.tab,directory:path.join(path.dirname(socketPath),'screenshots'),selector:context.selector,options:o,...(extension?{documentIdentity:()=>generation(context.tab)}:{})});},setInputFiles:async paths=>{if(typeof fileUpload!=='function'||!context.tab||!context.selector)throw Error('HOST_FILE_CHOOSER_ADAPTER_REQUIRED');return fileUpload({tab:context.tab,selector:context.selector,paths});}});
- const generation=tab=>readHostDocumentIdentity(tab,{extension:!!extension});
- const get=async id=>{const t=(await tabs()).find(t=>t.id===id);if(!t)throw Error('ROLE_BROWSER_PAGE_LOST');if(tracked.has(id))return tracked.get(id);const owned=(await browser.tabs.list()).some(t=>t.id===id);if(!owned&&extension)borrowed.add(id);const tab=!owned&&extension&&browser.user?.claimTab?await browser.user.claimTab(t):await browser.tabs.get(id);tracked.set(id,tab);return tab;};
+ const generation=async tab=>{
+  const observed=await readHostDocumentIdentity(tab,{extension:!!extension,probeForm:!!extension});
+  if(extension){
+   scope(observed.url);
+   documents.set(tab.id,observed);
+  }
+  return observed;
+ };
+ const get=async id=>{
+  const t=(await tabs()).find(t=>t.id===id);
+  if(!t)throw Error('ROLE_BROWSER_PAGE_LOST');
+  if(tracked.has(id))return tracked.get(id);
+  if(extension&&!descriptors.has(id))descriptors.set(id,{providerTabId:t.providerTabId||null});
+  const owned=(await browser.tabs.list()).some(t=>t.id===id);
+  const tab=!owned&&extension&&browser.user?.claimTab?await browser.user.claimTab(t):await browser.tabs.get(id);
+  if(!owned&&extension)borrowed.add(id);
+  tracked.set(id,tab);
+  if(extension&&!documents.has(id))await generation(tab);
+  return tab;
+ };
+ const connectionStatus=()=>({state:'connected',mode:extension?'agent_plugin':mode==='iab'?'iab':'host_chrome',executor:{...executor},protocolVersion:4,pageTools:['newPage','reload','closePage','firstEntry','entryFallback','componentClick'],connectionAttempts:1,automaticRetries:0,provider:executor.provider,...(extension?{chromeStarted:false,profileReused:true}:{} )});
+ const detached=error=>browserErrorCode(error)==='BROWSER_EXTENSION_TAB_DETACHED';
+ async function recoverTab(pageId, binding){
+  if(recovering.has(pageId))return recovering.get(pageId);
+  const recovery=(async()=>{
+   const before=documents.get(pageId)||(binding?.pageId===pageId&&binding.generation?
+    {url:binding.pageUrl,generation:binding.generation,formRequired:binding.kind==='verified_role'}:null);
+   if(!before)throw Error('BROWSER_EXTENSION_ORIGINAL_DOCUMENT_REQUIRED');
+   unavailable.add(pageId);
+   const current=refreshExtension?await refreshExtension():browser;
+   const [userTabs,ownedTabs]=await Promise.all([current.user?.openTabs?.()||[],current.tabs.list()]);
+   const descriptor=descriptors.get(pageId);
+   const matches=row=>row.id===pageId&&(!descriptor?.providerTabId||row.providerTabId===descriptor.providerTabId);
+   const userRow=userTabs.find(matches),ownedRow=ownedTabs.find(matches),row=userRow||ownedRow;
+   if(!row)throw Error('BROWSER_EXTENSION_ORIGINAL_TAB_UNAVAILABLE');
+   if(row.url!==before.url)throw Error('BROWSER_EXTENSION_ORIGINAL_DOCUMENT_CHANGED');
+   scope(row.url);
+   const tab=userRow&&current.user?.claimTab?await current.user.claimTab(userRow):await current.tabs.get(pageId);
+   if(tab.id!==pageId)throw Error('BROWSER_EXTENSION_ORIGINAL_TAB_UNAVAILABLE');
+   const observed=await readHostDocumentIdentity(tab,{extension:true,probeForm:true});
+   if(observed.url!==before.url||observed.generation!==before.generation)throw Error('BROWSER_EXTENSION_ORIGINAL_DOCUMENT_CHANGED');
+   const formReadback=observed.formControls>0;
+   if((before.formRequired||before.formControls>0)&&!formReadback)throw Error('BROWSER_EXTENSION_ORIGINAL_FORM_UNVERIFIED');
+   browser=current;
+   tracked.set(pageId,tab);
+   documents.set(pageId,observed);
+   unavailable.delete(pageId);
+   return {pageId,generation:observed.generation,sameDocument:true,formReadback};
+  })();
+  recovering.set(pageId,recovery);
+  try{return await recovery;}finally{recovering.delete(pageId);}
+ }
  const adapter=async(url,{pageId,readOnly=false,roleBinding}={})=>{if(pageId&&!readOnly&&(!roleBinding||roleBinding.pageId!==pageId))throw Error('VERIFIED_ROLE_PAGE_BINDING_REQUIRED');const matches=(await tabs()).filter(t=>pageId?t.id===pageId:t.url===url);if(matches.length!==1)throw Error(matches.length?'AMBIGUOUS_PAGE':'EXISTING_PAGE_NOT_FOUND');if(!samePage(matches[0].url,url))throw Error('EXPLICIT_PAGE_URL_MISMATCH');const tab=await get(matches[0].id),current=await tab.url(),document=await generation(tab);scope(current);if(!samePage(current,url))throw Error('EXPLICIT_PAGE_URL_MISMATCH');const adapted=new pageAdapter({url:()=>current,evaluate:(...a)=>tab.playwright.evaluate(...a),locator:(...a)=>locator(tab.playwright.locator(...a),{tab,selector:a[0]}),getByRole:(...a)=>locator(tab.playwright.getByRole(...a)),screenshot:o=>screenshotHostTab({tab,directory:path.join(path.dirname(socketPath),'screenshots'),options:o,...(extension?{documentIdentity:()=>generation(tab)}:{})})},{listOpenPageUrls:async()=>(await tabs()).map(t=>t.url)});adapted.hostPageId=tab.id;adapted.documentGeneration=document.generation;return adapted;};
  const dispatch=async(method,args)=>{
-  if(method==='status'||extension&&['initializeConfiguredChrome','restoreConfiguredChrome'].includes(method))return {state:'connected',mode:extension?'agent_plugin':mode==='iab'?'iab':'host_chrome',executor:{...executor},protocolVersion:4,pageTools:['newPage','reload','closePage','firstEntry','entryFallback','componentClick'],connectionAttempts:1,automaticRetries:0,provider:executor.provider,...(extension?{chromeStarted:false,profileReused:true}:{} )};
+  if(method==='status'||extension&&method==='initializeConfiguredChrome')return connectionStatus();
+  if(extension&&method==='restoreConfiguredChrome'){
+   if(!args.authorization?.restore||!args.authorization.evidence?.trim())throw Error('BROWSER_RESTORE_AUTHORIZATION_REQUIRED');
+   const ids=args.pageId?[args.pageId]:[...unavailable];
+   const recovered=[],failed=[];
+   for(const id of ids){
+    try{
+     const observed=documents.get(id);
+     if(args.expectedPageUrl&&observed&&observed.url!==args.expectedPageUrl)throw Error('BROWSER_EXTENSION_ORIGINAL_DOCUMENT_CHANGED');
+     recovered.push(await recoverTab(id,args.roleBinding));
+    }
+    catch(error){failed.push({pageId:id,reason:browserErrorCode(error)});}
+   }
+   const allVerified=ids.length>0&&!failed.length&&recovered.every(proof=>proof.formReadback);
+   return {...connectionStatus(),restored:allVerified,recoveryStatus:allVerified?'original_form_verified':'original_tab_not_verified',recovered,failed};
+  }
   if(method==='tabs')return tabs();
   if(method==='closePage'){const all=await tabs();if(!all.some(t=>t.id===args.pageId))throw Error('ROLE_BROWSER_PAGE_LOST');if(extension&&(borrowed.has(args.pageId)||!(await browser.tabs.list()).some(t=>t.id===args.pageId)))throw Error('MAIN_CHROME_BORROWED_PAGE_PRESERVED');const tab=await browser.tabs.get(args.pageId);if(typeof tab.close!=='function')throw Error('HOST_TAB_CLOSE_UNSUPPORTED');if((await browser.tabs.list()).length<=1)throw Error('LAST_PAGE_NOT_CLOSABLE');await tab.close();tracked.delete(args.pageId);return {pageId:args.pageId,closed:true};}
-  if(method==='failureSnapshot'){const all=await tabs();const item=all.find(t=>t.id===args.pageId);if(!item)return missingPageFailureState(args.pageId);const tab=await browser.tabs.get(item.id);return pageFailureState({url:()=>tab.url(),evaluate:fn=>tab.playwright.evaluate(fn)},args.pageId);}
+  if(method==='failureSnapshot'){const all=await tabs();const item=all.find(t=>t.id===args.pageId);if(!item)return missingPageFailureState(args.pageId);const tab=await get(item.id);return pageFailureState({url:()=>tab.url(),evaluate:fn=>tab.playwright.evaluate(fn)},args.pageId);}
   if(method==='entryInspection'){const tab=await get(args.pageId),url=await tab.url();return inspectEntryPage({url:()=>url,locator:selector=>locator(tab.playwright.locator(selector))},args);}
   if(method==='pageIdentity'){const tab=await get(args.pageId),document=await generation(tab);return {pageId:tab.id,pageUrl:document.url,generation:document.generation,sessionId};}
   if(method==='screenshot'){const tab=await get(args.pageId);return screenshotHostTab({tab,directory:path.join(path.dirname(socketPath),'screenshots'),selector:args.selector,...(extension?{documentIdentity:()=>generation(tab)}:{})});}
@@ -116,7 +182,34 @@ export async function startHostBrowserBridge({browser,socketPath,allowedOrigins,
   return p.act(args.action,args.value,args.files);
  };
  const pending=[];
- const runDispatch=(method,args)=>retryBrowserOperation(()=>dispatch(method,args),{retrySafe:['tabs','pageIdentity','failureSnapshot','roleSnapshot','entryInspection','roleEntryInventory','roleEntryLanding','existingPage','inventory','observe','assertLocation','reaInspect','openPage'].includes(method)});
+ const repeatableReads=new Set(['pageIdentity','failureSnapshot','roleSnapshot','entryInspection','roleEntryInventory','existingPage','inventory','observe','assertLocation','repeatDiscovery','reaInspect','screenshot','wait']);
+ const runDispatch=async(method,args)=>{
+  let recovery=null;
+  if(extension&&args.pageId&&method!=='restoreConfiguredChrome'&&unavailable.has(args.pageId)){
+   recovery=await recoverTab(args.pageId,args.roleBinding);
+  }
+  try{
+   const result=await retryBrowserOperation(()=>dispatch(method,args),{retrySafe:repeatableReads.has(method)||['tabs','roleEntryLanding','openPage'].includes(method)});
+   return recovery&&method==='pageIdentity'?{...result,recovery}:result;
+  }catch(error){
+   if(!extension||!args.pageId||!detached(error))throw error;
+   unavailable.add(args.pageId);
+   if(recovery)throw error;
+   recovery=await recoverTab(args.pageId,args.roleBinding);
+   if(!repeatableReads.has(method)){
+    const interrupted=Error('BROWSER_EXTENSION_ACTION_NEEDS_READBACK');
+    interrupted.operationStep=error.operationStep||'interrupted_action';
+    throw interrupted;
+   }
+   try{
+    const result=await dispatch(method,args);
+    return method==='pageIdentity'?{...result,recovery}:result;
+   }catch(retryError){
+    if(detached(retryError))unavailable.add(args.pageId);
+    throw retryError;
+   }
+  }
+ };
  // Some hosts require browser calls to originate inside the currently active
  // tool invocation. Queue RPC work and let that invocation explicitly pump it;
  // an HTTP callback retaining a previous invocation is not a durable executor.

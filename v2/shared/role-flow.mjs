@@ -80,7 +80,7 @@ export class RoleFlow{
   if(!plan.entryOnly)plan=rolePageContract(plan,{title:t.title,officialId:this.roleId(t,prior)});
   return {q,t,c,entry,recipe,template,plan,target,prior};
  }
- async snapshot(x,pageId){const raw=await this.browser.request('roleSnapshot',{pageId,roleSelector:x.plan.roleSelector,roleIdentity:x.plan.roleIdentity,loginRoot:x.c.fields?.root});
+ async snapshot(x,pageId){const binding=x.prior?.browserBinding;const raw=await this.browser.request('roleSnapshot',{pageId,roleSelector:x.plan.roleSelector,roleIdentity:x.plan.roleIdentity,loginRoot:x.c.fields?.root,...(binding?.pageId===pageId?{roleBinding:binding}:{})});
   Object.assign(raw,sessionFromSnapshot(raw));if(!raw.loginFormPresent)await bindRoleTitleProof(this.browser,x.plan,pageId,raw);return raw;}
  // 别的任务已绑定的标签（pageId → taskId）；本任务自己的不算。
  async boundElsewhere(taskId){const m=typeof this.queues.boundPages==='function'?await this.queues.boundPages():new Map();for(const [k,v] of [...m])if(v===taskId)m.delete(k);return m;}

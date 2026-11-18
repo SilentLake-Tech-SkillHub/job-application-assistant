@@ -17,13 +17,20 @@ export async function registerMainChromeExtension({agent,browserId,allowedOrigin
  const inventory=()=>agent.browsers.list(),entry=(await inventory()).find(b=>b.id===browserId);
  if(entry?.type!=='extension')throw Error('HOST_BROWSER_PROVIDER_NOT_VERIFIED');
  const browser=await agent.browsers.get(browserId);
+ const refreshExtension=async()=>{
+  const instance=entry.metadata?.extensionInstanceId;
+  const matches=(await inventory()).filter(candidate=>candidate.type==='extension'&&
+   (instance?candidate.metadata?.extensionInstanceId===instance:candidate.id===entry.id));
+  if(matches.length!==1)throw Error('BROWSER_EXTENSION_ORIGINAL_INSTANCE_UNAVAILABLE');
+  return agent.browsers.get(matches[0].id);
+ };
  const upload=fileUpload||(async({tab,selector,paths})=>{
   if(typeof tab.playwright?.waitForEvent!=='function')throw Error('HOST_FILE_CHOOSER_ADAPTER_REQUIRED');
   const chooser=tab.playwright.waitForEvent('filechooser');await tab.playwright.locator(selector).click();await (await chooser).setFiles(paths);
  });
  const packageRoot=reaPackageRoot||env.RECRUITING_REA_PACKAGE_ROOT;
  const capture=reaInspect||(packageRoot?async args=>{const hostObservation=await collectHostReaPage(args);return {hostObservation,reaPackageRoot:packageRoot,binding:hostObservation.binding};}:undefined);
- const bridge=await startHostBrowserBridge({browser,inventory,mode:'chrome',extension,hostEnvironment:env,socketPath:extensionSocketPath(env.RECRUITING_BROWSER_SOCKET,env.RECRUITING_HOST_ID),allowedOrigins,fileUpload:upload,reaInspect:capture,deferBrowserCalls});
+ const bridge=await startHostBrowserBridge({browser,inventory,mode:'chrome',extension,refreshExtension,hostEnvironment:env,socketPath:extensionSocketPath(env.RECRUITING_BROWSER_SOCKET,env.RECRUITING_HOST_ID),allowedOrigins,fileUpload:upload,reaInspect:capture,deferBrowserCalls});
  return {...bridge,extension};
 }
 export async function registerHostBrowser({agent,browserId,channel='iab',socketPath,allowedOrigins,fileUpload,reaInspect,deferBrowserCalls=true}){

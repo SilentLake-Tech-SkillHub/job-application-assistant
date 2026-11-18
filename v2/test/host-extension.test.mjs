@@ -86,3 +86,28 @@ test('the official host extension bridge claims an existing user tab, preserves 
   await assert.rejects(client.request('closePage',{pageId:'user-tab'}),/MAIN_CHROME_BORROWED_PAGE_PRESERVED/);
  }finally{if(bridge)await new Promise(r=>bridge.server.close(r));await rm(workspace,{recursive:true,force:true});}
 });
+
+test('a detached original tab is reclaimed and reread without loading another document',async()=>{
+ const workspace=await mkdtemp('/tmp/ext-recover-'),url='https://example.test/form';let bridge,detached=false,generation='original',claims=0,clicks=0,executeClick=false;
+ const entry={id:'form-tab',providerTabId:'native-original',title:'Original form',url};
+ const tab={id:entry.id,url:async()=>{if(executeClick){executeClick=false;clicks++;detached=true;throw Error('Debugger unattached');}return url;},playwright:{evaluate:async()=>{if(detached)throw Error('Debugger unattached');return {url,generation,formControls:4};}}};
+ const browser={browserId:'official-extension',tabs:{list:async()=>[],new:async()=>assert.fail('must preserve the original tab')},user:{openTabs:async()=>[entry],claimTab:async row=>{assert.equal(row,entry);claims++;detached=false;return tab;}}};
+ try{
+  await registerHostExtension({workspace,hostId:'codex',extension:{id:'chatgpt',name:'ChatGPT',transport:'host_sdk'}});
+  const agent={browsers:{list:async()=>[{id:browser.browserId,type:'extension',metadata:{extensionInstanceId:'same-extension'}}],get:async()=>browser}};
+  const env={RECRUITING_HANDOFF_DIR:path.join(workspace,'岗位交接'),RECRUITING_HOST_ID:'codex',RECRUITING_BROWSER_SOCKET:path.join(workspace,'b.sock')};
+  bridge=await registerMainChromeExtension({agent,browserId:browser.browserId,allowedOrigins:['https://example.test'],env,deferBrowserCalls:false});
+  const client=new BrokerBrowserAdapter(bridge.socketPath),auth={authorization:{restore:true,evidence:'restore the original tab'}};
+  assert.equal((await client.request('restoreConfiguredChrome',auth)).recoveryStatus,'original_tab_not_verified');
+  await client.request('pageIdentity',{pageId:entry.id});
+  detached=true;
+  const actual=await client.request('pageIdentity',{pageId:entry.id});
+  assert.equal(actual.generation,'original');assert.equal(actual.recovery?.formReadback,true);assert.equal(claims,2);
+  executeClick=true;
+  await assert.rejects(client.request('roleEntryClick',{pageId:entry.id}),/BROWSER_EXTENSION_ACTION_NEEDS_READBACK/);
+  assert.equal(clicks,1);assert.equal(claims,3);
+  detached=true;generation='another-document';
+  await assert.rejects(client.request('pageIdentity',{pageId:entry.id}),/BROWSER_EXTENSION_ORIGINAL_DOCUMENT_CHANGED/);
+  assert.equal(claims,4);
+ }finally{if(bridge)await new Promise(r=>bridge.server.close(r));await rm(workspace,{recursive:true,force:true});}
+});
