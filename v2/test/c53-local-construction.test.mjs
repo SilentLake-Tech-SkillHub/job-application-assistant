@@ -51,3 +51,27 @@ test('unmapped or duplicated repeat source rows cannot trigger additional blank 
  ]});
  assert.deepEqual([...sections],['works','projects']);
 });
+
+test('a failed option search does not discard successful siblings or stop remaining searches',async()=>{
+ const task={companyId:'C00001',pageUrl:'https://example.test/apply',captureId:'capture-C00001'};
+ const requested=['#first','#failure','#last'];
+ const ready=new Set();let stage='build',builds=0;
+ const deps={cycle:async()=>({stage,templateHash:'h'}),profile:async()=>({}),template:async()=>null,
+  call:async (tool,a)=>{
+   if(tool==='form_mapping_candidates')return {candidates:[]};
+   if(tool==='form_build_template'){
+    builds++;
+    return {readyToRegister:false,pending:[{id:'manual-gap',kind:'mapping'}],nextGoals:requested.filter(selector=>!ready.has(selector)).map(selector=>({selector,captureId:task.captureId,nextTool:'form_search_choices'}))};
+   }
+   if(tool==='form_search_choices'){
+    if(a.selector==='#failure')return {error:'CHOICE_GOAL_OBSERVED_RESULTS_REQUIRED'};
+    ready.add(a.selector);return {status:'choice_resolved'};
+   }
+   throw Error(tool);
+  }};
+ const result=await runConstructionBuild({task,deps,authorization:{prepare:true,evidence:'authorized'},page:{readySelector:'#form',sections:['Basic']}});
+ assert.equal(builds,2);
+ assert.deepEqual([...ready],['#first','#last']);
+ assert.equal(result.stageMetrics.operationCounts.form_search_choices,3);
+ assert.equal(result.stageMetrics.localRepairs,2);
+});

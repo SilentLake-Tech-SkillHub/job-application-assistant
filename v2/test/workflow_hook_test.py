@@ -20,7 +20,10 @@ class WorkflowHookTest(unittest.TestCase):
   input_file=stage/'input.json'
   input_file.write_text('{}')
   command='node '+cli+' --workspace '+shlex.quote(str(self.root))+' --stage-dir '+shlex.quote(str(stage))+' application company_batch_status '+shlex.quote(str(input_file))
-  self.assertEqual(self.invoke(tool_name='exec_command',tool_input={'cmd':command}).returncode,0)
+  self.assertEqual(self.invoke(tool_name='exec_command',tool_input={'cmd':'CODEX_THREAD_ID=other '+command}).returncode,2)
+  self.assertFalse(list((self.root/'state').glob('host-turn-*.json')))
+  # Anchor records come from the real event and do not authorize a shell tool.
+  self.assertEqual(self.invoke(tool_name='exec_command',tool_input={'cmd':'RECRUITING_HOST_ID=codex CODEX_THREAD_ID=enabled '+command}).returncode,2)
   module=(ROOT/'shared'/'cli-workflow-receipt.mjs').as_uri()
   code=f"""import {{loadCliWorkflowTarget,recordCliWorkflow}} from {json.dumps(module)};
 const target=await loadCliWorkflowTarget({{workspace:process.env.RECRUITING_WORKSPACE_ROOT}});

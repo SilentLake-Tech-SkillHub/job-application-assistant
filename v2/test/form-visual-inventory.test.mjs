@@ -18,6 +18,8 @@ test('only the same recovered document can pair a new bridge session with its pr
  const rebound=visualTableForRecoveredDocument(table,{...page,sessionId:'restarted'});
  assert.equal(rebound.current.inventoryHash,table.current.inventoryHash);
  assert.equal(rebound.current.page.sessionId,'restarted');
+ assert.equal(visualTableForRecoveredDocument(table,page,rebound.current.page).current.page.sessionId,page.sessionId);
+ assert.equal(visualTableForRecoveredDocument(table,page,page),null);
  assert.equal(visualTableForRecoveredDocument(table,{...rebound.current.page,generation:'navigated'}),null);
  assert.equal(visualTableForRecoveredDocument(table,{...rebound.current.page,pageId:'chrome:other'}),null);
 });

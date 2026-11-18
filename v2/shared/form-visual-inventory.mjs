@@ -7,9 +7,10 @@ export const sameVisualDocument=(a,b)=>!!a&&!!b&&['pageId','pageUrl','generation
 export const sameVisualPage=(a,b)=>sameVisualDocument(a,b)&&!!a.sessionId&&a.sessionId===b.sessionId;
 export const primaryStructureHash=structure=>structure?.primaryContentHash||structure?.contentHash;
 
-export function visualTableForRecoveredDocument(table,page){
+export function visualTableForRecoveredDocument(table,page,capturePage){
  const current=table?.current;
- if(!current?.inventoryHash||!sameVisualDocument(current.page,page)||sameVisualPage(current.page,page))return null;
+ if(!current?.inventoryHash||!sameVisualDocument(current.page,page))return null;
+ if(sameVisualPage(current.page,page)&&sameVisualPage(capturePage,page))return null;
  return {...table,current:{...current,page}};
 }
 

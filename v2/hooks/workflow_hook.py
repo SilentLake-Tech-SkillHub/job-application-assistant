@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import time
 import uuid
@@ -59,7 +60,7 @@ def source_read_allowed(value):
             target.suffix in {'.md', '.py', '.mjs', '.json'} and package in target.parents)
 
 
-def component_cli_event(event):
+def component_cli_event(event, *, anchor_only=False):
     """Normalize the installed fixed CLI into the same workflow Hook path."""
     kind = event.get('tool_name', '').split('__')[-1].lower()
     if kind not in {'bash', 'exec_command', 'execute', 'shell'}:
@@ -72,6 +73,16 @@ def component_cli_event(event):
         return event
     try:
         parts = shlex.split(command)
+        if anchor_only:
+            prefix = {}
+            while parts and re.fullmatch(r'(?:RECRUITING_[A-Z0-9_]+|CODEX_THREAD_ID|CODEX_SESSION_ID|CLAUDE_SESSION_ID|DSH_SESSION_ID)=.*', parts[0]):
+                variable, value = parts.pop(0).split('=', 1)
+                if variable in prefix:
+                    return event
+                prefix[variable] = value
+            ids = {prefix[name] for name in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'CLAUDE_SESSION_ID', 'DSH_SESSION_ID') if name in prefix}
+            if not prefix or '--stage-dir' not in parts or ids and ids != {event.get('session_id')}:
+                return event
         cli = Path(__file__).resolve().parents[1] / 'scripts/cli.mjs'
         updater = cli.with_name('update-runtime.mjs')
         if len(parts) in {2, 3} and Path(parts[0]).name == 'node' and Path(parts[1]).resolve() == updater and (len(parts) == 2 or parts[2] == '--preview'):
@@ -374,6 +385,7 @@ def handle(event):
     cwd = Path(event.get('cwd') or ROOT).resolve()
     if (cwd != ROOT and ROOT not in cwd.parents) or host_role() == 'maintainer':
         return {}
+    literal_cli = component_cli_event(event, anchor_only=True)
     event = component_cli_event(event)
     name = event.get('hook_event_name')
     tool = event.get('tool_name', '')
@@ -381,8 +393,10 @@ def handle(event):
     session, turn = event.get('session_id'), event.get('turn_id')
     receipt = STATE / (key(session, turn) + '.json') if session and turn else None
 
-    tracks_work = operation in LIFECYCLE['stages'] or operation == 'company_batch_status'
-    anchors_cli = name == 'UserPromptSubmit' or (name in {'PreToolUse', 'PostToolUse'} and recruiting_tool(tool) and tracks_work)
+    anchor_tool = literal_cli.get('tool_name', '') if literal_cli.get('component_cli') else tool
+    anchor_operation = anchor_tool.split('__')[-1]
+    tracks_work = anchor_operation in LIFECYCLE['stages'] or anchor_operation == 'company_batch_status'
+    anchors_cli = name == 'UserPromptSubmit' or (name in {'PreToolUse', 'PostToolUse'} and recruiting_tool(anchor_tool) and tracks_work)
     if anchors_cli and session and turn:
         STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
         mark = hashlib.sha256(session.encode()).hexdigest()[:24]

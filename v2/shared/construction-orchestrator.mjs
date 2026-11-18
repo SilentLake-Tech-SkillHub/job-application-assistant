@@ -83,26 +83,25 @@ export async function runConstructionBuild({deps,task,authorization,primary=null
   const capture=new Set();
   const resolved=[];
   for(const goal of goals||[]){
-   if(!goal.selector||goal.captureId!==captureId||attemptedChoices.has(goal.selector))continue;
+   if(!goal.selector||goal.captureId!==captureId||attemptedChoices.has(goal.nextTool+'\0'+goal.selector))continue;
    // Capabilities and provenance are checked within each fixed operation.
    if(goal.nextTool==='capture_choice_options')capture.add(goal.selector);
    if(goal.nextTool==='form_search_choices')resolved.push(goal.selector);
   }
+  let changed=false;
   if(capture.size){
-   for(const selector of capture)attemptedChoices.add(selector);
+   for(const selector of capture)attemptedChoices.add('capture_choice_options\0'+selector);
    const r=await call('capture_choice_options',{companyId,pageUrl,captureId,selectors:[...capture]});
-   if(r.error||r.requiresUser)return null;
-   return {changed:true};
+   if(!r.error&&!r.requiresUser&&(r.choices?.length>0||r.status==='captured')){
+    changed=true;localRepairs+=r.choices?.length||1;
+   }
   }
-  if(!resolved.length)return null;
-  let any=false;
   for(const selector of new Set(resolved)){
-   attemptedChoices.add(selector);
+   attemptedChoices.add('form_search_choices\0'+selector);
    const r=await call('form_search_choices',{companyId,captureId,selector});
-   if(r.error||r.requiresUser)break;
-   if(r.status==='choices_resolved'||r.status==='resolved'||r.mapped>0||r.resolution?.status==='matched')any=true;
+   if(r.status==='choice_resolved'&&!r.evidenceReuse){changed=true;localRepairs++;}
   }
-  return any?{changed:true}:null;
+  return changed?{changed:true}:null;
  };
  const done=(status,extra={})=>({status,companyId,steps:steps.length,lastSteps:steps.slice(-8),agentItems:uniqueItems(agentItems),userItems:uniqueItems(userItems),fallbackItems:uniqueItems(fallbackItems),
   stageMetrics:{wallMs:Math.round(performance.now()-started),localRepairs,operationCounts:steps.reduce((out,step)=>(out[step.tool]=(out[step.tool]||0)+1,out),{}),agentItems:uniqueItems(agentItems).length},

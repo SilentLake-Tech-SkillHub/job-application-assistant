@@ -546,30 +546,35 @@ registerOperation('form_capture_visual',{description:'建库第一步。在已�
   return {id,status:'visual_inventory_recorded',rows:next.rows.filter(row=>next.current.rowIds.includes(row.id)),nextTools:['capture_rea_structure']};
  }
  const keys=formAssetKeys(a.companyId);
- const [coverage,structure]=await Promise.all([optionalRun(keys.coverage),optionalRun(keys.structure)]);
+ const [coverage,structure,before]=await Promise.all([optionalRun(keys.coverage),optionalRun(keys.structure),optionalRun(keys.capture)]);
  let reboundStructure=structure;
- if(structure?.visualPage&&table?.current?.surveyRevision===2&&coverage?.review?.status==='passed'&&table.current.page?.pageUrl===page.pageUrl&&!sameVisualPage(table.current.page,page)){
-  const before=await optionalRun(keys.capture),formal=await optionalTemplate(a.companyId);
+ let capturePage=before?.visualPage;
+ const captureMatchesStructure=before&&captureContentHash(before)===structure?.controlCaptureHash;
+ let captureVerified=captureMatchesStructure;
+ if(structure?.visualPage&&table?.current?.surveyRevision===2&&coverage?.review?.status==='passed'&&table.current.page?.pageUrl===page.pageUrl&&
+  (!sameVisualPage(table.current.page,page)||!sameVisualPage(capturePage,page)||!captureMatchesStructure)){
+  const formal=await optionalTemplate(a.companyId);
   if(before?.roleId&&(await templateState(formal)).route!=='reuse'){
    const live=await captureCompanyControls({...a,provider:before.provider||undefined,visualPage:page});
    if(live.roleId===before.roleId){
-    const recovered=visualTableForRecoveredDocument(table,page);
+    const recovered=visualTableForRecoveredDocument(table,page,captureMatchesStructure?capturePage:null);
     if(recovered){
      const {result,structure:liveStructure}=await readBoundRea({...a,authorization:{acquire:true,evidence:'原申请页同一文档，重新取得当前控件和 REA 核实原一级对照'}});
      const inspection=await recordReaInspection(store,{companyId:a.companyId,pageUrl:a.pageUrl,structure:liveStructure,capture:live,rawEvidence:result.evidence,nativeStructure:result.nativeStructure||null,visual:recovered.current,template:formal,recoveredVisualTable:recovered});
      if(inspection.asset){
-      table=recovered;reboundStructure=inspection.asset;
+      table=recovered;reboundStructure=inspection.asset;capturePage=live.visualPage;captureVerified=true;
       await store.put('runs',id,table);
-     }
+     }else capturePage=null;
     }else if(captureContentHash(live)===structure.controlCaptureHash){
      table={...table,current:{...table.current,page}};
      reboundStructure={...structure,pageId:page.pageId,visualPage:page,primaryContentHash:coverage.review.structureHash};
      await store.put('runs',id,table);await store.put('runs',keys.structure,reboundStructure);
-    }
+     capturePage=live.visualPage;captureVerified=true;
+    }else capturePage=null;
    }
   }
  }
- const continuing=currentPrimaryContinuation(table,coverage,reboundStructure,page);
+ const continuing=captureVerified&&sameVisualPage(capturePage,page)&&currentPrimaryContinuation(table,coverage,reboundStructure,page);
  if(continuing)return {id,...continuing,secondaryScreenshotTool:'role_screenshot'};
  const screenshots=await captureVisualScreenshots(a,page);
  if(!sameVisualPage(page,await acquisitionPage(a)))throw Error('VISUAL_FORM_PAGE_CHANGED');
