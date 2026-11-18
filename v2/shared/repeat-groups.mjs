@@ -215,7 +215,7 @@ export function inheritPageContract(page,previous=[]){
  return result;
 }
 const UNMAPPED='unmapped.pending';
-export function inheritFields(fields,previous=[],pathPrefix,{preserveObservedBlockers=false,mappings=[]}={}){
+export function inheritFields(fields,previous=[],pathPrefix,{preserveObservedBlockers=false,mappings=[],observedRepeatSections=[]}={}){
  const prior=previous.flatMap(t=>t?.pages||[]).filter(p=>p.pathPrefix===pathPrefix).flatMap(p=>p.fields||[]);
  if(!prior.length)return fields;
  const key=f=>f.inventorySelectors?.[0]||f.read?.selector,seen=new Set(fields.map(key));
@@ -230,11 +230,16 @@ export function inheritFields(fields,previous=[],pathPrefix,{preserveObservedBlo
  // A record this capture never showed, or a condition not active now, says nothing
  // about the company. A control gone from a record the capture did show is the company's change.
  const shown=new Set(fields.map(fieldScope).filter(Boolean).map(scope=>JSON.stringify(scope)));
+ const observedSections=new Set(observedRepeatSections);
+ const confirmedSelectors=new Set(mappings.filter(mapping=>mapping.status==='mapped'&&!mapping.factKey.startsWith('unmapped.')).map(mapping=>mapping.selector));
+ const knownField=field=>field.userOnly||field.source&&!field.source.startsWith('unmapped.')||field.inventorySelectors?.some(selector=>confirmedSelectors.has(selector));
+ const confirmedRows=new Set(prior.filter(knownField).map(fieldScope).filter(Boolean).map(scope=>JSON.stringify(scope)));
  const unseen=[];
  for(const old of prior){
   if(seen.has(key(old)))continue;
   const scope=fieldScope(old);
   if(!old.when&&(!scope||shown.has(JSON.stringify(scope))))continue;
+  if(!old.when&&scope&&observedSections.has(scope[0])&&!knownField(old)&&!confirmedRows.has(JSON.stringify(scope)))continue;
   let retained={constructionBlockers:[],...structuredClone(old)};
   const owner=FAMILY.exec(old.source||'');
   if(scope&&owner&&!old.userOnly&&!['dropdown','radio','multiselect','searchable_text'].includes(old.control?.type)){

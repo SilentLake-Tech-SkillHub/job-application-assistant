@@ -1,5 +1,5 @@
 import test from 'node:test';
-import {unresolvedRepeatSections} from '../shared/repeat-groups.mjs';
+import {inheritFields,unresolvedRepeatSections} from '../shared/repeat-groups.mjs';
 import assert from 'node:assert/strict';
 import {retainReviewedPrimary,currentPrimaryContinuation} from '../shared/form-visual-inventory.mjs';
 import {pageFromTemplate,runConstructionBuild} from '../shared/construction-orchestrator.mjs';
@@ -50,6 +50,19 @@ test('unmapped or duplicated repeat source rows cannot trigger additional blank 
   field('education',1,'education.first.school'),field('education',1,'unmapped.company.helper')
  ]});
  assert.deepEqual([...sections],['works','projects']);
+});
+
+test('fresh repeat evidence retires absent blank placeholders and keeps confirmed unseen records',()=>{
+ const field=(index,source,sub='link')=>{
+  const selector=`#formily-item-portfolio_list [class^="apply-form-array-card__"]:nth-child(${index}) [data-field="${sub}"]`;
+  return {source,id:`field-${index}-${sub}`,inventorySelectors:[selector],read:{selector,kind:'value'}};
+ };
+ const current=[field(1,'portfolio.first.link')];
+ const prior=[...current,field(2,'portfolio.second.link'),field(2,'unmapped.pending','note'),field(3,'unmapped.sample.field')];
+ const template={pages:[{pathPrefix:'/form',fields:prior}]};
+ const inherited=inheritFields(current,[template],'/form',{observedRepeatSections:['portfolio']});
+ assert.deepEqual(inherited.map(item=>item.id),['field-1-link','field-2-link','field-2-note']);
+ assert.equal(inheritFields(current,[template],'/form').length,4);
 });
 
 test('a failed option search does not discard successful siblings or stop remaining searches',async()=>{
