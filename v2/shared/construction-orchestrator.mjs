@@ -29,7 +29,7 @@ export function pageFromTemplate(template,task={}){
 export function splitMappings(candidates,profile){
  const auto=[],agent=[];
  for(const c of candidates||[]){
-  if(c.currentFactKey)continue;
+  if(c.currentFactKey&&!c.currentFactKey.startsWith('unmapped.'))continue;
   const options=(c.candidates||[]).filter(x=>x?.factKey);
   const only=options.length===1?options[0]:null,fact=only?profile?.facts?.[only.factKey]:null;
   const known=only&&(only.status==='confirmed_handoff_material'||fact?.status==='known');

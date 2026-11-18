@@ -17,9 +17,10 @@ test('D2: only a single candidate with a known fact (or confirmed handoff materi
   {selector:'#c',label:'学校',questionId:'q3',candidates:[{factKey:'edu.school'},{factKey:'edu.school_en'}]},
   {selector:'#d',label:'简历',questionId:'q4',candidates:[{factKey:'material.resume',status:'confirmed_handoff_material'}]},
   {selector:'#e',label:'新题',questionId:null,candidates:[{factKey:'person.name'}]},
-  {selector:'#f',label:'已映射',questionId:'q6',currentFactKey:'person.name',candidates:[]}
+  {selector:'#f',label:'已映射',questionId:'q6',currentFactKey:'person.name',candidates:[]},
+  {selector:'#g',label:'占位',questionId:'q7',currentFactKey:'unmapped.sample.field',candidates:[{factKey:'person.name'}]}
  ],profile);
- assert.deepEqual(auto,[{questionId:'q1',factKey:'person.name'},{questionId:'q4',factKey:'material.resume'}]);
+ assert.deepEqual(auto,[{questionId:'q1',factKey:'person.name'},{questionId:'q4',factKey:'material.resume'},{questionId:'q7',factKey:'person.name'}]);
  assert.deepEqual(agent.map(a=>[a.selector,a.reason]),[['#b','MULTIPLE_CANDIDATES_OR_FACT_MISSING'],['#c','MULTIPLE_CANDIDATES_OR_FACT_MISSING'],['#e','QUESTION_NOT_REGISTERED']]);
 });
 
