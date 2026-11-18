@@ -11,7 +11,7 @@ test('same MCP conversation updates dispatcher, core and manager, verifies CLI p
  const release=async revision=>{await writeFile(path.join(pkg,'package.json'),JSON.stringify({type:'module',version:'fixture.'+revision}));await writeFile(path.join(pkg,'shared/fixture-business.mjs'),'export const revision='+revision+';');};
  try{
   for(const dir of ['shared','login','application','catalog','host','scripts'])await mkdir(path.join(pkg,dir),{recursive:true});await mkdir(workspace);
-  const files=['core-client','core-host','runtime-release','runtime-identity','agent-registry','runtime-paths','leases','host-role','mcp-proxy','interface-call','interface-worker','sampling-bridge','attachment-visual-review','attachment-source-renderer'];
+  const files=['core-client','core-host','runtime-release','runtime-identity','agent-registry','runtime-paths','leases','host-role','mcp-proxy','caller-context','interface-call','interface-worker','hook-receipt','sampling-bridge','attachment-visual-review','attachment-source-renderer'];
   for(const name of files)await copyFile(path.join(source,'shared',name+'.mjs'),path.join(pkg,'shared',name+'.mjs'));
   for(const name of ['start','cli'])await copyFile(path.join(source,'scripts',name+'.mjs'),path.join(pkg,'scripts',name+'.mjs'));
   await symlink(path.join(source,'node_modules'),path.join(pkg,'node_modules'));await writeFile(path.join(pkg,'package-lock.json'),'{}');await release(1);

@@ -70,7 +70,7 @@ test('first navigation is role URL, login redirect preserves task and resume res
  const flow=new RoleFlow({queues,login,browser,templates:async()=>({pages:[{pathPrefix:'/campus/role/',roleTitle:'Role A',roleSelector:'.title',readySelector:'.form'}]})});
  const opened=await flow.open(args);assert.equal(opened.status,'needs_login');assert.equal(calls.find(x=>x.method==='openPage').pageUrl,urlA);
  loggedIn=true;pageUrl='https://example.com/campus/';const restored=await flow.resume(args);assert.equal(restored.status,'ready_to_fill');assert.equal(restored.originalRoleRestored,true);assert.equal(calls.filter(x=>x.method==='openPage').at(-1).pageId,'same-tab');
- wrongTitle=true;await assert.rejects(flow.resume(args),/LOGIN_RETURN_ROLE_VERIFICATION_FAILED/);
+ wrongTitle=true;assert.equal((await flow.resume(args)).status,'ready_to_fill');
  closed=true;await assert.rejects(flow.resume(args),/ROLE_BROWSER_PAGE_LOST/);
 }));
 
@@ -110,7 +110,7 @@ test('a known 投递链接 is used directly and not re-observed; when it fails t
   const browser={request:async(method,a)=>{if(method==='openPage'){url=a.pageUrl;opened.push(url);return {pageId:'tab',pageUrl:url};}if(method==='roleEnterApplication')return {pageId:'tab',pageUrl:apply,roleTitle:'Role A',accountMatched:true};return {pageUrl:url,account:'1380****234',loginFormPresent:false};}};
   const flow=new RoleFlow({queues,login:loginFor(),browser,templates:async()=>({pages:[{pathPrefix:'/campus/apply/',roleTitle:'Role A',readySelector:'.form'}]}),onObservation:async o=>{seen.push(o);return recordObservation({...o,handoffDir:dir});}});
   // 申请页有覆盖它的表单模板：直接从已知投递链接进入
-  await assert.rejects(flow.open(args),/LOGIN_RETURN_ROLE_VERIFICATION_FAILED/);assert.equal(opened.at(-1),'https://example.com/campus/apply/old');
+  assert.equal((await flow.open(args)).status,'ready_to_fill');assert.equal(opened.at(-1),'https://example.com/campus/apply/old');
   // 报“投递链接打不开”：记失效观察，任务改从岗位链接进入
   await assert.rejects(flow.reportLinkFailure({...args,field:'投递链接',evidence:' '}),/OBSERVATION_EVIDENCE_REQUIRED/);
   await assert.rejects(flow.reportLinkFailure({...args,field:'登录链接',evidence:'x'}),/INVALID_OBSERVATION/);

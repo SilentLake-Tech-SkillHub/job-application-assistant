@@ -40,12 +40,13 @@ test('the first entry config is a valid declarative entry; an off-scope form wid
  assert.ok(transitionLocationMatches(e.form.location,`https://ke.example/form?fromPage=job&jobAdId=${UUID}`,UUID));assert.ok(!transitionLocationMatches(e.detail.location,`https://ke.example/form?jobAdId=${UUID}`,UUID));
  const inScope=firstEntryConfig({current:{...current,allowedPaths:['/']},observed:observed(),roleId:UUID,now});assert.deepEqual(inScope.allowedPaths,['/']);
 });
-test('a form page without the role id keeps its title when one is found, otherwise it is not taken as this role\'s form',()=>{
+test('a shared form retains optional title evidence and continues without a job ID or title',()=>{
  const noId={pageUrl:'https://ke.example/apply/form'};
  const titled=firstEntryConfig({current,observed:observed({...noId,formTitle:{heading:null,path:'body > div:nth-of-type(2) > span:nth-of-type(1)'}}),roleId:UUID,now});
  assert.equal(titled.entry.form.roleSelector,'body > div:nth-of-type(2) > span:nth-of-type(1)');assert.equal(titled.entry.allowProvenanceIdentity,undefined);
- // 落地页认不出是本岗位（地址没有编号、页面没有标题）：不当申请表，不写（2026-11-16 追加）。
- assert.throws(()=>firstEntryConfig({current,observed:observed(noId),roleId:UUID,now}),/APPLICATION_ENTRY_FIRST_LANDING_NOT_FORM/);
+ // C48 K7：真实入口点击已到可见表单，无岗位标题/编号也继续。
+ const shared=firstEntryConfig({current,observed:observed(noId),roleId:UUID,now});
+ assert.equal(shared.entry.allowProvenanceIdentity,true);assert.equal(shared.entry.form.roleSelector,undefined);
  // 地址能核对岗位编号时，结构路径（随版式变）不写进配置。
  assert.equal(firstEntryConfig({current,observed:observed({formTitle:{heading:null,path:'body > p:nth-of-type(1)'}}),roleId:UUID,now}).entry.form.roleSelector,undefined);
 });
@@ -213,7 +214,7 @@ function fallbackFlow({allowed=true}={}){
   if(method==='openPage'){tabs.find(x=>x.id===args.pageId).url=args.pageUrl;return {pageId:args.pageId,pageUrl:args.pageUrl};}
   if(method==='roleEntryInventory')return {pageId:args.pageId,pageUrl:urlOf(args.pageId),detailTitle:{heading:'h1',path:null},candidates:args.labels?[{role:'link',label:args.labels[0],count:1,domOrder:[0]}]:[{role:'button',label:'申请职位',count:2,domOrder:[1,0]}]};
   if(method==='roleSnapshot')return {pageUrl:urlOf(args.pageId),loginFormPresent:login};
-  if(method==='roleEntryLanding')return {pageId:args.pageId,pageUrl:urlOf(args.pageId),...landing,formFieldSelector:FIRST_ENTRY.formFieldSelector};
+  if(method==='roleEntryLanding')return {pageId:args.pageId,pageUrl:urlOf(args.pageId),...landing,...(urlOf(args.pageId)==='https://ke.example/campus/index'?{formFieldsVisible:false}:{}),formFieldSelector:FIRST_ENTRY.formFieldSelector};
   throw Error('unexpected '+method);}};
  const queues={task:async()=>({q:{id:'q',queueHash:'h'},t}),read:async()=>structuredClone(state),put:async(id,v)=>{state=structuredClone(v);}};
  const loginEngine={company:async()=>structuredClone(config),locked:async(c,fn)=>fn(),compile:async()=>({planId:'p',planHash:'h'})};
@@ -225,6 +226,17 @@ const task={queueId:'q',queueHash:'h',taskId:'task'};
 test('entry fallback outside the registry goes to the user without touching the page',async()=>{
  const {f,calls}=fallbackFlow({allowed:false});
  const r=await f.entryFallback({...task,mode:'start'});assert.equal(r.status,'needs_user');assert.equal(r.reason,'HOST_NOT_IN_FALLBACK_REGISTRY');assert.ok(!calls.includes('roleEntryInventory'));
+});
+test('a screenshot-confirmed shared application editor continues without another entry click',async()=>{
+ const x=fallbackFlow();x.tabs[0].url='https://ke.example/profile/edit';
+ await x.f.entryFallback({...task,mode:'start',preserveCurrentPage:true});
+ assert.equal(x.tabs[0].url,'https://ke.example/profile/edit');
+ const r=await x.f.entryFallback({...task,mode:'report',report:{alreadyForm:true}});
+ assert.equal(r.status,'ready_to_fill');assert.deepEqual(r.continuation.nextTools,['workflow_next']);assert.equal(x.created.length,0);assert.equal(x.calls.includes('roleEntryClick'),false);
+});
+test('already-form fallback still distinguishes an actual login screen',async()=>{
+ const x=fallbackFlow();await x.f.entryFallback({...task,mode:'start'});x.setLogin(true);
+ assert.equal((await x.f.entryFallback({...task,mode:'report',report:{alreadyForm:true}})).status,'needs_login');
 });
 test('entry fallback returns to the role link, inventories it, and records the Agent click with the same-text order',async()=>{
  const x=fallbackFlow();

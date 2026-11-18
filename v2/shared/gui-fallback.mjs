@@ -5,7 +5,7 @@
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {validateRecordedSteps} from './control-operations.mjs';
-export const SURFACE_BY_CHANNEL=Object.freeze({chrome:'chrome_clone_extension',iab:'builtin_browser'});
+export const SURFACE_BY_CHANNEL=Object.freeze({chrome:'chrome_clone_extension',main:'chrome_main_extension',iab:'builtin_browser'});
 export const STEP_KINDS=['click_field','click_text','type_value','type_text','press'];
 export function fallbackRegistryFile(env=process.env){
  return env.RECRUITING_AGENT_FALLBACK_REGISTRY||(env.RECRUITING_WORKSPACE_ROOT?path.join(env.RECRUITING_WORKSPACE_ROOT,'产品管理','Agent浏览器兜底登记.json'):null);
@@ -25,7 +25,7 @@ export function fallbackSurface({registry,hostId,pageId}){
  if(!registry)return {allowed:false,reason:'AGENT_FALLBACK_REGISTRY_MISSING'};
  const entry=registry.agents.find(a=>a.hostId===hostId);
  if(!entry)return {allowed:false,reason:'HOST_NOT_IN_FALLBACK_REGISTRY',hostId:hostId||null};
- const own=!!surface&&entry['浏览器'].includes(surface),componentClick=entry['浏览器'].includes(COMPONENT_SURFACE);
+ const own=!!surface&&entry['浏览器'].includes(surface),componentClick=channel!=='main'&&entry['浏览器'].includes(COMPONENT_SURFACE);
  if(!own&&!componentClick)return {allowed:false,reason:'PAGE_BROWSER_NOT_IN_FALLBACK_REGISTRY',agent:entry.agent,hostId,surface};
  return {allowed:true,agent:entry.agent,hostId,surface:own?surface:null,surfaceLabel:own?registry['浏览器']?.[surface]||surface:null,componentClick,...(componentClick?{componentLabel:registry['浏览器']?.[COMPONENT_SURFACE]||COMPONENT_SURFACE}:{}),pageId};
 }

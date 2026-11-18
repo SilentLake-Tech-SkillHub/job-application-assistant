@@ -4,6 +4,7 @@ import {mkdtemp,readFile,writeFile,rm,mkdir,readdir} from 'node:fs/promises';
 import path from 'node:path';import os from 'node:os';import {fileURLToPath} from 'node:url';
 import {LoginEngine} from '../login/engine.mjs';
 import {validateCompany} from '../login/contracts.mjs';
+import {withTaskRecords} from '../shared/task-records.mjs';
 import {acquireLease,leasePath,defaultLeaseRoot} from '../shared/leases.mjs';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -21,6 +22,14 @@ test('compile is offline and changed account invalidates plan before browser wri
 test('unknown popup is blocked without input or dismiss',()=>fixture(async({engine,o,actions})=>{o.dialogs=1;o.popupTitle='未知权限';const p=await engine.compile({companyId:'insta360',pageUrl:o.url});await assert.rejects(engine.prepare({...p,authorization:auth}),/UNKNOWN_LOGIN_POPUP/);assert.equal(actions.length,0);}));
 test('existing authenticated session is reused without matching personal identity',()=>fixture(async({engine,o,actions})=>{o.account='1390****888';o.form=false;const p=await engine.compile({companyId:'insta360',pageUrl:o.url});assert.equal((await engine.prepare({...p,authorization:auth})).status,'authenticated');assert.equal(actions.length,0);}));
 test('successful session reuse does not send SMS',()=>fixture(async({engine,o,actions})=>{o.account='1380****234';o.form=false;const p=await engine.compile({companyId:'insta360',pageUrl:o.url});const r=await engine.prepare({...p,authorization:auth});assert.equal(r.status,'authenticated');assert.equal(r.smsSent,false);assert.equal(actions.length,0);}));
+test('a queued login plan survives task storage adding the confirmed role metadata',()=>fixture(async({engine,o,actions})=>{
+ const taskId='synthetic-queued-login';
+ const p=await withTaskRecords({taskId,roleId:'J000001',tool:'role_advance'},()=>engine.compile({companyId:'insta360',pageUrl:o.url}));
+ o.form=false;
+ assert.equal((await engine.prepare({...p,authorization:auth})).status,'authenticated');
+ assert.equal(actions.length,0);
+ await assert.rejects(engine.prepare({...p,planHash:'altered',authorization:auth}),/LOGIN_PLAN_HASH_MISMATCH/);
+}));
 test('an undecided switch leaves the login consent to the user before any write',()=>fixture(async({engine,o,actions})=>{o.dialogs=1;o.popupTitle='隐私声明';const p=await engine.compile({companyId:'insta360',pageUrl:o.url});const r=await engine.prepare({...p,authorization:auth});assert.equal(r.status,'needs_user_login');assert.equal(r.method,'user_operated_consent');assert.equal(r.handoff.nextTool,'role_advance');assert.equal(r.businessAuthorization.reason,'BUSINESS_AUTHORIZATION_SWITCH_REQUIRED');assert.equal(actions.length,0);await assert.rejects(engine.send({...p,authorization:auth}),/PRIVACY_ACCEPTANCE_REQUIRED/);}));
 test('switch 1 handles the open declaration, selects the country and ticks consent without opening the policy',()=>fixture(async({engine,o,profileFile,actions})=>{const profile=JSON.parse(await readFile(profileFile));profile.policy={businessAuthorization:1};await writeFile(profileFile,JSON.stringify(profile));o.dialogs=1;o.popupTitle='隐私声明';const p=await engine.compile({companyId:'insta360',pageUrl:o.url});const r=await engine.prepare({...p,authorization:auth});assert.equal(r.status,'ready_to_request_sms');assert.equal(o.dialogs,0);assert.equal(o.country,'+86');assert.equal(o.phone,phone);assert.equal(o.consent,true);assert.equal(actions.filter(a=>a.selector===company.consent.openSelector).length,0);assert.equal(actions.filter(a=>a.selector===company.fields.send).length,0);const saved=JSON.parse(await readFile(profileFile));assert.deepEqual(saved.policy,{businessAuthorization:1});}));
 test('actual origin lock shared with application engine prevents login mutation',()=>fixture(async({engine,o,actions})=>{const p=await engine.compile({companyId:'insta360',pageUrl:o.url});const release=await acquireLease(leasePath(engine.leaseRoot,'recruiting-origin:'+company.origin));try{await assert.rejects(engine.prepare({...p,authorization:auth}),/COMPANY_ALREADY_RUNNING/);assert.equal(actions.length,0);}finally{await release();}}));

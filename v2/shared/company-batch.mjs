@@ -13,7 +13,7 @@ export class CompanyBatch{
   const release=await acquireLease(leasePath(this.leaseRoot,'company-dispatch:'+this.store.root),{waitMs:30000,busyCode:'COMPANY_BATCH_BUSY'});
   try{return await this.createUnlocked(args);}finally{await release();}
  }
- async createUnlocked({rolesFile,companyPlan,authorizationRef,companiesPerChannel=10,parallelRoles=false,browserChannels}){
+ async createUnlocked({rolesFile,companyPlan,authorizationRef,companiesPerChannel=10,roleLimit,parallelRoles=false,browserChannels}){
   if(!authorizationRef?.trim())throw Error('BATCH_AUTHORIZATION_REQUIRED');
   if(!Number.isInteger(companiesPerChannel)||companiesPerChannel<1||companiesPerChannel>10)throw Error('INVALID_COMPANY_CHANNEL_CAPACITY');
   const {input}=await this.queues.inputAdapter({rolesFile,companyPlan});
@@ -22,7 +22,7 @@ export class CompanyBatch{
   const requested=browserChannels||(storedPolicy?.batchId===input.batchId?storedPolicy.browserChannels||undefined:undefined);
   const initialization=await this.browser?.executionCapabilities?.(),channelSelection=resolveBatchChannels(initialization,requested),channels=channelSelection.channels;
   await this.store.put('runs','batch-browser-policy',{batchId:input.batchId,browserChannels:channelSelection.requestedChannels,authorizationRef:browserChannels?authorizationRef:storedPolicy?.authorizationRef||authorizationRef});
-  const queue=await this.queues.import({rolesFile,companyPlan,batchPolicy:{mode:'parallel_companies',authorizationRef,companiesPerChannel,parallelRoles:!!parallelRoles}}),companies=[];
+  const queue=await this.queues.import({rolesFile,companyPlan,batchPolicy:{mode:'parallel_companies',authorizationRef,companiesPerChannel,...(roleLimit!==undefined?{roleLimit}:{}),parallelRoles:!!parallelRoles}}),companies=[];
   // Reordering or changing browser preferences never recreates task records.
   if(queue.reused&&index[queue.queueId]){try{const existing=await this.store.get('runs',index[queue.queueId]);if(!existing.closedAt){
    if(existing.queueHash!==queue.queueHash){
@@ -159,9 +159,9 @@ export class CompanyBatch{
   }
   if(args.status==='blocked'){
    const receipts=await Promise.all((args.runIds||[]).map(id=>this.store.get('runs',id)));
-   if(!receipts.some(receipt=>receipt.status==='blocked_for_supervisor'&&receipt.continuation?.handoffVerified===true&&(!receipt.companyId||receipt.companyId===c.companyId)))throw Error('VERIFIED_BLOCK_HANDOFF_REQUIRED');
+   if(!receipts.some(receipt=>receipt.status==='repair_required'&&receipt.repair?.resumeAfterRepair===true&&receipt.continuation?.handoffVerified===true&&(!receipt.companyId||receipt.companyId===c.companyId)))throw Error('VERIFIED_BLOCK_HANDOFF_REQUIRED');
   }
-  if(args.status==='blocked'&&!args.reason?.trim())throw Error('BLOCK_REASON_REQUIRED');Object.assign(c,{status:args.status,reason:args.reason||null,runIds:args.runIds||[],updatedAt:new Date(this.clock()).toISOString(),leaseExpiresAt:new Date(this.clock()+30*60*1000).toISOString()});b.revision++;await this.store.put('runs',b.id,b);if(c.status==='ready_for_user_review'&&!b.companies.some(x=>x.loginScope===c.loginScope&&active.has(x.status))){const owners=await this.owners();delete owners[c.loginScope];await this.store.put('runs','company-channel-owners',owners);}const remainingAgentWork=b.companies.filter(company=>['pending','dispatched','running'].includes(company.status)).length;return {companyId:c.companyId,channel:c.channel,status:c.status,remainingAgentWork,batchPreparationComplete:b.companies.every(company=>company.status==='ready_for_user_review'),continuation:remainingAgentWork?{state:'prepare',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:['company_batch_take','workflow_advance']}:c.status==='blocked'?{state:'technical_block',owner:'supervisor',requiresUser:false,shouldContinue:false,handoffVerified:true,nextTools:[]}:{state:c.status==='waiting_for_user'?'user_input':'review',owner:'user',requiresUser:true,shouldContinue:false,nextTools:[]},submission:'not_performed'};
+  if(args.status==='blocked'&&!args.reason?.trim())throw Error('BLOCK_REASON_REQUIRED');Object.assign(c,{status:args.status,reason:args.reason||null,runIds:args.runIds||[],updatedAt:new Date(this.clock()).toISOString(),leaseExpiresAt:new Date(this.clock()+30*60*1000).toISOString()});b.revision++;await this.store.put('runs',b.id,b);if(c.status==='ready_for_user_review'&&!b.companies.some(x=>x.loginScope===c.loginScope&&active.has(x.status))){const owners=await this.owners();delete owners[c.loginScope];await this.store.put('runs','company-channel-owners',owners);}const remainingAgentWork=b.companies.filter(company=>['pending','dispatched','running','blocked'].includes(company.status)).length;return {companyId:c.companyId,channel:c.channel,status:c.status,remainingAgentWork,batchPreparationComplete:b.companies.every(company=>company.status==='ready_for_user_review'),continuation:remainingAgentWork?{state:c.status==='blocked'?'repair':'prepare',owner:'agent',requiresUser:false,shouldContinue:true,nextTools:c.status==='blocked'?['company_batch_status']:['company_batch_take','workflow_advance'],...(c.status==='blocked'?{repairOwner:'supervisor',instruction:'技术交接仍属整批待办；实际接入已授权维护流程，修复重载后恢复原任务，继续其它公司。'}:{})}:{state:c.status==='waiting_for_user'?'user_input':'review',owner:'user',requiresUser:true,shouldContinue:false,nextTools:[]},submission:'not_performed'};
  });}
  async status(args){
   const b=await this.get(args),live=await this.queues.hydratedTasks(b.queueId);
@@ -177,6 +177,20 @@ export class CompanyBatch{
    }
    return {...company,roleCount,protectedRoles};
   });
-  return {batchId:b.id,revision:b.revision,companiesPerChannel:b.companiesPerChannel,channels:b.channels,channelSelection:b.channelSelection,companies,submission:'not_performed'};
+  const actionable=[],waitingCompanies=[],loginRechecks=[];
+  for(const company of companies){
+   if(['protected','closed_preparation','ready_for_user_review'].includes(company.status))continue;
+   for(const task of b.companies.find(c=>c.companyId===company.companyId)?.tasks||[]){
+    if(live.get(task.taskId)?.protectedReason)continue;
+    let state;try{state=await this.queues.read(task.taskId);}catch(error){if(error.code!=='ENOENT')throw error;}
+    if(state?.status==='ready_for_user_review')continue;
+    const ref={companyId:company.companyId,roleId:task.roleId,taskId:task.taskId,queueId:b.queueId,queueHash:b.queueHash};
+    if(state?.status==='needs_login'||state?.loginWait){waitingCompanies.push(company.companyId);loginRechecks.push({...ref,nextTool:'role_advance',waitingForLogin:true,pollAfterMs:30000});break;}
+    if(company.status==='waiting_for_user'&&!/login|登录/i.test(company.reason||'')){waitingCompanies.push(company.companyId);break;}
+    actionable.push({...ref,nextTool:state?.status==='ready_to_fill'?'workflow_next':'role_advance'});break;
+   }
+  }
+  actionable.push(...loginRechecks);
+  return {batchId:b.id,revision:b.revision,companiesPerChannel:b.companiesPerChannel,channels:b.channels,channelSelection:b.channelSelection,companies,actionable,waitingCompanies,loginRechecks,pollAfterMs:actionable.length&&actionable.every(t=>t.waitingForLogin)?30000:0,agentWorkRemaining:actionable.length>0,submission:'not_performed'};
  }
 }

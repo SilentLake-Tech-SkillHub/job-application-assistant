@@ -5,10 +5,22 @@ import {randomUUID} from 'node:crypto';
 import {screenshotMaskDOM} from './screenshot-mask.mjs';
 // Geometry and policy are read from the actual page. Raw pixels stay in memory;
 // only a masked, optionally cropped PNG may be written to the private directory.
-export function screenshotGeometryDOM({selectors,selector}){
+export function screenshotGeometryDOM({selectors,selector,generation}){
  const box=n=>{const b=n.getBoundingClientRect();return {x:b.left+scrollX,y:b.top+scrollY,width:b.width,height:b.height};};
  const single=s=>{const nodes=[...document.querySelectorAll(s)].filter(n=>n.getClientRects().length&&getComputedStyle(n).visibility!=='hidden');if(nodes.length!==1)throw Error('HOST_SCREENSHOT_TARGET_NOT_UNIQUE');return box(nodes[0]);};
- return {pageUrl:location.href,generation:String(performance.timeOrigin),width:Math.max(innerWidth,document.documentElement.scrollWidth,document.body.scrollWidth),height:Math.max(innerHeight,document.documentElement.scrollHeight,document.body.scrollHeight),masks:selectors.map(single),clip:selector?single(selector):null};
+ return {pageUrl:location.href,generation:generation??(typeof performance!=='undefined'?String(performance.timeOrigin):null),width:Math.max(innerWidth,document.documentElement.scrollWidth,document.body.scrollWidth),height:Math.max(innerHeight,document.documentElement.scrollHeight,document.body.scrollHeight),masks:selectors.map(single),clip:selector?single(selector):null};
+}
+export async function readHostDocumentIdentity(tab,{extension=false,probeForm=false}={}){
+ const result=await tab.playwright.evaluate(({probeForm})=>{
+  const identity={url:location.href,generation:typeof performance!=='undefined'&&typeof performance.timeOrigin==='number'?String(performance.timeOrigin):null};
+  if(probeForm){
+   const controls=document.querySelectorAll('input:not([type=hidden]):not([type=password]):not([type=submit]), textarea, select, [contenteditable=true], [role=combobox], [role=checkbox], [role=radio]');
+   identity.formControls=Array.from(controls).filter(control=>control.getClientRects().length&&getComputedStyle(control).visibility!=='hidden').length;
+  }
+  return identity;
+ },{probeForm});
+ if(!result.generation&&extension){const capability=await tab.capabilities?.get('cdp');if(typeof capability?.send!=='function')throw Error('HOST_DOCUMENT_IDENTITY_CAPABILITY_REQUIRED');const tree=await capability.send('Page.getFrameTree');result.generation=tree?.frameTree?.frame?.loaderId||null;}
+ if(!result.generation||result.generation==='undefined')throw Error('BROWSER_DOCUMENT_IDENTITY_REQUIRED');return result;
 }
 export function redactAndCropScreenshot(bytes,geometry){
  let image;try{image=PNG.sync.read(Buffer.from(bytes));}catch{try{image=jpegjs.decode(Buffer.from(bytes),{useTArray:true});}catch{throw Error('HOST_SCREENSHOT_IMAGE_FORMAT_REQUIRED');}}
@@ -22,11 +34,12 @@ export function redactAndCropScreenshot(bytes,geometry){
  const result=new PNG({width,height});for(let y=0;y<height;y++)Buffer.from(image.data).copy(result.data,y*width*4,((y+r.y)*image.width+r.x)*4,((y+r.y)*image.width+r.right)*4);
  return PNG.sync.write(result);
 }
-export async function screenshotHostTab({tab,directory,selector,options={}}){
+export async function screenshotHostTab({tab,directory,selector,options={},documentIdentity}){
  if(options.style)throw Error('HOST_SCREENSHOT_STYLE_UNSUPPORTED');
  if(typeof tab.screenshot!=='function')throw Error('HOST_SCREENSHOT_CAPABILITY_REQUIRED');
- const masks=await tab.playwright.evaluate(screenshotMaskDOM),before=await tab.playwright.evaluate(screenshotGeometryDOM,{selectors:masks,selector});
- const bytes=await tab.screenshot({fullPage:true}),afterMasks=await tab.playwright.evaluate(screenshotMaskDOM),after=await tab.playwright.evaluate(screenshotGeometryDOM,{selectors:afterMasks,selector});
+ const masks=await tab.playwright.evaluate(screenshotMaskDOM),beforeIdentity=await documentIdentity?.(),before=await tab.playwright.evaluate(screenshotGeometryDOM,{selectors:masks,selector,...(beforeIdentity?{generation:beforeIdentity.generation}:{})});
+ const bytes=await tab.screenshot({fullPage:true}),afterMasks=await tab.playwright.evaluate(screenshotMaskDOM),afterIdentity=await documentIdentity?.(),after=await tab.playwright.evaluate(screenshotGeometryDOM,{selectors:afterMasks,selector,...(afterIdentity?{generation:afterIdentity.generation}:{})});
+ if(JSON.stringify(beforeIdentity)!==JSON.stringify(afterIdentity))throw Error('HOST_SCREENSHOT_PAGE_OR_LAYOUT_CHANGED');
  if(JSON.stringify(masks)!==JSON.stringify(afterMasks))throw Error('HOST_SCREENSHOT_SENSITIVE_FIELDS_CHANGED');
  if(JSON.stringify(before)!==JSON.stringify(after))throw Error('HOST_SCREENSHOT_PAGE_OR_LAYOUT_CHANGED');
  const safe=redactAndCropScreenshot(bytes,before),file=options.path||path.join(directory,randomUUID()+'.png');

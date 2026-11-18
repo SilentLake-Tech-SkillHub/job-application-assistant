@@ -1,13 +1,34 @@
 // Some ATS résumé editors omit the job title. The independently read actual
 // URL job ID remains usable; never manufacture a DOM title from the plan.
+import {samePage} from './page-scope.mjs';
 export function readRoleIdentity(spec,url){
  if(!spec)return null;const u=new URL(url),source=spec.source||'query',fragment=u.hash.slice(1),split=fragment.indexOf('?');let value=null;
  if(source==='query'||source==='hashQuery'){const q=source==='query'?u.searchParams:new URLSearchParams(split<0?'':fragment.slice(split+1));value=q.getAll(spec.parameter).length===1?q.get(spec.parameter):null;}
  else if(source==='path'||source==='hashPath'){
-  if(typeof spec.pattern!=='string'||!spec.pattern.startsWith('^')||!spec.pattern.endsWith('$')||spec.pattern.length>500)throw Error('ROLE_IDENTITY_PATTERN_REQUIRED');
-  value=new RegExp(spec.pattern).exec(source==='path'?u.pathname:split<0?fragment:fragment.slice(0,split))?.groups?.[spec.parameter]||null;
+  if(typeof spec.pattern==='string'&&spec.pattern.startsWith('^')&&spec.pattern.endsWith('$')&&spec.pattern.length<=500){try{value=new RegExp(spec.pattern).exec(source==='path'?u.pathname:split<0?fragment:fragment.slice(0,split))?.groups?.[spec.parameter]||null;}catch{value=null;}}
  }else throw Error('ROLE_IDENTITY_SOURCE_REQUIRED');
  return {parameter:spec.parameter,value,source};
+}
+
+export function inferredRoleIdentity(url,officialId){
+ if(!officialId)return null;const u=new URL(url),value=String(officialId),fragment=u.hash.slice(1),split=fragment.indexOf('?');
+ for(const [source,params] of [['query',u.searchParams],['hashQuery',new URLSearchParams(split<0?'':fragment.slice(split+1))]]){
+  const keys=[...params.keys()].filter(key=>params.getAll(key).length===1&&params.get(key)===value);
+  if(keys.length===1)return {source,parameter:keys[0],value};
+ }
+ const escape=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+ for(const [source,p]of [['path',u.pathname],['hashPath',split<0?fragment:fragment.slice(0,split)]]){
+  const parts=p.split('/'),hits=parts.filter(part=>part===value);
+  if(hits.length===1)return {source,parameter:'roleId',pattern:'^'+parts.map(part=>part===value?'(?<roleId>[^/]+)':escape(part)).join('/')+'$',value};
+ }
+ return null;
+}
+
+export function assertRoleSnapshot(plan,observed,expectedUrl){
+ const checks={location:samePage(observed.pageUrl,expectedUrl),role:matchesRole(plan,observed),login:observed.loginFormPresent!==true&&observed.form!==true};
+ const code=!checks.location?'ROLE_PAGE_LOCATION_MISMATCH':!checks.login?'LOGIN_SESSION_REQUIRED':null;
+ if(code){const error=Error(code);error.details={phase:'role_verification',checks,expectedRole:plan.roleTitle||null,observedRole:observed.roleTitle||null,expectedRoleId:plan.roleIdentity?.value||null,observedRoleId:observed.roleIdentity?.value||null,nextTool:!checks.login?'role_advance':!checks.location?'role_advance':'form_construct_build'};throw error;}
+ return {checks,roleObservation:{matches:checks.role,continued:true}};
 }
 export function matchesRole(plan,observed){
  if(plan.rolePrefix!==undefined){

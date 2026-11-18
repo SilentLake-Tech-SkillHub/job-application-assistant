@@ -31,7 +31,16 @@ test('entry click landing on login with the user still to log in waits for the u
  const {f,calls}=flowFixture();f.enter=async()=>{calls.push('enter');return {status:'needs_login',pageId:'bound',loginPlan:{planId:'p',planHash:'h'}};};
  const r=await f.advance({authorization});assert.equal(r.status,'needs_user_login');assert.equal(r.continuation.requiresUser,true);assert.deepEqual(calls,['open','enter','login']);
 });
-test('ready review is returned without touching the form',async()=>{const {f,calls}=flowFixture({status:'ready_for_user_review',pageId:'bound',verifyRunId:'v'});const r=await f.advance({authorization});assert.equal(r.verifyRunId,'v');assert.deepEqual(calls,[]);});
+test('ready review is returned after checking the retained page without touching the form',async()=>{
+ const {f,calls}=flowFixture({status:'ready_for_user_review',pageId:'bound',returnUrl:'https://example.test/form',browserBinding:{generation:'same'},verifyRunId:'v'});
+ const reads=[];f.browser={request:async method=>{reads.push(method);return method==='tabs'?[{id:'bound',url:'https://example.test/form?token=new'}]:{generation:'same'};}};
+ const r=await f.advance({authorization});assert.equal(r.verifyRunId,'v');assert.deepEqual(calls,[]);assert.deepEqual(reads,['tabs','pageIdentity']);
+});
+test('review on a changed document is rebound rather than returning its old verification',async()=>{
+ const {f,calls}=flowFixture({status:'ready_for_user_review',pageId:'bound',returnUrl:'https://example.test/form',browserBinding:{generation:'old'},verifyRunId:'old-verification'});
+ let saved;f.queues.put=async(_id,state)=>{saved=structuredClone(state);};f.browser={request:async method=>method==='tabs'?[{id:'bound',url:'https://example.test/form'}]:{generation:'new'}};
+ const r=await f.advance({authorization});assert.equal(r.status,'ready_to_fill');assert.equal(r.verifyRunId,undefined);assert.equal(saved.status,'rebind_required');assert.deepEqual(calls,['open','enter']);
+});
 test('entry requires preparation login authority before using a queue',async()=>{const {f,calls}=flowFixture();await assert.rejects(f.advance({}),/LOGIN_AUTHORIZATION_REQUIRED/);assert.deepEqual(calls,[]);});
 import vm from 'node:vm';import {loginStateDOM} from '../shared/login-state.mjs';
 function domState({url='/job',selectors={},buttons=[],texts=[],dialogs=[]}){

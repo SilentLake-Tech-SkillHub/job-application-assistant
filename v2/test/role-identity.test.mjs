@@ -13,7 +13,7 @@ test('query and SPA fragment identities share actual URL extraction without expe
  assert.equal(readRoleIdentity({parameter:'id',source:'hashQuery'},'https://a.test/#/form?id=actual').value,'actual');
  assert.equal(readRoleIdentity({parameter:'id',source:'hashPath',pattern:'^/jobs/(?<id>[^/]+)/apply$'},'https://a.test/#/jobs/actual/apply').value,'actual');
  assert.equal(readRoleIdentity({parameter:'id'},'https://a.test/?id=a&id=b').value,null);
- assert.throws(()=>readRoleIdentity({parameter:'id',source:'hashPath',pattern:'.*'},'https://a.test/#/jobs/a'),/PATTERN_REQUIRED/);
+ assert.equal(readRoleIdentity({parameter:'id',source:'hashPath',pattern:'.*'},'https://a.test/#/jobs/a').value,null);
 });
 test('resuming an entered role preserves its actual application URL rather than reverting to its detail URL',async()=>{const t={taskId:'t',companyId:'c',title:'Role',url:'https://a.test/detail',applyUrl:null},q={id:'q'},state={queueId:'q',expectedTitle:'Role',originalRoleUrl:t.url,applicationUrl:'https://a.test/form?pid=1'};const f=new RoleFlow({queues:{task:async()=>({q,t}),read:async()=>state},login:{company:async()=>({origin:'https://a.test',allowedPaths:['/']})},templates:async()=>({pages:[{pathPrefix:'/form',roleTitle:'Role',roleIdentity:{parameter:'pid',value:'1'}}]})});const x=await f.context({});assert.equal(x.target,state.applicationUrl);assert.equal(x.plan.pathPrefix,'/form');});
 

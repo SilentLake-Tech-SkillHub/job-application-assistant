@@ -53,20 +53,47 @@ class WorkflowHookTest(unittest.TestCase):
   self.invoke(hook_event_name='UserPromptSubmit')
   self.assertIn('additionalContext',self.invoke(turn_id='other').stdout)
 
- def test_repeated_stops_without_new_tools_escalate_to_supervisor(self):
+ def test_repeated_stops_never_convert_unfinished_agent_work_to_permission_to_end(self):
   response={'continuation':{'state':'map','owner':'agent','requiresUser':False,'shouldContinue':True}}
   self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__workflow_next',tool_response=response)
   self.assertEqual(json.loads(self.invoke(hook_event_name='Stop',session_id='other').stdout),{})
   self.assertEqual(json.loads(self.invoke(hook_event_name='Stop',turn_id='other').stdout),{})
-  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout)['decision'],'block')
-  self.assertIn('AGENT_NO_PROGRESS_LOOP',json.loads(self.invoke(hook_event_name='Stop').stdout)['systemMessage'])
-  state=json.loads(next((self.root/'state').glob('continuation-*.json')).read_text())
-  self.assertEqual(state['owner'],'supervisor');self.assertFalse(state['requiresUser']);self.assertFalse(state['complete'])
-  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout),{})
+  for _ in range(5):self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout)['decision'],'block')
   self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__workflow_next',tool_response=response)
   self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout)['decision'],'block')
   self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__workflow_handoff',tool_response={'continuation':{'state':'technical_block','owner':'supervisor','requiresUser':False,'shouldContinue':False,'handoffVerified':True}})
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout)['decision'],'block')
+
+ def test_automatic_stop_continuation_carries_work_to_the_new_turn_until_actual_result(self):
+  response={'continuation':{'state':'repair','owner':'agent','shouldContinue':True,'nextTools':['run_status']}}
+  self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__workflow_handoff',tool_response=response)
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout)['decision'],'block')
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop',turn_id='continued',stop_hook_active=True).stdout)['decision'],'block')
+  self.invoke(hook_event_name='PostToolUse',turn_id='continued',tool_name='mcp__recruiting_application_v2__company_batch_status',tool_response={'agentWorkRemaining':False,'actionable':[]})
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop',turn_id='continued',stop_hook_active=True).stdout),{})
+
+ def test_stage_attempt_does_not_masquerade_as_a_real_post_tool_use_receipt(self):
+  self.invoke(tool_name='mcp__recruiting_application_v2__workflow_next')
+  files=[p for p in (self.root/'state').glob('continuation-*.json') if not p.name.startswith('continuation-session-')]
+  state=json.loads(files[0].read_text());self.assertEqual(state['observedEvents'],['PreToolUse'])
+
+
+ def test_waiting_company_does_not_clear_another_tasks_agent_work(self):
+  self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__workflow_next',tool_input={'taskId':'task-a'},tool_response={'continuation':{'state':'construct','owner':'agent','shouldContinue':True,'nextTools':['form_construct_build']}})
+  self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_login_v2__role_advance',tool_input={'taskId':'task-b'},tool_response={'continuation':{'state':'user_input','owner':'user','shouldContinue':False}})
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout)['decision'],'block')
+  self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__workflow_next',tool_input={'taskId':'task-a'},tool_response={'continuation':{'state':'review','owner':'user','shouldContinue':False}})
   self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout),{})
+
+ def test_authoritative_batch_work_prevents_stop_and_clears_completed_task_routes(self):
+  self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__company_batch_status',tool_response={'agentWorkRemaining':True,'actionable':[{'taskId':'a','nextTool':'form_construct_build'}]})
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout)['decision'],'block')
+  self.invoke(hook_event_name='PostToolUse',tool_name='mcp__recruiting_application_v2__company_batch_status',tool_response={'agentWorkRemaining':False,'actionable':[]})
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop').stdout),{})
+
+ def test_readonly_maintenance_query_does_not_enroll_a_chat_into_production(self):
+  self.invoke(hook_event_name='PostToolUse',session_id='maintenance',tool_name='mcp__recruiting_application_v2__company_batch_status',tool_response={'agentWorkRemaining':True,'actionable':[{'taskId':'a','nextTool':'workflow_next'}]})
+  self.assertEqual(json.loads(self.invoke(hook_event_name='Stop',session_id='maintenance').stdout),{})
 
  def test_declared_new_stage_is_tracked_with_dsh_hyphenated_namespace(self):
   response={'workflowContract':{'revision':1,'tracked':True},'continuation':{'state':'construct','owner':'agent','shouldContinue':True}}

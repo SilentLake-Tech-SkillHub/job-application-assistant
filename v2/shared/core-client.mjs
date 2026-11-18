@@ -42,7 +42,7 @@ export class CoreClient{
   }
   requireSameRelease(actual,expected);return expected;
  }
- async execute(operation,args={},capabilities={}){const expected=await this.freshRelease();return this.request('/execute',{operation,args,capabilities,expected});}
+ async execute(operation,args={},capabilities={}){const expected=await this.freshRelease(),conversationId=process.env.CODEX_THREAD_ID||process.env.CODEX_SESSION_ID||process.env.DSH_SESSION_ID||process.env.CLAUDE_SESSION_ID;return this.request('/execute',{operation,args,capabilities:{...(conversationId?{conversationId}:{}),...capabilities},expected});}
  async listOperations(){const expected=await this.freshRelease();return this.request('/operations',{expected});}
  async control(action){
   await this.connect();if(action!=='update')return this.request('/control',{action});

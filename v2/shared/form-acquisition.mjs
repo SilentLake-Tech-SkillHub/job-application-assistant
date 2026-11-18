@@ -4,8 +4,17 @@ export function acquisitionPlan(plan, provider) {
  return {...(plan || {}), ...(provider ? {provider} : {})};
 }
 
+export async function stableControlCount(read,{pause=ms=>new Promise(r=>setTimeout(r,ms)),attempts=8}={}){
+ let previous=null;
+ for(let i=0;i<attempts;i++){const current=await read();if(current===previous)return current;previous=current;await pause(150);}
+ throw Error('FORM_CONTROLS_NOT_STABLE');
+}
+
 export async function detectedAcquisitionPlan(page,plan,provider){
- const observed=await page.observe({fields:[],groups:[{id:'ant',selector:'form.ant-form .ant-form-item'},{id:'feishu',selector:'.atsx-form-item[data-cy]'},{id:'phoenix',selector:'.form-item--phoenix'}]});
+ const observed=await page.observe({fields:[],groups:[{id:'ant',selector:'form.ant-form .ant-form-item'},{id:'feishu',selector:'.atsx-form-item[data-cy]'},{id:'phoenix',selector:'.form-item--phoenix'},{id:'formily',selector:'.ud-formily-item'}]});
+ // Formily and atsx can be hosted by the same ATS. Select the DOM reader by
+ // observed controls; the atsx reader cannot read Formily questions.
+ if(observed.groups?.formily>0&&!observed.groups?.feishu&&(!provider||provider==='feishu'))return acquisitionPlan(plan,'phoenix');
  const found=['ant','feishu','phoenix'].filter(key=>observed.groups?.[key]>0);
  if(!provider&&found.length>1)throw Error('FORM_PROVIDER_AMBIGUOUS');
  if(provider&&found.length&&!found.includes(provider))throw Error('FORM_PROVIDER_EVIDENCE_MISMATCH');

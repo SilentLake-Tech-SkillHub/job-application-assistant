@@ -4,6 +4,35 @@
 import {startHostBrowserBridge} from '../shared/host-browser-bridge.mjs';
 import {capabilityFile,capabilityHostId,hostCapability,channelsOf,detectBrowserCapability} from '../shared/browser-capability.mjs';
 import {loadAdapter} from '../host/adapters/registry.mjs';
+import {loadFallbackRegistry,fallbackRegistryFile} from '../shared/gui-fallback.mjs';
+import {resolveHostExtension,extensionSocketPath} from '../shared/host-extension.mjs';
+import {configurePaths} from '../shared/runtime-paths.mjs';
+import {collectHostReaPage} from '../shared/host-rea.mjs';
+// Called INSIDE the actual host's extension tool runtime, never another host's daemon.
+export async function registerMainChromeExtension({agent,browserId,allowedOrigins,fileUpload,reaInspect,reaPackageRoot,deferBrowserCalls=true,env=process.env}){
+ env={...env};configurePaths({env});
+ if(!agent?.browsers?.list||!agent?.browsers?.get||!browserId)throw Error('TRUSTED_HOST_BROWSER_RUNTIME_REQUIRED');
+ const extension=resolveHostExtension({registry:await loadFallbackRegistry(fallbackRegistryFile(env)),hostId:env.RECRUITING_HOST_ID,capability:(await loadAdapter(env.RECRUITING_HOST_ID)).mainChromeExtension});
+ if(extension.transport!=='host_sdk')throw Error('HOST_EXTENSION_TRANSPORT_MISMATCH');
+ const inventory=()=>agent.browsers.list(),entry=(await inventory()).find(b=>b.id===browserId);
+ if(entry?.type!=='extension')throw Error('HOST_BROWSER_PROVIDER_NOT_VERIFIED');
+ const browser=await agent.browsers.get(browserId);
+ const refreshExtension=async()=>{
+  const instance=entry.metadata?.extensionInstanceId;
+  const matches=(await inventory()).filter(candidate=>candidate.type==='extension'&&
+   (instance?candidate.metadata?.extensionInstanceId===instance:candidate.id===entry.id));
+  if(matches.length!==1)throw Error('BROWSER_EXTENSION_ORIGINAL_INSTANCE_UNAVAILABLE');
+  return agent.browsers.get(matches[0].id);
+ };
+ const upload=fileUpload||(async({tab,selector,paths})=>{
+  if(typeof tab.playwright?.waitForEvent!=='function')throw Error('HOST_FILE_CHOOSER_ADAPTER_REQUIRED');
+  const chooser=tab.playwright.waitForEvent('filechooser');await tab.playwright.locator(selector).click();await (await chooser).setFiles(paths);
+ });
+ const packageRoot=reaPackageRoot||env.RECRUITING_REA_PACKAGE_ROOT;
+ const capture=reaInspect||(packageRoot?async args=>{const hostObservation=await collectHostReaPage(args);return {hostObservation,reaPackageRoot:packageRoot,binding:hostObservation.binding};}:undefined);
+ const bridge=await startHostBrowserBridge({browser,inventory,mode:'chrome',extension,refreshExtension,hostEnvironment:env,socketPath:extensionSocketPath(env.RECRUITING_BROWSER_SOCKET,env.RECRUITING_HOST_ID),allowedOrigins,fileUpload:upload,reaInspect:capture,deferBrowserCalls});
+ return {...bridge,extension};
+}
 export async function registerHostBrowser({agent,browserId,channel='iab',socketPath,allowedOrigins,fileUpload,reaInspect,deferBrowserCalls=true}){
  // Only the host's built-in browser is bridged. The Chrome channel is the component's own dedicated
  // Chrome clone, attached over CDP by the broker; no host plugin ever stands in for it.
@@ -36,7 +65,8 @@ export async function registerFromCapability({agent,allowedOrigins,fileUpload,re
  }
  return {channels:channelsOf(entry),bridges};
 }
-export async function pumpHostBrowser(bridge,{maxJobs=20}={}){
+export async function pumpHostBrowser(bridge,{maxJobs=20,waitMs=0}={}){
  if(!bridge||typeof bridge.pump!=='function'||!Number.isInteger(maxJobs)||maxJobs<1||maxJobs>100)throw Error('HOST_BROWSER_PUMP_REQUIRED');
- let completed=0;while(completed<maxJobs&&await bridge.pump())completed++;return {completed,pending:bridge.pendingCount(),executor:bridge.executor};
+ if(!Number.isInteger(waitMs)||waitMs<0||waitMs>5000)throw Error('HOST_BROWSER_PUMP_WAIT_INVALID');
+ let completed=0;const end=Date.now()+waitMs;while(completed<maxJobs){if(await bridge.pump())completed++;else if(Date.now()<end)await new Promise(r=>setTimeout(r,25));else break;}return {completed,pending:bridge.pendingCount(),executor:bridge.executor};
 }

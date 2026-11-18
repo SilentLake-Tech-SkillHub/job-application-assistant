@@ -97,7 +97,6 @@ export function validateTemplate(t) {
   }
   for (const p of t.pages) {
     if ((t.companyTemplateVersion!==2&&!p.pathPrefix?.startsWith('/')) || !p.readySelector || !Array.isArray(p.fields) || !p.fields.length) throw Error('INVALID_PAGE');
-    if((t.companyTemplateVersion!==2&&!p.roleTitle) || (!p.roleSelector&&!p.roleIdentity?.parameter))throw Error('ROLE_IDENTITY_REQUIRED');
     if(p.rolePrefix!==undefined&&(typeof p.rolePrefix!=='string'||!p.rolePrefix.trim()||/[\r\n\u2028\u2029]/u.test(p.rolePrefix)||typeof p.roleSelector!=='string'||!p.roleSelector.trim()))throw Error('ROLE_PREFIX_CONTRACT_REQUIRED');
     if(!p.sections?.length||!p.sectionDiscovery?.selector||!p.sectionDiscovery?.titleSelector)throw Error('SECTION_COVERAGE_PLAN_REQUIRED');
     if(p.sections.some(section=>typeof section?.title!=='string'||!section.title.trim()))throw Error('SECTION_TITLES_REQUIRED');
@@ -425,7 +424,7 @@ export class Engine {
         const repeatFieldIds=plannedRepeatFieldIds(plan);
         const renderedFields=controls=>{const rendered=new Set(controls.map(control=>control.selector));return plan.fields.filter(field=>(field.inventorySelectors||[field.read.selector]).some(selector=>rendered.has(selector)||!repeatFieldIds.has(field.id)&&!selector?.startsWith('phoenixq:')));};
         let initial=await page.observe({...plan,fields:renderedFields(live)});
-        if(!samePage(initial.pageUrl,task.pageUrl)||!matchesRole(plan,initial))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
+        if(!samePage(initial.pageUrl,task.pageUrl))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
         const canActivate=f=>{if(!f.when||!template.coverage?.proof)return false;const parent=frozenFields.find(p=>p.source===f.when.source);return parent?.disposition==='fill'&&parent.value===f.when.equals&&parent.control?.options?.includes(parent.value)&&initial.fields[parent.id]?.present===true&&initial.fields[parent.id]?.selected===true&&frozenFields.indexOf(parent)<frozenFields.indexOf(f);};
         // Upload first because parsing may replace the form; then create the planned records.
         const uploads=frozenFields.filter(f=>f.kind==='file'&&f.disposition==='fill'&&(!authorization.uploadFieldIds||authorization.uploadFieldIds.includes(f.id)));
@@ -443,12 +442,16 @@ export class Engine {
           materialWrites++;
         }
         const layoutInputs=frozenFields.filter(f=>f.prepareBeforeGroups&&f.disposition==='fill');
+        let layoutWrites=0;
         for(const f of layoutInputs){
+          const read=await page.observe({...plan,fields:[f]}),current=read.fields?.[f.id];
+          if(!task.testInteractions&&current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'&&(!['choice','date'].includes(f.kind)||current.selected===true)){(result.skippedMatchingFields??=[]).push(f.id);continue;}
           for(const action of f.actions||[])await page.act(choiceActionWithReadback(action,f.read?.selectedSelector),f.value,prepared.files);
+          layoutWrites++;
         }
         // The portal can render an entire group only after a material or a
         // prerequisite field has been applied. Discover against that state.
-        const layoutChanged=materialWrites>0||layoutInputs.length>0;
+        const layoutChanged=materialWrites>0||layoutWrites>0;
         const beforeExpansion=layoutChanged?await inventory():live;
         await this.learnRepeatContract(page,template,plan,beforeExpansion,task.recordPlan);
         const uncontracted=sectionsWithoutAdd(plan,beforeExpansion).filter(section=>plan.groups?.some(group=>groupSection(group)===section&&!group.addSelector));
@@ -461,7 +464,7 @@ export class Engine {
         if(controlContractChanges(plan,expanded).length)throw Error('FORM_CONTROL_CONTRACT_CHANGED');
         if(layoutChanged||plan.groups?.length){
           const beforeMaterial=initial;initial=await page.observe({...plan,fields:renderedFields(expanded)});
-          if(!samePage(initial.pageUrl,task.pageUrl)||!matchesRole(plan,initial))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
+          if(!samePage(initial.pageUrl,task.pageUrl))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
           result.pageChecks.at(-1).postMaterialReadAt=initial.readAt;
           result.pageChecks.at(-1).changedAfterMaterial=plan.fields.filter(f=>!f.userOnly&&JSON.stringify(beforeMaterial.fields[f.id]?.value)!==JSON.stringify(initial.fields[f.id]?.value)).map(f=>f.id);
           if(plan.groups?.length)result.pageChecks.at(-1).repeatCounts=plan.groups.map(group=>({
@@ -488,7 +491,7 @@ export class Engine {
           // An upload/parser or earlier field may have changed the form. Never
           // skip a write based on an observation made before those operations.
           const latest=await page.observe({...plan,fields:[f]});
-          if(!samePage(latest.pageUrl,task.pageUrl)||!matchesRole(plan,latest))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
+          if(!samePage(latest.pageUrl,task.pageUrl))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
           const current=latest.fields[f.id];
           try{
           if(!task.testInteractions&&f.control?.type==='searchable_text'&&current?.present&&!current.errors?.length&&compare(current.value,f.value)==='match'){
@@ -531,7 +534,7 @@ export class Engine {
           for(const f of frozenFields){
             if(f.disposition!=='fill'||f.kind!=='text'||f.control?.type!=='text'||f.userOnly||f.sensitive||f.actions?.length!==1||f.actions[0].method!=='fill'||typeof f.value!=='string'||!afterMaterial.fields[f.id]?.present||compare(afterMaterial.fields[f.id].value,f.value)==='match'||!completedWrites.has(f.id)&&!result.skippedMatchingFields?.includes(f.id))continue;
             const current=await page.observe({...plan,fields:[f]});
-            if(!samePage(current.pageUrl,task.pageUrl)||!matchesRole(plan,current))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
+            if(!samePage(current.pageUrl,task.pageUrl))throw Error('PAGE_OR_ROLE_IDENTITY_CHANGED');
             if(current.fields[f.id]?.value!==afterMaterial.fields[f.id].value)continue;
             await page.act(choiceActionWithReadback(f.actions[0],f.read?.selectedSelector),f.value,prepared.files);corrected.push(f.id);
           }

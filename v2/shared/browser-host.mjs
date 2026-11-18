@@ -1,3 +1,9 @@
+import {MainChromePluginAdapter,PluginTransport} from './main-chrome-plugin.mjs';
+import {browserPreferences} from './browser-preferences.mjs';
+import {loadFallbackRegistry,fallbackRegistryFile} from './gui-fallback.mjs';
+import {resolveHostExtension,extensionSocketPath,assertExtensionExecutor} from './host-extension.mjs';
+import {loadAdapter} from '../host/adapters/registry.mjs';
+import {configurePaths} from './runtime-paths.mjs';
 import {genericSourceManifest} from './runtime-identity.mjs';
 import {installBrokerDiagnostics} from './broker-diagnostics.mjs';
 import {browserErrorCode,browserErrorDetails,retryBrowserOperation} from './browser-errors.mjs';
@@ -11,6 +17,9 @@ import path from 'node:path';
 import {BrowserAdapter} from './browser.mjs';
 import {cloneConfig,launchClone} from './chrome-clone.mjs';
 import {inspectVerification} from './verification.mjs';
+// Installed hosts may configure only the handoff directory. Resolve the same
+// workspace as the business core before reading external browser preferences.
+if(process.env.RECRUITING_WORKSPACE_ROOT||process.env.RECRUITING_HANDOFF_DIR)configurePaths();
 const socketPath=process.argv[2];
 if(!socketPath||!path.isAbsolute(socketPath)||Buffer.byteLength(socketPath)>100)throw Error('SHORT_ABSOLUTE_SOCKET_PATH_REQUIRED');
 await mkdir(path.dirname(socketPath),{recursive:true,mode:0o700});
@@ -29,7 +38,23 @@ if(hostMode==='cdp'&&!process.env.RECRUITING_CDP_URL)throw Error('EXPLICIT_BROWS
 // initialize/restore stages, starts it as a normal Chrome via shared/chrome-clone.mjs.
 const cloneLauncher=hostMode==='cdp'?async({restoreLastSession}={})=>launchClone({config:cloneConfig(process.env),restoreLastSession}):null;
 if(hostMode==='cdp'&&process.env.RECRUITING_BROWSER_PROFILE_DIR){const config=cloneConfig(process.env);if(new URL(process.env.RECRUITING_CDP_URL).port!==String(config.port))throw Error('CHROME_CLONE_CONFIG_MISMATCH');}
-const browser=new BrowserAdapter(hostMode==='cdp'?(process.env.RECRUITING_CDP_URL):hostMode==='iab'?'managed-iab':'managed-chrome',{profileDir:process.env.RECRUITING_BROWSER_PROFILE_DIR,screenshotDir:path.join(path.dirname(socketPath),'screenshots'),cloneLauncher});
+const cloneBrowser=new BrowserAdapter(hostMode==='cdp'?(process.env.RECRUITING_CDP_URL):hostMode==='iab'?'managed-iab':'managed-chrome',{profileDir:process.env.RECRUITING_BROWSER_PROFILE_DIR,screenshotDir:path.join(path.dirname(socketPath),'screenshots'),cloneLauncher});
+let browser=cloneBrowser,mainBrowser=null,selectedBrowser='clone';
+let mainExtensionKey=null;
+const nativeExtensionCall=(extension,method,args)=>new Promise((resolve,reject)=>{
+ const request=http.request({socketPath:extensionSocketPath(socketPath,extension.hostId),path:'/rpc',method:'POST',headers:{'content-type':'application/json'}},response=>{
+  const chunks=[];response.on('data',c=>chunks.push(c));response.on('end',()=>{
+   try{
+    const result=JSON.parse(Buffer.concat(chunks));
+    if(result.error){
+     const error=Error(result.error),details=safeControlErrorDetails(result.details);
+     if(details)error.details=details;
+     reject(error);
+    }else resolve(result.data);
+   }catch(error){reject(error);}
+  });
+ });request.on('error',()=>reject(Error('HOST_EXTENSION_BRIDGE_REQUIRED')));request.setTimeout(105000,()=>request.destroy(Error('HOST_EXTENSION_OPERATION_TIMEOUT')));request.end(JSON.stringify({method,args}));
+});
 // pageTools：本进程代码支持的标签操作。浏览器主控进程不随 MCP 重载，旧进程没有这些操作；工具调用前按它判断。
 const residentSource=await genericSourceManifest();
 // activeOperations：正在处理的请求数。业务核心 reload 时据此判断主控是否空闲，空闲才换新主控（C43）。
@@ -41,14 +66,33 @@ const server=http.createServer(async(req,res)=>{
   res.setHeader('content-type','application/json');
   if(req.url==='/health'){res.end(JSON.stringify(status()));return;}
   if(req.method!=='POST'||req.url!=='/rpc'){res.writeHead(404).end('{}');return;}
-  let method,args;activeOperations++;
+  let method,args,hostId;activeOperations++;
   try{
     const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>8*1024*1024)throw Error('REQUEST_TOO_LARGE');chunks.push(chunk);}
-    ({method,args={}}=JSON.parse(Buffer.concat(chunks)));let data;
+    ({method,args={},hostId}=JSON.parse(Buffer.concat(chunks)));let data;
+    if(process.env.RECRUITING_WORKSPACE_ROOT&&method!=='shutdown'){
+      const preference=await browserPreferences();
+      if(preference.choice==='main'){
+        const extension=resolveHostExtension({registry:await loadFallbackRegistry(fallbackRegistryFile()),hostId,capability:(await loadAdapter(hostId)).mainChromeExtension});
+        if(extension.transport==='host_sdk'){
+          let nativeStatus;try{nativeStatus=assertExtensionExecutor(await nativeExtensionCall(extension,'status',{}),extension);}catch(error){
+            if(method==='status'&&error.message==='HOST_EXTENSION_BRIDGE_REQUIRED'){res.end(JSON.stringify({data:{state:'host_extension_required',mode:'agent_plugin',expectedExtension:extension,reason:error.message,nextTool:'registerMainChromeExtension'}}));return;}
+            throw error;
+          }
+          data=method==='status'?nativeStatus:await nativeExtensionCall(extension,method,args);res.end(JSON.stringify({data}));return;
+        }
+        if(['initializeConfiguredChrome','restoreConfiguredChrome'].includes(method)){
+          const key=JSON.stringify(extension);if(mainExtensionKey!==key){mainBrowser=new MainChromePluginAdapter({transport:new PluginTransport({...(extension.endpoint?{endpoint:extension.endpoint}:{})}),extension,screenshotDir:path.join(path.dirname(socketPath),'screenshots')});mainExtensionKey=key;}
+          browser=mainBrowser;selectedBrowser='main';
+        }else if(mainExtensionKey!==JSON.stringify(extension)&&method!=='status')throw Error('BROWSER_RESTORE_REQUIRED');
+      }else if(['initializeConfiguredChrome','restoreConfiguredChrome'].includes(method)&&preference.choice==='clone'){browser=cloneBrowser;selectedBrowser='clone';}
+      else if(preference.choice&&preference.choice!==selectedBrowser&&method!=='status')throw Error('BROWSER_RESTORE_REQUIRED');
+    }
+
     // 代码更新后由业务核心 reload 让旧主控退出（C43）：只在没有其他请求时退出，只关本进程，不关 Chrome 分身和标签。
     if(method==='shutdown'){if(activeOperations>1)throw Error('BROWSER_HOST_BUSY');res.end(JSON.stringify({data:{stopping:true,pid:process.pid,sourceFingerprint:residentSource.sourceFingerprint}}));setImmediate(()=>server.close(()=>process.exit(0)));return;}
     if(diagnostics.isDegraded()&&!['status','tabs','pageIdentity','roleSnapshot','entryInspection','roleEntryInventory','roleEntryLanding','failureSnapshot','existingPage','inventory','observe','screenshot','assertLocation'].includes(method))throw Error('BROKER_DEGRADED_WRITES_BLOCKED');
-    const retrySafe=['tabs','pageIdentity','failureSnapshot','roleSnapshot','roleEntryInventory','roleEntryLanding','existingPage','inventory','observe','assertLocation','reaInspect','openPage','roleEnterApplication'].includes(method);
+    const retrySafe=['tabs','pageIdentity','failureSnapshot','roleSnapshot','roleEntryInventory','roleEntryLanding','existingPage','inventory','observe','assertLocation','reaInspect','openPage'].includes(method);
     data=await retryBrowserOperation(async()=>{let data;
     if(method==='status')data=status();
     else if(method==='initializeConfiguredChrome')data=await browser.initializeConfiguredChrome(args);

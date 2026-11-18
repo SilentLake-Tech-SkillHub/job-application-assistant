@@ -15,10 +15,10 @@ export function verifyForm(expected, observed, {now=Date.now(),maxAgeMs=60000}={
   if(!observed?.readAt || observed.source!=='live_dom')return {status:'unverified',checks:[{id:'observation',status:'unverified',reason:'LIVE_DOM_READ_REQUIRED'}]};
   const age=now-Date.parse(observed.readAt);
   if(!Number.isFinite(age)||age< -5000||age>maxAgeMs)return {status:'unverified',checks:[{id:'observation',status:'unverified',reason:'STALE_OR_INVALID_OBSERVATION'}]};
-  if(!expected.fields?.length||!expected.roleTitle||(!observed.roleTitle&&!observed.roleIdentity)||!Array.isArray(observed.inventoryIds))return {status:'unverified',checks:[{id:'coverage',status:'unverified',reason:'INCOMPLETE_VERIFICATION_INPUT'}]};
+  if(!expected.fields?.length||!Array.isArray(observed.inventoryIds))return {status:'unverified',checks:[{id:'coverage',status:'unverified',reason:'INCOMPLETE_VERIFICATION_INPUT'}]};
   if(new Set(expected.fields.map(f=>f.id)).size!==expected.fields.length)return {status:'unverified',checks:[{id:'coverage',status:'unverified',reason:'DUPLICATE_EXPECTED_FIELD'}]};
   if(expected.pageUrl!==observed.pageUrl)return {status:'blocked',checks:[{id:'page',status:'mismatch',reason:'PAGE_IDENTITY_CHANGED'}]};
-  if(!matchesRole(expected,observed))return {status:'blocked',checks:[{id:'role',status:'mismatch',reason:'ROLE_IDENTITY_CHANGED'}]};
+  const roleObservation={matches:matchesRole(expected,observed),continued:true};
   for(const source of contentViolations(Object.values(observed.fields||{}).map(f=>f.value),expected.contentPolicy))
     checks.push({id:'content_policy',source,status:'mismatch',reason:'EXCLUDED_CONTENT_RELOCATED'});
   if(expected.sections){
@@ -61,7 +61,7 @@ export function verifyForm(expected, observed, {now=Date.now(),maxAgeMs=60000}={
       check.reason=!empty?'UNSOURCED_VALUE_ON_PAGE':omit?'USER_RESOLVED_EMPTY_FIELD':field.datePrecisionGap?'DATE_SOURCE_PRECISION_INSUFFICIENT':'UNANSWERED_FIELD_REQUIRES_USER_RESPONSE';if(field.datePrecisionGap)check.datePrecisionGap=field.datePrecisionGap;checks.push(check);continue;
     }
     if(actual.errors?.length){check.status='invalid';check.reason='FIELD_VALIDATION_ERROR';checks.push(check);continue;}
-    if(field.searchableCommitRequired&&(actual.searchableCommitProof?.status!=='verified'||actual.searchableCommitProof.label!==actual.value||actual.searchableCommitProof.blurConfirmed!==true||actual.searchableCommitProof.readbackStable!==true||!(actual.searchableCommitProof.optionClicked===true||actual.searchableCommitProof.mode==='explicit_custom_value'))){check.status='mismatch';check.reason=actual.searchableCommitProof?.reason||'SEARCHABLE_COMMIT_ACTION_PROOF_REQUIRED';const errorDetails=safeControlErrorDetails(actual.searchableCommitProof?.errorDetails);if(errorDetails)check.errorDetails=errorDetails;checks.push(check);continue;}
+    if(field.searchableCommitRequired&&(actual.searchableCommitProof?.status!=='verified'||actual.searchableCommitProof.label!==actual.value||actual.searchableCommitProof.blurConfirmed!==true||actual.searchableCommitProof.readbackStable!==true||!(actual.searchableCommitProof.optionClicked===true||actual.searchableCommitProof.mode==='explicit_custom_value'||actual.searchableCommitProof.mode==='existing_selected_value'&&actual.searchableCommitProof.existingSelectionVerified===true&&actual.searchableCommitProof.currentSelection?.verified===true))){check.status='mismatch';check.reason=actual.searchableCommitProof?.reason||'SEARCHABLE_COMMIT_ACTION_PROOF_REQUIRED';const errorDetails=safeControlErrorDetails(actual.searchableCommitProof?.errorDetails);if(errorDetails)check.errorDetails=errorDetails;checks.push(check);continue;}
     const proof=actual.selectionProof,selectedDisplay=field.selectionDisplayProofAllowed===true&&proof?.kind==='selected_display'&&proof.renderer==='phoenix_select'&&proof.selectedDisplayConfirmed===true&&proof.nonEditable===true&&proof.placeholderAbsent===true;
     const selectionError=safeControlErrorDetails(proof?.errorDetails);
     if(selectionError)check.errorDetails=selectionError;
@@ -94,5 +94,5 @@ export function verifyForm(expected, observed, {now=Date.now(),maxAgeMs=60000}={
   for(const error of observed.pageErrors||[])checks.push({id:'page_validation',status:'invalid',reason:'VISIBLE_PAGE_ERROR',selector:error.selector});
   const materialCoverage=verifyMaterialCoverage(expected,observed);checks.push(...materialCoverage.checks);
   const counts={};for(const c of checks)counts[c.status]=(counts[c.status]||0)+1;
-  return {status:checks.every(c=>['match','confirmed_omission'].includes(c.status))?'verified':'needs_attention',readAt:observed.readAt,counts,materialCoverage,summary:verificationSummary(checks,expected.fields.map(f=>f.id)),checks,save:observed.saveEvidence||'not_verified',submission:'not_performed'};
+  return {status:checks.every(c=>['match','confirmed_omission'].includes(c.status))?'verified':'needs_attention',readAt:observed.readAt,roleObservation,counts,materialCoverage,summary:verificationSummary(checks,expected.fields.map(f=>f.id)),checks,save:observed.saveEvidence||'not_verified',submission:'not_performed'};
 }

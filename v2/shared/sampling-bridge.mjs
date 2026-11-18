@@ -4,6 +4,7 @@ import http from 'node:http';import {mkdtemp,chmod,rm} from 'node:fs/promises';i
 import {createSocketVisionReviewer} from './attachment-visual-review.mjs';
 const current=new AsyncLocalStorage();
 export const withHostCapabilities=(capabilities,fn)=>current.run(capabilities||{},fn);
+export const currentHostCapabilities=()=>current.getStore()||{};
 export function delegatedVisionReviewer(){
  const reviewer=()=>{const socket=current.getStore()?.visionSocket;return socket?createSocketVisionReviewer(socket):null;};
  const fn=async request=>{const r=reviewer();if(!r)throw Error('VISION_SAMPLING_UNAVAILABLE');return r(request);};

@@ -2,11 +2,12 @@ import {createHash} from 'node:crypto';
 export const TRANSIENT_BROWSER_ERRORS=new Set(['BROWSER_OPERATION_TIMEOUT','BROWSER_PAGE_CLOSED','BROWSER_NAVIGATION_INTERRUPTED','BROWSER_CONNECTION_LOST','BROWSER_HOST_NOT_AVAILABLE','BROWSER_HOST_OPERATION_TIMEOUT','ROLE_BROWSER_PAGE_LOST']);
 export function browserErrorCode(error){
  const text=String(error?.message||'');
+ if(/\bdebugger (?:unattached|(?:is )?not attached|detached)\b/i.test(text))return 'BROWSER_EXTENSION_TAB_DETACHED';
  if(/^[A-Z_]+$/.test(text)&&!/^E(?:CONN|PIPE|TIMEDOUT)/.test(text))return text;
  if(/closed|has been disposed|target.*gone/i.test(text))return 'BROWSER_PAGE_CLOSED';
  if(/navigation.*interrupt|execution context was destroyed|navigation.*abort/i.test(text))return 'BROWSER_NAVIGATION_INTERRUPTED';
  if(/disconnect|ECONNRESET|ECONNREFUSED|socket hang up|connection.*closed|connect.*fail/i.test(text))return 'BROWSER_CONNECTION_LOST';
- if(error?.name==='TimeoutError'||/timed?\s*out|timeout/i.test(text))return 'BROWSER_OPERATION_TIMEOUT';
+ if(error?.name==='TimeoutError'||/timed?\s*out|timeout|deadline exceeded/i.test(text))return 'BROWSER_OPERATION_TIMEOUT';
  if(/element.*not found|no.*element|selector.*not found/i.test(text))return 'BROWSER_ELEMENT_NOT_FOUND';
  return 'BROWSER_OPERATION_FAILED';
 }

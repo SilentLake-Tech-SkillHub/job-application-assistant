@@ -13,6 +13,14 @@ const profile={facts:{name:{status:'known',value:'Applicant'},gender:{status:'kn
 const capture=(companyId,framework)=>({companyId,captureId:'captured',pageUrl:`https://${companyId}.example/form`,observedAt:new Date().toISOString(),controls:[{selector:'#name',label:'姓名',tag:'input',type:'text',required:true,contextProvider:framework},{selector:'#gender',questionSelector:'#gender-wrapper',selectedSelector:'#gender-selected',labelSelector:'#gender-label',label:'性别',tag:'input',type:'combobox',required:true,contextProvider:framework}]});
 const page={roleTitle:'Product',roleSelector:'h1',readySelector:'form',sections:[{title:'基本信息'}],sectionDiscovery:{selector:'section',titleSelector:'h2'}};
 const mappings=[{selector:'#name',factKey:'name'},{selector:'#gender',factKey:'gender'}];
+test('a shared application template does not require a job heading or a matching URL job ID',()=>{
+ const c=capture('shared','.ant-form-item');c.controls=[c.controls[0]];
+ const contract={readySelector:page.readySelector,sections:page.sections,sectionDiscovery:page.sectionDiscovery};
+ for(const p of [contract,{...contract,roleIdentity:{source:'path',parameter:'job',pattern:'^/form$',value:'expected'}}]){
+  const b=buildFormTemplate({capture:c,profile,mappings:[mappings[0]],page:p,templateId:'shared'});
+  assert.equal(b.readyToRegister,true);assert.doesNotThrow(()=>validateTemplate(b.template));
+ }
+});
 test('a restored conditional question keeps its mapped source while its branch is currently inactive',()=>{
  const c=capture('conditional','.ud-formily-item');c.controls=[{selector:'#name',label:'姓名',tag:'input',type:'text',when:{source:'channel',equals:'yes'}}];
  const b=buildFormTemplate({capture:c,profile,mappings:[{selector:'#name',factKey:'name',active:false,status:'mapped'}],page,templateId:'conditional'});

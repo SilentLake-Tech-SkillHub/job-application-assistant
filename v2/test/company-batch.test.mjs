@@ -4,6 +4,7 @@ import {withTaskRecords} from '../shared/task-records.mjs';
 import {createHash} from 'node:crypto';
 import {CompanyDirectory} from '../shared/company-directory.mjs';import {handoffInput} from '../shared/queue-config.mjs';
 import {companyDoc,site,role,confirm,saveCompany,handoffWorkspace} from './fixtures/handoff.mjs';
+import {technicalRepairHandoff} from '../shared/workflow-contract.mjs';
 const pad=(n,w)=>String(n).padStart(w,'0');
 // 交接区里 n 家公司，各一个站点、一个岗位；addRole(i) 给第 i 家补第二个岗位（志愿顺序 2）后按用户确认重新保存。
 async function fixture(fn,n=24){const root=await mkdtemp(path.join(os.tmpdir(),'company-batch-'));
@@ -15,6 +16,17 @@ async function fixture(fn,n=24){const root=await mkdtemp(path.join(os.tmpdir(),'
  const submitRole=async (i,id)=>{const doc=docs[i];doc['岗位'].find(r=>r['岗位编码']===id)['投递状态']='岗位已投递';await saveCompany(dir,confirm(doc));};
  try{await fn({catalog,addRole,submitRole,store,queues,batch,setChannels:async(i,channels)=>{docs[i]['批次']['执行']={browserChannels:channels};await saveCompany(dir,confirm(docs[i]));},tick:()=>now+=31*60*1000});}finally{await rm(root,{recursive:true,force:true});await rm(dir,{recursive:true,force:true});}}
 test('default takes ten companies per channel, not ten roles; repeat take cannot duplicate',()=>fixture(async({batch,addRole})=>{await addRole(0);const b=await batch.create({authorizationRef:'synthetic approved batch'}),r=await batch.take(b);assert.deepEqual(r.activeCompanies,{chrome:10,iab:10});assert.equal(r.assignments.length,20);assert.equal(r.assignments[0].tasks.length,2);assert.equal(r.pendingCompanies,4);assert.equal(r.browserExecuted,false);assert.equal((await batch.take(b)).assignments.length,0);}));
+test('an explicit roleLimit counts jobs independently of per-channel company capacity',()=>fixture(async({batch,addRole})=>{
+ await addRole(0);const b=await batch.create({authorizationRef:'ten jobs',roleLimit:10});
+ assert.equal(b.queue.tasks.length,10);assert.equal(new Set(b.queue.tasks.map(t=>t.companyId)).size,9);
+ const taken=await batch.take(b);assert.equal(taken.assignments.reduce((n,c)=>n+c.tasks.length,0),10);
+}));
+test('batch closeout reports the first executable role per company alongside independent user waits',()=>fixture(async({batch,queues,addRole})=>{
+ await addRole(0);const b=await batch.create({authorizationRef:'prepare'});
+ await queues.put(b.queue.tasks[0].taskId,{status:'needs_login'});
+ const r=await batch.status(b);assert.equal(r.agentWorkRemaining,true);assert.ok(r.waitingCompanies.includes('C00001'));
+ assert.equal(r.actionable.filter(x=>x.companyId==='C00001'&&x.waitingForLogin).length,1);assert.equal(r.loginRechecks.length,1);assert.equal(r.actionable.filter(x=>x.companyId==='C00002').length,1);
+},2));
 test('an existing batch drops submitted roles from dispatch and keeps other roles and their task IDs',()=>fixture(async({batch,queues,addRole,submitRole})=>{
  const next=await addRole(0);
  const original=await batch.create({authorizationRef:'confirmed batch'});
@@ -65,6 +77,14 @@ test('an explanation alone cannot turn technical work into a user wait or compan
  await assert.rejects(batch.record({...b,...a,status:'waiting_for_user',reason:'driver missing'}),/USER_WAIT_EVIDENCE_REQUIRED/);
  await assert.rejects(batch.record({...b,...a,status:'blocked',reason:'driver missing'}),/VERIFIED_BLOCK_HANDOFF_REQUIRED/);
 }));
+test('the last company technical handoff keeps whole-batch repair work actionable',()=>fixture(async({batch,store})=>{
+ const b=await batch.create({authorizationRef:'prepare original roles'}),a=(await batch.take(b)).assignments[0];
+ const handoff=technicalRepairHandoff({id:'verified-handoff',companyId:a.companyId,evidenceId:'observed-driver-error',reasons:['REA_HOST_CAPABILITY_REQUIRED']});
+ await store.put('runs',handoff.id,handoff);
+ const r=await batch.record({...b,...a,status:'blocked',runIds:[handoff.id],reason:'actual REA adapter gap'});
+ assert.equal(r.continuation.owner,'agent');assert.equal(r.continuation.shouldContinue,true);assert.equal(r.batchPreparationComplete,false);assert.equal(r.remainingAgentWork,1);
+ assert.equal((await batch.status(b)).agentWorkRemaining,true);
+},1));
 
 test('company completion requires an independent receipt for the exact role materials',()=>fixture(async({batch,queues,store})=>{
  const b=await batch.create({authorizationRef:'synthetic'}),a=(await batch.take(b)).assignments[0],task=a.tasks[0];

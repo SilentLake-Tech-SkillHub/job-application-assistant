@@ -112,8 +112,7 @@ function fieldFromControl(c,m,choice){
 // One generator for every company. Company identities occur only in private input.
 export function buildFormTemplate({capture,profile,mappings=[],choices=[],page,templateId,version=1,reaStructure,reaReconciliation=[],previous=[]}){
  if(!capture?.controls?.length||!capture.pageUrl||!capture.observedAt)throw Error('CURRENT_CONTROL_CAPTURE_REQUIRED');
- if(!page?.roleTitle||!page.readySelector||!page.sections?.length||!page.sectionDiscovery)throw Error('OBSERVED_PAGE_CONTRACT_REQUIRED');
- if(page.roleIdentity&&readRoleIdentity(page.roleIdentity,capture.pageUrl)?.value!==page.roleIdentity.value)throw Error('OBSERVED_ROLE_IDENTITY_MISMATCH');
+ if(!page?.readySelector||!page.sections?.length||!page.sectionDiscovery)throw Error('OBSERVED_PAGE_CONTRACT_REQUIRED');
  if(reaStructure&&(formScope(reaStructure.pageUrl)!==formScope(capture.pageUrl)||reaStructure.companyId!==capture.companyId))throw Error('REA_CONTROL_CAPTURE_SCOPE_MISMATCH');
  if(page.provider&&capture.provider&&page.provider!==capture.provider)throw Error('FORM_PROVIDER_EVIDENCE_MISMATCH');
  page=inheritPageContract({...page,pathPrefix:page.pathPrefix||new URL(capture.pageUrl).pathname,sections:page.sections.map(section=>typeof section==='string'?{title:section}:section),...(capture.provider?{provider:capture.provider}:{})},previous);

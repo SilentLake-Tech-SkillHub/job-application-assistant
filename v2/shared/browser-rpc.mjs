@@ -7,10 +7,14 @@ import {canonicalizeInventory,remapSpec} from './feishu-selectors.mjs';
 export class BrokerBrowserAdapter {
   constructor(socketPath,{requestTimeoutMs=110000}={}){this.socketPath=socketPath;this.requestTimeoutMs=requestTimeoutMs;}
   async request(method,args={}){
+    if(method!=='status'&&process.env.RECRUITING_WORKSPACE_ROOT){
+      const {browserPreferences}=await import('./browser-preferences.mjs'),preference=await browserPreferences();
+      if(preference.choice==='main'&&!preference.allowed)throw Error('MAIN_CHROME_HOST_NOT_REGISTERED');
+    }
     const normalize=v=>typeof v==='string'&&v.startsWith('phoenixq:')?normalizePhoenixReference(v):Array.isArray(v)?v.map(normalize):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,normalize(x)])):v;
     args=normalize(args);
     await this.assertCurrentHost(method);
-    const data=JSON.stringify({method,args});
+    const data=JSON.stringify({method,args,hostId:process.env.RECRUITING_HOST_ID||null});
     const result=await retryBrowserOperation(()=>new Promise((resolve,reject)=>{
       const req=http.request({socketPath:this.socketPath,path:'/rpc',method:'POST',headers:{'content-type':'application/json','content-length':Buffer.byteLength(data)}},res=>{
         const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>{try{resolve(JSON.parse(Buffer.concat(chunks)));}catch{reject(Error('INVALID_BROWSER_HOST_RESPONSE'));}});
@@ -56,7 +60,7 @@ class BrokerPage {
     return this.call('observe',{plan});
   }
   async assertSingleEditor(){const key=sharedRecordKey(this.pageUrl);if(!key)return;const tabs=await this.browser.tabs();if(tabs.some(t=>t.url!==this.pageUrl&&sharedRecordKey(t.url)===key))throw Error('SHARED_RESUME_HAS_OTHER_OPEN_EDITORS');}
-  async act(action,value,files){if(!this.pageId||!this.roleBinding)throw Error('BROWSER_BOUND_PAGE_REQUIRED');if(this.readOnly)throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');if(!['capture_wecruit_schema','wait','dropdown_inspect','ant_dropdown_inspect','ud_dropdown_inspect','ant_dropdown_verify','ud_dropdown_verify','dropdown_verify'].includes(action.method))await this.assertSingleEditor();return this.call('act',{action:action.provider==='feishu'?{...remapSpec(action,this.rowKeys||{}),selectorsResolved:true}:action,value,files});}
+  async act(action,value,files){if(!this.pageId||!this.roleBinding)throw Error('BROWSER_BOUND_PAGE_REQUIRED');if(this.readOnly)throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');if(!['capture_wecruit_schema','phoenix_autocomplete_verify','phoenix_autocomplete_inspect','wait','dropdown_inspect','ant_dropdown_inspect','ud_dropdown_inspect','ant_dropdown_verify','ud_dropdown_verify','dropdown_verify'].includes(action.method))await this.assertSingleEditor();return this.call('act',{action:action.provider==='feishu'?{...remapSpec(action,this.rowKeys||{}),selectorsResolved:true}:action,value,files});}
   async repeatDiscovery(titles){return this.call('repeatDiscovery',{titles});}
-  async ensureGroups(groups){if(!this.pageId||!this.roleBinding)throw Error('BROWSER_BOUND_PAGE_REQUIRED');if(this.readOnly)throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');if(groups?.length)await this.assertSingleEditor();return this.call('ensureGroups',{groups});}
+  async ensureGroups(groups){if(!this.pageId||!this.roleBinding)throw Error('BROWSER_BOUND_PAGE_REQUIRED');if(this.readOnly)throw Error('READ_ONLY_PAGE_MUTATION_FORBIDDEN');return this.call('ensureGroups',{groups});}
 }

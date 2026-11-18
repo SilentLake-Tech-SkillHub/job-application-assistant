@@ -78,7 +78,7 @@ test('session registration bridges only the built-in browser and stops explicitl
 import {HOST_IDS,loadAdapter,validateAdapter} from '../host/adapters/registry.mjs';
 import {detectWithoutHostSdk} from '../scripts/browser-capability.mjs';
 test('every listed host has a valid adapter that describes only its built-in browser and never decides routing',async()=>{
- assert.deepEqual(HOST_IDS,['codex','claude-code','antigravity','kimi-code','zcode','dsh']);
+ assert.deepEqual(HOST_IDS,['codex','claude-code','antigravity','kimi-code','kimi-work','zcode','dsh']);
  for(const id of HOST_IDS){const a=await loadAdapter(id);assert.equal(a.id,id);assert.equal('channels' in a,false);assert.equal('mode' in a,false);assert.deepEqual(Object.keys(a.browsers),['iab']);}
  const fallback=await loadAdapter('unknown-host');assert.equal(fallback.browsers.iab.declared,false);assert.equal(fallback.mcpConfig.format,'json');
  await assert.rejects(loadAdapter('../unknown-host'),/UNKNOWN_HOST_ADAPTER/);
