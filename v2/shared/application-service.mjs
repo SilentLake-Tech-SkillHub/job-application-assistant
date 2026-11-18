@@ -518,7 +518,7 @@ async function captureVisualScreenshots(scope,binding){
  const snapshot=()=>browser.request('screenshot',{pageId:scope.pageId});
  const {surface}=await page.observe({acquisitionScroll:{}});
  if(!surface){const screenshot=await snapshot();if(screenshot?.scope!=='full_page')throw Error('FORM_VISUAL_SCREENSHOT_COVERAGE_REQUIRED');return [screenshot];}
- const last=surface.extent-surface.height,step=Math.max(1,Math.floor(surface.height*0.65));
+ const last=surface.extent-surface.height,step=Math.max(1,Math.floor(surface.height*0.75));
  const positions=[...new Set([...Array.from({length:Math.ceil(last/step)},(_,i)=>i*step),last])];
  if(positions.length>30)throw Error('FORM_VISUAL_SCREENSHOT_COVERAGE_REQUIRED');
  const screenshots=[];

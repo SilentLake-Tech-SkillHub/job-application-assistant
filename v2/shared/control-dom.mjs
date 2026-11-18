@@ -528,7 +528,7 @@ export function controlDOM(spec){
     const label=phoenixLabel(root),section=phoenixSection(root),inline=phoenixInlineOngoing(root),peers=phoenixRoots().filter(n=>phoenixLabel(n)===label&&phoenixSection(n)===section),occurrence=peers.indexOf(root);
     return phoenixParts(root).map(p=>({inlineOngoing:p.renderer==='phoenix_date_picker'&&inline?{label:inline.label,evidence:inline.evidence,selector:'phoenixq:'+JSON.stringify({section,label,occurrence,part:'ongoingInline'})}:undefined,diagnosticSelector:diagnosticSelector(p.renderer==='phoenix_date_picker'&&inline?inline.scope:p.node),selector:'phoenixq:'+JSON.stringify({section,label,occurrence,part:p.part,controlIndex:p.index||0}),labelSelector:'phoenixq:'+JSON.stringify({section,label,occurrence,part:'label'}),selectedSelector:p.part==='select'?'phoenixq:'+JSON.stringify({section,label,occurrence,part:'selected'}):undefined,documentTypePrefix:/证件号码|身份证号码/.test(label)&&root.querySelector('.form-item__control .phoenix-button__content')?{label:root.querySelector('.form-item__control .phoenix-button__content').innerText?.trim(),selector:'phoenixq:'+JSON.stringify({section,label,occurrence,part:'documentType'})}:undefined,locatorStrategy:'semantic_question',tag:p.node.tagName.toLowerCase(),type:p.type,label,required:!!root.querySelector('.form-item__title .form-item__required'),readonly:!!p.node.readOnly,disabled:!!p.node.disabled,accept:p.node.getAttribute('accept'),placeholder:p.node.getAttribute('placeholder'),contextProvider:'.form-item--phoenix',group:section||null,repeatIndex:occurrence,renderer:p.renderer,options:p.part==='radio'?[...p.node.querySelectorAll('.phoenix-radio__radio-text')].filter(visible).map(n=>n.textContent.trim()):undefined,constructionBlockers:['phoenix_native','phoenix_select','phoenix_radio'].includes(p.renderer)?[]:[p.renderer==='phoenix_radio'?'PHOENIX_RADIO_DRIVER_REQUIRED':p.renderer==='phoenix_unknown'?'PHOENIX_CONTROL_UNSUPPORTED':'PHOENIX_OPTIONS_AND_DRIVER_REQUIRED'],userOnly:p.type==='password'||/证件号码|身份证|护照号|验证码|密码/.test(label)}));
   });
-  const navigationScope=n=>{const nav=n.closest('nav,header,[role="navigation"],[role="search"],.print-nav');return nav&&!n.closest('.form-item--phoenix,.ant-form-item,.ud-formily-item,.atsx-form-item')?{reason:'outside_application_form',kind:'navigation',containerSelector:diagnosticSelector(nav),controlSelector:diagnosticSelector(n)}:null;};
+  const navigationScope=n=>{const nav=n.closest('nav,header,[role="navigation"],[role="search"],.print-nav,div[class^="navbar-"],div[class*=" navbar-"]');return nav&&!n.closest('.form-item--phoenix,.ant-form-item,.ud-formily-item,.atsx-form-item')?{reason:'outside_application_form',kind:'navigation',containerSelector:diagnosticSelector(nav),controlSelector:diagnosticSelector(n)}:null;};
   const dateAuxiliaries=new Set(phoenixRoots().filter(r=>r.querySelector('[id$="field_date_time_picker"]')).map(phoenixInlineOngoing).filter(Boolean).map(a=>a.node));
   const atsxCombobox='.atsx-select-selection[role="combobox"]';
   const ownedSearch=n=>n.matches?.('input.atsx-select-search__field')&&visible(n.closest(atsxCombobox));
@@ -557,7 +557,10 @@ export function controlDOM(spec){
       }
       const label=root.querySelector(':scope > .ud-formily-item-label')?.innerText?.trim();
       const ownCheckbox=f.type==='checkbox'&&f.label&&root.querySelector(atsxCombobox)&&f.label!==label?.replace(/[＊*\s]+$/gu,'');
-      if(ownCheckbox)return {...f,label:f.label.replace(/[＊*\s]+$/gu,''),questionSelector:selector(n.labels?.[0]||n)};
+      if(ownCheckbox){
+       const ownLabel=selector(n.labels?.[0]||n);
+       return {...f,label:f.label.replace(/[＊*\s]+$/gu,''),locatorStrategy:'semantic_question',questionSelector:ownLabel,labelSelector:ownLabel};
+      }
       const group=n.closest('[id^="formily-item-"][id$="_list"]'),row=n.closest('.register-form-group-wrapper');
       const radio=f.type==='radio'?radioRecords(root):[];
       const complete=radio.length&&radio.every(item=>item.label&&item.targetSelector)&&new Set(radio.map(item=>item.label)).size===radio.length;

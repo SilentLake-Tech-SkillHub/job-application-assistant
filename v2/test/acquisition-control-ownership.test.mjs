@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {controlDOM} from '../shared/control-dom.mjs';
 import {primaryCandidates} from '../shared/form-visual-inventory.mjs';
+import {liveControls} from '../shared/control-context.mjs';
 
 const element=(tagName,id='',extra={})=>({
  tagName,id,innerText:'',children:[],getClientRects:()=>[{}],getAttribute:()=>null,
@@ -19,7 +20,7 @@ function observe(nodes,run){
  }finally{Object.assign(globalThis,original);}
 }
 
-test('a Formily field owns one ATSX combobox and preserves the separate checkbox label',()=>{
+test('the live inventory keeps one ATSX combobox and the separate checkbox label after enrichment',async()=>{
  const title=element('DIV','city-caption',{innerText:'意向城市*'});
  const root=element('DIV','city',{querySelector:s=>s.includes('label')?title:s.includes('atsx-select-selection')?widget:null});
  const label=element('LABEL','relocation-caption',{textContent:'接受调剂到其他城市'});
@@ -29,7 +30,11 @@ test('a Formily field owns one ATSX combobox and preserves the separate checkbox
  const input=element('INPUT','city-search',{type:'text',parentElement:widget,discovery:controls,
   matches:s=>s==='input.atsx-select-search__field',closest:s=>s.includes('atsx-select-selection')?widget:s.includes('ud-formily-item')?root:null});
  const checkbox=element('INPUT','relocation',{type:'checkbox',parentElement:label,labels:[label],discovery:controls,closest:s=>s.includes('ud-formily-item')?root:null});
- const controlsObserved=observe([root,title,label,widget,input,checkbox],()=>controlDOM({}));
+ const raw=observe([root,title,label,widget,input,checkbox],()=>controlDOM({}));
+ const controlsObserved=await liveControls({
+  inventory:async()=>raw,
+  observe:async({fields})=>({fields:Object.fromEntries(fields.map(field=>[field.id,{value:'意向城市*'}]))})
+ });
  assert.deepEqual(controlsObserved.map(({selector,label,type})=>[selector,label,type]),[
   ['#city-widget','意向城市','combobox'],['#relocation','接受调剂到其他城市','checkbox']
  ]);
